@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useCandidate, useUpdateCandidate } from "@/hooks/use-candidates";
+import { useUpdateEmployee } from "@/hooks/use-employees";
 import { useApplications } from "@/hooks/use-applications";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ScoreBadge, ScoreBar } from "@/components/ScoreBadge";
@@ -29,7 +30,7 @@ import {
 import { formatDistanceToNow, format } from "date-fns";
 import {
   CANDIDATE_CATEGORIES, LICENSE_STATUSES, TURKEY_CITIES, REAL_ESTATE_BRANDS,
-  REQUIRED_DOCUMENTS, STAGE_LABELS,
+  REQUIRED_DOCUMENTS, STAGE_LABELS, CONTRACT_TYPES, URETKENLIK_ORANLAR,
   type Candidate, type InsertCandidate, type CandidateNote,
   type PublicUser,
 } from "@shared/schema";
@@ -789,7 +790,7 @@ export default function CandidateDetail() {
       </div>
 
       {candidate && (
-        <EditCandidateDialog candidate={candidate} open={editOpen} onOpenChange={setEditOpen} />
+        <EditCandidateDialog candidate={candidate} employeeRecord={employeeRecord ?? null} open={editOpen} onOpenChange={setEditOpen} />
       )}
     </Layout>
   );
@@ -856,9 +857,16 @@ function ChipToggle({ options, value, onChange }: { options: string[]; value: st
 
 // ─── Edit Dialog ─────────────────────────────────────────────────────────────
 
-function EditCandidateDialog({ candidate, open, onOpenChange }: { candidate: Candidate; open: boolean; onOpenChange: (v: boolean) => void }) {
-  const { mutate: update, isPending } = useUpdateCandidate();
+function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: { candidate: Candidate; employeeRecord: any | null; open: boolean; onOpenChange: (v: boolean) => void }) {
+  const { mutate: update, isPending: savingCand } = useUpdateCandidate();
+  const { mutate: updateEmployee, isPending: savingEmp } = useUpdateEmployee();
+  const isPending = savingCand || savingEmp;
   const { toast } = useToast();
+  const { data: hiringManagers = [] } = useQuery<PublicUser[]>({
+    queryKey: ["/api/hiring-managers"],
+    queryFn: () => fetch("/api/hiring-managers").then((r) => r.json()),
+    enabled: !!employeeRecord,
+  });
 
   const [form, setForm] = useState({
     name: candidate.name ?? "",
@@ -882,6 +890,22 @@ function EditCandidateDialog({ candidate, open, onOpenChange }: { candidate: Can
   const [specialization, setSpecialization] = useState<string[]>(candidate.specialization ?? []);
   const [languages, setLanguages] = useState<string[]>(candidate.languages ?? []);
   const f = (k: string, v: string) => setForm((p) => ({ ...p, [k]: v }));
+
+  // KW / employee fields (only used when candidate is an employee)
+  const [kwuid, setKwuid] = useState(employeeRecord?.kwuid ?? "");
+  const [kwMail, setKwMail] = useState(employeeRecord?.kwMail ?? "");
+  const [empTitle, setEmpTitle] = useState(employeeRecord?.title ?? "");
+  const [startDate, setStartDate] = useState(
+    employeeRecord?.startDate ? new Date(employeeRecord.startDate).toISOString().split("T")[0] : ""
+  );
+  const [contractType, setContractType] = useState(employeeRecord?.contractType ?? "");
+  const [uretkenlikKoclugu, setUretkenlikKoclugu] = useState<boolean>(employeeRecord?.uretkenlikKoclugu ?? false);
+  const [uretkenlikManagerId, setUretkenlikManagerId] = useState(
+    employeeRecord?.uretkenlikKocluguManagerId ? String(employeeRecord.uretkenlikKocluguManagerId) : ""
+  );
+  const [uretkenlikOran, setUretkenlikOran] = useState(employeeRecord?.uretkenlikKocluguOran ?? "");
+  const [capMonth, setCapMonth] = useState(employeeRecord?.capMonth ?? "");
+  const [capValue, setCapValue] = useState(employeeRecord?.capValue ?? "");
 
   const handleSave = () => {
     if (!form.name.trim() || !form.email.trim()) {
@@ -908,7 +932,28 @@ function EditCandidateDialog({ candidate, open, onOpenChange }: { candidate: Can
         expectedStartMonth: form.expectedStartMonth || undefined,
       } as Partial<InsertCandidate>,
     }, {
-      onSuccess: () => { toast({ title: "Profil güncellendi" }); onOpenChange(false); },
+      onSuccess: () => {
+        if (employeeRecord) {
+          updateEmployee({
+            id: employeeRecord.id,
+            kwuid: kwuid || undefined,
+            kwMail: kwMail || undefined,
+            title: empTitle || undefined,
+            startDate: startDate || undefined,
+            contractType: contractType || null,
+            uretkenlikKoclugu,
+            uretkenlikKocluguManagerId: uretkenlikKoclugu && uretkenlikManagerId ? Number(uretkenlikManagerId) : null,
+            uretkenlikKocluguOran: uretkenlikKoclugu && uretkenlikOran ? uretkenlikOran : null,
+            capMonth: capMonth || undefined,
+            capValue: capValue || undefined,
+          }, {
+            onSuccess: () => { toast({ title: "Profil güncellendi" }); onOpenChange(false); },
+          });
+        } else {
+          toast({ title: "Profil güncellendi" });
+          onOpenChange(false);
+        }
+      },
     });
   };
 
@@ -1040,6 +1085,75 @@ function EditCandidateDialog({ candidate, open, onOpenChange }: { candidate: Can
               </Field>
             </div>
           </Section>
+
+          {/* KW Info — only shown when candidate is an active employee */}
+          {employeeRecord && (
+            <Section title="KW Bilgileri">
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="KWUID">
+                  <Input value={kwuid} onChange={(e) => setKwuid(e.target.value)} placeholder="KWUID girin" />
+                </Field>
+                <Field label="KW E-posta">
+                  <Input type="email" value={kwMail} onChange={(e) => setKwMail(e.target.value)} placeholder="isim@kw.com.tr" />
+                </Field>
+                <Field label="Ünvan">
+                  <Input value={empTitle} onChange={(e) => setEmpTitle(e.target.value)} placeholder="Danışman" />
+                </Field>
+                <Field label="Başlangıç Tarihi">
+                  <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                </Field>
+                <Field label="Sözleşme Türü">
+                  <Select value={contractType} onValueChange={setContractType}>
+                    <SelectTrigger><SelectValue placeholder="Seçiniz..." /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">— Seçilmedi —</SelectItem>
+                      {CONTRACT_TYPES.map((ct) => <SelectItem key={ct} value={ct}>{ct}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field label="Cap Ayı">
+                  <Input value={capMonth} onChange={(e) => setCapMonth(e.target.value)} placeholder="Ocak" />
+                </Field>
+                <Field label="Cap Değeri">
+                  <Input value={capValue} onChange={(e) => setCapValue(e.target.value)} placeholder="Cap miktarı" />
+                </Field>
+              </div>
+              <div className="mt-3 rounded-lg border border-border bg-muted/20 p-3 space-y-3">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="uretkenlik-cd"
+                    checked={uretkenlikKoclugu}
+                    onChange={(e) => setUretkenlikKoclugu(e.target.checked)}
+                    className="rounded"
+                  />
+                  <Label htmlFor="uretkenlik-cd" className="text-sm font-medium cursor-pointer">Üretkenlik Koçluğu</Label>
+                </div>
+                {uretkenlikKoclugu && (
+                  <div className="grid grid-cols-2 gap-3 pl-6">
+                    <Field label="Koç (Hiring Manager)">
+                      <Select value={uretkenlikManagerId} onValueChange={setUretkenlikManagerId}>
+                        <SelectTrigger><SelectValue placeholder="Yönetici seçin..." /></SelectTrigger>
+                        <SelectContent>
+                          {hiringManagers.map((hm) => (
+                            <SelectItem key={hm.id} value={String(hm.id)}>{hm.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                    <Field label="Paylaşım Oranı">
+                      <Select value={uretkenlikOran} onValueChange={setUretkenlikOran}>
+                        <SelectTrigger><SelectValue placeholder="Oran seçin..." /></SelectTrigger>
+                        <SelectContent>
+                          {URETKENLIK_ORANLAR.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                  </div>
+                )}
+              </div>
+            </Section>
+          )}
 
           <div className="flex gap-2 pt-1">
             <Button variant="outline" className="flex-1" onClick={() => onOpenChange(false)}>İptal</Button>

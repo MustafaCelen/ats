@@ -100,6 +100,22 @@ function parseCsv(text: string): Record<string, string>[] {
   }).filter((row) => Object.values(row).some((v) => v));
 }
 
+// ── Stable helper components (must be top-level to avoid focus loss) ──────────
+function EmpSectionHeader({ label }: { label: string }) {
+  return (
+    <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground border-b border-border pb-1 mb-2">{label}</p>
+  );
+}
+
+function EmpField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-1">
+      <Label className="text-xs">{label}</Label>
+      {children}
+    </div>
+  );
+}
+
 // Edit Employee Dialog — covers both employee (KW) fields and candidate personal info
 function EditEmployeeDialog({ emp, open, onOpenChange }: { emp: any; open: boolean; onOpenChange: (v: boolean) => void }) {
   const { mutate: updateEmployee, isPending: savingEmp } = useUpdateEmployee();
@@ -153,16 +169,6 @@ function EditEmployeeDialog({ emp, open, onOpenChange }: { emp: any; open: boole
   const [experience, setExperience] = useState(String(c.experience ?? 0));
   const [socialMedia, setSocialMedia] = useState(c.socialMedia ?? "");
   const [resumeText, setResumeText] = useState(c.resumeText ?? "");
-
-  const SectionHeader = ({ label }: { label: string }) => (
-    <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground border-b border-border pb-1 mb-2">{label}</p>
-  );
-  const F = ({ label, children }: { label: string; children: React.ReactNode }) => (
-    <div className="space-y-1">
-      <Label className="text-xs">{label}</Label>
-      {children}
-    </div>
-  );
 
   const handleSave = () => {
     if (!candName.trim()) { toast({ title: "Ad zorunludur", variant: "destructive" }); return; }
@@ -227,70 +233,70 @@ function EditEmployeeDialog({ emp, open, onOpenChange }: { emp: any; open: boole
         <div className="space-y-4 pt-1 max-h-[75vh] overflow-y-auto pr-1">
 
           {/* ── Personal Info ── */}
-          <SectionHeader label="Kişisel Bilgiler" />
+          <EmpSectionHeader label="Kişisel Bilgiler" />
           <div className="grid grid-cols-2 gap-3">
-            <F label="Ad Soyad *">
+            <EmpField label="Ad Soyad *">
               <Input value={candName} onChange={(e) => setCandName(e.target.value)} data-testid="input-emp-cand-name" />
-            </F>
-            <F label="E-posta">
+            </EmpField>
+            <EmpField label="E-posta">
               <Input type="email" value={candEmail} onChange={(e) => setCandEmail(e.target.value)} />
-            </F>
-            <F label="Telefon">
+            </EmpField>
+            <EmpField label="Telefon">
               <Input value={candPhone} onChange={(e) => setCandPhone(e.target.value)} placeholder="+90..." />
-            </F>
-            <F label="Sosyal Medya / LinkedIn">
+            </EmpField>
+            <EmpField label="Sosyal Medya / LinkedIn">
               <Input value={socialMedia} onChange={(e) => setSocialMedia(e.target.value)} placeholder="https://linkedin.com/in/..." />
-            </F>
+            </EmpField>
           </div>
 
           {/* ── Address ── */}
-          <SectionHeader label="Adres" />
+          <EmpSectionHeader label="Adres" />
           <div className="grid grid-cols-2 gap-3">
-            <F label="Şehir">
+            <EmpField label="Şehir">
               <Select value={city} onValueChange={setCity}>
                 <SelectTrigger><SelectValue placeholder="Şehir seçin..." /></SelectTrigger>
                 <SelectContent>{TURKEY_CITIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
               </Select>
-            </F>
-            <F label="İlçe">
+            </EmpField>
+            <EmpField label="İlçe">
               <Input value={district} onChange={(e) => setDistrict(e.target.value)} placeholder="Kadıköy, Çankaya..." />
-            </F>
+            </EmpField>
             <div className="col-span-2">
-              <F label="Açık Adres">
+              <EmpField label="Açık Adres">
                 <Input value={candAddress} onChange={(e) => setCandAddress(e.target.value)} placeholder="Sokak, bina no, daire..." />
-              </F>
+              </EmpField>
             </div>
           </div>
 
           {/* ── Emergency Contact ── */}
-          <SectionHeader label="Acil Durum İletişim" />
+          <EmpSectionHeader label="Acil Durum İletişim" />
           <div className="grid grid-cols-2 gap-3">
-            <F label="Ad Soyad">
+            <EmpField label="Ad Soyad">
               <Input value={emergencyName} onChange={(e) => setEmergencyName(e.target.value)} placeholder="Yakın kişinin adı" />
-            </F>
-            <F label="Telefon">
+            </EmpField>
+            <EmpField label="Telefon">
               <Input value={emergencyPhone} onChange={(e) => setEmergencyPhone(e.target.value)} placeholder="+90..." />
-            </F>
+            </EmpField>
           </div>
 
           {/* ── Real Estate Profile ── */}
-          <SectionHeader label="Gayrimenkul Profili" />
+          <EmpSectionHeader label="Gayrimenkul Profili" />
           <div className="grid grid-cols-2 gap-3">
-            <F label="Kategori">
+            <EmpField label="Kategori">
               <Select value={category} onValueChange={setCategory}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {CANDIDATE_CATEGORIES.map((cat) => <SelectItem key={cat} value={cat}>{cat}</SelectItem>)}
                 </SelectContent>
               </Select>
-            </F>
-            <F label="Mevcut Marka">
+            </EmpField>
+            <EmpField label="Mevcut Marka">
               <Select value={currentBrand} onValueChange={setCurrentBrand}>
                 <SelectTrigger><SelectValue placeholder="Seçin..." /></SelectTrigger>
                 <SelectContent>{REAL_ESTATE_BRANDS.map((b) => <SelectItem key={b} value={b}>{b}</SelectItem>)}</SelectContent>
               </Select>
-            </F>
-            <F label="Lisans Durumu">
+            </EmpField>
+            <EmpField label="Lisans Durumu">
               <Select value={licenseStatus} onValueChange={setLicenseStatus}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -299,31 +305,31 @@ function EditEmployeeDialog({ emp, open, onOpenChange }: { emp: any; open: boole
                   <SelectItem value="licensed">Lisanslı</SelectItem>
                 </SelectContent>
               </Select>
-            </F>
-            <F label="Lisans No">
+            </EmpField>
+            <EmpField label="Lisans No">
               <Input value={licenseNumber} onChange={(e) => setLicenseNumber(e.target.value)} placeholder="TKGM-..." />
-            </F>
-            <F label="Deneyim (yıl)">
+            </EmpField>
+            <EmpField label="Deneyim (yıl)">
               <Input type="number" min={0} value={experience} onChange={(e) => setExperience(e.target.value)} />
-            </F>
+            </EmpField>
           </div>
 
           {/* ── KW / Employment Info ── */}
-          <SectionHeader label="KW Bilgileri" />
+          <EmpSectionHeader label="KW Bilgileri" />
           <div className="grid grid-cols-2 gap-3">
-            <F label="KWUID">
+            <EmpField label="KWUID">
               <Input value={kwuid} onChange={(e) => setKwuid(e.target.value)} placeholder="KWUID girin" data-testid="input-kwuid" />
-            </F>
-            <F label="KW E-posta">
+            </EmpField>
+            <EmpField label="KW E-posta">
               <Input value={kwMail} onChange={(e) => setKwMail(e.target.value)} placeholder="isim@kw.com.tr" type="email" data-testid="input-kwmail" />
-            </F>
-            <F label="Ünvan">
+            </EmpField>
+            <EmpField label="Ünvan">
               <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Danışman" data-testid="input-emp-title" />
-            </F>
-            <F label="Başlangıç Tarihi">
+            </EmpField>
+            <EmpField label="Başlangıç Tarihi">
               <Input value={startDate} onChange={(e) => setStartDate(e.target.value)} type="date" data-testid="input-startdate" />
-            </F>
-            <F label="Sözleşme Türü">
+            </EmpField>
+            <EmpField label="Sözleşme Türü">
               <Select value={contractType} onValueChange={setContractType}>
                 <SelectTrigger data-testid="select-contract-type"><SelectValue placeholder="Seçiniz..." /></SelectTrigger>
                 <SelectContent>
@@ -331,16 +337,16 @@ function EditEmployeeDialog({ emp, open, onOpenChange }: { emp: any; open: boole
                   {CONTRACT_TYPES.map((ct) => <SelectItem key={ct} value={ct}>{ct}</SelectItem>)}
                 </SelectContent>
               </Select>
-            </F>
-            <F label="Cap Ayı">
+            </EmpField>
+            <EmpField label="Cap Ayı">
               <Select value={capMonth} onValueChange={setCapMonth}>
                 <SelectTrigger data-testid="select-cap-month"><SelectValue placeholder="Ay seçin..." /></SelectTrigger>
                 <SelectContent>{MONTHS_TR.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent>
               </Select>
-            </F>
-            <F label="Cap Değeri">
+            </EmpField>
+            <EmpField label="Cap Değeri">
               <Input value={capValue} onChange={(e) => setCapValue(e.target.value)} placeholder="Cap miktarı" data-testid="input-cap-value" />
-            </F>
+            </EmpField>
           </div>
 
           {/* Üretkenlik Koçluğu */}
@@ -351,24 +357,24 @@ function EditEmployeeDialog({ emp, open, onOpenChange }: { emp: any; open: boole
             </div>
             {uretkenlikKoclugu && (
               <div className="grid grid-cols-2 gap-3 pl-6">
-                <F label="Koç (Hiring Manager)">
+                <EmpField label="Koç (Hiring Manager)">
                   <Select value={uretkenlikManagerId} onValueChange={setUretkenlikManagerId}>
                     <SelectTrigger data-testid="select-uretkenlik-manager"><SelectValue placeholder="Yönetici seçin..." /></SelectTrigger>
                     <SelectContent>{hiringManagers.map((hm) => <SelectItem key={hm.id} value={String(hm.id)}>{hm.name}</SelectItem>)}</SelectContent>
                   </Select>
-                </F>
-                <F label="Paylaşım Oranı">
+                </EmpField>
+                <EmpField label="Paylaşım Oranı">
                   <Select value={uretkenlikOran} onValueChange={setUretkenlikOran}>
                     <SelectTrigger data-testid="select-uretkenlik-oran"><SelectValue placeholder="Oran seçin..." /></SelectTrigger>
                     <SelectContent>{URETKENLIK_ORANLAR.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent>
                   </Select>
-                </F>
+                </EmpField>
               </div>
             )}
           </div>
 
           {/* Notes */}
-          <SectionHeader label="Notlar" />
+          <EmpSectionHeader label="Notlar" />
           <Textarea value={resumeText} onChange={(e) => setResumeText(e.target.value)} rows={3} placeholder="Ek bilgiler..." />
 
           <div className="flex gap-2 pt-2">
