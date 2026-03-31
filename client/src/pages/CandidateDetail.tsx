@@ -950,6 +950,15 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
   const [uretkenlikOran, setUretkenlikOran] = useState(employeeRecord?.uretkenlikKocluguOran ?? "");
   const [capMonth, setCapMonth] = useState(employeeRecord?.capMonth ?? "");
   const [capValue, setCapValue] = useState(employeeRecord?.capValue ?? "");
+  // Billing fields
+  const [billingName, setBillingName] = useState(employeeRecord?.billingName ?? "");
+  const [billingAddress, setBillingAddress] = useState(employeeRecord?.billingAddress ?? "");
+  const [billingDistrict, setBillingDistrict] = useState(employeeRecord?.billingDistrict ?? "");
+  const [billingCity, setBillingCity] = useState(employeeRecord?.billingCity ?? "");
+  const [billingCountry, setBillingCountry] = useState(employeeRecord?.billingCountry ?? "");
+  const [taxOffice, setTaxOffice] = useState(employeeRecord?.taxOffice ?? "");
+  const [taxId, setTaxId] = useState(employeeRecord?.taxId ?? "");
+  const [birthDate, setBirthDate] = useState(employeeRecord?.birthDate ?? "");
 
   const handleSave = () => {
     if (!form.name.trim() || !form.email.trim()) {
@@ -990,6 +999,14 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
             uretkenlikKocluguOran: uretkenlikKoclugu && uretkenlikOran ? uretkenlikOran : null,
             capMonth: capMonth || undefined,
             capValue: capValue || undefined,
+            billingName: billingName || undefined,
+            billingAddress: billingAddress || undefined,
+            billingDistrict: billingDistrict || undefined,
+            billingCity: billingCity || undefined,
+            billingCountry: billingCountry || undefined,
+            taxOffice: taxOffice || undefined,
+            taxId: taxId || undefined,
+            birthDate: birthDate || undefined,
           }, {
             onSuccess: () => { toast({ title: "Profil güncellendi" }); onOpenChange(false); },
           });
@@ -1195,6 +1212,42 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
                     </Field>
                   </div>
                 )}
+              </div>
+            </Section>
+          )}
+
+          {/* Billing Info — only shown when candidate is an active employee */}
+          {employeeRecord && (
+            <Section title="Fatura & Vergi Bilgileri">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="col-span-2">
+                  <Field label="Şirket / Şahıs İsmi">
+                    <Input value={billingName} onChange={(e) => setBillingName(e.target.value)} placeholder="Fatura kesilecek isim veya şirket" />
+                  </Field>
+                </div>
+                <div className="col-span-2">
+                  <Field label="Fatura Adresi">
+                    <Input value={billingAddress} onChange={(e) => setBillingAddress(e.target.value)} placeholder="Cadde, bina no..." />
+                  </Field>
+                </div>
+                <Field label="İlçe">
+                  <Input value={billingDistrict} onChange={(e) => setBillingDistrict(e.target.value)} placeholder="İlçe" />
+                </Field>
+                <Field label="İl">
+                  <Input value={billingCity} onChange={(e) => setBillingCity(e.target.value)} placeholder="İl" />
+                </Field>
+                <Field label="Ülke">
+                  <Input value={billingCountry} onChange={(e) => setBillingCountry(e.target.value)} placeholder="Türkiye" />
+                </Field>
+                <Field label="Vergi Dairesi">
+                  <Input value={taxOffice} onChange={(e) => setTaxOffice(e.target.value)} placeholder="Vergi dairesi adı" />
+                </Field>
+                <Field label="Vergi / TCK No">
+                  <Input value={taxId} onChange={(e) => setTaxId(e.target.value)} placeholder="Vergi veya TC kimlik no" />
+                </Field>
+                <Field label="Doğum Tarihi">
+                  <Input type="date" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} />
+                </Field>
               </div>
             </Section>
           )}
