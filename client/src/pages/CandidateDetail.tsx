@@ -960,6 +960,29 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
   const [taxId, setTaxId] = useState(employeeRecord?.taxId ?? "");
   const [birthDate, setBirthDate] = useState(employeeRecord?.birthDate ?? "");
 
+  // Sync KW + billing state when employeeRecord loads (query resolves after component mounts)
+  useEffect(() => {
+    if (!employeeRecord) return;
+    setKwuid(employeeRecord.kwuid ?? "");
+    setKwMail(employeeRecord.kwMail ?? "");
+    setEmpTitle(employeeRecord.title ?? "");
+    setStartDate(employeeRecord.startDate ? new Date(employeeRecord.startDate).toISOString().split("T")[0] : "");
+    setContractType(employeeRecord.contractType ?? "");
+    setUretkenlikKoclugu(employeeRecord.uretkenlikKoclugu ?? false);
+    setUretkenlikManagerId(employeeRecord.uretkenlikKocluguManagerId ? String(employeeRecord.uretkenlikKocluguManagerId) : "");
+    setUretkenlikOran(employeeRecord.uretkenlikKocluguOran ?? "");
+    setCapMonth(employeeRecord.capMonth ?? "");
+    setCapValue(employeeRecord.capValue ?? "");
+    setBillingName(employeeRecord.billingName ?? "");
+    setBillingAddress(employeeRecord.billingAddress ?? "");
+    setBillingDistrict(employeeRecord.billingDistrict ?? "");
+    setBillingCity(employeeRecord.billingCity ?? "");
+    setBillingCountry(employeeRecord.billingCountry ?? "");
+    setTaxOffice(employeeRecord.taxOffice ?? "");
+    setTaxId(employeeRecord.taxId ?? "");
+    setBirthDate(employeeRecord.birthDate ?? "");
+  }, [employeeRecord]);
+
   const handleSave = () => {
     if (!form.name.trim() || !form.email.trim()) {
       toast({ title: "Ad ve e-posta zorunludur", variant: "destructive" }); return;
