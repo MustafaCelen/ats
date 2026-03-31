@@ -2,6 +2,7 @@ import { useState, useRef } from "react";
 import { Link } from "wouter";
 import { Layout } from "@/components/Layout";
 import { useEmployees, useUpdateEmployee, useDeleteEmployee, useImportEmployees } from "@/hooks/use-employees";
+import { useUpdateCandidate } from "@/hooks/use-candidates";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,10 +20,11 @@ import {
 import {
   Users, Search, Phone, Mail, MapPin, Award, Building2,
   MoreHorizontal, ExternalLink, CheckCircle2, XCircle, Briefcase, CalendarDays,
-  Upload, Download, Pencil, Key, AtSign, AlertCircle, FileText, UserCheck,
+  Upload, Download, Pencil, Key, AtSign, AlertCircle, FileText, UserCheck, Globe,
 } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
 import { useQuery } from "@tanstack/react-query";
-import { CONTRACT_TYPES, URETKENLIK_ORANLAR, type PublicUser } from "@shared/schema";
+import { CONTRACT_TYPES, URETKENLIK_ORANLAR, TURKEY_CITIES, REAL_ESTATE_BRANDS, CANDIDATE_CATEGORIES, type PublicUser } from "@shared/schema";
 import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 
@@ -98,15 +100,18 @@ function parseCsv(text: string): Record<string, string>[] {
   }).filter((row) => Object.values(row).some((v) => v));
 }
 
-// Edit Employee Dialog
+// Edit Employee Dialog — covers both employee (KW) fields and candidate personal info
 function EditEmployeeDialog({ emp, open, onOpenChange }: { emp: any; open: boolean; onOpenChange: (v: boolean) => void }) {
-  const { mutate: updateEmployee, isPending } = useUpdateEmployee();
+  const { mutate: updateEmployee, isPending: savingEmp } = useUpdateEmployee();
+  const { mutate: updateCandidate, isPending: savingCand } = useUpdateCandidate();
+  const isPending = savingEmp || savingCand;
   const { toast } = useToast();
   const { data: hiringManagers = [] } = useQuery<PublicUser[]>({
     queryKey: ["/api/hiring-managers"],
     queryFn: () => fetch("/api/hiring-managers").then((r) => r.json()),
   });
 
+  // ── Employee / KW fields ──
   const [kwuid, setKwuid] = useState(emp.kwuid ?? "");
   const [kwMail, setKwMail] = useState(emp.kwMail ?? "");
   const [title, setTitle] = useState(emp.title ?? "");
@@ -119,7 +124,6 @@ function EditEmployeeDialog({ emp, open, onOpenChange }: { emp: any; open: boole
     emp.uretkenlikKocluguManagerId ? String(emp.uretkenlikKocluguManagerId) : ""
   );
   const [uretkenlikOran, setUretkenlikOran] = useState<string>(emp.uretkenlikKocluguOran ?? "");
-
   const defaultCapMonth = (() => {
     if (emp.capMonth) return emp.capMonth;
     if (emp.startDate) {
@@ -132,25 +136,79 @@ function EditEmployeeDialog({ emp, open, onOpenChange }: { emp: any; open: boole
   const [capMonth, setCapMonth] = useState(defaultCapMonth);
   const [capValue, setCapValue] = useState(emp.capValue ?? "");
 
+  // ── Candidate personal fields ──
+  const c = emp.candidate ?? {};
+  const [candName, setCandName] = useState(c.name ?? "");
+  const [candEmail, setCandEmail] = useState(c.email ?? "");
+  const [candPhone, setCandPhone] = useState(c.phone ?? "");
+  const [candAddress, setCandAddress] = useState(c.address ?? "");
+  const [emergencyName, setEmergencyName] = useState(c.emergencyContactName ?? "");
+  const [emergencyPhone, setEmergencyPhone] = useState(c.emergencyContactPhone ?? "");
+  const [city, setCity] = useState(c.city ?? "");
+  const [district, setDistrict] = useState(c.district ?? "");
+  const [category, setCategory] = useState(c.category ?? "K0");
+  const [licenseStatus, setLicenseStatus] = useState(c.licenseStatus ?? "unlicensed");
+  const [licenseNumber, setLicenseNumber] = useState(c.licenseNumber ?? "");
+  const [currentBrand, setCurrentBrand] = useState(c.currentBrand ?? "");
+  const [experience, setExperience] = useState(String(c.experience ?? 0));
+  const [socialMedia, setSocialMedia] = useState(c.socialMedia ?? "");
+  const [resumeText, setResumeText] = useState(c.resumeText ?? "");
+
+  const SectionHeader = ({ label }: { label: string }) => (
+    <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground border-b border-border pb-1 mb-2">{label}</p>
+  );
+  const F = ({ label, children }: { label: string; children: React.ReactNode }) => (
+    <div className="space-y-1">
+      <Label className="text-xs">{label}</Label>
+      {children}
+    </div>
+  );
+
   const handleSave = () => {
-    updateEmployee(
+    if (!candName.trim()) { toast({ title: "Ad zorunludur", variant: "destructive" }); return; }
+
+    updateCandidate(
       {
-        id: emp.id,
-        kwuid: kwuid || undefined,
-        kwMail: kwMail || undefined,
-        title: title || undefined,
-        startDate: startDate || undefined,
-        contractType: contractType || null,
-        uretkenlikKoclugu,
-        uretkenlikKocluguManagerId: uretkenlikKoclugu && uretkenlikManagerId ? Number(uretkenlikManagerId) : null,
-        uretkenlikKocluguOran: uretkenlikKoclugu && uretkenlikOran ? uretkenlikOran : null,
-        capMonth: capMonth || undefined,
-        capValue: capValue || undefined,
+        id: c.id,
+        data: {
+          name: candName,
+          email: candEmail || undefined,
+          phone: candPhone || undefined,
+          address: candAddress || undefined,
+          emergencyContactName: emergencyName || undefined,
+          emergencyContactPhone: emergencyPhone || undefined,
+          city: city || undefined,
+          district: district || undefined,
+          category,
+          licenseStatus,
+          licenseNumber: licenseNumber || undefined,
+          currentBrand: currentBrand || undefined,
+          experience: parseInt(experience) || 0,
+          socialMedia: socialMedia || undefined,
+          resumeText: resumeText || undefined,
+        },
       },
       {
         onSuccess: () => {
-          toast({ title: "Çalışan bilgileri güncellendi" });
-          onOpenChange(false);
+          updateEmployee(
+            {
+              id: emp.id,
+              kwuid: kwuid || undefined,
+              kwMail: kwMail || undefined,
+              title: title || undefined,
+              startDate: startDate || undefined,
+              contractType: contractType || null,
+              uretkenlikKoclugu,
+              uretkenlikKocluguManagerId: uretkenlikKoclugu && uretkenlikManagerId ? Number(uretkenlikManagerId) : null,
+              uretkenlikKocluguOran: uretkenlikKoclugu && uretkenlikOran ? uretkenlikOran : null,
+              capMonth: capMonth || undefined,
+              capValue: capValue || undefined,
+            },
+            {
+              onSuccess: () => { toast({ title: "Profil güncellendi" }); onOpenChange(false); },
+              onError: () => toast({ title: "Güncelleme başarısız", variant: "destructive" }),
+            }
+          );
         },
         onError: () => toast({ title: "Güncelleme başarısız", variant: "destructive" }),
       }
@@ -159,136 +217,164 @@ function EditEmployeeDialog({ emp, open, onOpenChange }: { emp: any; open: boole
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md" aria-describedby="edit-emp-desc">
+      <DialogContent className="max-w-2xl" aria-describedby="edit-emp-desc">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Pencil className="h-4 w-4 text-primary" /> Çalışan Bilgilerini Düzenle
+            <Pencil className="h-4 w-4 text-primary" /> Profili Düzenle
           </DialogTitle>
           <p id="edit-emp-desc" className="text-sm text-muted-foreground">{emp.candidate?.name}</p>
         </DialogHeader>
-        <div className="space-y-3 pt-1 max-h-[70vh] overflow-y-auto pr-1">
+        <div className="space-y-4 pt-1 max-h-[75vh] overflow-y-auto pr-1">
 
-          {/* KW Fields */}
+          {/* ── Personal Info ── */}
+          <SectionHeader label="Kişisel Bilgiler" />
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label className="text-xs font-semibold text-muted-foreground mb-1 block">KWUID</Label>
-              <Input value={kwuid} onChange={(e) => setKwuid(e.target.value)} placeholder="KWUID girin" data-testid="input-kwuid" />
-            </div>
-            <div>
-              <Label className="text-xs font-semibold text-muted-foreground mb-1 block">KW E-posta</Label>
-              <Input value={kwMail} onChange={(e) => setKwMail(e.target.value)} placeholder="isim@kw.com.tr" type="email" data-testid="input-kwmail" />
+            <F label="Ad Soyad *">
+              <Input value={candName} onChange={(e) => setCandName(e.target.value)} data-testid="input-emp-cand-name" />
+            </F>
+            <F label="E-posta">
+              <Input type="email" value={candEmail} onChange={(e) => setCandEmail(e.target.value)} />
+            </F>
+            <F label="Telefon">
+              <Input value={candPhone} onChange={(e) => setCandPhone(e.target.value)} placeholder="+90..." />
+            </F>
+            <F label="Sosyal Medya / LinkedIn">
+              <Input value={socialMedia} onChange={(e) => setSocialMedia(e.target.value)} placeholder="https://linkedin.com/in/..." />
+            </F>
+          </div>
+
+          {/* ── Address ── */}
+          <SectionHeader label="Adres" />
+          <div className="grid grid-cols-2 gap-3">
+            <F label="Şehir">
+              <Select value={city} onValueChange={setCity}>
+                <SelectTrigger><SelectValue placeholder="Şehir seçin..." /></SelectTrigger>
+                <SelectContent>{TURKEY_CITIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+              </Select>
+            </F>
+            <F label="İlçe">
+              <Input value={district} onChange={(e) => setDistrict(e.target.value)} placeholder="Kadıköy, Çankaya..." />
+            </F>
+            <div className="col-span-2">
+              <F label="Açık Adres">
+                <Input value={candAddress} onChange={(e) => setCandAddress(e.target.value)} placeholder="Sokak, bina no, daire..." />
+              </F>
             </div>
           </div>
 
+          {/* ── Emergency Contact ── */}
+          <SectionHeader label="Acil Durum İletişim" />
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label className="text-xs font-semibold text-muted-foreground mb-1 block">Ünvan</Label>
-              <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Danışman" data-testid="input-emp-title" />
-            </div>
-            <div>
-              <Label className="text-xs font-semibold text-muted-foreground mb-1 block">Başlangıç Tarihi</Label>
-              <Input value={startDate} onChange={(e) => setStartDate(e.target.value)} type="date" data-testid="input-startdate" />
-            </div>
+            <F label="Ad Soyad">
+              <Input value={emergencyName} onChange={(e) => setEmergencyName(e.target.value)} placeholder="Yakın kişinin adı" />
+            </F>
+            <F label="Telefon">
+              <Input value={emergencyPhone} onChange={(e) => setEmergencyPhone(e.target.value)} placeholder="+90..." />
+            </F>
           </div>
 
-          {/* Contract Type */}
-          <div>
-            <Label className="text-xs font-semibold text-muted-foreground mb-1 block flex items-center gap-1">
-              <FileText className="h-3 w-3" /> Sözleşme Türü
-            </Label>
-            <Select value={contractType} onValueChange={setContractType}>
-              <SelectTrigger data-testid="select-contract-type">
-                <SelectValue placeholder="Seçiniz..." />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">— Seçilmedi —</SelectItem>
-                {CONTRACT_TYPES.map((ct) => (
-                  <SelectItem key={ct} value={ct}>{ct}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Cap Fields */}
+          {/* ── Real Estate Profile ── */}
+          <SectionHeader label="Gayrimenkul Profili" />
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label className="text-xs font-semibold text-muted-foreground mb-1 block">Cap Ayı</Label>
-              <Select value={capMonth} onValueChange={setCapMonth}>
-                <SelectTrigger data-testid="select-cap-month">
-                  <SelectValue placeholder="Ay seçin..." />
-                </SelectTrigger>
+            <F label="Kategori">
+              <Select value={category} onValueChange={setCategory}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {MONTHS_TR.map((m) => (
-                    <SelectItem key={m} value={m}>{m}</SelectItem>
-                  ))}
+                  {CANDIDATE_CATEGORIES.map((cat) => <SelectItem key={cat} value={cat}>{cat}</SelectItem>)}
                 </SelectContent>
               </Select>
-            </div>
-            <div>
-              <Label className="text-xs font-semibold text-muted-foreground mb-1 block">Cap Değeri</Label>
-              <Input
-                value={capValue}
-                onChange={(e) => setCapValue(e.target.value)}
-                placeholder="Cap miktarı"
-                data-testid="input-cap-value"
-              />
-            </div>
+            </F>
+            <F label="Mevcut Marka">
+              <Select value={currentBrand} onValueChange={setCurrentBrand}>
+                <SelectTrigger><SelectValue placeholder="Seçin..." /></SelectTrigger>
+                <SelectContent>{REAL_ESTATE_BRANDS.map((b) => <SelectItem key={b} value={b}>{b}</SelectItem>)}</SelectContent>
+              </Select>
+            </F>
+            <F label="Lisans Durumu">
+              <Select value={licenseStatus} onValueChange={setLicenseStatus}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="unlicensed">Lisanssız</SelectItem>
+                  <SelectItem value="pending">Lisans Bekliyor</SelectItem>
+                  <SelectItem value="licensed">Lisanslı</SelectItem>
+                </SelectContent>
+              </Select>
+            </F>
+            <F label="Lisans No">
+              <Input value={licenseNumber} onChange={(e) => setLicenseNumber(e.target.value)} placeholder="TKGM-..." />
+            </F>
+            <F label="Deneyim (yıl)">
+              <Input type="number" min={0} value={experience} onChange={(e) => setExperience(e.target.value)} />
+            </F>
+          </div>
+
+          {/* ── KW / Employment Info ── */}
+          <SectionHeader label="KW Bilgileri" />
+          <div className="grid grid-cols-2 gap-3">
+            <F label="KWUID">
+              <Input value={kwuid} onChange={(e) => setKwuid(e.target.value)} placeholder="KWUID girin" data-testid="input-kwuid" />
+            </F>
+            <F label="KW E-posta">
+              <Input value={kwMail} onChange={(e) => setKwMail(e.target.value)} placeholder="isim@kw.com.tr" type="email" data-testid="input-kwmail" />
+            </F>
+            <F label="Ünvan">
+              <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Danışman" data-testid="input-emp-title" />
+            </F>
+            <F label="Başlangıç Tarihi">
+              <Input value={startDate} onChange={(e) => setStartDate(e.target.value)} type="date" data-testid="input-startdate" />
+            </F>
+            <F label="Sözleşme Türü">
+              <Select value={contractType} onValueChange={setContractType}>
+                <SelectTrigger data-testid="select-contract-type"><SelectValue placeholder="Seçiniz..." /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">— Seçilmedi —</SelectItem>
+                  {CONTRACT_TYPES.map((ct) => <SelectItem key={ct} value={ct}>{ct}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </F>
+            <F label="Cap Ayı">
+              <Select value={capMonth} onValueChange={setCapMonth}>
+                <SelectTrigger data-testid="select-cap-month"><SelectValue placeholder="Ay seçin..." /></SelectTrigger>
+                <SelectContent>{MONTHS_TR.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent>
+              </Select>
+            </F>
+            <F label="Cap Değeri">
+              <Input value={capValue} onChange={(e) => setCapValue(e.target.value)} placeholder="Cap miktarı" data-testid="input-cap-value" />
+            </F>
           </div>
 
           {/* Üretkenlik Koçluğu */}
           <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-3">
             <div className="flex items-center gap-2">
-              <Checkbox
-                id="uretkenlik-koclugu"
-                checked={uretkenlikKoclugu}
-                onCheckedChange={(v) => setUretkenlikKoclugu(Boolean(v))}
-                data-testid="checkbox-uretkenlik"
-              />
-              <Label htmlFor="uretkenlik-koclugu" className="text-sm font-medium cursor-pointer">
-                Üretkenlik Koçluğu
-              </Label>
+              <Checkbox id="uretkenlik-koclugu-emp" checked={uretkenlikKoclugu} onCheckedChange={(v) => setUretkenlikKoclugu(Boolean(v))} data-testid="checkbox-uretkenlik" />
+              <Label htmlFor="uretkenlik-koclugu-emp" className="text-sm font-medium cursor-pointer">Üretkenlik Koçluğu</Label>
             </div>
-
             {uretkenlikKoclugu && (
-              <div className="space-y-2 pl-6">
-                <div>
-                  <Label className="text-xs font-semibold text-muted-foreground mb-1 block flex items-center gap-1">
-                    <UserCheck className="h-3 w-3" /> Koç (Hiring Manager)
-                  </Label>
+              <div className="grid grid-cols-2 gap-3 pl-6">
+                <F label="Koç (Hiring Manager)">
                   <Select value={uretkenlikManagerId} onValueChange={setUretkenlikManagerId}>
-                    <SelectTrigger data-testid="select-uretkenlik-manager">
-                      <SelectValue placeholder="Yönetici seçin..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {hiringManagers.map((hm) => (
-                        <SelectItem key={hm.id} value={String(hm.id)}>{hm.name}</SelectItem>
-                      ))}
-                    </SelectContent>
+                    <SelectTrigger data-testid="select-uretkenlik-manager"><SelectValue placeholder="Yönetici seçin..." /></SelectTrigger>
+                    <SelectContent>{hiringManagers.map((hm) => <SelectItem key={hm.id} value={String(hm.id)}>{hm.name}</SelectItem>)}</SelectContent>
                   </Select>
-                </div>
-                <div>
-                  <Label className="text-xs font-semibold text-muted-foreground mb-1 block">
-                    Üretkenlik Koçluğu Paylaşım Oranı
-                  </Label>
+                </F>
+                <F label="Paylaşım Oranı">
                   <Select value={uretkenlikOran} onValueChange={setUretkenlikOran}>
-                    <SelectTrigger data-testid="select-uretkenlik-oran">
-                      <SelectValue placeholder="Oran seçin..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {URETKENLIK_ORANLAR.map((o) => (
-                        <SelectItem key={o} value={o}>{o}</SelectItem>
-                      ))}
-                    </SelectContent>
+                    <SelectTrigger data-testid="select-uretkenlik-oran"><SelectValue placeholder="Oran seçin..." /></SelectTrigger>
+                    <SelectContent>{URETKENLIK_ORANLAR.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent>
                   </Select>
-                </div>
+                </F>
               </div>
             )}
           </div>
 
+          {/* Notes */}
+          <SectionHeader label="Notlar" />
+          <Textarea value={resumeText} onChange={(e) => setResumeText(e.target.value)} rows={3} placeholder="Ek bilgiler..." />
+
           <div className="flex gap-2 pt-2">
             <Button variant="outline" size="sm" className="flex-1" onClick={() => onOpenChange(false)}>İptal</Button>
             <Button size="sm" className="flex-1" onClick={handleSave} disabled={isPending} data-testid="btn-save-employee">
-              Kaydet
+              {isPending ? "Kaydediliyor..." : "Kaydet"}
             </Button>
           </div>
         </div>

@@ -132,6 +132,9 @@ export const candidates = pgTable("candidates", {
   resumeText: text("resume_text"),               // notes / background
   tags: text("tags").array().default([]),
   expectedStartMonth: text("expected_start_month"),  // e.g. "2025-03"
+  address: text("address"),                          // open address (street, building, etc.)
+  emergencyContactName: text("emergency_contact_name"),
+  emergencyContactPhone: text("emergency_contact_phone"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

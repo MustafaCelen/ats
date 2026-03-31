@@ -542,11 +542,28 @@ export default function CandidateDetail() {
                   <>
                     <InfoRow icon={<MapPin className="h-3.5 w-3.5" />} label="Şehir">{candidate.city}</InfoRow>
                     {candidate.district && <InfoRow icon={<MapPin className="h-3.5 w-3.5" />} label="İlçe">{candidate.district}</InfoRow>}
+                    {(candidate as any).address && <InfoRow icon={<MapPin className="h-3.5 w-3.5" />} label="Açık Adres">{(candidate as any).address}</InfoRow>}
                   </>
                 ) : (
                   <p className="text-xs text-muted-foreground italic">Konum belirtilmemiş</p>
                 )}
               </div>
+
+              {((candidate as any).emergencyContactName || (candidate as any).emergencyContactPhone) && (
+                <div className="rounded-xl border border-border bg-card p-5 shadow-sm space-y-3">
+                  <h2 className="text-sm font-semibold flex items-center gap-2"><Phone className="h-4 w-4 text-primary" />Acil Durum İletişim</h2>
+                  {(candidate as any).emergencyContactName && (
+                    <InfoRow icon={<User className="h-3.5 w-3.5" />} label="Ad Soyad">{(candidate as any).emergencyContactName}</InfoRow>
+                  )}
+                  {(candidate as any).emergencyContactPhone && (
+                    <InfoRow icon={<Phone className="h-3.5 w-3.5" />} label="Telefon">
+                      <a href={`tel:${(candidate as any).emergencyContactPhone}`} className="hover:text-foreground transition-colors">
+                        {(candidate as any).emergencyContactPhone}
+                      </a>
+                    </InfoRow>
+                  )}
+                </div>
+              )}
 
               {(candidate.referredBy || candidate.socialMedia) && (
                 <div className="rounded-xl border border-border bg-card p-5 shadow-sm space-y-3">
@@ -853,6 +870,9 @@ function EditCandidateDialog({ candidate, open, onOpenChange }: { candidate: Can
     licenseNumber: candidate.licenseNumber ?? "",
     city: candidate.city ?? "",
     district: candidate.district ?? "",
+    address: (candidate as any).address ?? "",
+    emergencyContactName: (candidate as any).emergencyContactName ?? "",
+    emergencyContactPhone: (candidate as any).emergencyContactPhone ?? "",
     experience: String(candidate.experience ?? 0),
     referredBy: candidate.referredBy ?? "",
     socialMedia: candidate.socialMedia ?? "",
@@ -878,6 +898,9 @@ function EditCandidateDialog({ candidate, open, onOpenChange }: { candidate: Can
         licenseNumber: form.licenseNumber || undefined,
         city: form.city || undefined,
         district: form.district || undefined,
+        address: form.address || undefined,
+        emergencyContactName: form.emergencyContactName || undefined,
+        emergencyContactPhone: form.emergencyContactPhone || undefined,
         referredBy: form.referredBy || undefined,
         socialMedia: form.socialMedia || undefined,
         resumeText: form.resumeText || undefined,
@@ -977,6 +1000,23 @@ function EditCandidateDialog({ candidate, open, onOpenChange }: { candidate: Can
               </Field>
               <Field label="İlçe">
                 <Input value={form.district} onChange={(e) => f("district", e.target.value)} placeholder="Kadıköy, Çankaya..." />
+              </Field>
+              <div className="col-span-2">
+                <Field label="Açık Adres">
+                  <Input value={form.address} onChange={(e) => f("address", e.target.value)} placeholder="Sokak, bina no, daire..." />
+                </Field>
+              </div>
+            </div>
+          </Section>
+
+          {/* Emergency Contact */}
+          <Section title="Acil Durum İletişim">
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Ad Soyad">
+                <Input value={form.emergencyContactName} onChange={(e) => f("emergencyContactName", e.target.value)} placeholder="Yakın kişinin adı" />
+              </Field>
+              <Field label="Telefon">
+                <Input value={form.emergencyContactPhone} onChange={(e) => f("emergencyContactPhone", e.target.value)} placeholder="+90..." />
               </Field>
             </div>
           </Section>
