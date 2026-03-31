@@ -460,64 +460,56 @@ export default function CandidateDetail() {
                   </div>
                 )}
 
-                {(employeeRecord.billingName || employeeRecord.taxId || employeeRecord.birthDate) && (
-                  <div className="mt-4 pt-4 border-t border-[#CC0000]/15">
-                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-1">
-                      <FileText className="h-3.5 w-3.5" /> Fatura Bilgileri
-                    </p>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
-                      {employeeRecord.billingName && (
-                        <div className="col-span-2 sm:col-span-3">
-                          <p className="text-xs text-muted-foreground mb-0.5">Şirket / Şahıs İsmi</p>
-                          <p className="font-semibold">{employeeRecord.billingName}</p>
-                        </div>
-                      )}
-                      {employeeRecord.billingAddress && (
-                        <div className="col-span-2 sm:col-span-3">
-                          <p className="text-xs text-muted-foreground mb-0.5">Fatura Adresi</p>
-                          <p>{employeeRecord.billingAddress}</p>
-                        </div>
-                      )}
-                      {(employeeRecord.billingDistrict || employeeRecord.billingCity) && (
-                        <div>
-                          <p className="text-xs text-muted-foreground mb-0.5">İlçe / İl</p>
-                          <p>{[employeeRecord.billingDistrict, employeeRecord.billingCity].filter(Boolean).join(" / ")}</p>
-                        </div>
-                      )}
-                      {employeeRecord.billingCountry && (
-                        <div>
-                          <p className="text-xs text-muted-foreground mb-0.5">Ülke</p>
-                          <p>{employeeRecord.billingCountry}</p>
-                        </div>
-                      )}
-                      {employeeRecord.taxOffice && (
-                        <div>
-                          <p className="text-xs text-muted-foreground mb-0.5">Vergi Dairesi</p>
-                          <p>{employeeRecord.taxOffice}</p>
-                        </div>
-                      )}
-                      {employeeRecord.taxId && (
-                        <div>
-                          <p className="text-xs text-muted-foreground mb-0.5">Vergi / TCK No</p>
-                          <p className="font-mono">{employeeRecord.taxId}</p>
-                        </div>
-                      )}
-                      {employeeRecord.birthDate && (
-                        <div>
-                          <p className="text-xs text-muted-foreground mb-0.5">Doğum Tarihi</p>
-                          <p>{employeeRecord.birthDate}</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-
                 {employeeRecord.notes && (
                   <div className="mt-4 pt-4 border-t border-[#CC0000]/15">
                     <p className="text-xs text-muted-foreground font-medium mb-1">Notlar</p>
                     <p className="text-sm text-foreground/80">{employeeRecord.notes}</p>
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* ── Billing / Tax Info (separate card, only for employees) ── */}
+          {employeeRecord && (
+            <div className="rounded-xl border border-blue-200 bg-blue-50/50 shadow-sm overflow-hidden">
+              <div className="flex items-center gap-2 px-5 py-3 border-b border-blue-200 bg-blue-50">
+                <FileText className="h-4 w-4 text-blue-600" />
+                <h2 className="text-sm font-bold text-blue-700 uppercase tracking-wide">Fatura &amp; Vergi Bilgileri</h2>
+              </div>
+              <div className="p-5 grid grid-cols-2 sm:grid-cols-3 gap-4 text-sm">
+                <div className="col-span-2 sm:col-span-3">
+                  <p className="text-xs text-muted-foreground font-medium mb-1">Şirket / Şahıs İsmi</p>
+                  <p className="font-semibold">{employeeRecord.billingName || "—"}</p>
+                </div>
+                <div className="col-span-2 sm:col-span-3">
+                  <p className="text-xs text-muted-foreground font-medium mb-1">Fatura Adresi</p>
+                  <p>{employeeRecord.billingAddress || "—"}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground font-medium mb-1">İlçe</p>
+                  <p>{employeeRecord.billingDistrict || "—"}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground font-medium mb-1">İl</p>
+                  <p>{employeeRecord.billingCity || "—"}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground font-medium mb-1">Ülke</p>
+                  <p>{employeeRecord.billingCountry || "—"}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground font-medium mb-1">Vergi Dairesi</p>
+                  <p>{employeeRecord.taxOffice || "—"}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground font-medium mb-1">Vergi / TCK No</p>
+                  <p className="font-mono">{employeeRecord.taxId || "—"}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground font-medium mb-1">Doğum Tarihi</p>
+                  <p>{employeeRecord.birthDate || "—"}</p>
+                </div>
               </div>
             </div>
           )}

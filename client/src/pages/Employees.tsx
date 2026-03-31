@@ -899,56 +899,47 @@ export default function Employees() {
                 )}
               </div>
 
-              {/* Billing info */}
-              {(detailEmployee.billingName || detailEmployee.taxId || detailEmployee.birthDate) && (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 space-y-2">
-                  <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide">Fatura Bilgileri</p>
-                  <div className="grid grid-cols-2 gap-3 text-sm">
-                    {detailEmployee.billingName && (
-                      <div className="col-span-2">
-                        <p className="text-xs text-muted-foreground font-medium mb-0.5">Şirket / Şahıs İsmi</p>
-                        <p className="font-semibold">{detailEmployee.billingName}</p>
-                      </div>
-                    )}
-                    {detailEmployee.billingAddress && (
-                      <div className="col-span-2">
-                        <p className="text-xs text-muted-foreground font-medium mb-0.5">Fatura Adresi</p>
-                        <p>{detailEmployee.billingAddress}</p>
-                      </div>
-                    )}
-                    {(detailEmployee.billingDistrict || detailEmployee.billingCity) && (
-                      <div>
-                        <p className="text-xs text-muted-foreground font-medium mb-0.5">İlçe / İl</p>
-                        <p>{[detailEmployee.billingDistrict, detailEmployee.billingCity].filter(Boolean).join(" / ")}</p>
-                      </div>
-                    )}
-                    {detailEmployee.billingCountry && (
-                      <div>
-                        <p className="text-xs text-muted-foreground font-medium mb-0.5">Ülke</p>
-                        <p>{detailEmployee.billingCountry}</p>
-                      </div>
-                    )}
-                    {detailEmployee.taxOffice && (
-                      <div>
-                        <p className="text-xs text-muted-foreground font-medium mb-0.5">Vergi Dairesi</p>
-                        <p>{detailEmployee.taxOffice}</p>
-                      </div>
-                    )}
-                    {detailEmployee.taxId && (
-                      <div>
-                        <p className="text-xs text-muted-foreground font-medium mb-0.5">Vergi / TCK No</p>
-                        <p className="font-mono">{detailEmployee.taxId}</p>
-                      </div>
-                    )}
-                    {detailEmployee.birthDate && (
-                      <div>
-                        <p className="text-xs text-muted-foreground font-medium mb-0.5">Doğum Tarihi</p>
-                        <p>{detailEmployee.birthDate}</p>
-                      </div>
-                    )}
+              {/* Billing info — always shown as its own section */}
+              <div className="rounded-lg border border-blue-200 bg-blue-50/60 overflow-hidden">
+                <div className="flex items-center gap-2 px-3 py-2 border-b border-blue-200 bg-blue-50">
+                  <FileText className="h-3.5 w-3.5 text-blue-600" />
+                  <p className="text-xs font-bold text-blue-700 uppercase tracking-wide">Fatura &amp; Vergi Bilgileri</p>
+                </div>
+                <div className="grid grid-cols-2 gap-3 text-sm p-3">
+                  <div className="col-span-2">
+                    <p className="text-xs text-muted-foreground font-medium mb-0.5">Şirket / Şahıs İsmi</p>
+                    <p className="font-semibold">{detailEmployee.billingName || "—"}</p>
+                  </div>
+                  <div className="col-span-2">
+                    <p className="text-xs text-muted-foreground font-medium mb-0.5">Fatura Adresi</p>
+                    <p>{detailEmployee.billingAddress || "—"}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground font-medium mb-0.5">İlçe</p>
+                    <p>{detailEmployee.billingDistrict || "—"}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground font-medium mb-0.5">İl</p>
+                    <p>{detailEmployee.billingCity || "—"}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground font-medium mb-0.5">Ülke</p>
+                    <p>{detailEmployee.billingCountry || "—"}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground font-medium mb-0.5">Vergi Dairesi</p>
+                    <p>{detailEmployee.taxOffice || "—"}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground font-medium mb-0.5">Vergi / TCK No</p>
+                    <p className="font-mono">{detailEmployee.taxId || "—"}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground font-medium mb-0.5">Doğum Tarihi</p>
+                    <p>{detailEmployee.birthDate || "—"}</p>
                   </div>
                 </div>
-              )}
+              </div>
 
               {detailEmployee.candidate?.specialization?.length > 0 && (
                 <div>
