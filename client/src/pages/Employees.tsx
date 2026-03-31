@@ -152,6 +152,16 @@ function EditEmployeeDialog({ emp, open, onOpenChange }: { emp: any; open: boole
   const [capMonth, setCapMonth] = useState(defaultCapMonth);
   const [capValue, setCapValue] = useState(emp.capValue ?? "");
 
+  // Billing fields
+  const [billingName, setBillingName] = useState(emp.billingName ?? "");
+  const [billingAddress, setBillingAddress] = useState(emp.billingAddress ?? "");
+  const [billingDistrict, setBillingDistrict] = useState(emp.billingDistrict ?? "");
+  const [billingCity, setBillingCity] = useState(emp.billingCity ?? "");
+  const [billingCountry, setBillingCountry] = useState(emp.billingCountry ?? "Türkiye");
+  const [taxOffice, setTaxOffice] = useState(emp.taxOffice ?? "");
+  const [taxId, setTaxId] = useState(emp.taxId ?? "");
+  const [birthDate, setBirthDate] = useState(emp.birthDate ?? "");
+
   // ── Candidate personal fields ──
   const c = emp.candidate ?? {};
   const [candName, setCandName] = useState(c.name ?? "");
@@ -209,6 +219,14 @@ function EditEmployeeDialog({ emp, open, onOpenChange }: { emp: any; open: boole
               uretkenlikKocluguOran: uretkenlikKoclugu && uretkenlikOran ? uretkenlikOran : null,
               capMonth: capMonth || undefined,
               capValue: capValue || undefined,
+              billingName: billingName || undefined,
+              billingAddress: billingAddress || undefined,
+              billingDistrict: billingDistrict || undefined,
+              billingCity: billingCity || undefined,
+              billingCountry: billingCountry || undefined,
+              taxOffice: taxOffice || undefined,
+              taxId: taxId || undefined,
+              birthDate: birthDate || undefined,
             },
             {
               onSuccess: () => { toast({ title: "Profil güncellendi" }); onOpenChange(false); },
@@ -371,6 +389,39 @@ function EditEmployeeDialog({ emp, open, onOpenChange }: { emp: any; open: boole
                 </EmpField>
               </div>
             )}
+          </div>
+
+          {/* Billing */}
+          <EmpSectionHeader label="Fatura Bilgileri" />
+          <div className="grid grid-cols-2 gap-3">
+            <div className="col-span-2">
+              <EmpField label="Şirket / Şahıs İsmi">
+                <Input value={billingName} onChange={(e) => setBillingName(e.target.value)} placeholder="Fatura kesilecek isim veya şirket" />
+              </EmpField>
+            </div>
+            <div className="col-span-2">
+              <EmpField label="Fatura Adresi">
+                <Input value={billingAddress} onChange={(e) => setBillingAddress(e.target.value)} placeholder="Sokak, bina no, daire..." />
+              </EmpField>
+            </div>
+            <EmpField label="İlçe">
+              <Input value={billingDistrict} onChange={(e) => setBillingDistrict(e.target.value)} placeholder="Kadıköy..." />
+            </EmpField>
+            <EmpField label="İl">
+              <Input value={billingCity} onChange={(e) => setBillingCity(e.target.value)} placeholder="İstanbul..." />
+            </EmpField>
+            <EmpField label="Ülke">
+              <Input value={billingCountry} onChange={(e) => setBillingCountry(e.target.value)} placeholder="Türkiye" />
+            </EmpField>
+            <EmpField label="Vergi Dairesi">
+              <Input value={taxOffice} onChange={(e) => setTaxOffice(e.target.value)} placeholder="Bağcılar VD..." />
+            </EmpField>
+            <EmpField label="Vergi / TCK No">
+              <Input value={taxId} onChange={(e) => setTaxId(e.target.value)} placeholder="1234567890" />
+            </EmpField>
+            <EmpField label="Doğum Tarihi">
+              <Input type="date" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} />
+            </EmpField>
           </div>
 
           {/* Notes */}
@@ -847,6 +898,57 @@ export default function Employees() {
                   </div>
                 )}
               </div>
+
+              {/* Billing info */}
+              {(detailEmployee.billingName || detailEmployee.taxId || detailEmployee.birthDate) && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 space-y-2">
+                  <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide">Fatura Bilgileri</p>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    {detailEmployee.billingName && (
+                      <div className="col-span-2">
+                        <p className="text-xs text-muted-foreground font-medium mb-0.5">Şirket / Şahıs İsmi</p>
+                        <p className="font-semibold">{detailEmployee.billingName}</p>
+                      </div>
+                    )}
+                    {detailEmployee.billingAddress && (
+                      <div className="col-span-2">
+                        <p className="text-xs text-muted-foreground font-medium mb-0.5">Fatura Adresi</p>
+                        <p>{detailEmployee.billingAddress}</p>
+                      </div>
+                    )}
+                    {(detailEmployee.billingDistrict || detailEmployee.billingCity) && (
+                      <div>
+                        <p className="text-xs text-muted-foreground font-medium mb-0.5">İlçe / İl</p>
+                        <p>{[detailEmployee.billingDistrict, detailEmployee.billingCity].filter(Boolean).join(" / ")}</p>
+                      </div>
+                    )}
+                    {detailEmployee.billingCountry && (
+                      <div>
+                        <p className="text-xs text-muted-foreground font-medium mb-0.5">Ülke</p>
+                        <p>{detailEmployee.billingCountry}</p>
+                      </div>
+                    )}
+                    {detailEmployee.taxOffice && (
+                      <div>
+                        <p className="text-xs text-muted-foreground font-medium mb-0.5">Vergi Dairesi</p>
+                        <p>{detailEmployee.taxOffice}</p>
+                      </div>
+                    )}
+                    {detailEmployee.taxId && (
+                      <div>
+                        <p className="text-xs text-muted-foreground font-medium mb-0.5">Vergi / TCK No</p>
+                        <p className="font-mono">{detailEmployee.taxId}</p>
+                      </div>
+                    )}
+                    {detailEmployee.birthDate && (
+                      <div>
+                        <p className="text-xs text-muted-foreground font-medium mb-0.5">Doğum Tarihi</p>
+                        <p>{detailEmployee.birthDate}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {detailEmployee.candidate?.specialization?.length > 0 && (
                 <div>

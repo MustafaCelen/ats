@@ -233,6 +233,15 @@ export const employees = pgTable("employees", {
   uretkenlikKocluguOran: text("uretkenlik_koclugu_oran"), // 5% | 10%
   capMonth: text("cap_month"),  // e.g. "2025-03"
   capValue: text("cap_value"),  // cap amount/target
+  // Billing / invoice info
+  billingName: text("billing_name"),          // Şirket / Şahıs İsmi
+  billingAddress: text("billing_address"),    // Fatura Adresi
+  billingDistrict: text("billing_district"),  // İlçe
+  billingCity: text("billing_city"),          // İl
+  billingCountry: text("billing_country"),    // Ülke
+  taxOffice: text("tax_office"),              // Vergi Dairesi
+  taxId: text("tax_id"),                      // Vergi / TCK No
+  birthDate: text("birth_date"),              // Doğum Tarihi
   createdAt: timestamp("created_at").defaultNow(),
 });
 

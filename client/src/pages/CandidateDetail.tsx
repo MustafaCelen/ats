@@ -460,6 +460,58 @@ export default function CandidateDetail() {
                   </div>
                 )}
 
+                {(employeeRecord.billingName || employeeRecord.taxId || employeeRecord.birthDate) && (
+                  <div className="mt-4 pt-4 border-t border-[#CC0000]/15">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-1">
+                      <FileText className="h-3.5 w-3.5" /> Fatura Bilgileri
+                    </p>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
+                      {employeeRecord.billingName && (
+                        <div className="col-span-2 sm:col-span-3">
+                          <p className="text-xs text-muted-foreground mb-0.5">Şirket / Şahıs İsmi</p>
+                          <p className="font-semibold">{employeeRecord.billingName}</p>
+                        </div>
+                      )}
+                      {employeeRecord.billingAddress && (
+                        <div className="col-span-2 sm:col-span-3">
+                          <p className="text-xs text-muted-foreground mb-0.5">Fatura Adresi</p>
+                          <p>{employeeRecord.billingAddress}</p>
+                        </div>
+                      )}
+                      {(employeeRecord.billingDistrict || employeeRecord.billingCity) && (
+                        <div>
+                          <p className="text-xs text-muted-foreground mb-0.5">İlçe / İl</p>
+                          <p>{[employeeRecord.billingDistrict, employeeRecord.billingCity].filter(Boolean).join(" / ")}</p>
+                        </div>
+                      )}
+                      {employeeRecord.billingCountry && (
+                        <div>
+                          <p className="text-xs text-muted-foreground mb-0.5">Ülke</p>
+                          <p>{employeeRecord.billingCountry}</p>
+                        </div>
+                      )}
+                      {employeeRecord.taxOffice && (
+                        <div>
+                          <p className="text-xs text-muted-foreground mb-0.5">Vergi Dairesi</p>
+                          <p>{employeeRecord.taxOffice}</p>
+                        </div>
+                      )}
+                      {employeeRecord.taxId && (
+                        <div>
+                          <p className="text-xs text-muted-foreground mb-0.5">Vergi / TCK No</p>
+                          <p className="font-mono">{employeeRecord.taxId}</p>
+                        </div>
+                      )}
+                      {employeeRecord.birthDate && (
+                        <div>
+                          <p className="text-xs text-muted-foreground mb-0.5">Doğum Tarihi</p>
+                          <p>{employeeRecord.birthDate}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {employeeRecord.notes && (
                   <div className="mt-4 pt-4 border-t border-[#CC0000]/15">
                     <p className="text-xs text-muted-foreground font-medium mb-1">Notlar</p>
