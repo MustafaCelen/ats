@@ -1043,45 +1043,78 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" aria-describedby="edit-candidate-desc">
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto" aria-describedby="edit-candidate-desc">
         <DialogHeader>
           <DialogTitle>Profili Düzenle — {candidate.name}</DialogTitle>
           <p id="edit-candidate-desc" className="text-sm text-muted-foreground">Aday bilgilerini güncelleyin</p>
         </DialogHeader>
 
-        <div className="space-y-5 pt-2">
-          {/* Basic */}
-          <Section title="Kişisel Bilgiler">
+        <div className="space-y-1 pt-2">
+
+          {/* ── Kişisel Bilgiler ── */}
+          <EditGroup icon="👤" title="Kişisel Bilgiler">
             <div className="grid grid-cols-2 gap-3">
               <Field label="Ad Soyad *"><Input value={form.name} onChange={(e) => f("name", e.target.value)} data-testid="input-edit-name" /></Field>
               <Field label="E-posta *"><Input type="email" value={form.email} onChange={(e) => f("email", e.target.value)} data-testid="input-edit-email" /></Field>
               <Field label="Telefon"><Input value={form.phone} onChange={(e) => f("phone", e.target.value)} data-testid="input-edit-phone" /></Field>
               <Field label="Sosyal Medya / LinkedIn"><Input value={form.socialMedia} onChange={(e) => f("socialMedia", e.target.value)} placeholder="https://linkedin.com/in/..." /></Field>
             </div>
-          </Section>
+          </EditGroup>
 
-          {/* KW Category */}
-          <Section title="KW Kategori">
-            <div className="grid grid-cols-3 gap-2">
-              {CANDIDATE_CATEGORIES.map((cat) => {
-                const m = CATEGORY_META[cat];
-                return (
-                  <button
-                    key={cat} type="button"
-                    onClick={() => f("category", cat)}
-                    className={`p-3 rounded-lg border-2 text-left transition-all ${form.category === cat ? "border-primary bg-primary/5" : "border-border hover:border-muted-foreground"}`}
-                    data-testid={`category-option-${cat}`}
-                  >
-                    <p className={`text-sm font-bold ${m.color.split(" ")[1]}`}>{m.label}</p>
-                    <p className="text-[11px] text-muted-foreground mt-0.5">{m.desc}</p>
-                  </button>
-                );
-              })}
+          {/* ── Konum & Acil Durum ── */}
+          <EditGroup icon="📍" title="Konum & Acil Durum İletişim">
+            <div className="grid grid-cols-2 gap-x-6 gap-y-3">
+              {/* Left — Location */}
+              <div className="space-y-3">
+                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Konum</p>
+                <Field label="Şehir">
+                  <Select value={form.city} onValueChange={(v) => f("city", v)}>
+                    <SelectTrigger><SelectValue placeholder="Şehir seçin..." /></SelectTrigger>
+                    <SelectContent>{TURKEY_CITIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                  </Select>
+                </Field>
+                <Field label="İlçe">
+                  <Input value={form.district} onChange={(e) => f("district", e.target.value)} placeholder="Kadıköy, Çankaya..." />
+                </Field>
+                <Field label="Açık Adres">
+                  <Input value={form.address} onChange={(e) => f("address", e.target.value)} placeholder="Sokak, bina no, daire..." />
+                </Field>
+              </div>
+              {/* Right — Emergency */}
+              <div className="space-y-3">
+                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Acil Durum İletişim</p>
+                <Field label="Ad Soyad">
+                  <Input value={form.emergencyContactName} onChange={(e) => f("emergencyContactName", e.target.value)} placeholder="Yakın kişinin adı" />
+                </Field>
+                <Field label="Telefon">
+                  <Input value={form.emergencyContactPhone} onChange={(e) => f("emergencyContactPhone", e.target.value)} placeholder="+90..." />
+                </Field>
+              </div>
             </div>
-          </Section>
+          </EditGroup>
 
-          {/* Realtor */}
-          <Section title="Gayrimenkul Bilgileri">
+          {/* ── Gayrimenkul Profili ── */}
+          <EditGroup icon="🏠" title="Gayrimenkul Profili">
+            {/* Category chips */}
+            <div className="mb-3">
+              <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Kategori</p>
+              <div className="grid grid-cols-3 gap-2">
+                {CANDIDATE_CATEGORIES.map((cat) => {
+                  const m = CATEGORY_META[cat];
+                  return (
+                    <button
+                      key={cat} type="button"
+                      onClick={() => f("category", cat)}
+                      className={`p-3 rounded-lg border-2 text-left transition-all ${form.category === cat ? "border-primary bg-primary/5" : "border-border hover:border-muted-foreground"}`}
+                      data-testid={`category-option-${cat}`}
+                    >
+                      <p className={`text-sm font-bold ${m.color.split(" ")[1]}`}>{m.label}</p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">{m.desc}</p>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <Field label="Mevcut Marka / Ofis">
                 <Select value={form.currentBrand} onValueChange={(v) => f("currentBrand", v)}>
@@ -1106,176 +1139,132 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
                 <Input value={form.licenseNumber} onChange={(e) => f("licenseNumber", e.target.value)} placeholder="TKGM-..." />
               </Field>
             </div>
-          </Section>
-
-          {/* Specialization */}
-          <Section title="Uzmanlık Alanları">
-            <ChipToggle options={SPECIALIZATIONS} value={specialization} onChange={setSpecialization} />
-          </Section>
-
-          {/* Languages */}
-          <Section title="Yabancı Dil">
-            <ChipToggle options={LANGUAGES} value={languages} onChange={setLanguages} />
-          </Section>
-
-          {/* Location */}
-          <Section title="Konum">
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Şehir">
-                <Select value={form.city} onValueChange={(v) => f("city", v)}>
-                  <SelectTrigger><SelectValue placeholder="Şehir seçin..." /></SelectTrigger>
-                  <SelectContent>{TURKEY_CITIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-                </Select>
-              </Field>
-              <Field label="İlçe">
-                <Input value={form.district} onChange={(e) => f("district", e.target.value)} placeholder="Kadıköy, Çankaya..." />
-              </Field>
-              <div className="col-span-2">
-                <Field label="Açık Adres">
-                  <Input value={form.address} onChange={(e) => f("address", e.target.value)} placeholder="Sokak, bina no, daire..." />
-                </Field>
+            {/* Specialization + Languages side by side */}
+            <div className="grid grid-cols-2 gap-x-6 gap-y-2 mt-3">
+              <div>
+                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Uzmanlık Alanları</p>
+                <ChipToggle options={SPECIALIZATIONS} value={specialization} onChange={setSpecialization} />
+              </div>
+              <div>
+                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Yabancı Dil</p>
+                <ChipToggle options={LANGUAGES} value={languages} onChange={setLanguages} />
               </div>
             </div>
-          </Section>
+          </EditGroup>
 
-          {/* Emergency Contact */}
-          <Section title="Acil Durum İletişim">
+          {/* ── Diğer ── */}
+          <EditGroup icon="📋" title="Diğer">
             <div className="grid grid-cols-2 gap-3">
-              <Field label="Ad Soyad">
-                <Input value={form.emergencyContactName} onChange={(e) => f("emergencyContactName", e.target.value)} placeholder="Yakın kişinin adı" />
-              </Field>
-              <Field label="Telefon">
-                <Input value={form.emergencyContactPhone} onChange={(e) => f("emergencyContactPhone", e.target.value)} placeholder="+90..." />
-              </Field>
-            </div>
-          </Section>
-
-          {/* Other */}
-          <Section title="Diğer">
-            <div className="space-y-3">
               <Field label="Beklenen Başlangıç Ayı">
-                <Input
-                  type="month"
-                  value={form.expectedStartMonth}
-                  onChange={(e) => f("expectedStartMonth", e.target.value)}
-                  data-testid="input-edit-expected-start-month"
-                />
+                <Input type="month" value={form.expectedStartMonth} onChange={(e) => f("expectedStartMonth", e.target.value)} data-testid="input-edit-expected-start-month" />
               </Field>
               <Field label="Referans (kim tanıttı?)">
                 <Input value={form.referredBy} onChange={(e) => f("referredBy", e.target.value)} placeholder="Ad Soyad veya kaynak" />
               </Field>
-              <Field label="Notlar / Özet">
-                <Textarea value={form.resumeText} onChange={(e) => f("resumeText", e.target.value)} rows={3} placeholder="Ek bilgiler..." />
-              </Field>
-            </div>
-          </Section>
-
-          {/* KW Info — only shown when candidate is an active employee */}
-          {employeeRecord && (
-            <Section title="KW Bilgileri">
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="KWUID">
-                  <Input value={kwuid} onChange={(e) => setKwuid(e.target.value)} placeholder="KWUID girin" />
-                </Field>
-                <Field label="KW E-posta">
-                  <Input type="email" value={kwMail} onChange={(e) => setKwMail(e.target.value)} placeholder="isim@kw.com.tr" />
-                </Field>
-                <Field label="Ünvan">
-                  <Input value={empTitle} onChange={(e) => setEmpTitle(e.target.value)} placeholder="Danışman" />
-                </Field>
-                <Field label="Başlangıç Tarihi">
-                  <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-                </Field>
-                <Field label="Sözleşme Türü">
-                  <Select value={contractType} onValueChange={setContractType}>
-                    <SelectTrigger><SelectValue placeholder="Seçiniz..." /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">— Seçilmedi —</SelectItem>
-                      {CONTRACT_TYPES.map((ct) => <SelectItem key={ct} value={ct}>{ct}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </Field>
-                <Field label="Cap Ayı">
-                  <Input value={capMonth} onChange={(e) => setCapMonth(e.target.value)} placeholder="Ocak" />
-                </Field>
-                <Field label="Cap Değeri">
-                  <Input value={capValue} onChange={(e) => setCapValue(e.target.value)} placeholder="Cap miktarı" />
+              <div className="col-span-2">
+                <Field label="Notlar / Özet">
+                  <Textarea value={form.resumeText} onChange={(e) => f("resumeText", e.target.value)} rows={3} placeholder="Ek bilgiler..." />
                 </Field>
               </div>
-              <div className="mt-3 rounded-lg border border-border bg-muted/20 p-3 space-y-3">
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id="uretkenlik-cd"
-                    checked={uretkenlikKoclugu}
-                    onChange={(e) => setUretkenlikKoclugu(e.target.checked)}
-                    className="rounded"
-                  />
-                  <Label htmlFor="uretkenlik-cd" className="text-sm font-medium cursor-pointer">Üretkenlik Koçluğu</Label>
+            </div>
+          </EditGroup>
+
+          {/* ── KW Çalışan Bilgileri (employee only) ── */}
+          {employeeRecord && (
+            <div className="rounded-xl border-2 border-[#CC0000]/30 overflow-hidden">
+              <div className="h-1 bg-gradient-to-r from-[#B40101] via-[#CC0000] to-[#8B0000]" />
+              <div className="px-4 py-3 bg-[#CC0000]/5 border-b border-[#CC0000]/20">
+                <p className="text-sm font-bold text-[#CC0000] uppercase tracking-wide">KW Çalışan Bilgileri</p>
+              </div>
+              <div className="p-4 space-y-4">
+
+                {/* KW Identity */}
+                <div>
+                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Kimlik & Erişim</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="KWUID"><Input value={kwuid} onChange={(e) => setKwuid(e.target.value)} placeholder="KWUID girin" /></Field>
+                    <Field label="KW E-posta"><Input type="email" value={kwMail} onChange={(e) => setKwMail(e.target.value)} placeholder="isim@kw.com.tr" /></Field>
+                  </div>
                 </div>
-                {uretkenlikKoclugu && (
-                  <div className="grid grid-cols-2 gap-3 pl-6">
-                    <Field label="Koç (Hiring Manager)">
-                      <Select value={uretkenlikManagerId} onValueChange={setUretkenlikManagerId}>
-                        <SelectTrigger><SelectValue placeholder="Yönetici seçin..." /></SelectTrigger>
+
+                {/* Contract */}
+                <div>
+                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Sözleşme & Performans</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="Ünvan"><Input value={empTitle} onChange={(e) => setEmpTitle(e.target.value)} placeholder="Danışman" /></Field>
+                    <Field label="Başlangıç Tarihi"><Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} /></Field>
+                    <Field label="Sözleşme Türü">
+                      <Select value={contractType} onValueChange={setContractType}>
+                        <SelectTrigger><SelectValue placeholder="Seçiniz..." /></SelectTrigger>
                         <SelectContent>
-                          {hiringManagers.map((hm) => (
-                            <SelectItem key={hm.id} value={String(hm.id)}>{hm.name}</SelectItem>
-                          ))}
+                          <SelectItem value="none">— Seçilmedi —</SelectItem>
+                          {CONTRACT_TYPES.map((ct) => <SelectItem key={ct} value={ct}>{ct}</SelectItem>)}
                         </SelectContent>
                       </Select>
                     </Field>
-                    <Field label="Paylaşım Oranı">
-                      <Select value={uretkenlikOran} onValueChange={setUretkenlikOran}>
-                        <SelectTrigger><SelectValue placeholder="Oran seçin..." /></SelectTrigger>
-                        <SelectContent>
-                          {URETKENLIK_ORANLAR.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
+                    <Field label="Cap Ayı"><Input value={capMonth} onChange={(e) => setCapMonth(e.target.value)} placeholder="Ocak" /></Field>
+                    <Field label="Cap Değeri"><Input value={capValue} onChange={(e) => setCapValue(e.target.value)} placeholder="Cap miktarı" /></Field>
+                  </div>
+                </div>
+
+                {/* Uretkenlik */}
+                <div className="rounded-lg border border-[#CC0000]/20 bg-[#CC0000]/5 p-3 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <input type="checkbox" id="uretkenlik-cd" checked={uretkenlikKoclugu} onChange={(e) => setUretkenlikKoclugu(e.target.checked)} className="rounded" />
+                    <Label htmlFor="uretkenlik-cd" className="text-sm font-medium cursor-pointer">Üretkenlik Koçluğu</Label>
+                  </div>
+                  {uretkenlikKoclugu && (
+                    <div className="grid grid-cols-2 gap-3 pl-6">
+                      <Field label="Koç (Hiring Manager)">
+                        <Select value={uretkenlikManagerId} onValueChange={setUretkenlikManagerId}>
+                          <SelectTrigger><SelectValue placeholder="Yönetici seçin..." /></SelectTrigger>
+                          <SelectContent>{hiringManagers.map((hm) => <SelectItem key={hm.id} value={String(hm.id)}>{hm.name}</SelectItem>)}</SelectContent>
+                        </Select>
+                      </Field>
+                      <Field label="Paylaşım Oranı">
+                        <Select value={uretkenlikOran} onValueChange={setUretkenlikOran}>
+                          <SelectTrigger><SelectValue placeholder="Oran seçin..." /></SelectTrigger>
+                          <SelectContent>{URETKENLIK_ORANLAR.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent>
+                        </Select>
+                      </Field>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Fatura & Vergi Bilgileri (employee only) ── */}
+          {employeeRecord && (
+            <div className="rounded-xl border-2 border-blue-200 overflow-hidden">
+              <div className="h-1 bg-gradient-to-r from-blue-400 via-blue-500 to-blue-600" />
+              <div className="px-4 py-3 bg-blue-50 border-b border-blue-200">
+                <p className="text-sm font-bold text-blue-700 uppercase tracking-wide">Fatura &amp; Vergi Bilgileri</p>
+              </div>
+              <div className="p-4 space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="col-span-2">
+                    <Field label="Şirket / Şahıs İsmi">
+                      <Input value={billingName} onChange={(e) => setBillingName(e.target.value)} placeholder="Fatura kesilecek isim veya şirket" />
                     </Field>
                   </div>
-                )}
+                  <div className="col-span-2">
+                    <Field label="Fatura Adresi">
+                      <Input value={billingAddress} onChange={(e) => setBillingAddress(e.target.value)} placeholder="Cadde, bina no..." />
+                    </Field>
+                  </div>
+                  <Field label="İlçe"><Input value={billingDistrict} onChange={(e) => setBillingDistrict(e.target.value)} placeholder="İlçe" /></Field>
+                  <Field label="İl"><Input value={billingCity} onChange={(e) => setBillingCity(e.target.value)} placeholder="İl" /></Field>
+                  <Field label="Ülke"><Input value={billingCountry} onChange={(e) => setBillingCountry(e.target.value)} placeholder="Türkiye" /></Field>
+                  <Field label="Doğum Tarihi"><Input type="date" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} /></Field>
+                  <Field label="Vergi Dairesi"><Input value={taxOffice} onChange={(e) => setTaxOffice(e.target.value)} placeholder="Vergi dairesi adı" /></Field>
+                  <Field label="Vergi / TCK No"><Input value={taxId} onChange={(e) => setTaxId(e.target.value)} placeholder="Vergi veya TC kimlik no" /></Field>
+                </div>
               </div>
-            </Section>
+            </div>
           )}
 
-          {/* Billing Info — only shown when candidate is an active employee */}
-          {employeeRecord && (
-            <Section title="Fatura & Vergi Bilgileri">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="col-span-2">
-                  <Field label="Şirket / Şahıs İsmi">
-                    <Input value={billingName} onChange={(e) => setBillingName(e.target.value)} placeholder="Fatura kesilecek isim veya şirket" />
-                  </Field>
-                </div>
-                <div className="col-span-2">
-                  <Field label="Fatura Adresi">
-                    <Input value={billingAddress} onChange={(e) => setBillingAddress(e.target.value)} placeholder="Cadde, bina no..." />
-                  </Field>
-                </div>
-                <Field label="İlçe">
-                  <Input value={billingDistrict} onChange={(e) => setBillingDistrict(e.target.value)} placeholder="İlçe" />
-                </Field>
-                <Field label="İl">
-                  <Input value={billingCity} onChange={(e) => setBillingCity(e.target.value)} placeholder="İl" />
-                </Field>
-                <Field label="Ülke">
-                  <Input value={billingCountry} onChange={(e) => setBillingCountry(e.target.value)} placeholder="Türkiye" />
-                </Field>
-                <Field label="Vergi Dairesi">
-                  <Input value={taxOffice} onChange={(e) => setTaxOffice(e.target.value)} placeholder="Vergi dairesi adı" />
-                </Field>
-                <Field label="Vergi / TCK No">
-                  <Input value={taxId} onChange={(e) => setTaxId(e.target.value)} placeholder="Vergi veya TC kimlik no" />
-                </Field>
-                <Field label="Doğum Tarihi">
-                  <Input type="date" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} />
-                </Field>
-              </div>
-            </Section>
-          )}
-
-          <div className="flex gap-2 pt-1">
+          <div className="flex gap-2 pt-2">
             <Button variant="outline" className="flex-1" onClick={() => onOpenChange(false)}>İptal</Button>
             <Button className="flex-1" onClick={handleSave} disabled={isPending} data-testid="btn-save-candidate">
               {isPending ? "Kaydediliyor..." : "Kaydet"}
@@ -1292,6 +1281,18 @@ function Section({ title, children }: { title: string; children: React.ReactNode
     <div>
       <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">{title}</p>
       {children}
+    </div>
+  );
+}
+
+function EditGroup({ icon, title, children }: { icon: string; title: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-xl border border-border bg-card overflow-hidden mb-3">
+      <div className="flex items-center gap-2 px-4 py-2.5 bg-muted/40 border-b border-border">
+        <span className="text-base leading-none">{icon}</span>
+        <p className="text-xs font-bold uppercase tracking-wider text-foreground/70">{title}</p>
+      </div>
+      <div className="p-4">{children}</div>
     </div>
   );
 }
