@@ -1079,28 +1079,30 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
             </div>
           </EditGroup>
 
-          {/* ── Konum & Acil Durum ── */}
-          <EditGroup icon="📍" title="Konum & Acil Durum İletişim">
-            <div className="grid grid-cols-2 gap-x-6 gap-y-3">
-              {/* Left — Location */}
-              <div className="space-y-3">
-                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Konum</p>
-                <Field label="Şehir">
-                  <Select value={form.city} onValueChange={(v) => f("city", v)}>
-                    <SelectTrigger><SelectValue placeholder="Şehir seçin..." /></SelectTrigger>
-                    <SelectContent>{TURKEY_CITIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-                  </Select>
-                </Field>
-                <Field label="İlçe">
-                  <Input value={form.district} onChange={(e) => f("district", e.target.value)} placeholder="Kadıköy, Çankaya..." />
-                </Field>
+          {/* ── Konum ── */}
+          <EditGroup icon="📍" title="Konum">
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Şehir">
+                <Select value={form.city} onValueChange={(v) => f("city", v)}>
+                  <SelectTrigger><SelectValue placeholder="Şehir seçin..." /></SelectTrigger>
+                  <SelectContent>{TURKEY_CITIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                </Select>
+              </Field>
+              <Field label="İlçe">
+                <Input value={form.district} onChange={(e) => f("district", e.target.value)} placeholder="Kadıköy, Çankaya..." />
+              </Field>
+              <div className="col-span-2">
                 <Field label="Açık Adres">
                   <Input value={form.address} onChange={(e) => f("address", e.target.value)} placeholder="Sokak, bina no, daire..." />
                 </Field>
               </div>
-              {/* Right — Emergency */}
-              <div className="space-y-3">
-                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Acil Durum İletişim</p>
+            </div>
+          </EditGroup>
+
+          {/* ── Acil Durum İletişim (employees only) ── */}
+          {employeeRecord && (
+            <EditGroup icon="🚨" title="Acil Durum İletişim">
+              <div className="grid grid-cols-2 gap-3">
                 <Field label="Ad Soyad">
                   <Input value={form.emergencyContactName} onChange={(e) => f("emergencyContactName", e.target.value)} placeholder="Yakın kişinin adı" />
                 </Field>
@@ -1108,8 +1110,8 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
                   <Input value={form.emergencyContactPhone} onChange={(e) => f("emergencyContactPhone", e.target.value)} placeholder="+90..." />
                 </Field>
               </div>
-            </div>
-          </EditGroup>
+            </EditGroup>
+          )}
 
           {/* ── Gayrimenkul Profili ── */}
           <EditGroup icon="🏠" title="Gayrimenkul Profili">
