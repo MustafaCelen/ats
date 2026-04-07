@@ -1099,19 +1099,17 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
             </div>
           </EditGroup>
 
-          {/* ── Acil Durum İletişim (employees only) ── */}
-          {employeeRecord && (
-            <EditGroup icon="🚨" title="Acil Durum İletişim">
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="Ad Soyad">
-                  <Input value={form.emergencyContactName} onChange={(e) => f("emergencyContactName", e.target.value)} placeholder="Yakın kişinin adı" />
-                </Field>
-                <Field label="Telefon">
-                  <Input value={form.emergencyContactPhone} onChange={(e) => f("emergencyContactPhone", e.target.value)} placeholder="+90..." />
-                </Field>
-              </div>
-            </EditGroup>
-          )}
+          {/* ── Acil Durum İletişim ── */}
+          <EditGroup icon="🚨" title="Acil Durum İletişim">
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Ad Soyad">
+                <Input value={form.emergencyContactName} onChange={(e) => f("emergencyContactName", e.target.value)} placeholder="Yakın kişinin adı" />
+              </Field>
+              <Field label="Telefon">
+                <Input value={form.emergencyContactPhone} onChange={(e) => f("emergencyContactPhone", e.target.value)} placeholder="+90..." />
+              </Field>
+            </div>
+          </EditGroup>
 
           {/* ── Gayrimenkul Profili ── */}
           <EditGroup icon="🏠" title="Gayrimenkul Profili">
@@ -1175,9 +1173,11 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
           {/* ── Diğer ── */}
           <EditGroup icon="📋" title="Diğer">
             <div className="grid grid-cols-2 gap-3">
-              <Field label="Beklenen Başlangıç Ayı">
-                <Input type="month" value={form.expectedStartMonth} onChange={(e) => f("expectedStartMonth", e.target.value)} data-testid="input-edit-expected-start-month" />
-              </Field>
+              {!employeeRecord && (
+                <Field label="Beklenen Başlangıç Ayı">
+                  <Input type="month" value={form.expectedStartMonth} onChange={(e) => f("expectedStartMonth", e.target.value)} data-testid="input-edit-expected-start-month" />
+                </Field>
+              )}
               <Field label="Referans (kim tanıttı?)">
                 <Input value={form.referredBy} onChange={(e) => f("referredBy", e.target.value)} placeholder="Ad Soyad veya kaynak" />
               </Field>
