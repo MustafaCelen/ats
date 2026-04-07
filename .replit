@@ -47,3 +47,9 @@ timeoutMs = 20000
 
 [agent]
 expertMode = true
+
+[userenv]
+
+[userenv.shared]
+GOOGLE_CLIENT_ID = "95991901779-org38jmr7n44m29s5hpv2l5v5nt0bh9c.apps.googleusercontent.com"
+GOOGLE_CLIENT_SECRET = "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"
