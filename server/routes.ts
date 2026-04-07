@@ -736,7 +736,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.patch("/api/employees/:id", requireAuth, async (req, res) => {
     try {
       const id = Number(req.params.id);
-      const { status, title, notes, startDate, kwuid, kwMail, contractType, uretkenlikKoclugu, uretkenlikKocluguManagerId, uretkenlikKocluguOran, capMonth, capValue } = req.body;
+      const { status, title, notes, startDate, kwuid, kwMail, contractType, uretkenlikKoclugu, uretkenlikKocluguManagerId, uretkenlikKocluguOran, capMonth, capValue, billingName, billingAddress, billingDistrict, billingCity, billingCountry, taxOffice, taxId, birthDate } = req.body;
       const update: any = {};
       if (status !== undefined) update.status = status;
       if (title !== undefined) update.title = title;
@@ -750,6 +750,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (uretkenlikKocluguOran !== undefined) update.uretkenlikKocluguOran = uretkenlikKocluguOran || null;
       if (capMonth !== undefined) update.capMonth = capMonth || null;
       if (capValue !== undefined) update.capValue = capValue || null;
+      if (billingName !== undefined) update.billingName = billingName || null;
+      if (billingAddress !== undefined) update.billingAddress = billingAddress || null;
+      if (billingDistrict !== undefined) update.billingDistrict = billingDistrict || null;
+      if (billingCity !== undefined) update.billingCity = billingCity || null;
+      if (billingCountry !== undefined) update.billingCountry = billingCountry || null;
+      if (taxOffice !== undefined) update.taxOffice = taxOffice || null;
+      if (taxId !== undefined) update.taxId = taxId || null;
+      if (birthDate !== undefined) update.birthDate = birthDate || null;
       const emp = await storage.updateEmployee(id, update);
       if (!emp) return res.status(404).json({ message: "Employee not found" });
       res.json(emp);

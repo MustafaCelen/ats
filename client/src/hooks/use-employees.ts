@@ -30,7 +30,7 @@ export function useCompleteHiring() {
 export function useUpdateEmployee() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...data }: { id: number; status?: string; title?: string; notes?: string; kwuid?: string; kwMail?: string; startDate?: string; contractType?: string | null; uretkenlikKoclugu?: boolean; uretkenlikKocluguManagerId?: number | null; uretkenlikKocluguOran?: string | null; capMonth?: string; capValue?: string }) =>
+    mutationFn: ({ id, ...data }: { id: number; status?: string; title?: string; notes?: string; kwuid?: string; kwMail?: string; startDate?: string; contractType?: string | null; uretkenlikKoclugu?: boolean; uretkenlikKocluguManagerId?: number | null; uretkenlikKocluguOran?: string | null; capMonth?: string; capValue?: string; billingName?: string; billingAddress?: string; billingDistrict?: string; billingCity?: string; billingCountry?: string; taxOffice?: string; taxId?: string; birthDate?: string }) =>
       apiRequest("PATCH", `${KEY}/${id}`, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: [KEY] });
