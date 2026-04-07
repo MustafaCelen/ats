@@ -36,6 +36,8 @@ import {
 } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 
+const MONTHS_TR = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"];
+
 const CATEGORY_META = {
   K0: { label: "K0", desc: "New to Real Estate", color: "bg-slate-100 text-slate-700 ring-slate-300", dot: "bg-slate-400" },
   K1: { label: "K1", desc: "Licensed — Limited Sales", color: "bg-amber-100 text-amber-800 ring-amber-300", dot: "bg-amber-500" },
@@ -948,7 +950,15 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
     employeeRecord?.uretkenlikKocluguManagerId ? String(employeeRecord.uretkenlikKocluguManagerId) : ""
   );
   const [uretkenlikOran, setUretkenlikOran] = useState(employeeRecord?.uretkenlikKocluguOran ?? "");
-  const [capMonth, setCapMonth] = useState(employeeRecord?.capMonth ?? "");
+  const [capMonth, setCapMonth] = useState(() => {
+    if (employeeRecord?.capMonth) return employeeRecord.capMonth;
+    if (employeeRecord?.startDate) {
+      const d = new Date(employeeRecord.startDate);
+      d.setMonth(d.getMonth() + 1);
+      return MONTHS_TR[d.getMonth()];
+    }
+    return "";
+  });
   const [capValue, setCapValue] = useState(employeeRecord?.capValue ?? "");
   // Billing fields
   const [billingName, setBillingName] = useState(employeeRecord?.billingName ?? "");
@@ -971,7 +981,15 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
     setUretkenlikKoclugu(employeeRecord.uretkenlikKoclugu ?? false);
     setUretkenlikManagerId(employeeRecord.uretkenlikKocluguManagerId ? String(employeeRecord.uretkenlikKocluguManagerId) : "");
     setUretkenlikOran(employeeRecord.uretkenlikKocluguOran ?? "");
-    setCapMonth(employeeRecord.capMonth ?? "");
+    if (employeeRecord.capMonth) {
+      setCapMonth(employeeRecord.capMonth);
+    } else if (employeeRecord.startDate) {
+      const d = new Date(employeeRecord.startDate);
+      d.setMonth(d.getMonth() + 1);
+      setCapMonth(MONTHS_TR[d.getMonth()]);
+    } else {
+      setCapMonth("");
+    }
     setCapValue(employeeRecord.capValue ?? "");
     setBillingName(employeeRecord.billingName ?? "");
     setBillingAddress(employeeRecord.billingAddress ?? "");
@@ -1202,7 +1220,12 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
                         </SelectContent>
                       </Select>
                     </Field>
-                    <Field label="Cap Ayı"><Input value={capMonth} onChange={(e) => setCapMonth(e.target.value)} placeholder="Ocak" /></Field>
+                    <Field label="Cap Ayı">
+                      <Select value={capMonth} onValueChange={setCapMonth}>
+                        <SelectTrigger><SelectValue placeholder="Ay seçin..." /></SelectTrigger>
+                        <SelectContent>{MONTHS_TR.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent>
+                      </Select>
+                    </Field>
                     <Field label="Cap Değeri"><Input value={capValue} onChange={(e) => setCapValue(e.target.value)} placeholder="Cap miktarı" /></Field>
                   </div>
                 </div>
