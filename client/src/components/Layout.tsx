@@ -10,13 +10,13 @@ import { useAuth, useLogout } from "@/hooks/use-auth";
 interface LayoutProps { children: React.ReactNode; }
 
 const hiringManagerNavItems = [
-  { icon: Briefcase,       label: "Jobs",         href: "/jobs" },
-  { icon: Users,           label: "Candidates",   href: "/candidates" },
-  { icon: UserCheck,       label: "Çalışanlar",   href: "/employees" },
-  { icon: Calendar,        label: "Interviews",   href: "/interviews" },
+  { icon: Briefcase,       label: "Üretim Bandı", href: "/jobs" },
+  { icon: Users,           label: "Adaylar",      href: "/candidates" },
+  { icon: UserCheck,       label: "Danışmanlar",  href: "/employees" },
+  { icon: Calendar,        label: "Randevular",   href: "/interviews" },
   { icon: KanbanSquare,    label: "Onboarding",   href: "/onboarding" },
-  { icon: BarChart2,       label: "Reports",      href: "/reports" },
-  { icon: ClipboardList,   label: "Tasks",        href: "/tasks" },
+  { icon: BarChart2,       label: "Raporlar",     href: "/reports" },
+  { icon: ClipboardList,   label: "Görevler",     href: "/tasks" },
 ];
 
 const adminNavItems = [
@@ -26,12 +26,12 @@ const adminNavItems = [
 ];
 
 const assistantNavItems = [
-  { icon: Briefcase,     label: "Jobs",       href: "/jobs" },
-  { icon: Users,         label: "Candidates", href: "/candidates" },
-  { icon: UserCheck,     label: "Çalışanlar", href: "/employees" },
-  { icon: Calendar,      label: "Interviews", href: "/interviews" },
-  { icon: KanbanSquare,  label: "Onboarding", href: "/onboarding" },
-  { icon: ClipboardList, label: "Tasks",      href: "/tasks" },
+  { icon: Briefcase,     label: "Üretim Bandı", href: "/jobs" },
+  { icon: Users,         label: "Adaylar",      href: "/candidates" },
+  { icon: UserCheck,     label: "Danışmanlar",  href: "/employees" },
+  { icon: Calendar,      label: "Randevular",   href: "/interviews" },
+  { icon: KanbanSquare,  label: "Onboarding",   href: "/onboarding" },
+  { icon: ClipboardList, label: "Görevler",     href: "/tasks" },
 ];
 
 export function Layout({ children }: LayoutProps) {
