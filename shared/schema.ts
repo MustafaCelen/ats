@@ -242,6 +242,7 @@ export const employees = pgTable("employees", {
   taxOffice: text("tax_office"),              // Vergi Dairesi
   taxId: text("tax_id"),                      // Vergi / TCK No
   birthDate: text("birth_date"),              // Doğum Tarihi
+  passiveAt: timestamp("passive_at"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

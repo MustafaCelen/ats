@@ -4,7 +4,7 @@ import { useReportStats } from "@/hooks/use-stats";
 import { STAGE_COLORS } from "@/components/StatusBadge";
 import { STAGE_LABELS } from "@shared/schema";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, AreaChart, Area, CartesianGrid } from "recharts";
-import { Calendar, Clock, TrendingUp, Users, CheckCircle, DollarSign, Briefcase, Activity, TimerReset, XCircle } from "lucide-react";
+import { Calendar, Clock, TrendingUp, Users, CheckCircle, DollarSign, Briefcase, Activity, TimerReset, XCircle, UserMinus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -261,6 +261,56 @@ export default function Reports() {
               </table>
             </div>
           </div>
+        </div>
+
+        {/* ── Passive Employees ────────────────────────────────────────────── */}
+        <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden" data-testid="passive-employees-section">
+          <div className="p-5 border-b border-border flex items-start gap-3">
+            <div className="rounded-lg p-2 bg-orange-50 text-orange-500 shrink-0 mt-0.5"><UserMinus className="h-4 w-4" /></div>
+            <div className="flex-1">
+              <div className="flex items-center gap-3">
+                <h2 className="text-base font-semibold text-foreground">Pasife Düşen Çalışanlar</h2>
+                {!isLoading && (
+                  <span className="inline-flex items-center rounded-full bg-orange-100 text-orange-700 text-xs font-semibold px-2.5 py-0.5" data-testid="passive-count-badge">
+                    {stats?.passiveEmployeeCount ?? 0}
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground mt-0.5">Seçili dönemde pasife alınan çalışanlar</p>
+            </div>
+          </div>
+          {isLoading ? (
+            <div className="px-5 py-4 animate-pulse space-y-3">
+              {[1, 2, 3].map((i) => <div key={i} className="h-10 bg-muted rounded" />)}
+            </div>
+          ) : !stats?.passiveEmployees?.length ? (
+            <div className="px-5 py-8 text-sm text-muted-foreground text-center">Bu dönemde pasife düşen çalışan bulunmuyor.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/30 text-muted-foreground uppercase text-xs">
+                  <tr>
+                    <th className="text-left p-4">Çalışan</th>
+                    <th className="text-left p-4">Ünvan</th>
+                    <th className="text-left p-4">İlan</th>
+                    <th className="text-left p-4">Pasife Alınma Tarihi</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stats.passiveEmployees.map((emp: any) => (
+                    <tr key={emp.id} className="border-t border-border" data-testid={`passive-employee-row-${emp.id}`}>
+                      <td className="p-4 font-medium text-foreground">{emp.name}</td>
+                      <td className="p-4 text-muted-foreground">{emp.title ?? "—"}</td>
+                      <td className="p-4 text-muted-foreground">{emp.jobTitle ?? "—"}</td>
+                      <td className="p-4 text-muted-foreground">
+                        {emp.passiveAt ? new Date(emp.passiveAt).toLocaleDateString("tr-TR") : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">

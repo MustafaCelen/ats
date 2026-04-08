@@ -44,6 +44,10 @@ export interface DashboardStats {
 
 export interface RejectionDropoff { fromStage: string; count: number; }
 
+export interface PassiveEmployee {
+  id: number; name: string; passiveAt: Date | null; title: string | null; jobTitle: string | null;
+}
+
 export interface ReportStats {
   funnel: FunnelStage[]; stageTimes: StageTime[]; total: number; hired: number;
   rejected: number; conversionRate: number; avgTimeToContractSign: number; avgTimeToEmploy: number;
@@ -52,6 +56,8 @@ export interface ReportStats {
   hiringManagerEfficiency: ManagerEfficiency[];
   activeJobPerformance: JobPerformance[];
   rejectionDropoff: RejectionDropoff[];
+  passiveEmployees: PassiveEmployee[];
+  passiveEmployeeCount: number;
 }
 
 function toPublicUser(u: User): PublicUser {
@@ -918,6 +924,35 @@ export class DatabaseStorage implements IStorage {
       .map((r) => ({ fromStage: r.fromStatus ?? "unknown", count: r.count }))
       .sort((a, b) => b.count - a.count);
 
+    // ── 10. PASSIVE EMPLOYEES: became passive within the date range ──────────────
+    const passiveConds: any[] = [
+      eq(employees.status, "passive"),
+      gte(employees.passiveAt, start),
+      lte(employees.passiveAt, end),
+    ];
+
+    const passiveRaw = await db
+      .select({
+        id: employees.id,
+        title: employees.title,
+        passiveAt: employees.passiveAt,
+        candidateName: candidates.name,
+        jobTitle: jobs.title,
+      })
+      .from(employees)
+      .leftJoin(candidates, eq(employees.candidateId, candidates.id))
+      .leftJoin(jobs, eq(employees.jobId, jobs.id))
+      .where(and(...passiveConds))
+      .orderBy(desc(employees.passiveAt));
+
+    const passiveEmployees: PassiveEmployee[] = passiveRaw.map((r) => ({
+      id: r.id,
+      name: r.candidateName ?? "—",
+      passiveAt: r.passiveAt,
+      title: r.title,
+      jobTitle: r.jobTitle ?? null,
+    }));
+
     return {
       funnel, stageTimes, total, hired, rejected, conversionRate,
       avgTimeToContractSign, avgTimeToEmploy,
@@ -927,6 +962,8 @@ export class DatabaseStorage implements IStorage {
       hiringManagerEfficiency: managerRows,
       activeJobPerformance,
       rejectionDropoff,
+      passiveEmployees,
+      passiveEmployeeCount: passiveEmployees.length,
     };
   }
 
@@ -1058,7 +1095,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateEmployee(id: number, data: Partial<InsertEmployee>): Promise<Employee | undefined> {
-    const [emp] = await db.update(employees).set(data).where(eq(employees.id, id)).returning();
+    const update: any = { ...data };
+    if (data.status === "passive") {
+      const [current] = await db.select({ passiveAt: employees.passiveAt }).from(employees).where(eq(employees.id, id));
+      if (!current?.passiveAt) update.passiveAt = new Date();
+    }
+    const [emp] = await db.update(employees).set(update).where(eq(employees.id, id)).returning();
     return emp;
   }
 
