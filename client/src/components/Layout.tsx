@@ -111,7 +111,7 @@ export function Layout({ children }: LayoutProps) {
           </div>
           <div>
             <span className="font-display text-base font-bold tracking-tight leading-none block">HireFlow</span>
-            <span className="text-[10px] text-muted-foreground leading-none">KW Turkey</span>
+            <span className="text-[10px] text-muted-foreground leading-none">KW Platin & Karma</span>
           </div>
         </div>
 
