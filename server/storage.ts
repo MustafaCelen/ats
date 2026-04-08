@@ -15,7 +15,7 @@ import {
   type Task, type InsertTask,
   type Employee, type InsertEmployee, type EmployeeWithRelations,
 } from "@shared/schema";
-import { eq, desc, count, sql, gte, lte, and, or, inArray, notInArray } from "drizzle-orm";
+import { eq, desc, count, sql, gte, lte, and, or, isNull, inArray, notInArray } from "drizzle-orm";
 import { differenceInDays } from "date-fns";
 
 export type ApplicationWithRelations = Application & { candidate?: Candidate; job?: Job };
@@ -475,7 +475,8 @@ export class DatabaseStorage implements IStorage {
   async getReportStats(startDate?: Date, endDate?: Date, jobIds?: number[]): Promise<ReportStats> {
     // Normalize date range
     const start = startDate ? new Date(startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    const end = endDate ? new Date(endDate) : new Date();
+    // Push end to 23:59:59.999 so date-only strings (e.g. "2026-04-08") include the full day
+    const end = endDate ? new Date(new Date(endDate).setHours(23, 59, 59, 999)) : new Date();
     start.setHours(0, 0, 0, 0);
     end.setHours(23, 59, 59, 999);
 
@@ -936,11 +937,15 @@ export class DatabaseStorage implements IStorage {
       .sort((a, b) => b.count - a.count);
 
     // ── 10. PASSIVE EMPLOYEES: became passive within the date range ──────────────
-    const passiveConds: any[] = [
+    // Include employees with null passiveAt (set passive before tracking existed) always,
+    // and date-filtered ones within the selected range
+    const passiveConds = and(
       eq(employees.status, "passive"),
-      gte(employees.passiveAt, start),
-      lte(employees.passiveAt, end),
-    ];
+      or(
+        isNull(employees.passiveAt),
+        and(gte(employees.passiveAt, start), lte(employees.passiveAt, end))
+      )
+    );
 
     const passiveRaw = await db
       .select({
@@ -953,7 +958,7 @@ export class DatabaseStorage implements IStorage {
       .from(employees)
       .leftJoin(candidates, eq(employees.candidateId, candidates.id))
       .leftJoin(jobs, eq(employees.jobId, jobs.id))
-      .where(and(...passiveConds))
+      .where(passiveConds)
       .orderBy(desc(employees.passiveAt));
 
     const passiveEmployees: PassiveEmployee[] = passiveRaw.map((r) => ({
@@ -1108,8 +1113,8 @@ export class DatabaseStorage implements IStorage {
   async updateEmployee(id: number, data: Partial<InsertEmployee>): Promise<Employee | undefined> {
     const update: any = { ...data };
     if (data.status === "passive") {
-      const [current] = await db.select({ passiveAt: employees.passiveAt }).from(employees).where(eq(employees.id, id));
-      if (!current?.passiveAt) update.passiveAt = new Date();
+      // Always stamp the latest passive date so the report date filter works correctly
+      update.passiveAt = new Date();
     }
     const [emp] = await db.update(employees).set(update).where(eq(employees.id, id)).returning();
     return emp;
