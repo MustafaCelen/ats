@@ -767,7 +767,7 @@ export class DatabaseStorage implements IStorage {
             inArray(stageHistory.jobId, assignedJobs),
             gte(stageHistory.enteredAt, start),
             lte(stageHistory.enteredAt, end),
-            inArray(applications.status, ["offer", "hired", "myk_training", "account_setup"]),
+            inArray(applications.status, ["hired", "myk_training", "account_setup"]),
           ));
         // Keep only the earliest entry per application
         const mgrHiredMap = new Map<number, { applicationId: number; hiredAt: string | null }>();
