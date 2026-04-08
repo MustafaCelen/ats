@@ -26,6 +26,7 @@ const adminNavItems = [
 ];
 
 const assistantNavItems = [
+  { icon: Briefcase,     label: "Jobs",       href: "/jobs" },
   { icon: Users,         label: "Candidates", href: "/candidates" },
   { icon: UserCheck,     label: "Çalışanlar", href: "/employees" },
   { icon: Calendar,      label: "Interviews", href: "/interviews" },

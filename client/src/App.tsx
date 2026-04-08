@@ -48,8 +48,8 @@ function Router() {
       <Route path="/login" component={Login} />
       <Route path="/" component={() => <Redirect to="/dashboard" />} />
       <Route path="/dashboard" component={() => <ProtectedRoute noAssistant><Dashboard /></ProtectedRoute>} />
-      <Route path="/jobs" component={() => <ProtectedRoute noAssistant><Jobs /></ProtectedRoute>} />
-      <Route path="/jobs/:id" component={() => <ProtectedRoute noAssistant><JobDetails /></ProtectedRoute>} />
+      <Route path="/jobs" component={() => <ProtectedRoute><Jobs /></ProtectedRoute>} />
+      <Route path="/jobs/:id" component={() => <ProtectedRoute><JobDetails /></ProtectedRoute>} />
       <Route path="/candidates" component={() => <ProtectedRoute><Candidates /></ProtectedRoute>} />
       <Route path="/candidates/:id" component={() => <ProtectedRoute><CandidateDetail /></ProtectedRoute>} />
       <Route path="/interviews" component={() => <ProtectedRoute><Interviews /></ProtectedRoute>} />

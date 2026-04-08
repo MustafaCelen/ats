@@ -8,11 +8,10 @@ import { z } from "zod";
 import { insertInterviewSchema, insertOfferSchema, type InsertTask, TASK_STATUSES } from "@shared/schema";
 import { getAuthUrl, createOAuth2Client, createCalendarEvent, deleteCalendarEvent } from "./google";
 
-// Scoping helper — admin sees everything, HM sees only their assigned jobs, assistant sees everything
+// Scoping helper — admin sees everything; HMs and assistants are limited to their assigned jobs
 function jobFilter(req: Request): number[] | undefined {
   if (req.user!.role === "admin") return undefined;
-  if (req.user!.role === "assistant") return undefined;
-  return req.user!.assignedJobIds;
+  return req.user!.assignedJobIds.length ? req.user!.assignedJobIds : undefined;
 }
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
@@ -232,18 +231,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ── Jobs ────────────────────────────────────────────────────────────────────
 
   app.get(api.jobs.list.path, requireAuth, async (req, res) => {
-    // Assistants can see all open jobs (to assign candidates); no job scope filtering needed
-    const filter = req.user!.role === "assistant" ? undefined : jobFilter(req);
-    res.json(await storage.getJobs(filter));
+    res.json(await storage.getJobs(jobFilter(req)));
   });
 
   app.get(api.jobs.get.path, requireAuth, async (req, res) => {
     const job = await storage.getJob(Number(req.params.id));
     if (!job) return res.status(404).json({ message: "Job not found" });
-    if (req.user!.role !== "assistant") {
-      const filter = jobFilter(req);
-      if (filter !== undefined && !filter.includes(job.id)) return res.status(403).json({ message: "Forbidden" });
-    }
+    const filter = jobFilter(req);
+    if (filter !== undefined && !filter.includes(job.id)) return res.status(403).json({ message: "Forbidden" });
     res.json(job);
   });
 
