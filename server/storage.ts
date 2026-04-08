@@ -536,7 +536,12 @@ export class DatabaseStorage implements IStorage {
     for (const r of metricRaw) metricMap[r.status] = r.count;
 
     const total = Object.values(metricMap).reduce((s, c) => s + c, 0);
-    const hired = metricMap["hired"] || 0;
+    // Count all post-contract stages: hired + every stage beyond it
+    const hired = (metricMap["hired"] || 0)
+      + (metricMap["myk_training"] || 0)
+      + (metricMap["account_setup"] || 0)
+      + (metricMap["documents"] || 0)
+      + (metricMap["employed"] || 0);
     const rejected = metricMap["rejected"] || 0;
     const conversionRate = total > 0 ? Math.round((hired / total) * 100) : 0;
 
