@@ -152,7 +152,16 @@ export class DatabaseStorage implements IStorage {
     return u ? toPublicUser(u) : undefined;
   }
   async deleteUser(id: number): Promise<void> {
+    // Clear job assignments for this user
     await db.delete(jobAssignments).where(eq(jobAssignments.userId, id));
+    // Null out coaching manager references so employee records stay intact
+    await db.update(employees)
+      .set({ uretkenlikKocluguManagerId: null })
+      .where(eq(employees.uretkenlikKocluguManagerId, id));
+    // Null out createdByUserId on candidates (nullable column)
+    await db.update(candidates)
+      .set({ createdByUserId: null })
+      .where(eq(candidates.createdByUserId, id));
     await db.delete(users).where(eq(users.id, id));
   }
   async seedAdminIfEmpty(): Promise<void> {

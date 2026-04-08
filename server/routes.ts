@@ -201,10 +201,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.delete("/api/users/:id", requireAuth, requireAdmin, async (req, res) => {
-    const id = Number(req.params.id);
-    if (req.user!.id === id) return res.status(400).json({ message: "Cannot delete yourself" });
-    await storage.deleteUser(id);
-    res.status(204).send();
+    try {
+      const id = Number(req.params.id);
+      if (req.user!.id === id) return res.status(400).json({ message: "Kendi hesabınızı silemezsiniz" });
+      await storage.deleteUser(id);
+      res.status(204).send();
+    } catch (err: any) {
+      res.status(500).json({ message: err?.message ?? "Kullanıcı silinemedi" });
+    }
   });
 
   // ── Job Assignments ───────────────────────────────────────────────────────────
