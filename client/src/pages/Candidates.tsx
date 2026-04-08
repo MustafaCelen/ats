@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Layout } from "@/components/Layout";
 import { Link } from "wouter";
 import { useCandidates, useCreateCandidate } from "@/hooks/use-candidates";
-import { useJobs } from "@/hooks/use-jobs";
+import { useJobs, useAllJobs } from "@/hooks/use-jobs";
 import { useApplications, useCreateApplication } from "@/hooks/use-applications";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -452,7 +452,7 @@ function CreateCandidateDialog({ open, onOpenChange }: { open: boolean; onOpenCh
 
 function ApplyToJobDialog({ candidateId, candidateName }: { candidateId: number; candidateName: string }) {
   const [open, setOpen] = useState(false);
-  const { data: jobs } = useJobs();
+  const { data: jobs } = useAllJobs();
   const { mutate, isPending } = useCreateApplication();
   const { toast } = useToast();
   const [selectedJob, setSelectedJob] = useState("");

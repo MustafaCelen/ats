@@ -13,6 +13,18 @@ export function useJobs() {
   });
 }
 
+// Returns ALL jobs regardless of assignment scope — used for candidate-to-job assignment dropdowns
+export function useAllJobs() {
+  return useQuery<Job[]>({
+    queryKey: [api.jobs.list.path, "all"],
+    queryFn: async () => {
+      const res = await fetch(`${api.jobs.list.path}?all=true`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch jobs");
+      return res.json();
+    },
+  });
+}
+
 export function useJob(id: number) {
   return useQuery<Job | null>({
     queryKey: [api.jobs.get.path, id],

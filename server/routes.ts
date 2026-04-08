@@ -231,7 +231,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ── Jobs ────────────────────────────────────────────────────────────────────
 
   app.get(api.jobs.list.path, requireAuth, async (req, res) => {
-    res.json(await storage.getJobs(jobFilter(req)));
+    // ?all=true lets assistants fetch every job (e.g. for candidate-assignment dropdowns)
+    const bypassScope = req.query.all === "true" && req.user!.role === "assistant";
+    res.json(await storage.getJobs(bypassScope ? undefined : jobFilter(req)));
   });
 
   app.get(api.jobs.get.path, requireAuth, async (req, res) => {
