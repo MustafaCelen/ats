@@ -827,16 +827,16 @@ export class DatabaseStorage implements IStorage {
         const mgrAcc = mgrOfferMap["accepted"] || 0;
         const mgrDec = mgrAcc + (mgrOfferMap["rejected"] || 0);
 
-        // Employed candidates: entered "documents" OR "employed" within date range
-        // "documents" is treated as effectively hired for reporting purposes
+        // Employed candidates: current status is "documents" or "employed"
+        // Check current application status (not history) so moving a candidate back removes them from the count
         const mgrEmployedRaw = await db
-          .selectDistinct({ applicationId: stageHistory.applicationId })
-          .from(stageHistory)
+          .select({ id: applications.id })
+          .from(applications)
           .where(and(
-            inArray(stageHistory.toStatus, ["documents", "employed"]),
-            inArray(stageHistory.jobId, assignedJobs),
-            gte(stageHistory.enteredAt, start),
-            lte(stageHistory.enteredAt, end),
+            inArray(applications.jobId, assignedJobs),
+            inArray(applications.status, ["documents", "employed"]),
+            gte(applications.appliedAt, start),
+            lte(applications.appliedAt, end),
           ));
         const employedCount = mgrEmployedRaw.length;
 
