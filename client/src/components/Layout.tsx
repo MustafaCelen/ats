@@ -9,8 +9,7 @@ import { useAuth, useLogout } from "@/hooks/use-auth";
 
 interface LayoutProps { children: React.ReactNode; }
 
-const baseNavItems = [
-  { icon: LayoutDashboard, label: "Dashboard",   href: "/dashboard" },
+const hiringManagerNavItems = [
   { icon: Briefcase,       label: "Jobs",         href: "/jobs" },
   { icon: Users,           label: "Candidates",   href: "/candidates" },
   { icon: UserCheck,       label: "Çalışanlar",   href: "/employees" },
@@ -21,7 +20,8 @@ const baseNavItems = [
 ];
 
 const adminNavItems = [
-  ...baseNavItems,
+  { icon: LayoutDashboard, label: "Dashboard",   href: "/dashboard" },
+  ...hiringManagerNavItems,
   { icon: Shield, label: "Users", href: "/users" },
 ];
 
@@ -41,7 +41,7 @@ export function Layout({ children }: LayoutProps) {
 
   const isAdmin = user?.role === "admin";
   const isAssistant = user?.role === "assistant";
-  const navItems = isAdmin ? adminNavItems : isAssistant ? assistantNavItems : baseNavItems;
+  const navItems = isAdmin ? adminNavItems : isAssistant ? assistantNavItems : hiringManagerNavItems;
 
   const handleLogout = () => {
     logout(undefined, { onSuccess: () => { window.location.href = "/login"; } });
