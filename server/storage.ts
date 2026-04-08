@@ -756,7 +756,7 @@ export class DatabaseStorage implements IStorage {
         ];
         const mgrApps = await db.select().from(applications).where(and(...mgrAppConds));
 
-        // Contract signed: first time entered 'hired' within date range AND current status is offer/hired/myk_training/account_setup
+        // Contract signed: first time entered 'hired' within date range AND current status is hired/myk_training/account_setup (offer excluded)
         // Deduplicate by applicationId to avoid counting back-and-forth stage moves multiple times
         const mgrHiredHistoryRaw = await db
           .select({ applicationId: stageHistory.applicationId, hiredAt: stageHistory.enteredAt })
