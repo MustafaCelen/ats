@@ -746,7 +746,8 @@ export class DatabaseStorage implements IStorage {
         ];
         const mgrApps = await db.select().from(applications).where(and(...mgrAppConds));
 
-        // Hires: entered 'hired' within date range AND still at hired or beyond (not moved back)
+        // Contract signed: entered 'hired' within date range AND current status is hired/myk_training/account_setup
+        // Once a candidate reaches 'documents' or 'employed' they are counted in Giriş instead
         const mgrHiredHistory = await db
           .select({ applicationId: stageHistory.applicationId, hiredAt: stageHistory.enteredAt })
           .from(stageHistory)
@@ -756,7 +757,7 @@ export class DatabaseStorage implements IStorage {
             inArray(stageHistory.jobId, assignedJobs),
             gte(stageHistory.enteredAt, start),
             lte(stageHistory.enteredAt, end),
-            inArray(applications.status, ["hired", "myk_training", "account_setup", "documents", "employed"]),
+            inArray(applications.status, ["hired", "myk_training", "account_setup"]),
           ));
 
         let mgrAvgTimeToContractSign = 0;
