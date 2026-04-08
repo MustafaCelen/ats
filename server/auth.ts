@@ -28,7 +28,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     return res.status(401).json({ message: "Unauthorized" });
   }
   const assignedJobIds =
-    user.role === "admin" || user.role === "assistant"
+    user.role === "admin"
       ? []
       : await storage.getAssignedJobIds(user.id);
   const { passwordHash: _, googleAccessToken: _a, googleRefreshToken: _b, ...publicFields } = user;

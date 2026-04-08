@@ -171,7 +171,7 @@ export function Layout({ children }: LayoutProps) {
           )}
           {isAssistant && (
             <span className="ml-auto text-xs text-muted-foreground bg-violet-50 text-violet-600 px-2 py-1 rounded-full">
-              Assistant
+              Assistant{user?.assignedJobIds?.length ? ` — ${user.assignedJobIds.length} ilan` : ""}
             </span>
           )}
         </header>

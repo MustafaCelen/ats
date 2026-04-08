@@ -89,7 +89,7 @@ export default function Users() {
                     {user.createdAt ? formatDistanceToNow(new Date(user.createdAt), { addSuffix: true }) : "—"}
                   </p>
                   <div className="flex items-center gap-1">
-                    {user.role === "hiring_manager" && (
+                    {(user.role === "hiring_manager" || user.role === "assistant") && (
                       <Button
                         size="sm" variant="outline"
                         className="h-7 text-xs"
