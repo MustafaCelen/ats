@@ -10,8 +10,9 @@ import {
 } from "@dnd-kit/core";
 import { useDroppable, useDraggable } from "@dnd-kit/core";
 import { motion, AnimatePresence } from "framer-motion";
-import { Briefcase, GripVertical, CalendarDays, CheckCircle2 } from "lucide-react";
+import { Briefcase, GripVertical, CalendarDays, CheckCircle2, ExternalLink } from "lucide-react";
 import { format } from "date-fns";
+import { Link } from "wouter";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel,
   AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
@@ -125,7 +126,17 @@ function DraggableCard({
             <GripVertical className="h-3.5 w-3.5" />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-foreground truncate">{app.candidate?.name ?? "—"}</p>
+            <Link
+              href={`/candidates/${app.candidateId}`}
+              className="group inline-flex items-center gap-1 hover:underline"
+              data-testid={`link-candidate-profile-${app.id}`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <span className="text-sm font-semibold text-foreground truncate group-hover:text-primary transition-colors">
+                {app.candidate?.name ?? "—"}
+              </span>
+              <ExternalLink className="h-3 w-3 text-muted-foreground/60 group-hover:text-primary shrink-0 transition-colors" />
+            </Link>
             {app.job && (
               <div className="flex items-center gap-1 mt-1">
                 <Briefcase className="h-3 w-3 text-muted-foreground shrink-0" />
