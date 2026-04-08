@@ -756,9 +756,9 @@ export class DatabaseStorage implements IStorage {
         ];
         const mgrApps = await db.select().from(applications).where(and(...mgrAppConds));
 
-        // Contract signed: entered 'hired' within date range AND current status is offer/hired/myk_training/account_setup
-        // Once a candidate reaches 'documents' or 'employed' they are counted in Giriş instead
-        const mgrHiredHistory = await db
+        // Contract signed: first time entered 'hired' within date range AND current status is offer/hired/myk_training/account_setup
+        // Deduplicate by applicationId to avoid counting back-and-forth stage moves multiple times
+        const mgrHiredHistoryRaw = await db
           .select({ applicationId: stageHistory.applicationId, hiredAt: stageHistory.enteredAt })
           .from(stageHistory)
           .innerJoin(applications, eq(applications.id, stageHistory.applicationId))
@@ -769,6 +769,15 @@ export class DatabaseStorage implements IStorage {
             lte(stageHistory.enteredAt, end),
             inArray(applications.status, ["offer", "hired", "myk_training", "account_setup"]),
           ));
+        // Keep only the earliest entry per application
+        const mgrHiredMap = new Map<number, { applicationId: number; hiredAt: string | null }>();
+        for (const row of mgrHiredHistoryRaw) {
+          const existing = mgrHiredMap.get(row.applicationId);
+          if (!existing || (row.hiredAt && existing.hiredAt && row.hiredAt < existing.hiredAt)) {
+            mgrHiredMap.set(row.applicationId, row);
+          }
+        }
+        const mgrHiredHistory = Array.from(mgrHiredMap.values());
 
         let mgrAvgTimeToContractSign = 0;
         if (mgrHiredHistory.length > 0) {
@@ -832,7 +841,8 @@ export class DatabaseStorage implements IStorage {
         const employedCount = mgrEmployedRaw.length;
 
         // Avg time to employ per manager: from appliedAt to "employed" completion
-        const mgrEmployedHistoryRows = await db
+        // Deduplicate by applicationId — keep earliest entry to avoid inflating averages from stage bouncing
+        const mgrEmployedHistoryRaw = await db
           .select({ applicationId: stageHistory.applicationId, employedAt: stageHistory.enteredAt })
           .from(stageHistory)
           .where(and(
@@ -841,6 +851,14 @@ export class DatabaseStorage implements IStorage {
             gte(stageHistory.enteredAt, start),
             lte(stageHistory.enteredAt, end),
           ));
+        const mgrEmployedMap = new Map<number, { applicationId: number; employedAt: string | null }>();
+        for (const row of mgrEmployedHistoryRaw) {
+          const existing = mgrEmployedMap.get(row.applicationId);
+          if (!existing || (row.employedAt && existing.employedAt && row.employedAt < existing.employedAt)) {
+            mgrEmployedMap.set(row.applicationId, row);
+          }
+        }
+        const mgrEmployedHistoryRows = Array.from(mgrEmployedMap.values());
         let mgrAvgTimeToEmploy = 0;
         if (mgrEmployedHistoryRows.length > 0) {
           const empAppIds = mgrEmployedHistoryRows.map((r) => r.applicationId);
