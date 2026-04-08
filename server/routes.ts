@@ -8,10 +8,10 @@ import { z } from "zod";
 import { insertInterviewSchema, insertOfferSchema, type InsertTask, TASK_STATUSES } from "@shared/schema";
 import { getAuthUrl, createOAuth2Client, createCalendarEvent, deleteCalendarEvent } from "./google";
 
-// Scoping helper — admin sees everything, HM sees only their assigned jobs, assistant sees nothing via job filter
+// Scoping helper — admin sees everything, HM sees only their assigned jobs, assistant sees everything
 function jobFilter(req: Request): number[] | undefined {
   if (req.user!.role === "admin") return undefined;
-  if (req.user!.role === "assistant") return [];
+  if (req.user!.role === "assistant") return undefined;
   return req.user!.assignedJobIds;
 }
 
