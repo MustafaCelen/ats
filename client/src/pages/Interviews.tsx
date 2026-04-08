@@ -554,7 +554,7 @@ function ScheduleInterviewDialog({ open, onOpenChange }: { open: boolean; onOpen
                 <SelectValue placeholder="Select candidate application..." />
               </SelectTrigger>
               <SelectContent>
-                {applications?.filter((a) => a.candidate?.name).map((a) => (
+                {applications?.filter((a) => a.candidate?.name && a.status !== "employed" && a.status !== "rejected").map((a) => (
                   <SelectItem key={a.id} value={a.id.toString()}>
                     {a.candidate?.name} — {a.job?.title}
                   </SelectItem>
