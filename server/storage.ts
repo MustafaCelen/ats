@@ -579,17 +579,18 @@ export class DatabaseStorage implements IStorage {
     );
 
     for (const [appId, rows] of Array.from(byApp.entries())) {
+      // Accumulate total time per stage for THIS application first, then contribute
+      // one data point per stage — prevents back-and-forth moves from inflating counts.
+      const appStageTotals: Record<string, number> = {};
+
       // "applied" stage time: from appliedAt to first stage history entry
       const appAppliedAt = appliedAtMap[appId];
       if (appAppliedAt && rows.length > 0 && rows[0].enteredAt) {
         const diff = differenceInDays(new Date(rows[0].enteredAt!), new Date(appAppliedAt));
-        if (diff > 0) {
-          totals["applied"].sum += diff;
-          totals["applied"].count += 1;
-        }
+        if (diff > 0) appStageTotals["applied"] = (appStageTotals["applied"] ?? 0) + diff;
       }
 
-      // All other stages: time between consecutive history entries
+      // All other stages: sum up time across all visits to the same stage
       for (let i = 0; i < rows.length - 1; i++) {
         const stage = rows[i].toStatus;
         if (!totals[stage]) continue;
@@ -597,8 +598,13 @@ export class DatabaseStorage implements IStorage {
         const nextAt = rows[i + 1].enteredAt ? new Date(rows[i + 1].enteredAt!) : undefined;
         if (!startAt || !nextAt) continue;
         const diff = differenceInDays(nextAt, startAt);
-        if (diff > 0) {
-          totals[stage].sum += diff;
+        if (diff > 0) appStageTotals[stage] = (appStageTotals[stage] ?? 0) + diff;
+      }
+
+      // Each application contributes exactly one data point per stage it passed through
+      for (const [stage, total] of Object.entries(appStageTotals)) {
+        if (totals[stage]) {
+          totals[stage].sum += total;
           totals[stage].count += 1;
         }
       }
