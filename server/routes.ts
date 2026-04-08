@@ -731,6 +731,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (existing) {
         return res.status(409).json({ message: "Candidate is already an active employee" });
       }
+      const currentApp = await storage.getApplication(applicationId);
       const emp = await storage.createEmployee({
         candidateId, jobId, applicationId,
         startDate: startDate ? new Date(startDate) : new Date(),
@@ -740,6 +741,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       });
       // Archive the application so it disappears from the pipeline and candidate list
       await storage.updateApplicationStatus(applicationId, "employed");
+      // Record the completion in stage history so it appears in hiring manager reports
+      await storage.addStageHistory({
+        applicationId,
+        candidateId,
+        jobId,
+        fromStatus: currentApp?.status ?? "documents",
+        toStatus: "employed",
+      });
       res.status(201).json(emp);
     } catch {
       res.status(500).json({ message: "Internal server error" });

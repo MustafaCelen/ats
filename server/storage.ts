@@ -807,32 +807,27 @@ export class DatabaseStorage implements IStorage {
         const mgrAcc = mgrOfferMap["accepted"] || 0;
         const mgrDec = mgrAcc + (mgrOfferMap["rejected"] || 0);
 
-        // Employed candidates: entered account_setup within date range AND still at account_setup or beyond
-        // (if moved back to a previous stage they are excluded)
+        // Employed candidates: entered "employed" within date range (recorded when İşe Alımı Tamamla is clicked)
         const mgrEmployedRows = await db
           .select({ count: count() })
           .from(stageHistory)
-          .innerJoin(applications, eq(applications.id, stageHistory.applicationId))
           .where(and(
-            eq(stageHistory.toStatus, "account_setup"),
+            eq(stageHistory.toStatus, "employed"),
             inArray(stageHistory.jobId, assignedJobs),
             gte(stageHistory.enteredAt, start),
             lte(stageHistory.enteredAt, end),
-            inArray(applications.status, ["account_setup", "documents", "employed"]),
           ));
         const employedCount = mgrEmployedRows[0]?.count || 0;
 
-        // Avg time to employ per manager: from appliedAt to account_setup
+        // Avg time to employ per manager: from appliedAt to "employed" completion
         const mgrEmployedHistoryRows = await db
           .select({ applicationId: stageHistory.applicationId, employedAt: stageHistory.enteredAt })
           .from(stageHistory)
-          .innerJoin(applications, eq(applications.id, stageHistory.applicationId))
           .where(and(
-            eq(stageHistory.toStatus, "account_setup"),
+            eq(stageHistory.toStatus, "employed"),
             inArray(stageHistory.jobId, assignedJobs),
             gte(stageHistory.enteredAt, start),
             lte(stageHistory.enteredAt, end),
-            inArray(applications.status, ["account_setup", "documents", "employed"]),
           ));
         let mgrAvgTimeToEmploy = 0;
         if (mgrEmployedHistoryRows.length > 0) {
