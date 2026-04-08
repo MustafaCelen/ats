@@ -450,12 +450,17 @@ function CreateCandidateDialog({ open, onOpenChange }: { open: boolean; onOpenCh
 
 // ─── Apply to Job Dialog ──────────────────────────────────────────────────────
 
+const ACTIVE_STATUSES = ["applied", "interview", "offer", "hired", "myk_training", "account_setup", "documents"];
+
 function ApplyToJobDialog({ candidateId, candidateName }: { candidateId: number; candidateName: string }) {
   const [open, setOpen] = useState(false);
   const { data: jobs } = useAllJobs();
+  const { data: existingApps } = useApplications(undefined, candidateId);
   const { mutate, isPending } = useCreateApplication();
   const { toast } = useToast();
   const [selectedJob, setSelectedJob] = useState("");
+
+  const activeApp = existingApps?.find((a) => ACTIVE_STATUSES.includes(a.status));
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -474,28 +479,37 @@ function ApplyToJobDialog({ candidateId, candidateName }: { candidateId: number;
           <p id="assign-job-desc" className="text-sm text-muted-foreground">Adayı bir pozisyona ekleyin.</p>
         </DialogHeader>
         <div className="space-y-4 py-2">
-          <Select value={selectedJob} onValueChange={setSelectedJob}>
-            <SelectTrigger data-testid="select-assign-job"><SelectValue placeholder="Pozisyon seçin..." /></SelectTrigger>
-            <SelectContent>
-              {jobs?.filter((j) => j.status === "open").map((job) => (
-                <SelectItem key={job.id} value={job.id.toString()}>{job.title} — {job.department}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button
-            onClick={() => {
-              if (!selectedJob) return;
-              mutate({ jobId: parseInt(selectedJob), candidateId, status: "applied", notes: "Applied via admin panel" }, {
-                onSuccess: () => setOpen(false),
-                onError: (err: Error) => toast({ title: "Atama yapılamadı", description: err.message, variant: "destructive" }),
-              });
-            }}
-            disabled={!selectedJob || isPending}
-            className="w-full"
-            data-testid="btn-confirm-assign"
-          >
-            {isPending ? "Atanıyor..." : "Onayla"}
-          </Button>
+          {activeApp ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
+              Bu aday zaten <strong>{activeApp.job?.title ?? "bir pozisyonda"}</strong> aktif süreçte.
+              Yeni bir ilana atamadan önce mevcut sürecin sonuçlandırılması gerekir.
+            </div>
+          ) : (
+            <>
+              <Select value={selectedJob} onValueChange={setSelectedJob}>
+                <SelectTrigger data-testid="select-assign-job"><SelectValue placeholder="Pozisyon seçin..." /></SelectTrigger>
+                <SelectContent>
+                  {jobs?.filter((j) => j.status === "open").map((job) => (
+                    <SelectItem key={job.id} value={job.id.toString()}>{job.title} — {job.department}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button
+                onClick={() => {
+                  if (!selectedJob) return;
+                  mutate({ jobId: parseInt(selectedJob), candidateId, status: "applied", notes: "Applied via admin panel" }, {
+                    onSuccess: () => setOpen(false),
+                    onError: (err: Error) => toast({ title: "Atama yapılamadı", description: err.message, variant: "destructive" }),
+                  });
+                }}
+                disabled={!selectedJob || isPending}
+                className="w-full"
+                data-testid="btn-confirm-assign"
+              >
+                {isPending ? "Atanıyor..." : "Onayla"}
+              </Button>
+            </>
+          )}
         </div>
       </DialogContent>
     </Dialog>
