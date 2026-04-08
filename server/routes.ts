@@ -459,6 +459,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.patch(api.applications.updateStatus.path, requireAuth, async (req, res) => {
     try {
+      if ((req.user as any)?.role === "assistant") {
+        return res.status(403).json({ message: "Assistants cannot update application status" });
+      }
       const { status } = api.applications.updateStatus.input.parse(req.body);
       const existing = await storage.getApplication(Number(req.params.id));
       if (!existing) return res.status(404).json({ message: "Application not found" });
