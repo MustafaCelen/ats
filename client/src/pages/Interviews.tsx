@@ -46,11 +46,15 @@ function useInterviews() {
 
 function useCreateInterview() {
   const qc = useQueryClient();
+  const { toast } = useToast();
   return useMutation({
     mutationFn: (data: any) => apiRequest("POST", "/api/interviews", data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/interviews"] });
       qc.invalidateQueries({ queryKey: ["/api/stats/dashboard"] });
+    },
+    onError: () => {
+      toast({ title: "Hata", description: "Mülakat oluşturulamadı. Lütfen tekrar deneyin.", variant: "destructive" });
     },
   });
 }
