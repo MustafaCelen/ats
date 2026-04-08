@@ -8,10 +8,15 @@ import { z } from "zod";
 import { insertInterviewSchema, insertOfferSchema, type InsertTask, TASK_STATUSES } from "@shared/schema";
 import { getAuthUrl, createOAuth2Client, createCalendarEvent, deleteCalendarEvent } from "./google";
 
-// Scoping helper — admin sees everything; HMs and assistants are limited to their assigned jobs
+// Scoping helper:
+//   admin      → undefined (all jobs)
+//   assistant  → strictly their assigned job IDs (empty array = see nothing)
+//   HM         → assigned job IDs, or undefined if none assigned (legacy: sees all)
 function jobFilter(req: Request): number[] | undefined {
-  if (req.user!.role === "admin") return undefined;
-  return req.user!.assignedJobIds.length ? req.user!.assignedJobIds : undefined;
+  const { role, assignedJobIds } = req.user!;
+  if (role === "admin") return undefined;
+  if (role === "assistant") return assignedJobIds; // always scoped, even if empty
+  return assignedJobIds.length ? assignedJobIds : undefined;
 }
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
