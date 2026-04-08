@@ -807,17 +807,18 @@ export class DatabaseStorage implements IStorage {
         const mgrAcc = mgrOfferMap["accepted"] || 0;
         const mgrDec = mgrAcc + (mgrOfferMap["rejected"] || 0);
 
-        // Employed candidates: entered "employed" within date range (recorded when İşe Alımı Tamamla is clicked)
-        const mgrEmployedRows = await db
-          .select({ count: count() })
+        // Employed candidates: entered "documents" OR "employed" within date range
+        // "documents" is treated as effectively hired for reporting purposes
+        const mgrEmployedRaw = await db
+          .selectDistinct({ applicationId: stageHistory.applicationId })
           .from(stageHistory)
           .where(and(
-            eq(stageHistory.toStatus, "employed"),
+            inArray(stageHistory.toStatus, ["documents", "employed"]),
             inArray(stageHistory.jobId, assignedJobs),
             gte(stageHistory.enteredAt, start),
             lte(stageHistory.enteredAt, end),
           ));
-        const employedCount = mgrEmployedRows[0]?.count || 0;
+        const employedCount = mgrEmployedRaw.length;
 
         // Avg time to employ per manager: from appliedAt to "employed" completion
         const mgrEmployedHistoryRows = await db
