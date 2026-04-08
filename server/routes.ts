@@ -506,11 +506,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // ── Interviews ─────────────────────────────────────────────────────────────
 
-  app.get(api.interviews.list.path, requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
+  app.get(api.interviews.list.path, requireAuth, async (req, res) => {
     res.json(await storage.getInterviews(undefined, jobFilter(req)));
   });
 
-  app.post(api.interviews.create.path, requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
+  app.post(api.interviews.create.path, requireAuth, async (req, res) => {
     try {
       const body = {
         ...req.body,
@@ -528,7 +528,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.patch(api.interviews.update.path, requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
+  app.patch(api.interviews.update.path, requireAuth, async (req, res) => {
     const { status } = req.body;
     const interview = await storage.updateInterviewStatus(Number(req.params.id), status);
     if (!interview) return res.status(404).json({ message: "Not found" });

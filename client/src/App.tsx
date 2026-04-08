@@ -51,7 +51,7 @@ function Router() {
       <Route path="/jobs/:id" component={() => <ProtectedRoute noAssistant><JobDetails /></ProtectedRoute>} />
       <Route path="/candidates" component={() => <ProtectedRoute><Candidates /></ProtectedRoute>} />
       <Route path="/candidates/:id" component={() => <ProtectedRoute><CandidateDetail /></ProtectedRoute>} />
-      <Route path="/interviews" component={() => <ProtectedRoute noAssistant><Interviews /></ProtectedRoute>} />
+      <Route path="/interviews" component={() => <ProtectedRoute><Interviews /></ProtectedRoute>} />
       <Route path="/reports" component={() => <ProtectedRoute noAssistant><Reports /></ProtectedRoute>} />
       <Route path="/users" component={() => <ProtectedRoute adminOnly><Users /></ProtectedRoute>} />
       <Route path="/tasks" component={() => <ProtectedRoute><Tasks /></ProtectedRoute>} />

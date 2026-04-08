@@ -27,6 +27,7 @@ const adminNavItems = [
 const assistantNavItems = [
   { icon: Users,         label: "Candidates", href: "/candidates" },
   { icon: UserCheck,     label: "Çalışanlar", href: "/employees" },
+  { icon: Calendar,      label: "Interviews", href: "/interviews" },
   { icon: ClipboardList, label: "Tasks",      href: "/tasks" },
 ];
 
