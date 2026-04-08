@@ -669,9 +669,9 @@ export class DatabaseStorage implements IStorage {
       avgTimeToContractSign = diffs.length > 0 ? Math.round(diffs.reduce((s, d) => s + d, 0) / diffs.length) : 0;
     }
 
-    // ── 3b. AVG TIME TO EMPLOY: from appliedAt to when they reached 'employed' (true final state) ─────
+    // ── 3b. AVG TIME TO EMPLOY: from appliedAt to when they first reached 'documents' stage ─────
     const employedHistoryConds: any[] = [
-      eq(stageHistory.toStatus, "employed"),
+      eq(stageHistory.toStatus, "documents"),
       gte(stageHistory.enteredAt, start),
       lte(stageHistory.enteredAt, end),
     ];
@@ -683,7 +683,7 @@ export class DatabaseStorage implements IStorage {
           .select({ applicationId: stageHistory.applicationId, employedAt: stageHistory.enteredAt })
           .from(stageHistory)
           .innerJoin(applications, eq(applications.id, stageHistory.applicationId))
-          .where(and(...employedHistoryConds, eq(applications.status, "employed")));
+          .where(and(...employedHistoryConds, inArray(applications.status, ["documents", "employed"])));
 
     let avgTimeToEmploy = 0;
     if (employedHistoryRows.length > 0) {
@@ -864,16 +864,18 @@ export class DatabaseStorage implements IStorage {
           ));
         const employedCount = mgrEmployedRaw.length;
 
-        // Avg time to employ per manager: from appliedAt to "employed" completion
+        // Avg time to employ per manager: from appliedAt to when they first reached 'documents' stage
         // Deduplicate by applicationId — keep earliest entry to avoid inflating averages from stage bouncing
         const mgrEmployedHistoryRaw = await db
           .select({ applicationId: stageHistory.applicationId, employedAt: stageHistory.enteredAt })
           .from(stageHistory)
+          .innerJoin(applications, eq(applications.id, stageHistory.applicationId))
           .where(and(
-            eq(stageHistory.toStatus, "employed"),
+            eq(stageHistory.toStatus, "documents"),
             inArray(stageHistory.jobId, assignedJobs),
             gte(stageHistory.enteredAt, start),
             lte(stageHistory.enteredAt, end),
+            inArray(applications.status, ["documents", "employed"]),
           ));
         const mgrEmployedMap = new Map<number, { applicationId: number; employedAt: string | null }>();
         for (const row of mgrEmployedHistoryRaw) {
