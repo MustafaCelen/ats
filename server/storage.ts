@@ -762,18 +762,20 @@ export class DatabaseStorage implements IStorage {
         ];
         const mgrApps = await db.select().from(applications).where(and(...mgrAppConds));
 
-        // Contract signed: first time entered 'hired' within date range AND current status is hired/myk_training/account_setup (offer excluded)
-        // Deduplicate by applicationId to avoid counting back-and-forth stage moves multiple times
+        // Contract signed: first time entered ANY post-contract stage within date range
+        // (hired, myk_training, account_setup, documents, employed) — handles direct skips (e.g. offer → myk_training)
+        // Deduplicate by applicationId keeping earliest entry so back-and-forth moves don't inflate the count
+        const POST_CONTRACT = ["hired", "myk_training", "account_setup", "documents", "employed"] as const;
         const mgrHiredHistoryRaw = await db
           .select({ applicationId: stageHistory.applicationId, hiredAt: stageHistory.enteredAt })
           .from(stageHistory)
           .innerJoin(applications, eq(applications.id, stageHistory.applicationId))
           .where(and(
-            eq(stageHistory.toStatus, "hired"),
+            inArray(stageHistory.toStatus, [...POST_CONTRACT]),
             inArray(stageHistory.jobId, assignedJobs),
             gte(stageHistory.enteredAt, start),
             lte(stageHistory.enteredAt, end),
-            inArray(applications.status, ["hired", "myk_training", "account_setup", "documents", "employed"]),
+            inArray(applications.status, [...POST_CONTRACT]),
           ));
         // Keep only the earliest entry per application
         const mgrHiredMap = new Map<number, { applicationId: number; hiredAt: string | null }>();
