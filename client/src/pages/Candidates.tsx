@@ -97,7 +97,7 @@ export default function Candidates() {
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-2xl font-display font-bold text-foreground">Talent Pool</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">Keller Williams Turkey — Aday Havuzu</p>
+            <p className="text-sm text-muted-foreground mt-0.5">Keller Williams Platin & Karma — Aday Havuzu</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <div className="relative">
@@ -326,7 +326,7 @@ function CreateCandidateDialog({ open, onOpenChange }: { open: boolean; onOpenCh
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" aria-describedby="create-candidate-desc">
         <DialogHeader>
           <DialogTitle className="font-display text-xl">Yeni Aday Ekle</DialogTitle>
-          <p id="create-candidate-desc" className="text-sm text-muted-foreground">Keller Williams Turkey aday havuzuna ekleyin</p>
+          <p id="create-candidate-desc" className="text-sm text-muted-foreground">Keller Williams Platin & Karma aday havuzuna ekleyin</p>
         </DialogHeader>
 
         <div className="space-y-5 mt-2">
