@@ -802,7 +802,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.get("/api/employees/export", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
     try {
       const list = await storage.getEmployees();
-      const headers = ["Ad Soyad", "E-posta", "Telefon", "Şehir", "Kategori", "KWUID", "KW E-posta", "Ünvan", "Başlangıç Tarihi", "Durum"];
+      const headers = [
+        "Ad Soyad", "E-posta", "Telefon", "Şehir", "Kategori",
+        "KWUID", "KW E-posta", "Ünvan", "Başlangıç Tarihi", "Durum",
+        "Doğum Tarihi", "Sözleşme Tipi", "Üretkenlik Koçluğu", "Koçluk Oranı",
+        "Cap Ayı", "Cap Miktarı",
+        "Fatura Adı", "Fatura Adresi", "Fatura İlçesi", "Fatura İli", "Fatura Ülkesi",
+        "Vergi Dairesi", "Vergi No / TCKN", "Notlar",
+      ];
       const rows = list.map((e: any) => [
         e.candidate?.name ?? "",
         e.candidate?.email ?? "",
@@ -814,6 +821,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         e.title ?? "",
         e.startDate ? new Date(e.startDate).toISOString().split("T")[0] : "",
         e.status ?? "active",
+        e.birthDate ?? "",
+        e.contractType ?? "",
+        e.uretkenlikKoclugu ? "Evet" : "Hayır",
+        e.uretkenlikKocluguOran ?? "",
+        e.capMonth ?? "",
+        e.capValue ?? "",
+        e.billingName ?? "",
+        e.billingAddress ?? "",
+        e.billingDistrict ?? "",
+        e.billingCity ?? "",
+        e.billingCountry ?? "",
+        e.taxOffice ?? "",
+        e.taxId ?? "",
+        e.notes ?? "",
       ]);
       const csv = [headers, ...rows]
         .map((r) => r.map((v: string) => `"${String(v).replace(/"/g, '""')}"`).join(","))
@@ -858,31 +879,86 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             });
           }
 
+          // Helper to pick first non-empty string from row columns
+          const col = (...keys: string[]) => {
+            for (const k of keys) { const v = (row[k] ?? "").trim(); if (v) return v; }
+            return null;
+          };
+          const boolCol = (...keys: string[]) => {
+            const v = col(...keys);
+            if (!v) return undefined;
+            return v === "Evet" || v === "true" || v === "1" || v.toLowerCase() === "yes";
+          };
+
+          const patch: any = {};
+          const kwuid   = col("KWUID", "kwuid");
+          const kwMail  = col("KW E-posta", "kwmail", "kwMail");
+          const title   = col("Ünvan", "title");
+          const status  = col("Durum", "status");
+          const birthDate     = col("Doğum Tarihi", "birthDate");
+          const contractType  = col("Sözleşme Tipi", "contractType");
+          const uretkenlik    = boolCol("Üretkenlik Koçluğu", "uretkenlikKoclugu");
+          const koçlukOran    = col("Koçluk Oranı", "uretkenlikKocluguOran");
+          const capMonth      = col("Cap Ayı", "capMonth");
+          const capValue      = col("Cap Miktarı", "capValue");
+          const billingName   = col("Fatura Adı", "billingName");
+          const billingAddr   = col("Fatura Adresi", "billingAddress");
+          const billingDist   = col("Fatura İlçesi", "billingDistrict");
+          const billingCity   = col("Fatura İli", "billingCity");
+          const billingCountry= col("Fatura Ülkesi", "billingCountry");
+          const taxOffice     = col("Vergi Dairesi", "taxOffice");
+          const taxId         = col("Vergi No / TCKN", "taxId");
+          const notes         = col("Notlar", "notes");
+
+          if (kwuid) patch.kwuid = kwuid;
+          if (kwMail) patch.kwMail = kwMail;
+          if (title) patch.title = title;
+          if (status) patch.status = status;
+          if (birthDate) patch.birthDate = birthDate;
+          if (contractType) patch.contractType = contractType;
+          if (uretkenlik !== undefined) patch.uretkenlikKoclugu = uretkenlik;
+          if (koçlukOran) patch.uretkenlikKocluguOran = koçlukOran;
+          if (capMonth) patch.capMonth = capMonth;
+          if (capValue) patch.capValue = capValue;
+          if (billingName) patch.billingName = billingName;
+          if (billingAddr) patch.billingAddress = billingAddr;
+          if (billingDist) patch.billingDistrict = billingDist;
+          if (billingCity) patch.billingCity = billingCity;
+          if (billingCountry) patch.billingCountry = billingCountry;
+          if (taxOffice) patch.taxOffice = taxOffice;
+          if (taxId) patch.taxId = taxId;
+          if (notes) patch.notes = notes;
+
           // Check if already an employee
           const existing = await storage.getEmployeeByCandidateId(cand.id);
           if (existing) {
-            // Update kwuid/kwMail if provided
-            const patch: any = {};
-            const kwuid = (row["KWUID"] ?? row.kwuid ?? "").trim();
-            const kwMail = (row["KW E-posta"] ?? row.kwmail ?? row.kwMail ?? "").trim();
-            if (kwuid) patch.kwuid = kwuid;
-            if (kwMail) patch.kwMail = kwMail;
-            if (row["Ünvan"] ?? row.title) patch.title = row["Ünvan"] ?? row.title;
-            if (row["Durum"] ?? row.status) patch.status = row["Durum"] ?? row.status;
             if (Object.keys(patch).length) await storage.updateEmployee(existing.id, patch);
             updated++;
           } else {
-            const startDateStr = row["Başlangıç Tarihi"] ?? row.startDate ?? "";
+            const startDateStr = col("Başlangıç Tarihi", "startDate") ?? "";
             await storage.createEmployee({
               candidateId: cand.id,
               jobId: null as any,
               applicationId: null as any,
               startDate: startDateStr ? new Date(startDateStr) : new Date(),
-              status: (row["Durum"] ?? row.status ?? "active") as any,
-              title: row["Ünvan"] ?? row.title ?? null,
-              notes: null,
-              kwuid: (row["KWUID"] ?? row.kwuid ?? null) || null,
-              kwMail: (row["KW E-posta"] ?? row.kwmail ?? row.kwMail ?? null) || null,
+              status: (patch.status ?? "active") as any,
+              title: patch.title ?? null,
+              notes: patch.notes ?? null,
+              kwuid: patch.kwuid ?? null,
+              kwMail: patch.kwMail ?? null,
+              contractType: patch.contractType ?? null,
+              uretkenlikKoclugu: patch.uretkenlikKoclugu ?? false,
+              uretkenlikKocluguOran: patch.uretkenlikKocluguOran ?? null,
+              capMonth: patch.capMonth ?? null,
+              capValue: patch.capValue ?? null,
+              billingName: patch.billingName ?? null,
+              billingAddress: patch.billingAddress ?? null,
+              billingDistrict: patch.billingDistrict ?? null,
+              billingCity: patch.billingCity ?? null,
+              billingCountry: patch.billingCountry ?? null,
+              taxOffice: patch.taxOffice ?? null,
+              taxId: patch.taxId ?? null,
+              birthDate: patch.birthDate ?? null,
             });
             created++;
           }
