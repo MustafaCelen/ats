@@ -936,11 +936,11 @@ export class DatabaseStorage implements IStorage {
       .map((r) => ({ fromStage: r.fromStatus ?? "unknown", count: r.count }))
       .sort((a, b) => b.count - a.count);
 
-    // ── 10. PASSIVE EMPLOYEES: became passive within the date range ──────────────
-    // Include employees with null passiveAt (set passive before tracking existed) always,
+    // ── 10. PASSIVE EMPLOYEES: became inactive within the date range ──────────────
+    // Include employees with null passiveAt (set inactive before tracking existed) always,
     // and date-filtered ones within the selected range
     const passiveConds = and(
-      eq(employees.status, "passive"),
+      eq(employees.status, "inactive"),
       or(
         isNull(employees.passiveAt),
         and(gte(employees.passiveAt, start), lte(employees.passiveAt, end))
@@ -1112,7 +1112,7 @@ export class DatabaseStorage implements IStorage {
 
   async updateEmployee(id: number, data: Partial<InsertEmployee>): Promise<Employee | undefined> {
     const update: any = { ...data };
-    if (data.status === "passive") {
+    if (data.status === "inactive") {
       // Always stamp the latest passive date so the report date filter works correctly
       update.passiveAt = new Date();
     }
