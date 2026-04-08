@@ -941,7 +941,9 @@ export class DatabaseStorage implements IStorage {
     );
 
     // ── 9. REJECTION DROP-OFF: which stage did rejected candidates come from ─────
-    // Only counts candidates whose current status is still 'rejected' (excludes mistaken rejections that were undone)
+    // Rejection dropoff: for each application currently 'rejected', take the most recent
+    // stageHistory entry with toStatus='rejected' within the date range.
+    // Deduplicating by applicationId prevents counting back-and-forth moves multiple times.
     const rejConds: any[] = [
       eq(stageHistory.toStatus, "rejected"),
       eq(applications.status, "rejected"),
@@ -950,17 +952,32 @@ export class DatabaseStorage implements IStorage {
     ];
     if (hasJobScope) rejConds.push(inArray(stageHistory.jobId, jobIds!));
 
-    const rejRaw = scoped && !hasJobScope
+    const rejAllRows = scoped && !hasJobScope
       ? []
       : await db
-          .select({ fromStatus: stageHistory.fromStatus, count: count() })
+          .select({ applicationId: stageHistory.applicationId, fromStatus: stageHistory.fromStatus, enteredAt: stageHistory.enteredAt })
           .from(stageHistory)
           .innerJoin(applications, eq(applications.id, stageHistory.applicationId))
-          .where(and(...rejConds))
-          .groupBy(stageHistory.fromStatus);
+          .where(and(...rejConds));
 
-    const rejectionDropoff: RejectionDropoff[] = rejRaw
-      .map((r) => ({ fromStage: r.fromStatus ?? "unknown", count: r.count }))
+    // Keep only the most recent rejection entry per application
+    const rejByApp = new Map<number, { fromStatus: string | null; enteredAt: string | null }>();
+    for (const row of rejAllRows) {
+      const existing = rejByApp.get(row.applicationId);
+      if (!existing || (row.enteredAt && existing.enteredAt && row.enteredAt > existing.enteredAt)) {
+        rejByApp.set(row.applicationId, { fromStatus: row.fromStatus, enteredAt: row.enteredAt });
+      }
+    }
+
+    // Group deduplicated entries by fromStatus
+    const rejCountMap = new Map<string, number>();
+    for (const { fromStatus } of rejByApp.values()) {
+      const key = fromStatus ?? "unknown";
+      rejCountMap.set(key, (rejCountMap.get(key) ?? 0) + 1);
+    }
+
+    const rejectionDropoff: RejectionDropoff[] = Array.from(rejCountMap.entries())
+      .map(([fromStage, count]) => ({ fromStage, count }))
       .sort((a, b) => b.count - a.count);
 
     // ── 10. PASSIVE EMPLOYEES: became inactive within the date range ──────────────
