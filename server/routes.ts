@@ -447,7 +447,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.patch(api.applications.updateStatus.path, requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
+  app.patch(api.applications.updateStatus.path, requireAuth, async (req, res) => {
     try {
       const { status } = api.applications.updateStatus.input.parse(req.body);
       const existing = await storage.getApplication(Number(req.params.id));

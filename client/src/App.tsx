@@ -16,6 +16,7 @@ import Reports from "@/pages/Reports";
 import Users from "@/pages/Users";
 import Tasks from "@/pages/Tasks";
 import Employees from "@/pages/Employees";
+import OnboardingBoard from "@/pages/OnboardingBoard";
 
 function ProtectedRoute({
   children,
@@ -56,6 +57,7 @@ function Router() {
       <Route path="/users" component={() => <ProtectedRoute adminOnly><Users /></ProtectedRoute>} />
       <Route path="/tasks" component={() => <ProtectedRoute><Tasks /></ProtectedRoute>} />
       <Route path="/employees" component={() => <ProtectedRoute><Employees /></ProtectedRoute>} />
+      <Route path="/onboarding" component={() => <ProtectedRoute><OnboardingBoard /></ProtectedRoute>} />
       <Route component={NotFound} />
     </Switch>
   );
