@@ -41,25 +41,27 @@ export const APPLICATION_STAGES = [
   "screening",
   "interview",
   "offer",
-  "hired",
-  "myk_training",  // Post-hire: MYK training follow-up
-  "account_setup", // Post-hire: mail/system account setup
-  "documents",     // Post-hire: 6 required documents
+  "contract_offered", // Onboarding: contract has been offered, awaiting signature
+  "hired",            // Onboarding: contract signed
+  "myk_training",     // Post-hire: MYK training follow-up
+  "account_setup",    // Post-hire: mail/system account setup
+  "documents",        // Post-hire: 6 required documents
   "rejected",
 ] as const;
 export type ApplicationStage = (typeof APPLICATION_STAGES)[number];
 
 // Display labels for stages (used in UI)
 export const STAGE_LABELS: Record<string, string> = {
-  applied:      "Başvuru",
-  screening:    "Randevu Oluşturma",
-  interview:    "Randevu",
-  offer:        "Sözleşme Önerildi",
-  hired:        "Sözleşme İmzalandı",
-  myk_training: "MYK Eğitimi",
-  account_setup:"Hesap Kurulumu",
-  documents:    "Belgeler",
-  rejected:     "Reddedildi",
+  applied:          "Başvuru",
+  screening:        "Randevu Oluşturma",
+  interview:        "Randevu",
+  offer:            "Sözleşme Önerildi",
+  contract_offered: "Sözleşme Teklifi",
+  hired:            "Sözleşme İmzalandı",
+  myk_training:     "MYK Eğitimi",
+  account_setup:    "Hesap Kurulumu",
+  documents:        "Belgeler",
+  rejected:         "Reddedildi",
 };
 
 // Required documents for the "documents" stage
