@@ -620,20 +620,34 @@ export class DatabaseStorage implements IStorage {
       avgDays: totals[stage].count ? Math.round((totals[stage].sum / totals[stage].count) * 10) / 10 : 0,
     }));
 
-    // ── 3a. AVG TIME TO CONTRACT SIGN: from appliedAt to the moment they reached 'hired' stage ─────
+    // ── 3a. AVG TIME TO CONTRACT SIGN: from appliedAt to first post-contract stage ─────
+    // Counts ANY entry into hired/myk_training/account_setup/documents/employed so direct
+    // skips (e.g. offer → myk_training) are included. Deduplicate per application, keep earliest.
+    const POST_CONTRACT_STAGES = ["hired", "myk_training", "account_setup", "documents", "employed"] as const;
     const hiredHistoryConds: any[] = [
-      eq(stageHistory.toStatus, "hired"),
+      inArray(stageHistory.toStatus, [...POST_CONTRACT_STAGES]),
       gte(stageHistory.enteredAt, start),
       lte(stageHistory.enteredAt, end),
     ];
     if (hasJobScope) hiredHistoryConds.push(inArray(stageHistory.jobId, jobIds!));
 
-    const hiredHistoryRows = scoped && !hasJobScope
+    const hiredHistoryRaw = scoped && !hasJobScope
       ? []
       : await db
           .select({ applicationId: stageHistory.applicationId, hiredAt: stageHistory.enteredAt })
           .from(stageHistory)
-          .where(and(...hiredHistoryConds));
+          .innerJoin(applications, eq(applications.id, stageHistory.applicationId))
+          .where(and(...hiredHistoryConds, inArray(applications.status, [...POST_CONTRACT_STAGES])));
+
+    // Keep only the earliest post-contract entry per application
+    const hiredEarliestMap = new Map<number, string>();
+    for (const row of hiredHistoryRaw) {
+      const existing = hiredEarliestMap.get(row.applicationId);
+      if (!existing || (row.hiredAt && row.hiredAt < existing)) {
+        hiredEarliestMap.set(row.applicationId, row.hiredAt!);
+      }
+    }
+    const hiredHistoryRows = Array.from(hiredEarliestMap.entries()).map(([applicationId, hiredAt]) => ({ applicationId, hiredAt }));
 
     let avgTimeToContractSign = 0;
     if (hiredHistoryRows.length > 0) {
@@ -655,9 +669,9 @@ export class DatabaseStorage implements IStorage {
       avgTimeToContractSign = diffs.length > 0 ? Math.round(diffs.reduce((s, d) => s + d, 0) / diffs.length) : 0;
     }
 
-    // ── 3b. AVG TIME TO EMPLOY: from appliedAt to when they reached 'account_setup' (became an employee) ─────
+    // ── 3b. AVG TIME TO EMPLOY: from appliedAt to when they reached 'employed' (true final state) ─────
     const employedHistoryConds: any[] = [
-      eq(stageHistory.toStatus, "account_setup"),
+      eq(stageHistory.toStatus, "employed"),
       gte(stageHistory.enteredAt, start),
       lte(stageHistory.enteredAt, end),
     ];
@@ -669,10 +683,7 @@ export class DatabaseStorage implements IStorage {
           .select({ applicationId: stageHistory.applicationId, employedAt: stageHistory.enteredAt })
           .from(stageHistory)
           .innerJoin(applications, eq(applications.id, stageHistory.applicationId))
-          .where(and(
-            ...employedHistoryConds,
-            inArray(applications.status, ["account_setup", "documents", "employed"]),
-          ));
+          .where(and(...employedHistoryConds, eq(applications.status, "employed")));
 
     let avgTimeToEmploy = 0;
     if (employedHistoryRows.length > 0) {
