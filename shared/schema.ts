@@ -135,6 +135,7 @@ export const candidates = pgTable("candidates", {
   address: text("address"),                          // open address (street, building, etc.)
   emergencyContactName: text("emergency_contact_name"),
   emergencyContactPhone: text("emergency_contact_phone"),
+  createdByUserId: integer("created_by_user_id"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -326,7 +327,7 @@ export const applicationDocumentsRelations = relations(applicationDocuments, ({ 
 
 // Insert schemas
 export const insertJobSchema = createInsertSchema(jobs).omit({ id: true, createdAt: true });
-export const insertCandidateSchema = createInsertSchema(candidates).omit({ id: true, createdAt: true });
+export const insertCandidateSchema = createInsertSchema(candidates).omit({ id: true, createdAt: true, createdByUserId: true });
 export const insertApplicationSchema = createInsertSchema(applications).omit({ id: true, appliedAt: true });
 export const insertInterviewSchema = createInsertSchema(interviews).omit({ id: true, createdAt: true });
 export const insertOfferSchema = createInsertSchema(offers).omit({ id: true, createdAt: true });

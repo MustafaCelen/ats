@@ -15,7 +15,7 @@ import {
   type Task, type InsertTask,
   type Employee, type InsertEmployee, type EmployeeWithRelations,
 } from "@shared/schema";
-import { eq, desc, count, sql, gte, lte, and, inArray, notInArray } from "drizzle-orm";
+import { eq, desc, count, sql, gte, lte, and, or, inArray, notInArray } from "drizzle-orm";
 import { differenceInDays } from "date-fns";
 
 export type ApplicationWithRelations = Application & { candidate?: Candidate; job?: Job };
@@ -82,10 +82,10 @@ export interface IStorage {
   createJob(job: InsertJob): Promise<Job>;
   updateJob(id: number, job: Partial<InsertJob>): Promise<Job | undefined>;
   deleteJob(id: number): Promise<void>;
-  getCandidates(jobIds?: number[]): Promise<Candidate[]>;
+  getCandidates(jobIds?: number[], createdByUserId?: number): Promise<Candidate[]>;
   getCandidate(id: number): Promise<Candidate | undefined>;
   getCandidateByEmail(email: string): Promise<Candidate | undefined>;
-  createCandidate(candidate: InsertCandidate): Promise<Candidate>;
+  createCandidate(candidate: InsertCandidate & { createdByUserId?: number }): Promise<Candidate>;
   updateCandidate(id: number, candidate: Partial<InsertCandidate>): Promise<Candidate | undefined>;
   deleteCandidate(id: number): Promise<void>;
   getCandidateNotes(candidateId: number): Promise<CandidateNote[]>;
@@ -206,19 +206,33 @@ export class DatabaseStorage implements IStorage {
   async deleteJob(id: number): Promise<void> {
     await db.delete(jobs).where(eq(jobs.id, id));
   }
-  async getCandidates(jobIds?: number[]): Promise<Candidate[]> {
+  async getCandidates(jobIds?: number[], createdByUserId?: number): Promise<Candidate[]> {
     // Exclude candidates who are already active employees
     const empRows = await db.select({ candidateId: employees.candidateId }).from(employees);
     const empIds = empRows.map((e) => e.candidateId);
 
     if (jobIds !== undefined) {
-      if (jobIds.length === 0) return [];
-      const rows = await db.selectDistinct({ id: applications.candidateId })
-        .from(applications)
-        .where(inArray(applications.jobId, jobIds));
-      const ids = rows.map((r) => r.id).filter((id) => !empIds.includes(id));
-      if (ids.length === 0) return [];
-      return db.select().from(candidates).where(inArray(candidates.id, ids)).orderBy(desc(candidates.createdAt));
+      // Hiring manager: show candidates who applied to their jobs OR who they personally created
+      let appCandidateIds: number[] = [];
+      if (jobIds.length > 0) {
+        const rows = await db.selectDistinct({ id: applications.candidateId })
+          .from(applications)
+          .where(inArray(applications.jobId, jobIds));
+        appCandidateIds = rows.map((r) => r.id);
+      }
+
+      // Also include candidates created by this HM
+      let createdIds: number[] = [];
+      if (createdByUserId !== undefined) {
+        const created = await db.select({ id: candidates.id })
+          .from(candidates)
+          .where(eq(candidates.createdByUserId, createdByUserId));
+        createdIds = created.map((r) => r.id);
+      }
+
+      const allIds = Array.from(new Set([...appCandidateIds, ...createdIds])).filter((id) => !empIds.includes(id));
+      if (allIds.length === 0) return [];
+      return db.select().from(candidates).where(inArray(candidates.id, allIds)).orderBy(desc(candidates.createdAt));
     }
 
     if (empIds.length > 0) {
@@ -234,7 +248,7 @@ export class DatabaseStorage implements IStorage {
     const [candidate] = await db.select().from(candidates).where(eq(candidates.email, email));
     return candidate;
   }
-  async createCandidate(insertCandidate: InsertCandidate): Promise<Candidate> {
+  async createCandidate(insertCandidate: InsertCandidate & { createdByUserId?: number }): Promise<Candidate> {
     const [candidate] = await db.insert(candidates).values(insertCandidate).returning();
     return candidate;
   }

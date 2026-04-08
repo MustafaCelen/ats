@@ -274,16 +274,26 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ── Candidates ──────────────────────────────────────────────────────────────
 
   app.get(api.candidates.list.path, requireAuth, async (req, res) => {
-    // Assistants can see all candidates (they need to assign candidates to jobs)
-    const filter = req.user!.role === "assistant" ? undefined : jobFilter(req);
-    res.json(await storage.getCandidates(filter));
+    const { role, id: userId } = req.user!;
+    if (role === "assistant") {
+      res.json(await storage.getCandidates());
+    } else if (role === "hiring_manager") {
+      const filter = jobFilter(req);
+      res.json(await storage.getCandidates(filter, userId));
+    } else {
+      res.json(await storage.getCandidates());
+    }
   });
 
   app.get(api.candidates.get.path, requireAuth, async (req, res) => {
     const candidate = await storage.getCandidate(Number(req.params.id));
     if (!candidate) return res.status(404).json({ message: "Candidate not found" });
-    // Assistants can view any candidate; HMs are scoped to their assigned jobs
-    if (req.user!.role !== "assistant") {
+    if (req.user!.role === "hiring_manager") {
+      // Allow if HM created this candidate
+      if (candidate.createdByUserId === req.user!.id) {
+        return res.json(candidate);
+      }
+      // Or if candidate has applied to one of HM's assigned jobs
       const filter = jobFilter(req);
       if (filter !== undefined) {
         const apps = await storage.getApplications(undefined, candidate.id, filter);
@@ -296,7 +306,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post(api.candidates.create.path, requireAuth, async (req, res) => {
     try {
       const input = api.candidates.create.input.parse(req.body);
-      const candidate = await storage.createCandidate(input);
+      const candidate = await storage.createCandidate({ ...input, createdByUserId: req.user!.id });
       res.status(201).json(candidate);
     } catch (err) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0].message });
