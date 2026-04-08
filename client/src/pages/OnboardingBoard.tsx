@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Layout } from "@/components/Layout";
 import { useApplications, useUpdateApplicationStatus, type ApplicationWithRelations } from "@/hooks/use-applications";
+import { useCompleteHiring } from "@/hooks/use-employees";
 import { STAGE_LABELS } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -9,8 +10,13 @@ import {
 } from "@dnd-kit/core";
 import { useDroppable, useDraggable } from "@dnd-kit/core";
 import { motion, AnimatePresence } from "framer-motion";
-import { Briefcase, GripVertical, CalendarDays } from "lucide-react";
+import { Briefcase, GripVertical, CalendarDays, CheckCircle2 } from "lucide-react";
 import { format } from "date-fns";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel,
+  AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
+  AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 const BOARD_STAGES = ["hired", "myk_training", "account_setup", "documents"] as const;
 
@@ -24,13 +30,15 @@ const COLUMN_META: Record<string, { color: string; bg: string; dot: string; bord
 function DroppableColumn({
   stage,
   apps,
-  onStatusChange,
   isDraggingActive,
+  completingHiring,
+  onCompleteHiring,
 }: {
   stage: string;
   apps: ApplicationWithRelations[];
-  onStatusChange: (appId: number, status: string) => void;
   isDraggingActive: boolean;
+  completingHiring: boolean;
+  onCompleteHiring: (app: ApplicationWithRelations) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: stage });
   const meta = COLUMN_META[stage];
@@ -67,7 +75,13 @@ function DroppableColumn({
             </motion.p>
           )}
           {apps.map((app) => (
-            <DraggableCard key={app.id} app={app} stage={stage} />
+            <DraggableCard
+              key={app.id}
+              app={app}
+              stage={stage}
+              completingHiring={completingHiring}
+              onCompleteHiring={() => onCompleteHiring(app)}
+            />
           ))}
         </AnimatePresence>
       </div>
@@ -75,7 +89,17 @@ function DroppableColumn({
   );
 }
 
-function DraggableCard({ app, stage }: { app: ApplicationWithRelations; stage: string }) {
+function DraggableCard({
+  app,
+  stage,
+  completingHiring,
+  onCompleteHiring,
+}: {
+  app: ApplicationWithRelations;
+  stage: string;
+  completingHiring: boolean;
+  onCompleteHiring: () => void;
+}) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: app.id,
     data: { app, stage },
@@ -88,7 +112,7 @@ function DraggableCard({ app, stage }: { app: ApplicationWithRelations; stage: s
       animate={{ opacity: isDragging ? 0.25 : 1, y: 0 }}
       exit={{ opacity: 0, y: -6 }}
       transition={{ duration: 0.15 }}
-      className="bg-card border border-border rounded-lg shadow-sm hover:shadow-md transition-shadow cursor-grab active:cursor-grabbing"
+      className="bg-card border border-border rounded-lg shadow-sm hover:shadow-md transition-shadow"
       data-testid={`onboarding-card-${app.id}`}
     >
       <div className="p-3">
@@ -96,7 +120,7 @@ function DraggableCard({ app, stage }: { app: ApplicationWithRelations; stage: s
           <div
             {...listeners}
             {...attributes}
-            className="text-muted-foreground/40 hover:text-muted-foreground mt-0.5 shrink-0 touch-none"
+            className="text-muted-foreground/40 hover:text-muted-foreground mt-0.5 shrink-0 touch-none cursor-grab active:cursor-grabbing"
           >
             <GripVertical className="h-3.5 w-3.5" />
           </div>
@@ -118,6 +142,18 @@ function DraggableCard({ app, stage }: { app: ApplicationWithRelations; stage: s
             )}
           </div>
         </div>
+
+        {stage === "documents" && (
+          <button
+            className="mt-2.5 w-full flex items-center justify-center gap-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700 text-xs font-semibold py-1.5 transition-colors disabled:opacity-50"
+            disabled={completingHiring}
+            data-testid={`btn-complete-hiring-${app.id}`}
+            onClick={onCompleteHiring}
+          >
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            İşe Alımı Tamamla
+          </button>
+        )}
       </div>
     </motion.div>
   );
@@ -135,8 +171,10 @@ function OverlayCard({ app }: { app: ApplicationWithRelations }) {
 export default function OnboardingBoard() {
   const { data: allApplications, isLoading } = useApplications();
   const { mutate: updateStatus } = useUpdateApplicationStatus();
+  const { mutate: completeHiring, isPending: completingHiring } = useCompleteHiring();
   const { toast } = useToast();
   const [activeApp, setActiveApp] = useState<ApplicationWithRelations | null>(null);
+  const [pendingHireApp, setPendingHireApp] = useState<ApplicationWithRelations | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
@@ -176,6 +214,38 @@ export default function OnboardingBoard() {
     setActiveApp(null);
   };
 
+  const handleCompleteHiring = () => {
+    if (!pendingHireApp) return;
+    completeHiring(
+      {
+        candidateId: pendingHireApp.candidateId,
+        jobId: pendingHireApp.jobId,
+        applicationId: pendingHireApp.id,
+        title: pendingHireApp.job?.title ?? undefined,
+      },
+      {
+        onSuccess: () => {
+          toast({
+            title: "İşe alım tamamlandı! 🎉",
+            description: `${pendingHireApp.candidate?.name} çalışan listesine eklendi.`,
+          });
+          setPendingHireApp(null);
+        },
+        onError: (err: any) => {
+          const msg = err?.message ?? "";
+          toast({
+            title: msg.includes("already") ? "Zaten çalışan listesinde" : "Hata oluştu",
+            variant: "destructive",
+            description: msg.includes("already")
+              ? "Bu aday zaten çalışan olarak kayıtlı."
+              : "Lütfen tekrar deneyin.",
+          });
+          setPendingHireApp(null);
+        },
+      }
+    );
+  };
+
   return (
     <Layout>
       <div className="flex flex-col h-full gap-4">
@@ -192,7 +262,7 @@ export default function OnboardingBoard() {
               <div key={s} className="min-w-[220px] flex-1 rounded-xl bg-muted/30 border border-border h-64 animate-pulse" />
             ))}
           </div>
-        ) : boardApps.length === 0 && !isLoading ? (
+        ) : boardApps.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 text-muted-foreground gap-2">
             <Briefcase className="h-10 w-10 opacity-30" />
             <p className="text-sm">Henüz sözleşme imzalayan aday yok</p>
@@ -205,8 +275,9 @@ export default function OnboardingBoard() {
                   key={stage}
                   stage={stage}
                   apps={byStage[stage] ?? []}
-                  onStatusChange={(id, status) => updateStatus({ id, status })}
                   isDraggingActive={!!activeApp}
+                  completingHiring={completingHiring}
+                  onCompleteHiring={setPendingHireApp}
                 />
               ))}
             </div>
@@ -216,6 +287,28 @@ export default function OnboardingBoard() {
           </DndContext>
         )}
       </div>
+
+      {/* Complete Hiring Confirmation Dialog */}
+      <AlertDialog open={!!pendingHireApp} onOpenChange={(open) => !open && setPendingHireApp(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>İşe Alımı Tamamla</AlertDialogTitle>
+            <AlertDialogDescription>
+              <strong>{pendingHireApp?.candidate?.name}</strong> adayı çalışan listesine eklenecek
+              ve başvurusu tamamlandı olarak işaretlenecek. Bu işlemi onaylıyor musunuz?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>İptal</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+              onClick={handleCompleteHiring}
+            >
+              Evet, Tamamla
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Layout>
   );
 }

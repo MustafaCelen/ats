@@ -530,6 +530,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.patch(api.interviews.update.path, requireAuth, async (req, res) => {
     const { status } = req.body;
+    if (req.user!.role === "assistant" && status !== "cancelled") {
+      return res.status(403).json({ message: "Assistants can only cancel interviews" });
+    }
     const interview = await storage.updateInterviewStatus(Number(req.params.id), status);
     if (!interview) return res.status(404).json({ message: "Not found" });
     res.json(interview);
@@ -708,7 +711,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.post("/api/employees", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
+  app.post("/api/employees", requireAuth, async (req, res) => {
     try {
       const { candidateId, jobId, applicationId, startDate, title, notes } = req.body;
       if (!candidateId || !jobId || !applicationId) {
