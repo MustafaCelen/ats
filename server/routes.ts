@@ -534,8 +534,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         endTime: req.body.endTime ? new Date(req.body.endTime) : req.body.endTime,
       };
       const input = insertInterviewSchema.parse(body);
-      const filter = jobFilter(req);
-      if (filter !== undefined && !filter.includes(input.jobId)) return res.status(403).json({ message: "Forbidden" });
+      // Assistants see all applications (same bypass as GET /api/applications),
+      // so they must be able to create interviews for any application they can access.
+      if (req.user!.role !== "assistant") {
+        const filter = jobFilter(req);
+        if (filter !== undefined && !filter.includes(input.jobId)) return res.status(403).json({ message: "Forbidden" });
+      }
       const interview = await storage.createInterview(input);
       res.status(201).json(interview);
     } catch (err) {
