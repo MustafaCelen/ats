@@ -54,12 +54,14 @@ export async function createCalendarEvent(user: User, params: {
   startTime: Date;
   endTime: Date;
   location?: string;
-  attendeeEmail?: string;
+  attendeeEmails?: string[];
 }): Promise<string | null> {
   if (!user.googleAccessToken) return null;
 
   const auth = await getOAuth2ClientForUser(user);
   const calendar = google.calendar({ version: "v3", auth });
+
+  const validEmails = (params.attendeeEmails ?? []).filter(Boolean);
 
   const event: any = {
     summary: params.title,
@@ -69,14 +71,14 @@ export async function createCalendarEvent(user: User, params: {
     end: { dateTime: params.endTime.toISOString() },
   };
 
-  if (params.attendeeEmail) {
-    event.attendees = [{ email: params.attendeeEmail }];
+  if (validEmails.length > 0) {
+    event.attendees = validEmails.map((email) => ({ email }));
   }
 
   const result = await calendar.events.insert({
     calendarId: "primary",
     requestBody: event,
-    sendUpdates: params.attendeeEmail ? "all" : "none",
+    sendUpdates: validEmails.length > 0 ? "all" : "none",
   });
 
   return result.data.id ?? null;

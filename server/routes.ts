@@ -114,7 +114,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // ── Google Calendar ───────────────────────────────────────────────────────────
 
-  app.post("/api/interviews/:id/calendar", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
+  app.post("/api/interviews/:id/calendar", requireAuth, async (req, res) => {
     const id = parseInt(req.params.id);
     const interview = await storage.getInterview(id);
     if (!interview) return res.status(404).json({ message: "Interview not found" });
@@ -128,6 +128,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const title = `Mülakat: ${candidate?.name ?? "Aday"} — ${interview.job?.title ?? ""}`;
     const description = interview.notes ?? "";
 
+    // Collect attendee emails: candidate + all hiring managers assigned to this job
+    const assignees = await storage.getJobAssignees(interview.jobId);
+    const attendeeEmails: string[] = [];
+    if (candidate?.email) attendeeEmails.push(candidate.email);
+    for (const assignee of assignees) {
+      if (assignee.email && !attendeeEmails.includes(assignee.email)) {
+        attendeeEmails.push(assignee.email);
+      }
+    }
+
     try {
       const eventId = await createCalendarEvent(user, {
         title,
@@ -135,7 +145,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         startTime: new Date(interview.startTime),
         endTime: new Date(interview.endTime),
         location: interview.location ?? undefined,
-        attendeeEmail: candidate?.email,
+        attendeeEmails,
       });
 
       if (eventId) {
