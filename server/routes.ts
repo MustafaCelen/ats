@@ -523,7 +523,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ── Interviews ─────────────────────────────────────────────────────────────
 
   app.get(api.interviews.list.path, requireAuth, async (req, res) => {
-    res.json(await storage.getInterviews(undefined, jobFilter(req)));
+    // Assistants bypass job scoping (same as applications list) so they see all interviews
+    const filter = req.user!.role === "assistant" ? undefined : jobFilter(req);
+    res.json(await storage.getInterviews(undefined, filter));
   });
 
   app.post(api.interviews.create.path, requireAuth, async (req, res) => {
