@@ -37,7 +37,7 @@ export default function Login() {
             <Briefcase className="h-7 w-7 text-white" />
           </div>
           <h1 className="text-2xl font-display font-bold text-foreground">HireFlow</h1>
-          <p className="text-sm text-muted-foreground mt-1">Keller Williams Turkey — ATS</p>
+          <p className="text-sm text-muted-foreground mt-1">Keller Williams Platin & Karma</p>
         </div>
 
         {/* Card */}
@@ -111,7 +111,7 @@ export default function Login() {
         </div>
 
         <p className="text-center text-xs text-muted-foreground mt-6">
-          © {new Date().getFullYear()} Keller Williams Turkey
+          © {new Date().getFullYear()} Keller Williams Platin & Karma
         </p>
       </div>
     </div>
