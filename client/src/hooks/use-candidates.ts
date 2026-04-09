@@ -39,7 +39,11 @@ export function useCreateCandidate() {
       if (!res.ok) throw new Error("Failed to create candidate");
       return res.json() as Promise<Candidate>;
     },
-    onSuccess: () => {
+    onSuccess: (newCandidate) => {
+      // Immediately add to cache so it appears in list without waiting for refetch
+      queryClient.setQueryData<Candidate[]>([api.candidates.list.path], (old) =>
+        old ? [newCandidate, ...old] : [newCandidate]
+      );
       queryClient.invalidateQueries({ queryKey: [api.candidates.list.path] });
     },
   });

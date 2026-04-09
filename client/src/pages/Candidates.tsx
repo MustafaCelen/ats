@@ -82,7 +82,7 @@ export default function Candidates() {
     const jobTitles = jobs.map((j) => j.jobTitle).join(" ");
     const matchSearch =
       c.name.toLowerCase().includes(search.toLowerCase()) ||
-      c.email.toLowerCase().includes(search.toLowerCase()) ||
+      (c.email ?? "").toLowerCase().includes(search.toLowerCase()) ||
       (c.city ?? "").toLowerCase().includes(search.toLowerCase()) ||
       (c.currentBrand ?? "").toLowerCase().includes(search.toLowerCase()) ||
       jobTitles.toLowerCase().includes(search.toLowerCase());
@@ -286,12 +286,11 @@ function CreateCandidateDialog({ open, onOpenChange }: { open: boolean; onOpenCh
 
   const handleSubmit = () => {
     if (!form.name.trim()) { toast({ title: "Ad zorunludur", variant: "destructive" }); return; }
-    if (!form.email.trim()) { toast({ title: "E-posta zorunludur", variant: "destructive" }); return; }
     if (!form.category) { toast({ title: "Kategori (K0/K1/K2) zorunludur", variant: "destructive" }); return; }
 
     mutate({
       name: form.name.trim(),
-      email: form.email.trim(),
+      email: form.email.trim() || undefined,
       phone: form.phone || undefined,
       category: form.category,
       currentBrand: form.currentBrand || undefined,

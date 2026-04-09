@@ -116,7 +116,7 @@ export const REAL_ESTATE_BRANDS = [
 export const candidates = pgTable("candidates", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
-  email: text("email").notNull(),
+  email: text("email"),
   phone: text("phone"),
   category: text("category").notNull().default("K0"), // K0 | K1 | K2
   currentBrand: text("current_brand"),           // K1: current agency brand

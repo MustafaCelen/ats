@@ -765,7 +765,7 @@ function AddCandidateDialog({ open, onOpenChange, jobId }: { open: boolean; onOp
             <SelectContent>
               {candidates?.map((c) => (
                 <SelectItem key={c.id} value={c.id.toString()}>
-                  {c.name} — {c.email}
+                  {c.name}{c.email ? ` — ${c.email}` : ""}
                 </SelectItem>
               ))}
             </SelectContent>
