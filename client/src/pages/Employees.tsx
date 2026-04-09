@@ -65,7 +65,14 @@ function parseCsv(text: string): Record<string, string>[] {
   const lines = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n").filter((l) => l.trim());
   if (lines.length < 2) return [];
 
+  // Strip BOM if present
+  const rawHeader = lines[0].startsWith("\uFEFF") ? lines[0].slice(1) : lines[0];
+
+  // Auto-detect delimiter: if header has tabs, treat as TSV
+  const delimiter = rawHeader.includes("\t") ? "\t" : ",";
+
   const parseRow = (line: string): string[] => {
+    if (delimiter === "\t") return line.split("\t");
     const fields: string[] = [];
     let i = 0;
     while (i < line.length) {
@@ -89,8 +96,6 @@ function parseCsv(text: string): Record<string, string>[] {
     return fields;
   };
 
-  // Strip BOM if present
-  const rawHeader = lines[0].startsWith("\uFEFF") ? lines[0].slice(1) : lines[0];
   const headers = parseRow(rawHeader);
   return lines.slice(1).map((line) => {
     const vals = parseRow(line);
@@ -550,7 +555,7 @@ export default function Employees() {
             <input
               ref={fileInputRef}
               type="file"
-              accept=".csv"
+              accept=".csv,.tsv,.txt"
               className="hidden"
               onChange={handleImportFile}
               data-testid="input-import-csv"

@@ -880,27 +880,33 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       let updated = 0;
       const errors: string[] = [];
 
+      // Parse Turkish DD.MM.YYYY date strings
+      const parseTRDate = (s: string | null): Date | null => {
+        if (!s) return null;
+        const m = s.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+        if (m) return new Date(`${m[3]}-${m[2]}-${m[1]}`);
+        const d = new Date(s);
+        return isNaN(d.getTime()) ? null : d;
+      };
+      // Map Turkish status words to internal values
+      const mapStatus = (s: string | null) => {
+        if (!s) return "active";
+        const l = s.toLowerCase();
+        if (l === "aktif") return "active";
+        if (l === "pasif" || l === "inactive") return "inactive";
+        if (l === "ayrıldı" || l === "left") return "left";
+        return s;
+      };
+
       for (const row of rows) {
         const name = (row["Ad Soyad"] ?? row.name ?? "").trim();
         const email = (row["E-posta"] ?? row.email ?? "").trim().toLowerCase();
-        if (!name || !email) {
-          errors.push(`Eksik ad veya e-posta: ${JSON.stringify(row)}`);
+        if (!name) {
+          errors.push(`Eksik ad: ${JSON.stringify(row)}`);
           continue;
         }
 
         try {
-          // Find or create candidate
-          let cand = await storage.getCandidateByEmail(email);
-          if (!cand) {
-            cand = await storage.createCandidate({
-              name,
-              email,
-              phone: row["Telefon"] ?? row.phone ?? null,
-              city: row["Şehir"] ?? row.city ?? null,
-              category: (row["Kategori"] ?? row.category ?? "K0") as any,
-            });
-          }
-
           // Helper to pick first non-empty string from row columns
           const col = (...keys: string[]) => {
             for (const k of keys) { const v = (row[k] ?? "").trim(); if (v) return v; }
@@ -912,8 +918,32 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             return v === "Evet" || v === "true" || v === "1" || v.toLowerCase() === "yes";
           };
 
-          const patch: any = {};
           const kwuid   = col("KWUID", "kwuid");
+
+          // Lookup order: 1) by KWUID in employees, 2) by email, 3) by name
+          let cand: any = null;
+          let existingEmployee: any = null;
+
+          if (kwuid) {
+            existingEmployee = await storage.getEmployeeByKwuid(kwuid);
+            if (existingEmployee) cand = existingEmployee.candidate;
+          }
+          if (!cand && email) {
+            cand = await storage.getCandidateByEmail(email);
+          }
+          if (!cand) {
+            cand = await storage.getCandidateByName(name);
+          }
+          if (!cand) {
+            cand = await storage.createCandidate({
+              name,
+              email: email || undefined,
+              phone: col("Telefon", "phone") ?? undefined,
+              city: col("Şehir", "city") ?? undefined,
+              category: (col("Kategori", "category") ?? "K0") as any,
+            });
+          }
+
           const kwMail  = col("KW E-posta", "kwmail", "kwMail");
           const title   = col("Ünvan", "title");
           const status  = col("Durum", "status");
@@ -931,12 +961,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           const taxOffice     = col("Vergi Dairesi", "taxOffice");
           const taxId         = col("Vergi No / TCKN", "taxId");
           const notes         = col("Notlar", "notes");
+          const parsedBirth   = parseTRDate(birthDate);
+          const mappedStatus  = mapStatus(status);
 
+          const patch: any = {};
           if (kwuid) patch.kwuid = kwuid;
           if (kwMail) patch.kwMail = kwMail;
           if (title) patch.title = title;
-          if (status) patch.status = status;
-          if (birthDate) patch.birthDate = birthDate;
+          if (mappedStatus) patch.status = mappedStatus;
+          if (parsedBirth) patch.birthDate = parsedBirth.toISOString().split("T")[0];
           if (contractType) patch.contractType = contractType;
           if (uretkenlik !== undefined) patch.uretkenlikKoclugu = uretkenlik;
           if (koçlukOran) patch.uretkenlikKocluguOran = koçlukOran;
@@ -951,19 +984,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           if (taxId) patch.taxId = taxId;
           if (notes) patch.notes = notes;
 
-          // Check if already an employee
-          const existing = await storage.getEmployeeByCandidateId(cand.id);
-          if (existing) {
-            if (Object.keys(patch).length) await storage.updateEmployee(existing.id, patch);
+          // Check if already an employee (re-use existingEmployee found by KWUID above)
+          if (!existingEmployee) existingEmployee = await storage.getEmployeeByCandidateId(cand.id);
+          if (existingEmployee) {
+            if (Object.keys(patch).length) await storage.updateEmployee(existingEmployee.id, patch);
             updated++;
           } else {
             const startDateStr = col("Başlangıç Tarihi", "startDate") ?? "";
+            const parsedStart = parseTRDate(startDateStr);
             await storage.createEmployee({
               candidateId: cand.id,
               jobId: null as any,
               applicationId: null as any,
-              startDate: startDateStr ? new Date(startDateStr) : new Date(),
-              status: (patch.status ?? "active") as any,
+              startDate: parsedStart ?? new Date(),
+              status: (mappedStatus ?? "active") as any,
               title: patch.title ?? null,
               notes: patch.notes ?? null,
               kwuid: patch.kwuid ?? null,

@@ -85,6 +85,7 @@ export interface IStorage {
   getCandidates(jobIds?: number[], createdByUserId?: number): Promise<Candidate[]>;
   getCandidate(id: number): Promise<Candidate | undefined>;
   getCandidateByEmail(email: string): Promise<Candidate | undefined>;
+  getCandidateByName(name: string): Promise<Candidate | undefined>;
   createCandidate(candidate: InsertCandidate & { createdByUserId?: number }): Promise<Candidate>;
   updateCandidate(id: number, candidate: Partial<InsertCandidate>): Promise<Candidate | undefined>;
   deleteCandidate(id: number): Promise<void>;
@@ -120,6 +121,7 @@ export interface IStorage {
   getEmployees(): Promise<EmployeeWithRelations[]>;
   getEmployee(id: number): Promise<EmployeeWithRelations | undefined>;
   getEmployeeByCandidateId(candidateId: number): Promise<EmployeeWithRelations | undefined>;
+  getEmployeeByKwuid(kwuid: string): Promise<EmployeeWithRelations | undefined>;
   createEmployee(data: InsertEmployee): Promise<Employee>;
   updateEmployee(id: number, data: Partial<InsertEmployee>): Promise<Employee | undefined>;
   deleteEmployee(id: number): Promise<void>;
@@ -255,6 +257,10 @@ export class DatabaseStorage implements IStorage {
   }
   async getCandidateByEmail(email: string): Promise<Candidate | undefined> {
     const [candidate] = await db.select().from(candidates).where(eq(candidates.email, email));
+    return candidate;
+  }
+  async getCandidateByName(name: string): Promise<Candidate | undefined> {
+    const [candidate] = await db.select().from(candidates).where(eq(candidates.name, name));
     return candidate;
   }
   async createCandidate(insertCandidate: InsertCandidate & { createdByUserId?: number }): Promise<Candidate> {
@@ -1171,6 +1177,17 @@ export class DatabaseStorage implements IStorage {
       .leftJoin(candidates, eq(employees.candidateId, candidates.id))
       .leftJoin(jobs, eq(employees.jobId, jobs.id))
       .where(eq(employees.candidateId, candidateId));
+    if (!r) return undefined;
+    return { ...r.employee, candidate: r.candidate ?? undefined, job: r.job ?? undefined };
+  }
+
+  async getEmployeeByKwuid(kwuid: string): Promise<EmployeeWithRelations | undefined> {
+    const [r] = await db
+      .select({ employee: employees, candidate: candidates, job: jobs })
+      .from(employees)
+      .leftJoin(candidates, eq(employees.candidateId, candidates.id))
+      .leftJoin(jobs, eq(employees.jobId, jobs.id))
+      .where(eq(employees.kwuid, kwuid));
     if (!r) return undefined;
     return { ...r.employee, candidate: r.candidate ?? undefined, job: r.job ?? undefined };
   }
