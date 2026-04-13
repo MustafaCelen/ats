@@ -493,7 +493,7 @@ function ApplyToJobDialog({ candidateId, candidateName }: { candidateId: number;
                 <SelectTrigger data-testid="select-assign-job"><SelectValue placeholder="Pozisyon seçin..." /></SelectTrigger>
                 <SelectContent>
                   {jobs?.filter((j) => j.status === "open").map((job) => (
-                    <SelectItem key={job.id} value={job.id.toString()}>{job.title} — {job.department}</SelectItem>
+                    <SelectItem key={job.id} value={job.id.toString()}>{job.title}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
