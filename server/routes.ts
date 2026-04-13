@@ -125,7 +125,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
 
     const candidate = interview.candidate;
-    const title = `Mülakat: ${candidate?.name ?? "Aday"} — ${interview.job?.title ?? ""}`;
+    const title = `Randevu: ${candidate?.name ?? "Aday"} — ${interview.job?.title ?? ""}`;
     const description = interview.notes ?? "";
 
     // Collect attendee emails: candidate + all hiring managers assigned to this job
