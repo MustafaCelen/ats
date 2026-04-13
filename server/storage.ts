@@ -277,6 +277,19 @@ export class DatabaseStorage implements IStorage {
     return candidate;
   }
   async deleteCandidate(id: number): Promise<void> {
+    // Collect application IDs first (needed for applicationDocuments)
+    const appRows = await db.select({ id: applications.id }).from(applications).where(eq(applications.candidateId, id));
+    const appIds = appRows.map((r) => r.id);
+
+    // Delete child records in dependency order
+    await db.delete(stageHistory).where(eq(stageHistory.candidateId, id));
+    await db.delete(interviews).where(eq(interviews.candidateId, id));
+    await db.delete(offers).where(eq(offers.candidateId, id));
+    if (appIds.length) await db.delete(applicationDocuments).where(inArray(applicationDocuments.applicationId, appIds));
+    await db.delete(tasks).where(eq(tasks.candidateId, id));
+    await db.delete(candidateNotes).where(eq(candidateNotes.candidateId, id));
+    await db.delete(employees).where(eq(employees.candidateId, id));
+    await db.delete(applications).where(eq(applications.candidateId, id));
     await db.delete(candidates).where(eq(candidates.id, id));
   }
   async getCandidateNotes(candidateId: number): Promise<CandidateNote[]> {
