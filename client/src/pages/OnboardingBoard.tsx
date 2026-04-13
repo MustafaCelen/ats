@@ -19,7 +19,7 @@ import {
   AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-const BOARD_STAGES = ["offer", "hired", "myk_training", "account_setup", "documents"] as const;
+const BOARD_STAGES = ["offer", "hired", "myk_training", "account_setup", "documents", "rejected"] as const;
 
 const COLUMN_META: Record<string, { color: string; bg: string; dot: string; border: string }> = {
   offer:        { color: "text-amber-700",   bg: "bg-amber-50",    dot: "bg-amber-500",   border: "border-amber-200"   },
@@ -27,6 +27,7 @@ const COLUMN_META: Record<string, { color: string; bg: string; dot: string; bord
   myk_training: { color: "text-cyan-700",    bg: "bg-cyan-50",     dot: "bg-cyan-500",    border: "border-cyan-200"    },
   account_setup:{ color: "text-indigo-700",  bg: "bg-indigo-50",   dot: "bg-indigo-500",  border: "border-indigo-200"  },
   documents:    { color: "text-violet-700",  bg: "bg-violet-50",   dot: "bg-violet-500",  border: "border-violet-200"  },
+  rejected:     { color: "text-rose-700",    bg: "bg-rose-50",     dot: "bg-rose-500",    border: "border-rose-200"    },
 };
 
 function DroppableColumn({
