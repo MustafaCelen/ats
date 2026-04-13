@@ -214,7 +214,7 @@ export default function CandidateDetail() {
     enabled: !!candidateId,
   });
 
-  const { user } = useAuth();
+  const { data: user } = useAuth();
   const [, navigate] = useLocation();
   const { mutate: deleteCandidate, isPending: isDeleting } = useDeleteCandidate();
   const [noteText, setNoteText] = useState("");
