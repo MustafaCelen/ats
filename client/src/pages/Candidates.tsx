@@ -287,6 +287,9 @@ function CreateCandidateDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const handleSubmit = () => {
     if (!form.name.trim()) { toast({ title: "Ad zorunludur", variant: "destructive" }); return; }
     if (!form.category) { toast({ title: "Kategori (K0/K1/K2) zorunludur", variant: "destructive" }); return; }
+    if (form.phone && !/^05\d{9}$/.test(form.phone)) {
+      toast({ title: "Geçersiz telefon formatı", description: "05xxxxxxxxx formatında giriniz (11 haneli)", variant: "destructive" }); return;
+    }
 
     mutate({
       name: form.name.trim(),
@@ -312,6 +315,7 @@ function CreateCandidateDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         setSpecialization([]); setLanguages(["Türkçe"]);
         toast({ title: "Aday eklendi" });
       },
+      onError: (err: any) => toast({ title: "Hata", description: err?.message, variant: "destructive" }),
     });
   };
 
@@ -362,9 +366,9 @@ function CreateCandidateDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                 <Input value={form.name} onChange={(e) => f("name", e.target.value)} placeholder="Ahmet Yılmaz" data-testid="input-candidate-name" />
               </Field>
               <Field label="Telefon">
-                <Input value={form.phone} onChange={(e) => f("phone", e.target.value)} placeholder="+90 5xx xxx xx xx" data-testid="input-candidate-phone" />
+                <Input value={form.phone} onChange={(e) => f("phone", e.target.value)} placeholder="05xxxxxxxxx" data-testid="input-candidate-phone" />
               </Field>
-              <Field label="E-posta *">
+              <Field label="E-posta">
                 <Input type="email" value={form.email} onChange={(e) => f("email", e.target.value)} placeholder="ahmet@example.com" data-testid="input-candidate-email" />
               </Field>
               <Field label="Sosyal Medya / LinkedIn">

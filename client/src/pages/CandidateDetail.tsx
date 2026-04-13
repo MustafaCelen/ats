@@ -1046,8 +1046,11 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
   }, [employeeRecord]);
 
   const handleSave = () => {
-    if (!form.name.trim() || !form.email.trim()) {
-      toast({ title: "Ad ve e-posta zorunludur", variant: "destructive" }); return;
+    if (!form.name.trim()) {
+      toast({ title: "Ad zorunludur", variant: "destructive" }); return;
+    }
+    if (form.phone && !/^05\d{9}$/.test(form.phone)) {
+      toast({ title: "Geçersiz telefon formatı", description: "05xxxxxxxxx formatında giriniz (11 haneli)", variant: "destructive" }); return;
     }
     update({
       id: candidate.id,
@@ -1100,6 +1103,7 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
           onOpenChange(false);
         }
       },
+      onError: (err: any) => toast({ title: "Hata", description: err?.message, variant: "destructive" }),
     });
   };
 
@@ -1117,8 +1121,8 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
           <EditGroup icon="👤" title="Kişisel Bilgiler">
             <div className="grid grid-cols-2 gap-3">
               <Field label="Ad Soyad *"><Input value={form.name} onChange={(e) => f("name", e.target.value)} data-testid="input-edit-name" /></Field>
-              <Field label="E-posta *"><Input type="email" value={form.email} onChange={(e) => f("email", e.target.value)} data-testid="input-edit-email" /></Field>
-              <Field label="Telefon"><Input value={form.phone} onChange={(e) => f("phone", e.target.value)} data-testid="input-edit-phone" /></Field>
+              <Field label="E-posta"><Input type="email" value={form.email} onChange={(e) => f("email", e.target.value)} data-testid="input-edit-email" /></Field>
+              <Field label="Telefon"><Input value={form.phone} onChange={(e) => f("phone", e.target.value)} placeholder="05xxxxxxxxx" data-testid="input-edit-phone" /></Field>
               <Field label="Sosyal Medya / LinkedIn"><Input value={form.socialMedia} onChange={(e) => f("socialMedia", e.target.value)} placeholder="https://linkedin.com/in/..." /></Field>
             </div>
           </EditGroup>

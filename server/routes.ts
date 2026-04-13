@@ -319,9 +319,17 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json(candidate);
   });
 
+  const PHONE_RE = /^05\d{9}$/;
+
   app.post(api.candidates.create.path, requireAuth, async (req, res) => {
     try {
       const input = api.candidates.create.input.parse(req.body);
+      if (input.phone) {
+        if (!PHONE_RE.test(input.phone))
+          return res.status(400).json({ message: "Telefon numarası 05xxxxxxxxx formatında olmalıdır (11 haneli)" });
+        const dup = await storage.getCandidateByPhone(input.phone);
+        if (dup) return res.status(409).json({ message: `Bu telefon numarası zaten kayıtlı: ${dup.name}` });
+      }
       const candidate = await storage.createCandidate({ ...input, createdByUserId: req.user!.id });
       res.status(201).json(candidate);
     } catch (err) {
@@ -333,6 +341,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.put(api.candidates.update.path, requireAuth, async (req, res) => {
     try {
       const input = api.candidates.update.input.parse(req.body);
+      if (input.phone) {
+        if (!PHONE_RE.test(input.phone))
+          return res.status(400).json({ message: "Telefon numarası 05xxxxxxxxx formatında olmalıdır (11 haneli)" });
+        const dup = await storage.getCandidateByPhone(input.phone);
+        if (dup && dup.id !== Number(req.params.id))
+          return res.status(409).json({ message: `Bu telefon numarası zaten kayıtlı: ${dup.name}` });
+      }
       const candidate = await storage.updateCandidate(Number(req.params.id), input);
       if (!candidate) return res.status(404).json({ message: "Candidate not found" });
       res.json(candidate);

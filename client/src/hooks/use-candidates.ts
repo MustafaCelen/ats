@@ -36,7 +36,10 @@ export function useCreateCandidate() {
         body: JSON.stringify(data),
         credentials: "include",
       });
-      if (!res.ok) throw new Error("Failed to create candidate");
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message ?? "Failed to create candidate");
+      }
       return res.json() as Promise<Candidate>;
     },
     onSuccess: (newCandidate) => {
@@ -59,7 +62,10 @@ export function useUpdateCandidate() {
         body: JSON.stringify(data),
         credentials: "include",
       });
-      if (!res.ok) throw new Error("Failed to update candidate");
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message ?? "Failed to update candidate");
+      }
       return res.json() as Promise<Candidate>;
     },
     onSuccess: (_data, { id }) => {
