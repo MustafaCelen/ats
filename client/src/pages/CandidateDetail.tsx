@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import { useCandidate, useUpdateCandidate } from "@/hooks/use-candidates";
+import { useCandidate, useUpdateCandidate, useDeleteCandidate } from "@/hooks/use-candidates";
 import { useUpdateEmployee } from "@/hooks/use-employees";
 import { useApplications } from "@/hooks/use-applications";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -35,6 +35,12 @@ import {
   type PublicUser,
 } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
+import { useLocation } from "wouter";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 const MONTHS_TR = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"];
 
@@ -208,9 +214,13 @@ export default function CandidateDetail() {
     enabled: !!candidateId,
   });
 
+  const { user } = useAuth();
+  const [, navigate] = useLocation();
+  const { mutate: deleteCandidate, isPending: isDeleting } = useDeleteCandidate();
   const [noteText, setNoteText] = useState("");
   const [activeTab, setActiveTab] = useState<"overview" | "applications" | "notes" | "history">("overview");
   const [editOpen, setEditOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
   if (isLoading) {
     return (
@@ -249,9 +259,23 @@ export default function CandidateDetail() {
           <Link href="/candidates" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
             <ArrowLeft className="h-3.5 w-3.5" /> Adaylara Dön
           </Link>
-          <Button size="sm" variant="outline" onClick={() => setEditOpen(true)} data-testid="btn-edit-candidate">
-            <Pencil className="h-3.5 w-3.5 mr-1.5" /> Profili Düzenle
-          </Button>
+          <div className="flex items-center gap-2">
+            {user?.role === "admin" && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-destructive border-destructive/40 hover:bg-destructive/10"
+                onClick={() => setDeleteConfirmOpen(true)}
+                disabled={isDeleting}
+                data-testid="btn-delete-candidate"
+              >
+                <Trash2 className="h-3.5 w-3.5 mr-1.5" /> Sil
+              </Button>
+            )}
+            <Button size="sm" variant="outline" onClick={() => setEditOpen(true)} data-testid="btn-edit-candidate">
+              <Pencil className="h-3.5 w-3.5 mr-1.5" /> Profili Düzenle
+            </Button>
+          </div>
         </div>
 
         {/* ── Hero Profile Card ── */}
@@ -838,6 +862,26 @@ export default function CandidateDetail() {
       {candidate && (
         <EditCandidateDialog candidate={candidate} employeeRecord={employeeRecord ?? null} open={editOpen} onOpenChange={setEditOpen} />
       )}
+
+      <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Adayı silmek istediğinizden emin misiniz?</AlertDialogTitle>
+            <AlertDialogDescription>
+              <strong>{candidate?.name}</strong> adlı aday ve tüm ilgili veriler kalıcı olarak silinecek. Bu işlem geri alınamaz.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Vazgeç</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => deleteCandidate(candidateId, { onSuccess: () => navigate("/candidates") })}
+            >
+              Evet, Sil
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Layout>
   );
 }
