@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, buildUrl } from "@shared/routes";
 import { type Application, type Candidate, type Job, type InsertApplication } from "@shared/schema";
 
-export type ApplicationWithRelations = Application & { candidate?: Candidate; job?: Job };
+export type ApplicationWithRelations = Application & { candidate?: Candidate; job?: Job; latestNote?: string | null };
 
 export function useApplications(jobId?: number, candidateId?: number) {
   return useQuery<ApplicationWithRelations[]>({

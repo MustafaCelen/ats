@@ -402,11 +402,12 @@ function ApplicationListView({
   return (
     <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
       {/* Header */}
-      <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_auto] gap-3 px-4 py-2.5 bg-muted/40 border-b border-border text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+      <div className="grid grid-cols-[2fr_1fr_0.8fr_1.5fr_2fr_0.9fr_auto] gap-3 px-4 py-2.5 bg-muted/40 border-b border-border text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
         <div>Aday</div>
         <div>Aşama</div>
         <div>Puan</div>
         <div>İletişim</div>
+        <div>Son Not</div>
         <div>Başvuru Tarihi</div>
         <div />
       </div>
@@ -418,7 +419,7 @@ function ApplicationListView({
           return (
             <div
               key={app.id}
-              className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_auto] gap-3 px-4 py-3 items-center hover:bg-muted/20 transition-colors group"
+              className="grid grid-cols-[2fr_1fr_0.8fr_1.5fr_2fr_0.9fr_auto] gap-3 px-4 py-3 items-center hover:bg-muted/20 transition-colors group"
               data-testid={`list-row-${app.id}`}
             >
               {/* Candidate */}
@@ -462,16 +463,31 @@ function ApplicationListView({
               </div>
 
               {/* Contact */}
-              <div className="flex items-center gap-2">
-                {app.candidate?.phone && (
-                  <a href={`tel:${app.candidate.phone}`} className="text-muted-foreground hover:text-foreground transition-colors" title={app.candidate.phone}>
-                    <Phone className="h-3.5 w-3.5" />
+              <div className="space-y-0.5 min-w-0">
+                {app.candidate?.phone ? (
+                  <a href={`tel:${app.candidate.phone}`} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors truncate">
+                    <Phone className="h-3 w-3 shrink-0" />
+                    <span className="truncate">{app.candidate.phone}</span>
                   </a>
+                ) : (
+                  <span className="text-xs text-muted-foreground/40">—</span>
                 )}
                 {app.candidate?.email && (
-                  <a href={`mailto:${app.candidate.email}`} className="text-muted-foreground hover:text-foreground transition-colors" title={app.candidate.email}>
-                    <Mail className="h-3.5 w-3.5" />
+                  <a href={`mailto:${app.candidate.email}`} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors truncate">
+                    <Mail className="h-3 w-3 shrink-0" />
+                    <span className="truncate">{app.candidate.email}</span>
                   </a>
+                )}
+              </div>
+
+              {/* Latest note */}
+              <div className="min-w-0">
+                {app.latestNote ? (
+                  <p className="text-xs text-muted-foreground line-clamp-2" title={app.latestNote}>
+                    {app.latestNote}
+                  </p>
+                ) : (
+                  <span className="text-xs text-muted-foreground/40">—</span>
                 )}
               </div>
 
@@ -748,6 +764,7 @@ function RateNoteDialog({ app, open, onOpenChange }: { app: ApplicationWithRelat
   const { toast } = useToast();
   const [score, setScore] = useState<number>(app.score ?? 0);
   const [note, setNote] = useState("");
+  const [expectedStartMonth, setExpectedStartMonth] = useState(app.candidate?.expectedStartMonth ?? "");
   const { data: assistants = [] } = useQuery<PublicUser[]>({
     queryKey: ["/api/assistants"],
   });
@@ -768,10 +785,23 @@ function RateNoteDialog({ app, open, onOpenChange }: { app: ApplicationWithRelat
     },
   });
 
+  const { mutate: saveStartMonth, isPending: savingStartMonth } = useMutation({
+    mutationFn: ({ candidateId, month }: { candidateId: number; month: string }) =>
+      apiRequest("PUT", `/api/candidates/${candidateId}`, { expectedStartMonth: month }),
+    onSuccess: (_, { candidateId }) => {
+      qc.invalidateQueries({ queryKey: ["/api/candidates"] });
+      qc.invalidateQueries({ queryKey: ["/api/candidates", String(candidateId)] });
+      qc.invalidateQueries({ queryKey: ["/api/applications"] });
+    },
+  });
+
   const handleSubmit = () => {
     saveScore(score);
     if (note.trim()) saveNote(note.trim());
-    toast({ title: score > 0 ? `Rated ${score}/10` : "Score cleared", description: note.trim() ? "Note added to candidate." : undefined });
+    if (expectedStartMonth && expectedStartMonth !== (app.candidate?.expectedStartMonth ?? "")) {
+      saveStartMonth({ candidateId: app.candidateId, month: expectedStartMonth });
+    }
+    toast({ title: score > 0 ? `Puan: ${score}/10` : "Puan güncellendi", description: note.trim() ? "Not adaya eklendi." : undefined });
     onOpenChange(false);
   };
 
@@ -792,9 +822,20 @@ function RateNoteDialog({ app, open, onOpenChange }: { app: ApplicationWithRelat
             <StarPicker value={score} onChange={setScore} />
             {score > 0 && (
               <p className="text-xs text-muted-foreground mt-1.5">
-                {score}/10 — {["", "Very Low", "Low", "Below Average", "Fair", "Average", "Good", "Strong", "Very Strong", "Excellent", "Outstanding"][score]}
+                {score}/10 — {["", "Çok Düşük", "Düşük", "Ortanın Altı", "Orta", "Ortalama", "İyi", "Güçlü", "Çok Güçlü", "Mükemmel", "Olağanüstü"][score]}
               </p>
             )}
+          </div>
+
+          <div>
+            <Label className="text-xs mb-1.5 block">Beklenen Başlangıç Ayı</Label>
+            <Input
+              type="month"
+              value={expectedStartMonth}
+              onChange={(e) => setExpectedStartMonth(e.target.value)}
+              className="h-9 text-sm"
+              data-testid="input-expected-start-month"
+            />
           </div>
 
           <div>
@@ -814,9 +855,9 @@ function RateNoteDialog({ app, open, onOpenChange }: { app: ApplicationWithRelat
           </div>
 
           <div className="flex gap-2 pt-1">
-            <Button variant="outline" className="flex-1" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button className="flex-1" onClick={handleSubmit} disabled={savingScore || savingNote} data-testid="btn-submit-rate">
-              {(savingScore || savingNote) ? "Saving..." : "Save"}
+            <Button variant="outline" className="flex-1" onClick={() => onOpenChange(false)}>İptal</Button>
+            <Button className="flex-1" onClick={handleSubmit} disabled={savingScore || savingNote || savingStartMonth} data-testid="btn-submit-rate">
+              {(savingScore || savingNote || savingStartMonth) ? "Kaydediliyor..." : "Kaydet"}
             </Button>
           </div>
         </div>

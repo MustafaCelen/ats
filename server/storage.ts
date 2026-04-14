@@ -317,7 +317,26 @@ export class DatabaseStorage implements IStorage {
     if (candidateId) conditions.push(eq(applications.candidateId, candidateId));
     if (jobIds && jobIds.length > 0) conditions.push(inArray(applications.jobId, jobIds));
     const results = conditions.length > 0 ? await base.where(and(...conditions)) : await base;
-    return results.map((r) => ({ ...r.applications, candidate: r.candidate ?? undefined, job: r.job ?? undefined }));
+
+    // Batch-fetch latest note per candidate
+    const candidateIds = [...new Set(results.map((r) => r.applications.candidateId).filter(Boolean))] as number[];
+    const noteRows = candidateIds.length > 0
+      ? await db.select({ candidateId: candidateNotes.candidateId, content: candidateNotes.content })
+          .from(candidateNotes)
+          .where(inArray(candidateNotes.candidateId, candidateIds))
+          .orderBy(desc(candidateNotes.createdAt))
+      : [];
+    const latestNoteMap = new Map<number, string>();
+    for (const n of noteRows) {
+      if (!latestNoteMap.has(n.candidateId)) latestNoteMap.set(n.candidateId, n.content);
+    }
+
+    return results.map((r) => ({
+      ...r.applications,
+      candidate: r.candidate ?? undefined,
+      job: r.job ?? undefined,
+      latestNote: latestNoteMap.get(r.applications.candidateId) ?? null,
+    }));
   }
 
   async getApplications(jobId?: number, candidateId?: number, jobIds?: number[]): Promise<ApplicationWithRelations[]> {
