@@ -25,6 +25,7 @@ import {
 import {
   MapPin, Building2, MoreHorizontal, UserPlus, DollarSign,
   ArrowLeft, Users, Calendar, ChevronDown, ExternalLink, Star, CheckCircle2, GripVertical,
+  LayoutGrid, List, Phone, Mail, MessageSquare, FileText,
 } from "lucide-react";
 import { useCompleteHiring } from "@/hooks/use-employees";
 import { motion, AnimatePresence } from "framer-motion";
@@ -76,6 +77,8 @@ export default function JobDetails() {
   const [rateNoteApp, setRateNoteApp] = useState<ApplicationWithRelations | null>(null);
   const [pendingHireApp, setPendingHireApp] = useState<ApplicationWithRelations | null>(null);
   const [activeApp, setActiveApp] = useState<ApplicationWithRelations | null>(null);
+  const [viewMode, setViewMode] = useState<"kanban" | "list">("kanban");
+  const [listStageFilter, setListStageFilter] = useState<string>("all");
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
@@ -181,52 +184,108 @@ export default function JobDetails() {
           </div>
         </div>
 
-        {/* Kanban board */}
-        <DndContext
-          sensors={sensors}
-          collisionDetection={pointerWithin}
-          onDragStart={onDragStart}
-          onDragEnd={onDragEnd}
-        >
-          <div className="overflow-x-auto pb-4">
-            <div className="flex gap-3 min-w-[1100px]">
-              {APPLICATION_STAGES.map((stage) => {
-                const meta = COLUMN_META[stage] ?? { color: "text-gray-600", bg: "bg-gray-50", dot: "bg-gray-400" };
-                const columnApps = applications?.filter((a) => a.status === stage) ?? [];
-
+        {/* View toggle */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-1">
+            <button
+              onClick={() => setViewMode("kanban")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${viewMode === "kanban" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              <LayoutGrid className="h-3.5 w-3.5" /> Kanban
+            </button>
+            <button
+              onClick={() => setViewMode("list")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${viewMode === "list" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              <List className="h-3.5 w-3.5" /> Liste
+            </button>
+          </div>
+          {viewMode === "list" && (
+            <div className="flex items-center gap-1 flex-wrap">
+              <button
+                onClick={() => setListStageFilter("all")}
+                className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${listStageFilter === "all" ? "bg-foreground text-background border-foreground" : "border-border text-muted-foreground hover:text-foreground"}`}
+              >
+                Tümü
+              </button>
+              {APPLICATION_STAGES.map((s) => {
+                const meta = COLUMN_META[s];
                 return (
-                  <DroppableColumn key={stage} stage={stage} meta={meta} count={columnApps.length}>
-                    <AnimatePresence>
-                      {columnApps.map((app) => (
-                        <DraggableCard
-                          key={app.id}
-                          app={app}
-                          stage={stage}
-                          isDraggingActive={activeApp?.id === app.id}
-                          completingHiring={completingHiring}
-                          onStatusChange={(s) => handleStatusChange(app.id, s, app.candidate?.name ?? "")}
-                          onRateNote={() => setRateNoteApp(app)}
-                          onInterview={() => setInterviewApp(app)}
-                          onOffer={() => setOfferApp(app)}
-                          onCompleteHiring={() => setPendingHireApp(app)}
-                        />
-                      ))}
-                    </AnimatePresence>
-                    {columnApps.length === 0 && (
-                      <div className="py-6 text-center text-xs text-muted-foreground opacity-50 select-none">
-                        Drop here
-                      </div>
-                    )}
-                  </DroppableColumn>
+                  <button
+                    key={s}
+                    onClick={() => setListStageFilter(s)}
+                    className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${listStageFilter === s ? "bg-foreground text-background border-foreground" : "border-border text-muted-foreground hover:text-foreground"}`}
+                  >
+                    <span className={`h-1.5 w-1.5 rounded-full ${meta?.dot}`} />
+                    {STAGE_LABELS[s] ?? s}
+                  </button>
                 );
               })}
             </div>
-          </div>
+          )}
+        </div>
 
-          <DragOverlay dropAnimation={{ duration: 150, easing: "ease" }}>
-            {activeApp ? <CardDragPreview app={activeApp} /> : null}
-          </DragOverlay>
-        </DndContext>
+        {/* Kanban board */}
+        {viewMode === "kanban" && (
+          <DndContext
+            sensors={sensors}
+            collisionDetection={pointerWithin}
+            onDragStart={onDragStart}
+            onDragEnd={onDragEnd}
+          >
+            <div className="overflow-x-auto pb-4">
+              <div className="flex gap-3 min-w-[1100px]">
+                {APPLICATION_STAGES.map((stage) => {
+                  const meta = COLUMN_META[stage] ?? { color: "text-gray-600", bg: "bg-gray-50", dot: "bg-gray-400" };
+                  const columnApps = applications?.filter((a) => a.status === stage) ?? [];
+
+                  return (
+                    <DroppableColumn key={stage} stage={stage} meta={meta} count={columnApps.length}>
+                      <AnimatePresence>
+                        {columnApps.map((app) => (
+                          <DraggableCard
+                            key={app.id}
+                            app={app}
+                            stage={stage}
+                            isDraggingActive={activeApp?.id === app.id}
+                            completingHiring={completingHiring}
+                            onStatusChange={(s) => handleStatusChange(app.id, s, app.candidate?.name ?? "")}
+                            onRateNote={() => setRateNoteApp(app)}
+                            onInterview={() => setInterviewApp(app)}
+                            onOffer={() => setOfferApp(app)}
+                            onCompleteHiring={() => setPendingHireApp(app)}
+                          />
+                        ))}
+                      </AnimatePresence>
+                      {columnApps.length === 0 && (
+                        <div className="py-6 text-center text-xs text-muted-foreground opacity-50 select-none">
+                          Drop here
+                        </div>
+                      )}
+                    </DroppableColumn>
+                  );
+                })}
+              </div>
+            </div>
+
+            <DragOverlay dropAnimation={{ duration: 150, easing: "ease" }}>
+              {activeApp ? <CardDragPreview app={activeApp} /> : null}
+            </DragOverlay>
+          </DndContext>
+        )}
+
+        {/* List view */}
+        {viewMode === "list" && (
+          <ApplicationListView
+            applications={(applications ?? []).filter((a) => listStageFilter === "all" || a.status === listStageFilter)}
+            completingHiring={completingHiring}
+            onStatusChange={handleStatusChange}
+            onRateNote={(app) => setRateNoteApp(app)}
+            onInterview={(app) => setInterviewApp(app)}
+            onOffer={(app) => setOfferApp(app)}
+            onCompleteHiring={(app) => setPendingHireApp(app)}
+          />
+        )}
       </div>
 
       <AddCandidateDialog open={addCandidateOpen} onOpenChange={setAddCandidateOpen} jobId={jobId} />
@@ -310,6 +369,159 @@ export default function JobDetails() {
         </AlertDialogContent>
       </AlertDialog>
     </Layout>
+  );
+}
+
+// ─── List view ────────────────────────────────────────────────────────────────
+
+function ApplicationListView({
+  applications,
+  completingHiring,
+  onStatusChange,
+  onRateNote,
+  onInterview,
+  onOffer,
+  onCompleteHiring,
+}: {
+  applications: ApplicationWithRelations[];
+  completingHiring: boolean;
+  onStatusChange: (id: number, status: string, name: string) => void;
+  onRateNote: (app: ApplicationWithRelations) => void;
+  onInterview: (app: ApplicationWithRelations) => void;
+  onOffer: (app: ApplicationWithRelations) => void;
+  onCompleteHiring: (app: ApplicationWithRelations) => void;
+}) {
+  if (applications.length === 0) {
+    return (
+      <div className="rounded-xl border border-border bg-card p-12 text-center text-sm text-muted-foreground">
+        Bu aşamada aday bulunmuyor.
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
+      {/* Header */}
+      <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_auto] gap-3 px-4 py-2.5 bg-muted/40 border-b border-border text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+        <div>Aday</div>
+        <div>Aşama</div>
+        <div>Puan</div>
+        <div>İletişim</div>
+        <div>Başvuru Tarihi</div>
+        <div />
+      </div>
+
+      {/* Rows */}
+      <div className="divide-y divide-border">
+        {applications.map((app) => {
+          const meta = COLUMN_META[app.status] ?? { color: "text-gray-600", bg: "bg-gray-50", dot: "bg-gray-400" };
+          return (
+            <div
+              key={app.id}
+              className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_auto] gap-3 px-4 py-3 items-center hover:bg-muted/20 transition-colors group"
+              data-testid={`list-row-${app.id}`}
+            >
+              {/* Candidate */}
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center text-primary text-[11px] font-bold shrink-0">
+                  {app.candidate?.name?.slice(0, 2).toUpperCase()}
+                </div>
+                <div className="min-w-0">
+                  <Link href={`/candidates/${app.candidateId}`} className="text-sm font-semibold text-foreground hover:text-primary transition-colors truncate block">
+                    {app.candidate?.name}
+                  </Link>
+                  <p className="text-xs text-muted-foreground truncate">{app.candidate?.city}{app.candidate?.district ? ` · ${app.candidate.district}` : ""}</p>
+                </div>
+              </div>
+
+              {/* Stage */}
+              <div>
+                <Select value={app.status} onValueChange={(s) => onStatusChange(app.id, s, app.candidate?.name ?? "")}>
+                  <SelectTrigger className="h-7 text-xs w-full border-0 bg-transparent px-0 focus:ring-0 shadow-none">
+                    <div className="flex items-center gap-1.5">
+                      <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${meta.dot}`} />
+                      <span className={`font-medium text-xs ${meta.color}`}>{STAGE_LABELS[app.status] ?? app.status}</span>
+                    </div>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {APPLICATION_STAGES.map((s) => (
+                      <SelectItem key={s} value={s} className="text-xs">
+                        <div className="flex items-center gap-2">
+                          <span className={`h-1.5 w-1.5 rounded-full ${COLUMN_META[s]?.dot ?? "bg-gray-400"}`} />
+                          {STAGE_LABELS[s] ?? s}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Score */}
+              <div>
+                <ScoreBadge score={app.score} size="sm" showLabel />
+              </div>
+
+              {/* Contact */}
+              <div className="flex items-center gap-2">
+                {app.candidate?.phone && (
+                  <a href={`tel:${app.candidate.phone}`} className="text-muted-foreground hover:text-foreground transition-colors" title={app.candidate.phone}>
+                    <Phone className="h-3.5 w-3.5" />
+                  </a>
+                )}
+                {app.candidate?.email && (
+                  <a href={`mailto:${app.candidate.email}`} className="text-muted-foreground hover:text-foreground transition-colors" title={app.candidate.email}>
+                    <Mail className="h-3.5 w-3.5" />
+                  </a>
+                )}
+              </div>
+
+              {/* Date */}
+              <div className="text-xs text-muted-foreground">
+                {app.appliedAt ? formatDistanceToNow(new Date(app.appliedAt), { addSuffix: true }) : "—"}
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center gap-1">
+                {app.status === "documents" && (
+                  <button
+                    onClick={() => onCompleteHiring(app)}
+                    disabled={completingHiring}
+                    className="flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-md bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 transition-colors disabled:opacity-50"
+                    title="İşe Alımı Tamamla"
+                  >
+                    <CheckCircle2 className="h-3 w-3" /> Tamamla
+                  </button>
+                )}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button className="p-1.5 hover:bg-muted rounded-md text-muted-foreground transition-colors">
+                      <MoreHorizontal className="h-4 w-4" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-44">
+                    <DropdownMenuItem className="text-xs font-medium" onClick={() => onRateNote(app)}>
+                      <Star className="h-3 w-3 mr-2 text-amber-400" fill="currentColor" /> Rate &amp; Add Note
+                    </DropdownMenuItem>
+                    <DropdownMenuItem className="text-xs" onClick={() => onInterview(app)}>
+                      <Calendar className="h-3 w-3 mr-2 text-amber-500" /> Schedule Interview
+                    </DropdownMenuItem>
+                    <DropdownMenuItem className="text-xs" onClick={() => onOffer(app)}>
+                      <DollarSign className="h-3 w-3 mr-2 text-emerald-500" /> Create Offer
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem className="text-xs" asChild>
+                      <Link href={`/candidates/${app.candidateId}`}>
+                        <ExternalLink className="h-3 w-3 mr-2" /> View Profile
+                      </Link>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
