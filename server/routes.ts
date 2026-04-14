@@ -673,7 +673,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.get(api.stats.reports.path, requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
     const startDate = req.query.startDate ? new Date(req.query.startDate as string) : undefined;
     const endDate = req.query.endDate ? new Date(req.query.endDate as string) : undefined;
-    res.json(await storage.getReportStats(startDate, endDate, jobFilter(req)));
+    const office = req.query.office ? (req.query.office as string) : undefined;
+    res.json(await storage.getReportStats(startDate, endDate, jobFilter(req), office));
   });
 
   // ── Assistants list (for task assignment) ──────────────────────────────────

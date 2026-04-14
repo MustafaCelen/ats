@@ -135,9 +135,13 @@ export const candidates = pgTable("candidates", {
   address: text("address"),                          // open address (street, building, etc.)
   emergencyContactName: text("emergency_contact_name"),
   emergencyContactPhone: text("emergency_contact_phone"),
+  office: text("office"),                            // "Akatlar" | "Zekeriyaköy"
   createdByUserId: integer("created_by_user_id"),
   createdAt: timestamp("created_at").defaultNow(),
 });
+
+export const OFFICES = ["Akatlar", "Zekeriyaköy"] as const;
+export type Office = (typeof OFFICES)[number];
 
 export const applications = pgTable("applications", {
   id: serial("id").primaryKey(),

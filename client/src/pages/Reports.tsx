@@ -41,15 +41,22 @@ function formatDateInput(date: Date) {
   return date.toISOString().split("T")[0];
 }
 
+const OFFICE_OPTIONS = [
+  { label: "Her İki Ofis", value: undefined },
+  { label: "Akatlar", value: "Akatlar" },
+  { label: "Zekeriyaköy", value: "Zekeriyaköy" },
+] as const;
+
 export default function Reports() {
   const [activeDays, setActiveDays] = useState(30);
   const [useCustomRange, setUseCustomRange] = useState(false);
   const [fromDate, setFromDate] = useState(formatDateInput(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)));
   const [toDate, setToDate] = useState(formatDateInput(new Date()));
+  const [officeFilter, setOfficeFilter] = useState<string | undefined>(undefined);
 
   const computedStart = useCustomRange ? fromDate : formatDateInput(new Date(Date.now() - activeDays * 24 * 60 * 60 * 1000));
   const computedEnd = useCustomRange ? toDate : formatDateInput(new Date());
-  const { data: stats, isLoading } = useReportStats(computedStart, computedEnd);
+  const { data: stats, isLoading } = useReportStats(computedStart, computedEnd, officeFilter);
 
   const funnelData = (stats?.funnel ?? []).filter((f: any) => f.stage !== "rejected");
   const stageTimes = (stats?.stageTimes ?? []).filter((s: any) => s.stage !== "rejected");
@@ -64,6 +71,21 @@ export default function Reports() {
             <p className="text-sm text-muted-foreground mt-0.5">Insights into your recruitment pipeline</p>
           </div>
           <div className="flex flex-wrap gap-2 items-center">
+            {/* Office filter */}
+            <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-1">
+              {OFFICE_OPTIONS.map((o) => (
+                <Button
+                  key={o.label}
+                  size="sm"
+                  variant={officeFilter === o.value ? "default" : "ghost"}
+                  className="h-7 text-xs px-3"
+                  onClick={() => setOfficeFilter(o.value as string | undefined)}
+                  data-testid={`btn-office-${o.label.replace(/\s/g, "-")}`}
+                >
+                  {o.label}
+                </Button>
+              ))}
+            </div>
             <Button variant={useCustomRange ? "outline" : "default"} size="sm" onClick={() => setUseCustomRange(false)} data-testid="btn-range-presets">Presets</Button>
             <Button variant={useCustomRange ? "default" : "outline"} size="sm" onClick={() => setUseCustomRange(true)} data-testid="btn-range-custom">Custom Range</Button>
             {!useCustomRange && RANGES.map((r) => (

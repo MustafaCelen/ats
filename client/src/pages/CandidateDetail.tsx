@@ -617,6 +617,11 @@ export default function CandidateDetail() {
             <div className="space-y-4">
               <div className="rounded-xl border border-border bg-card p-5 shadow-sm space-y-3">
                 <h2 className="text-sm font-semibold flex items-center gap-2"><MapPin className="h-4 w-4 text-primary" />Konum</h2>
+                {(candidate as any).office && (
+                  <InfoRow icon={<Building2 className="h-3.5 w-3.5" />} label="KW Ofis">
+                    <span className="font-medium text-primary">{(candidate as any).office}</span>
+                  </InfoRow>
+                )}
                 {candidate.city ? (
                   <>
                     <InfoRow icon={<MapPin className="h-3.5 w-3.5" />} label="Şehir">{candidate.city}</InfoRow>
@@ -624,7 +629,7 @@ export default function CandidateDetail() {
                     {(candidate as any).address && <InfoRow icon={<MapPin className="h-3.5 w-3.5" />} label="Açık Adres">{(candidate as any).address}</InfoRow>}
                   </>
                 ) : (
-                  <p className="text-xs text-muted-foreground italic">Konum belirtilmemiş</p>
+                  !((candidate as any).office) && <p className="text-xs text-muted-foreground italic">Konum belirtilmemiş</p>
                 )}
               </div>
 
@@ -1048,6 +1053,7 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
     address: (candidate as any).address ?? "",
     emergencyContactName: (candidate as any).emergencyContactName ?? "",
     emergencyContactPhone: (candidate as any).emergencyContactPhone ?? "",
+    office: (candidate as any).office ?? "",
     experience: String(candidate.experience ?? 0),
     referredBy: candidate.referredBy ?? "",
     socialMedia: candidate.socialMedia ?? "",
@@ -1143,6 +1149,7 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
         address: form.address || undefined,
         emergencyContactName: form.emergencyContactName || undefined,
         emergencyContactPhone: form.emergencyContactPhone || undefined,
+        office: (form as any).office || undefined,
         referredBy: form.referredBy || undefined,
         socialMedia: form.socialMedia || undefined,
         resumeText: form.resumeText || undefined,
@@ -1207,6 +1214,17 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
           {/* ── Konum ── */}
           <EditGroup icon="📍" title="Konum">
             <div className="grid grid-cols-2 gap-3">
+              <div className="col-span-2">
+                <Field label="KW Ofis">
+                  <Select value={(form as any).office ?? ""} onValueChange={(v) => f("office", v)}>
+                    <SelectTrigger><SelectValue placeholder="Ofis seçin..." /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Akatlar">Akatlar</SelectItem>
+                      <SelectItem value="Zekeriyaköy">Zekeriyaköy</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
+              </div>
               <Field label="Şehir">
                 <Select value={form.city} onValueChange={(v) => f("city", v)}>
                   <SelectTrigger><SelectValue placeholder="Şehir seçin..." /></SelectTrigger>

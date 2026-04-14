@@ -279,6 +279,7 @@ function CreateCandidateDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     currentBrand: "", licenseStatus: "unlicensed", licenseNumber: "",
     city: "", district: "", experience: "0",
     referredBy: "", socialMedia: "", resumeText: "",
+    office: "",
   });
   const [specialization, setSpecialization] = useState<string[]>([]);
   const [languages, setLanguages] = useState<string[]>(["Türkçe"]);
@@ -301,6 +302,7 @@ function CreateCandidateDialog({ open, onOpenChange }: { open: boolean; onOpenCh
       licenseNumber: form.licenseNumber || undefined,
       city: form.city || undefined,
       district: form.district || undefined,
+      office: form.office || undefined,
       specialization,
       languages,
       experience: parseInt(form.experience) || 0,
@@ -311,7 +313,7 @@ function CreateCandidateDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     } as InsertCandidate, {
       onSuccess: () => {
         onOpenChange(false);
-        setForm({ name: "", email: "", phone: "", category: "", currentBrand: "", licenseStatus: "unlicensed", licenseNumber: "", city: "", district: "", experience: "0", referredBy: "", socialMedia: "", resumeText: "" });
+        setForm({ name: "", email: "", phone: "", category: "", currentBrand: "", licenseStatus: "unlicensed", licenseNumber: "", city: "", district: "", experience: "0", referredBy: "", socialMedia: "", resumeText: "", office: "" });
         setSpecialization([]); setLanguages(["Türkçe"]);
         toast({ title: "Aday eklendi" });
       },
@@ -418,6 +420,17 @@ function CreateCandidateDialog({ open, onOpenChange }: { open: boolean; onOpenCh
           {/* Location */}
           <Section title="Konum (Türkiye)">
             <div className="grid grid-cols-2 gap-3">
+              <div className="col-span-2">
+                <Field label="KW Ofis">
+                  <Select value={form.office} onValueChange={(v) => f("office", v)}>
+                    <SelectTrigger><SelectValue placeholder="Ofis seçin..." /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Akatlar">Akatlar</SelectItem>
+                      <SelectItem value="Zekeriyaköy">Zekeriyaköy</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
+              </div>
               <Field label="Şehir">
                 <Select value={form.city} onValueChange={(v) => f("city", v)}>
                   <SelectTrigger><SelectValue placeholder="Şehir seçin..." /></SelectTrigger>

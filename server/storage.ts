@@ -110,7 +110,7 @@ export interface IStorage {
   updateOfferStatus(id: number, status: string): Promise<Offer | undefined>;
   deleteOffer(id: number): Promise<void>;
   getDashboardStats(jobIds?: number[]): Promise<DashboardStats>;
-  getReportStats(startDate?: Date, endDate?: Date, jobIds?: number[]): Promise<ReportStats>;
+  getReportStats(startDate?: Date, endDate?: Date, jobIds?: number[], office?: string): Promise<ReportStats>;
   getApplicationDocuments(applicationId: number): Promise<ApplicationDocuments | null>;
   upsertApplicationDocuments(applicationId: number, receivedDocs: string[]): Promise<ApplicationDocuments>;
   getTasks(options: { assignedToUserId?: number; createdByUserId?: number }): Promise<TaskWithRelations[]>;
@@ -514,7 +514,7 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
-  async getReportStats(startDate?: Date, endDate?: Date, jobIds?: number[]): Promise<ReportStats> {
+  async getReportStats(startDate?: Date, endDate?: Date, jobIds?: number[], office?: string): Promise<ReportStats> {
     // Normalize date range
     const start = startDate ? new Date(startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     // Push end to 23:59:59.999 so date-only strings (e.g. "2026-04-08") include the full day
@@ -525,12 +525,22 @@ export class DatabaseStorage implements IStorage {
     const scoped = jobIds !== undefined;
     const hasJobScope = scoped && jobIds!.length > 0;
 
+    // ── Pre-compute office candidate IDs (null = no filter, [] = empty = no data) ──
+    let officeCandidateIds: number[] | null = null;
+    if (office) {
+      const officeRows = await db.select({ id: candidates.id }).from(candidates).where(eq(candidates.office, office));
+      officeCandidateIds = officeRows.map((r) => r.id);
+    }
+    const hasOfficeFilter = officeCandidateIds !== null;
+    const hasOfficeCandidates = hasOfficeFilter && officeCandidateIds!.length > 0;
+
     // ── 1. FUNNEL: all-time stage distribution (not date-filtered)
     // The funnel shows the current state of every application in the pipeline,
     // regardless of when the candidate applied. Date range only affects the
     // other metrics (time-to-hire, weekly volume, etc.).
     const funnelConds: any[] = [];
     if (hasJobScope) funnelConds.push(inArray(applications.jobId, jobIds!));
+    if (hasOfficeCandidates) funnelConds.push(inArray(applications.candidateId, officeCandidateIds!));
 
     const byStageRaw = scoped && !hasJobScope
       ? []
@@ -556,6 +566,7 @@ export class DatabaseStorage implements IStorage {
       lte(applications.appliedAt, end),
     ];
     if (hasJobScope) metricConds.push(inArray(applications.jobId, jobIds!));
+    if (hasOfficeCandidates) metricConds.push(inArray(applications.candidateId, officeCandidateIds!));
 
     const metricRaw = scoped && !hasJobScope
       ? []
@@ -585,6 +596,7 @@ export class DatabaseStorage implements IStorage {
       lte(applications.appliedAt, end),
     ];
     if (hasJobScope) dateScopedConds.push(inArray(applications.jobId, jobIds!));
+    if (hasOfficeCandidates) dateScopedConds.push(inArray(applications.candidateId, officeCandidateIds!));
 
     // Fetch applications in range WITH their appliedAt so we can compute "applied" stage time
     const relevantApps = scoped && !hasJobScope
@@ -663,6 +675,7 @@ export class DatabaseStorage implements IStorage {
       lte(stageHistory.enteredAt, end),
     ];
     if (hasJobScope) hiredHistoryConds.push(inArray(stageHistory.jobId, jobIds!));
+    if (hasOfficeCandidates) hiredHistoryConds.push(inArray(stageHistory.candidateId, officeCandidateIds!));
 
     const hiredHistoryRaw = scoped && !hasJobScope
       ? []
@@ -709,6 +722,7 @@ export class DatabaseStorage implements IStorage {
       lte(stageHistory.enteredAt, end),
     ];
     if (hasJobScope) employedHistoryConds.push(inArray(stageHistory.jobId, jobIds!));
+    if (hasOfficeCandidates) employedHistoryConds.push(inArray(stageHistory.candidateId, officeCandidateIds!));
 
     const employedHistoryRows = scoped && !hasJobScope
       ? []
@@ -739,7 +753,9 @@ export class DatabaseStorage implements IStorage {
     }
 
     // ── 4. WEEKLY APPLICATIONS: within selected date range ────────────────────
-    const weeklyResult = await db.execute(sql`
+    const weeklyResult = hasOfficeFilter && !hasOfficeCandidates
+      ? { rows: [] }
+      : await db.execute(sql`
       SELECT
         TO_CHAR(DATE_TRUNC('week', applied_at), 'Mon DD') AS week,
         DATE_TRUNC('week', applied_at) AS week_start,
@@ -747,6 +763,7 @@ export class DatabaseStorage implements IStorage {
       FROM applications
       WHERE applied_at >= ${start} AND applied_at <= ${end}
       ${hasJobScope ? sql`AND job_id IN (${sql.join(jobIds!.map((id) => sql`${id}`), sql`, `)})` : scoped ? sql`AND 1=0` : sql``}
+      ${hasOfficeCandidates ? sql`AND candidate_id IN (${sql.join(officeCandidateIds!.map((id) => sql`${id}`), sql`, `)})` : sql``}
       GROUP BY DATE_TRUNC('week', applied_at)
       ORDER BY DATE_TRUNC('week', applied_at)
     `);
@@ -758,6 +775,7 @@ export class DatabaseStorage implements IStorage {
     // ── 5. OFFER ACCEPTANCE RATE within date range ────────────────────────────
     const offerConds: any[] = [gte(offers.createdAt, start), lte(offers.createdAt, end)];
     if (hasJobScope) offerConds.push(inArray(offers.jobId, jobIds!));
+    if (hasOfficeCandidates) offerConds.push(inArray(offers.candidateId, officeCandidateIds!));
 
     const offersByStatus = scoped && !hasJobScope
       ? []
@@ -776,6 +794,7 @@ export class DatabaseStorage implements IStorage {
     // ── 6. TOTAL INTERVIEWS & OFFERS within date range ────────────────────────
     const ivConds: any[] = [gte(interviews.createdAt, start), lte(interviews.createdAt, end)];
     if (hasJobScope) ivConds.push(inArray(interviews.jobId, jobIds!));
+    if (hasOfficeCandidates) ivConds.push(inArray(interviews.candidateId, officeCandidateIds!));
 
     const ivRow = scoped && !hasJobScope
       ? [{ count: 0 }]
@@ -809,23 +828,26 @@ export class DatabaseStorage implements IStorage {
           gte(applications.appliedAt, start),
           lte(applications.appliedAt, end),
         ];
+        if (hasOfficeCandidates) mgrAppConds.push(inArray(applications.candidateId, officeCandidateIds!));
         const mgrApps = await db.select().from(applications).where(and(...mgrAppConds));
 
         // Contract signed: first time entered ANY post-contract stage within date range
         // (hired, myk_training, account_setup, documents, employed) — handles direct skips (e.g. offer → myk_training)
         // Deduplicate by applicationId keeping earliest entry so back-and-forth moves don't inflate the count
         const POST_CONTRACT = ["hired", "myk_training", "account_setup", "documents", "employed"] as const;
+        const mgrHiredHistoryConds: any[] = [
+          inArray(stageHistory.toStatus, [...POST_CONTRACT]),
+          inArray(stageHistory.jobId, assignedJobs),
+          gte(stageHistory.enteredAt, start),
+          lte(stageHistory.enteredAt, end),
+          inArray(applications.status, [...POST_CONTRACT]),
+        ];
+        if (hasOfficeCandidates) mgrHiredHistoryConds.push(inArray(stageHistory.candidateId, officeCandidateIds!));
         const mgrHiredHistoryRaw = await db
           .select({ applicationId: stageHistory.applicationId, hiredAt: stageHistory.enteredAt })
           .from(stageHistory)
           .innerJoin(applications, eq(applications.id, stageHistory.applicationId))
-          .where(and(
-            inArray(stageHistory.toStatus, [...POST_CONTRACT]),
-            inArray(stageHistory.jobId, assignedJobs),
-            gte(stageHistory.enteredAt, start),
-            lte(stageHistory.enteredAt, end),
-            inArray(applications.status, [...POST_CONTRACT]),
-          ));
+          .where(and(...mgrHiredHistoryConds));
         // Keep only the earliest entry per application
         const mgrHiredMap = new Map<number, { applicationId: number; hiredAt: string | null }>();
         for (const row of mgrHiredHistoryRaw) {
@@ -860,6 +882,7 @@ export class DatabaseStorage implements IStorage {
           gte(interviews.startTime, start),
           lte(interviews.startTime, end),
         ];
+        if (hasOfficeCandidates) mgrIvConds.push(inArray(interviews.candidateId, officeCandidateIds!));
         const mgrInterviewRows = await db
           .select({
             category: candidates.category,
@@ -878,6 +901,7 @@ export class DatabaseStorage implements IStorage {
           gte(offers.createdAt, start),
           lte(offers.createdAt, end),
         ];
+        if (hasOfficeCandidates) mgrOfferConds.push(inArray(offers.candidateId, officeCandidateIds!));
         const mgrOfferRows = await db.select({ status: offers.status, count: count() })
           .from(offers).where(and(...mgrOfferConds)).groupBy(offers.status);
         const mgrOfferMap = Object.fromEntries(mgrOfferRows.map((r) => [r.status, r.count]));
@@ -886,30 +910,34 @@ export class DatabaseStorage implements IStorage {
 
         // Employed candidates: current status is "documents" or "employed"
         // Check current application status (not history) so moving a candidate back removes them from the count
+        const mgrEmployedConds: any[] = [
+          inArray(applications.jobId, assignedJobs),
+          inArray(applications.status, ["documents", "employed"]),
+          gte(applications.appliedAt, start),
+          lte(applications.appliedAt, end),
+        ];
+        if (hasOfficeCandidates) mgrEmployedConds.push(inArray(applications.candidateId, officeCandidateIds!));
         const mgrEmployedRaw = await db
           .select({ id: applications.id })
           .from(applications)
-          .where(and(
-            inArray(applications.jobId, assignedJobs),
-            inArray(applications.status, ["documents", "employed"]),
-            gte(applications.appliedAt, start),
-            lte(applications.appliedAt, end),
-          ));
+          .where(and(...mgrEmployedConds));
         const employedCount = mgrEmployedRaw.length;
 
         // Avg time to employ per manager: from appliedAt to when they first reached 'documents' stage
         // Deduplicate by applicationId — keep earliest entry to avoid inflating averages from stage bouncing
+        const mgrEmpHistConds: any[] = [
+          eq(stageHistory.toStatus, "documents"),
+          inArray(stageHistory.jobId, assignedJobs),
+          gte(stageHistory.enteredAt, start),
+          lte(stageHistory.enteredAt, end),
+          inArray(applications.status, ["documents", "employed"]),
+        ];
+        if (hasOfficeCandidates) mgrEmpHistConds.push(inArray(stageHistory.candidateId, officeCandidateIds!));
         const mgrEmployedHistoryRaw = await db
           .select({ applicationId: stageHistory.applicationId, employedAt: stageHistory.enteredAt })
           .from(stageHistory)
           .innerJoin(applications, eq(applications.id, stageHistory.applicationId))
-          .where(and(
-            eq(stageHistory.toStatus, "documents"),
-            inArray(stageHistory.jobId, assignedJobs),
-            gte(stageHistory.enteredAt, start),
-            lte(stageHistory.enteredAt, end),
-            inArray(applications.status, ["documents", "employed"]),
-          ));
+          .where(and(...mgrEmpHistConds));
         const mgrEmployedMap = new Map<number, { applicationId: number; employedAt: string | null }>();
         for (const row of mgrEmployedHistoryRaw) {
           const existing = mgrEmployedMap.get(row.applicationId);
@@ -966,6 +994,7 @@ export class DatabaseStorage implements IStorage {
           gte(applications.appliedAt, start),
           lte(applications.appliedAt, end),
         ];
+        if (hasOfficeCandidates) appConds.push(inArray(applications.candidateId, officeCandidateIds!));
         const jobApps = await db
           .select({ applications, candidate: candidates })
           .from(applications)
@@ -1010,6 +1039,7 @@ export class DatabaseStorage implements IStorage {
       lte(stageHistory.enteredAt, end),
     ];
     if (hasJobScope) rejConds.push(inArray(stageHistory.jobId, jobIds!));
+    if (hasOfficeCandidates) rejConds.push(inArray(stageHistory.candidateId, officeCandidateIds!));
 
     const rejAllRows = scoped && !hasJobScope
       ? []
@@ -1042,27 +1072,30 @@ export class DatabaseStorage implements IStorage {
     // ── 10. PASSIVE EMPLOYEES: became inactive within the date range ──────────────
     // Include employees with null passiveAt (set inactive before tracking existed) always,
     // and date-filtered ones within the selected range
-    const passiveConds = and(
+    const passiveCondsArr: any[] = [
       eq(employees.status, "inactive"),
       or(
         isNull(employees.passiveAt),
         and(gte(employees.passiveAt, start), lte(employees.passiveAt, end))
-      )
-    );
+      ),
+    ];
+    if (hasOfficeCandidates) passiveCondsArr.push(inArray(employees.candidateId, officeCandidateIds!));
 
-    const passiveRaw = await db
-      .select({
-        id: employees.id,
-        title: employees.title,
-        passiveAt: employees.passiveAt,
-        candidateName: candidates.name,
-        jobTitle: jobs.title,
-      })
-      .from(employees)
-      .leftJoin(candidates, eq(employees.candidateId, candidates.id))
-      .leftJoin(jobs, eq(employees.jobId, jobs.id))
-      .where(passiveConds)
-      .orderBy(desc(employees.passiveAt));
+    const passiveRaw = hasOfficeFilter && !hasOfficeCandidates
+      ? []
+      : await db
+          .select({
+            id: employees.id,
+            title: employees.title,
+            passiveAt: employees.passiveAt,
+            candidateName: candidates.name,
+            jobTitle: jobs.title,
+          })
+          .from(employees)
+          .leftJoin(candidates, eq(employees.candidateId, candidates.id))
+          .leftJoin(jobs, eq(employees.jobId, jobs.id))
+          .where(and(...passiveCondsArr))
+          .orderBy(desc(employees.passiveAt));
 
     const passiveEmployees: PassiveEmployee[] = passiveRaw.map((r) => ({
       id: r.id,
