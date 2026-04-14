@@ -542,7 +542,7 @@ export class DatabaseStorage implements IStorage {
     if (hasJobScope) funnelConds.push(inArray(applications.jobId, jobIds!));
     if (hasOfficeCandidates) funnelConds.push(inArray(applications.candidateId, officeCandidateIds!));
 
-    const byStageRaw = scoped && !hasJobScope
+    const byStageRaw = (scoped && !hasJobScope) || (hasOfficeFilter && !hasOfficeCandidates)
       ? []
       : funnelConds.length > 0
         ? await db
@@ -568,7 +568,7 @@ export class DatabaseStorage implements IStorage {
     if (hasJobScope) metricConds.push(inArray(applications.jobId, jobIds!));
     if (hasOfficeCandidates) metricConds.push(inArray(applications.candidateId, officeCandidateIds!));
 
-    const metricRaw = scoped && !hasJobScope
+    const metricRaw = (scoped && !hasJobScope) || (hasOfficeFilter && !hasOfficeCandidates)
       ? []
       : await db
           .select({ status: applications.status, count: count() })
@@ -599,7 +599,7 @@ export class DatabaseStorage implements IStorage {
     if (hasOfficeCandidates) dateScopedConds.push(inArray(applications.candidateId, officeCandidateIds!));
 
     // Fetch applications in range WITH their appliedAt so we can compute "applied" stage time
-    const relevantApps = scoped && !hasJobScope
+    const relevantApps = (scoped && !hasJobScope) || (hasOfficeFilter && !hasOfficeCandidates)
       ? []
       : await db
           .select({ id: applications.id, appliedAt: applications.appliedAt })
@@ -677,7 +677,7 @@ export class DatabaseStorage implements IStorage {
     if (hasJobScope) hiredHistoryConds.push(inArray(stageHistory.jobId, jobIds!));
     if (hasOfficeCandidates) hiredHistoryConds.push(inArray(stageHistory.candidateId, officeCandidateIds!));
 
-    const hiredHistoryRaw = scoped && !hasJobScope
+    const hiredHistoryRaw = (scoped && !hasJobScope) || (hasOfficeFilter && !hasOfficeCandidates)
       ? []
       : await db
           .select({ applicationId: stageHistory.applicationId, hiredAt: stageHistory.enteredAt })
@@ -724,7 +724,7 @@ export class DatabaseStorage implements IStorage {
     if (hasJobScope) employedHistoryConds.push(inArray(stageHistory.jobId, jobIds!));
     if (hasOfficeCandidates) employedHistoryConds.push(inArray(stageHistory.candidateId, officeCandidateIds!));
 
-    const employedHistoryRows = scoped && !hasJobScope
+    const employedHistoryRows = (scoped && !hasJobScope) || (hasOfficeFilter && !hasOfficeCandidates)
       ? []
       : await db
           .select({ applicationId: stageHistory.applicationId, employedAt: stageHistory.enteredAt })
@@ -777,7 +777,7 @@ export class DatabaseStorage implements IStorage {
     if (hasJobScope) offerConds.push(inArray(offers.jobId, jobIds!));
     if (hasOfficeCandidates) offerConds.push(inArray(offers.candidateId, officeCandidateIds!));
 
-    const offersByStatus = scoped && !hasJobScope
+    const offersByStatus = (scoped && !hasJobScope) || (hasOfficeFilter && !hasOfficeCandidates)
       ? []
       : await db
           .select({ status: offers.status, count: count() })
@@ -796,11 +796,11 @@ export class DatabaseStorage implements IStorage {
     if (hasJobScope) ivConds.push(inArray(interviews.jobId, jobIds!));
     if (hasOfficeCandidates) ivConds.push(inArray(interviews.candidateId, officeCandidateIds!));
 
-    const ivRow = scoped && !hasJobScope
+    const ivRow = (scoped && !hasJobScope) || (hasOfficeFilter && !hasOfficeCandidates)
       ? [{ count: 0 }]
       : await db.select({ count: count() }).from(interviews).where(and(...ivConds));
 
-    const ofRow = scoped && !hasJobScope
+    const ofRow = (scoped && !hasJobScope) || (hasOfficeFilter && !hasOfficeCandidates)
       ? [{ count: 0 }]
       : await db.select({ count: count() }).from(offers).where(and(...offerConds));
 
@@ -1041,7 +1041,7 @@ export class DatabaseStorage implements IStorage {
     if (hasJobScope) rejConds.push(inArray(stageHistory.jobId, jobIds!));
     if (hasOfficeCandidates) rejConds.push(inArray(stageHistory.candidateId, officeCandidateIds!));
 
-    const rejAllRows = scoped && !hasJobScope
+    const rejAllRows = (scoped && !hasJobScope) || (hasOfficeFilter && !hasOfficeCandidates)
       ? []
       : await db
           .select({ applicationId: stageHistory.applicationId, fromStatus: stageHistory.fromStatus, enteredAt: stageHistory.enteredAt })
