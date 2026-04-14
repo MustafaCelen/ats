@@ -25,7 +25,7 @@ import {
   Trash2, Send, User, Pencil, MapPin, Building2,
   FileCheck, Globe, Star, Award, Users, TrendingUp,
   ExternalLink, Calendar, FileText, CheckCircle2, Circle, AtSign, History, Clock,
-  Key, UserCheck, BadgeCheck,
+  Key, UserCheck, BadgeCheck, RefreshCcw, XCircle,
 } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import {
@@ -214,11 +214,16 @@ export default function CandidateDetail() {
     enabled: !!candidateId,
   });
 
+  const { data: allInterviews } = useQuery<any[]>({
+    queryKey: ["/api/interviews"],
+  });
+  const candidateInterviews = (allInterviews ?? []).filter((iv) => iv.candidateId === candidateId);
+
   const { data: user } = useAuth();
   const [, navigate] = useLocation();
   const { mutate: deleteCandidate, isPending: isDeleting } = useDeleteCandidate();
   const [noteText, setNoteText] = useState("");
-  const [activeTab, setActiveTab] = useState<"overview" | "applications" | "notes" | "history">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "applications" | "interviews" | "notes" | "history">("overview");
   const [editOpen, setEditOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
@@ -364,7 +369,7 @@ export default function CandidateDetail() {
 
         {/* ── Tabs ── */}
         <div className="flex gap-1 border-b border-border">
-          {(["overview", "applications", "notes", "history"] as const).map((tab) => (
+          {(["overview", "applications", "interviews", "notes", "history"] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -373,9 +378,12 @@ export default function CandidateDetail() {
               }`}
               data-testid={`tab-${tab}`}
             >
-              {tab === "overview" ? "Profil" : tab === "applications" ? "Başvurular" : tab === "notes" ? "Notlar" : "Geçmiş"}
+              {tab === "overview" ? "Profil" : tab === "applications" ? "Başvurular" : tab === "interviews" ? "Randevular" : tab === "notes" ? "Notlar" : "Geçmiş"}
               {tab === "applications" && applications && (
                 <span className="ml-1.5 text-xs bg-muted px-1.5 py-0.5 rounded-full">{applications.length}</span>
+              )}
+              {tab === "interviews" && candidateInterviews.length > 0 && (
+                <span className="ml-1.5 text-xs bg-muted px-1.5 py-0.5 rounded-full">{candidateInterviews.length}</span>
               )}
               {tab === "notes" && notes && notes.length > 0 && (
                 <span className="ml-1.5 text-xs bg-muted px-1.5 py-0.5 rounded-full">{notes.length}</span>
@@ -695,6 +703,75 @@ export default function CandidateDetail() {
                   )}
                 </div>
               ))
+            )}
+          </div>
+        )}
+
+        {/* ── Interviews Tab ── */}
+        {activeTab === "interviews" && (
+          <div className="space-y-3">
+            {candidateInterviews.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground text-sm">
+                <Calendar className="h-8 w-8 opacity-30 mx-auto mb-2" />
+                Bu adayın randevusu bulunmuyor.
+              </div>
+            ) : (
+              [...candidateInterviews]
+                .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime())
+                .map((iv) => {
+                  const statusMeta: Record<string, { label: string; color: string; icon: any }> = {
+                    scheduled: { label: "Planlandı",   color: "bg-blue-100 text-blue-700 border-blue-200",     icon: Calendar },
+                    completed: { label: "Tamamlandı",  color: "bg-emerald-100 text-emerald-700 border-emerald-200", icon: CheckCircle2 },
+                    cancelled: { label: "İptal Edildi", color: "bg-red-100 text-red-700 border-red-200",        icon: XCircle },
+                  };
+                  const cfg = statusMeta[iv.status] ?? statusMeta.scheduled;
+                  const StatusIcon = cfg.icon;
+                  return (
+                    <div key={iv.id} className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-2" data-testid={`iv-row-${iv.id}`}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap mb-1">
+                            <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full border ${cfg.color}`}>
+                              <StatusIcon className="h-3 w-3" />
+                              {cfg.label}
+                            </span>
+                            {iv.rescheduleCount > 0 && (
+                              <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full border bg-violet-50 text-violet-700 border-violet-200">
+                                <RefreshCcw className="h-3 w-3" />
+                                {iv.rescheduleCount}× ertelendi
+                              </span>
+                            )}
+                          </div>
+                          <p className="font-medium text-foreground text-sm">{iv.title}</p>
+                          {iv.job && (
+                            <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
+                              <Briefcase className="h-3 w-3 shrink-0" />
+                              {iv.job.title}
+                            </p>
+                          )}
+                        </div>
+                        <div className="text-right shrink-0">
+                          <p className="text-xs font-medium text-foreground">
+                            {format(new Date(iv.startTime), "dd MMM yyyy")}
+                          </p>
+                          <p className="text-xs text-muted-foreground flex items-center gap-1 justify-end mt-0.5">
+                            <Clock className="h-3 w-3" />
+                            {format(new Date(iv.startTime), "HH:mm")} – {format(new Date(iv.endTime), "HH:mm")}
+                          </p>
+                        </div>
+                      </div>
+                      {iv.location && (
+                        <p className="text-xs text-muted-foreground flex items-center gap-1">
+                          <MapPin className="h-3 w-3 shrink-0" />
+                          {iv.location}
+                        </p>
+                      )}
+                      {iv.notes && (
+                        <p className="text-xs text-muted-foreground italic border-t border-border pt-2 mt-1">{iv.notes}</p>
+                      )}
+                    </div>
+                  );
+                })
             )}
           </div>
         )}
