@@ -805,11 +805,13 @@ export class DatabaseStorage implements IStorage {
       : await db.select({ count: count() }).from(offers).where(and(...offerConds));
 
     // ── 7. HIRING MANAGER EFFICIENCY within date range ────────────────────────
-    const managerIdRows = hasJobScope
-      ? await db.select({ userId: jobAssignments.userId }).from(jobAssignments).where(inArray(jobAssignments.jobId, jobIds!))
-      : scoped
-        ? []
-        : await db.select({ userId: users.id }).from(users).where(eq(users.role, "hiring_manager"));
+    const managerIdRows = (hasOfficeFilter && !hasOfficeCandidates)
+      ? []
+      : hasJobScope
+        ? await db.select({ userId: jobAssignments.userId }).from(jobAssignments).where(inArray(jobAssignments.jobId, jobIds!))
+        : scoped
+          ? []
+          : await db.select({ userId: users.id }).from(users).where(eq(users.role, "hiring_manager"));
 
     // Deduplicate manager IDs
     const uniqueManagerIds = Array.from(new Set(managerIdRows.map((m) => m.userId)));
