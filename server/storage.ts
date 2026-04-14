@@ -980,11 +980,13 @@ export class DatabaseStorage implements IStorage {
     );
 
     // ── 8. ACTIVE JOB PERFORMANCE within date range ───────────────────────────
-    const activeJobRows = hasJobScope
-      ? await db.select().from(jobs).where(inArray(jobs.id, jobIds!))
-      : scoped
-        ? []
-        : await db.select().from(jobs).where(eq(jobs.status, "open"));
+    const activeJobRows = (hasOfficeFilter && !hasOfficeCandidates)
+      ? []
+      : hasJobScope
+        ? await db.select().from(jobs).where(inArray(jobs.id, jobIds!))
+        : scoped
+          ? []
+          : await db.select().from(jobs).where(eq(jobs.status, "open"));
 
     const activeJobPerformance = await Promise.all(
       activeJobRows.map(async (job) => {
