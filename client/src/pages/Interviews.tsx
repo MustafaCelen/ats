@@ -20,6 +20,7 @@ import { format, isPast, isFuture } from "date-fns";
 import {
   Calendar, Clock, MapPin, Plus, CheckCircle2, XCircle, Trash2,
   Video, AlertCircle, CalendarPlus, CalendarCheck, Star, MessageSquarePlus,
+  RefreshCcw,
 } from "lucide-react";
 import { StarPicker, ScoreBadge } from "@/components/ScoreBadge";
 import { MentionTextarea } from "@/components/MentionTextarea";
@@ -103,6 +104,17 @@ function useSyncCalendar() {
   });
 }
 
+function useRescheduleInterview() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, startTime, endTime }: { id: number; startTime: string; endTime: string }) =>
+      apiRequest("PATCH", `/api/interviews/${id}`, { startTime, endTime }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/interviews"] });
+    },
+  });
+}
+
 export default function Interviews() {
   const { data: interviews, isLoading } = useInterviews();
   const { data: authUser } = useAuth();
@@ -110,6 +122,7 @@ export default function Interviews() {
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [evaluateTarget, setEvaluateTarget] = useState<InterviewWithRelations | null>(null);
   const [completeTarget, setCompleteTarget] = useState<InterviewWithRelations | null>(null);
+  const [rescheduleTarget, setRescheduleTarget] = useState<InterviewWithRelations | null>(null);
   const { mutate: updateStatus } = useUpdateInterview();
   const { mutate: deleteInterview } = useDeleteInterview();
   const { mutate: syncCalendar, isPending: isSyncing } = useSyncCalendar();
@@ -276,6 +289,12 @@ export default function Interviews() {
                             <AlertCircle className="h-3 w-3" /> Overdue
                           </span>
                         )}
+                        {(iv as any).rescheduleCount > 0 && (
+                          <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full border bg-violet-50 text-violet-700 border-violet-200" data-testid={`badge-reschedule-count-${iv.id}`}>
+                            <RefreshCcw className="h-3 w-3" />
+                            {(iv as any).rescheduleCount}× ertelendi
+                          </span>
+                        )}
                       </div>
                       <h3 className="font-semibold text-foreground">{iv.title}</h3>
                       <p className="text-sm text-muted-foreground">
@@ -343,6 +362,16 @@ export default function Interviews() {
                           <Button
                             size="sm"
                             variant="outline"
+                            className="text-xs h-8 border-violet-200 text-violet-700 hover:bg-violet-50"
+                            onClick={() => setRescheduleTarget(iv)}
+                            data-testid={`btn-reschedule-interview-${iv.id}`}
+                          >
+                            <RefreshCcw className="mr-1 h-3.5 w-3.5" />
+                            Ertele
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
                             className="text-xs h-8"
                             onClick={() => handleStatusChange(iv.id, "cancelled", iv.title)}
                             data-testid={`btn-cancel-interview-${iv.id}`}
@@ -387,6 +416,11 @@ export default function Interviews() {
         interview={completeTarget}
         open={!!completeTarget}
         onOpenChange={(v) => { if (!v) setCompleteTarget(null); }}
+      />
+      <RescheduleInterviewDialog
+        interview={rescheduleTarget}
+        open={!!rescheduleTarget}
+        onOpenChange={(v) => { if (!v) setRescheduleTarget(null); }}
       />
       <ScheduleInterviewDialog open={scheduleOpen} onOpenChange={setScheduleOpen} />
       <InterviewRateNoteDialog
@@ -484,6 +518,110 @@ function CompleteInterviewDialog({
               data-testid="btn-confirm-complete-interview"
             >
               {completing || moving ? "Saving..." : "Complete & Move"}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function RescheduleInterviewDialog({
+  interview,
+  open,
+  onOpenChange,
+}: {
+  interview: InterviewWithRelations | null;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+}) {
+  const { toast } = useToast();
+  const { mutate: reschedule, isPending } = useRescheduleInterview();
+  const [startTime, setStartTime] = useState("");
+  const [endTime, setEndTime] = useState("");
+
+  const toLocalInput = (d: Date) => {
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
+  const handleOpen = (v: boolean) => {
+    if (v && interview) {
+      setStartTime(toLocalInput(new Date(interview.startTime)));
+      setEndTime(toLocalInput(new Date(interview.endTime)));
+    }
+    onOpenChange(v);
+  };
+
+  const handleConfirm = () => {
+    if (!interview || !startTime || !endTime) return;
+    reschedule(
+      { id: interview.id, startTime, endTime },
+      {
+        onSuccess: () => {
+          toast({
+            title: "Randevu ertelendi",
+            description: `${interview.candidate?.name} için yeni tarih kaydedildi.`,
+          });
+          onOpenChange(false);
+        },
+        onError: () => {
+          toast({ title: "Hata", description: "Randevu güncellenemedi.", variant: "destructive" });
+        },
+      }
+    );
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpen}>
+      <DialogContent className="max-w-sm" aria-describedby="reschedule-iv-desc">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <RefreshCcw className="h-4 w-4 text-violet-600" />
+            Randevuyu Ertele
+          </DialogTitle>
+          <p id="reschedule-iv-desc" className="text-sm text-muted-foreground">
+            {interview?.candidate?.name} · {interview?.title}
+          </p>
+        </DialogHeader>
+
+        <div className="space-y-4 pt-2">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label className="text-xs font-medium mb-1.5 block">Yeni Başlangıç *</Label>
+              <Input
+                type="datetime-local"
+                value={startTime}
+                onChange={(e) => setStartTime(e.target.value)}
+                data-testid="input-reschedule-start"
+              />
+            </div>
+            <div>
+              <Label className="text-xs font-medium mb-1.5 block">Yeni Bitiş *</Label>
+              <Input
+                type="datetime-local"
+                value={endTime}
+                onChange={(e) => setEndTime(e.target.value)}
+                data-testid="input-reschedule-end"
+              />
+            </div>
+          </div>
+          {(interview as any)?.rescheduleCount > 0 && (
+            <p className="text-xs text-muted-foreground">
+              Bu randevu daha önce {(interview as any).rescheduleCount} kez ertelendi.
+            </p>
+          )}
+          <div className="flex gap-2">
+            <Button variant="outline" className="flex-1" onClick={() => onOpenChange(false)}>
+              İptal
+            </Button>
+            <Button
+              className="flex-1 bg-violet-600 hover:bg-violet-700 text-white"
+              onClick={handleConfirm}
+              disabled={isPending || !startTime || !endTime}
+              data-testid="btn-confirm-reschedule"
+            >
+              {isPending ? "Kaydediliyor..." : "Ertele & Kaydet"}
             </Button>
           </div>
         </div>

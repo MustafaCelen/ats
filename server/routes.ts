@@ -6,7 +6,7 @@ import { requireAuth, requireAdmin, requireHiringManagerOrAdmin } from "./auth";
 import { api } from "@shared/routes";
 import { z } from "zod";
 import { insertInterviewSchema, insertOfferSchema, type InsertTask, TASK_STATUSES } from "@shared/schema";
-import { getAuthUrl, createOAuth2Client, createCalendarEvent, deleteCalendarEvent } from "./google";
+import { getAuthUrl, createOAuth2Client, createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from "./google";
 
 // Scoping helper:
 //   admin      → undefined (all jobs)
@@ -576,11 +576,54 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.patch(api.interviews.update.path, requireAuth, async (req, res) => {
-    const { status } = req.body;
+    const id = Number(req.params.id);
+    const { status, startTime, endTime } = req.body;
+
+    // Reschedule: update times + increment rescheduleCount + sync calendar
+    if (startTime && endTime) {
+      if (req.user!.role === "assistant") {
+        return res.status(403).json({ message: "Assistants cannot reschedule interviews" });
+      }
+      const updated = await storage.updateInterview(id, {
+        startTime: new Date(startTime),
+        endTime: new Date(endTime),
+      });
+      if (!updated) return res.status(404).json({ message: "Not found" });
+
+      // Update Google Calendar event if one is linked
+      if (updated.calendarEventId) {
+        try {
+          const user = req.user!;
+          const full = await storage.getInterview(id);
+          const candidate = full?.candidate;
+          const job = full?.job;
+          const title = `Randevu: ${candidate?.name ?? "Aday"} — ${job?.title ?? ""}`;
+          const assignees = await storage.getJobAssignees(updated.jobId);
+          const attendeeEmails = [
+            ...(candidate?.email ? [candidate.email] : []),
+            ...assignees.map((a) => a.email).filter(Boolean),
+          ] as string[];
+          await updateCalendarEvent(user, updated.calendarEventId, {
+            title,
+            description: updated.notes ?? undefined,
+            startTime: new Date(startTime),
+            endTime: new Date(endTime),
+            location: updated.location ?? undefined,
+            attendeeEmails,
+          });
+        } catch (err) {
+          console.error("Calendar update failed (non-fatal):", err);
+        }
+      }
+
+      return res.json(updated);
+    }
+
+    // Status update (existing behaviour)
     if (req.user!.role === "assistant" && status !== "cancelled") {
       return res.status(403).json({ message: "Assistants can only cancel interviews" });
     }
-    const interview = await storage.updateInterviewStatus(Number(req.params.id), status);
+    const interview = await storage.updateInterviewStatus(id, status);
     if (!interview) return res.status(404).json({ message: "Not found" });
     res.json(interview);
   });

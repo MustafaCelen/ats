@@ -84,6 +84,36 @@ export async function createCalendarEvent(user: User, params: {
   return result.data.id ?? null;
 }
 
+export async function updateCalendarEvent(user: User, eventId: string, params: {
+  title: string;
+  description?: string;
+  startTime: Date;
+  endTime: Date;
+  location?: string;
+  attendeeEmails?: string[];
+}): Promise<void> {
+  if (!user.googleAccessToken) return;
+  const auth = await getOAuth2ClientForUser(user);
+  const calendar = google.calendar({ version: "v3", auth });
+  const validEmails = (params.attendeeEmails ?? []).filter(Boolean);
+  const event: any = {
+    summary: params.title,
+    description: params.description,
+    location: params.location,
+    start: { dateTime: params.startTime.toISOString() },
+    end: { dateTime: params.endTime.toISOString() },
+  };
+  if (validEmails.length > 0) {
+    event.attendees = validEmails.map((email) => ({ email }));
+  }
+  await calendar.events.patch({
+    calendarId: "primary",
+    eventId,
+    requestBody: event,
+    sendUpdates: validEmails.length > 0 ? "all" : "none",
+  });
+}
+
 export async function deleteCalendarEvent(user: User, eventId: string): Promise<void> {
   if (!user.googleAccessToken) return;
   const auth = await getOAuth2ClientForUser(user);

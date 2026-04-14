@@ -103,6 +103,7 @@ export interface IStorage {
   getInterviews(applicationId?: number, jobIds?: number[]): Promise<InterviewWithRelations[]>;
   createInterview(interview: InsertInterview): Promise<Interview>;
   updateInterviewStatus(id: number, status: string): Promise<Interview | undefined>;
+  updateInterview(id: number, data: { startTime: Date; endTime: Date }): Promise<Interview | undefined>;
   deleteInterview(id: number): Promise<void>;
   getOffers(applicationId?: number, jobIds?: number[]): Promise<OfferWithRelations[]>;
   createOffer(offer: InsertOffer): Promise<Offer>;
@@ -400,6 +401,14 @@ export class DatabaseStorage implements IStorage {
   }
   async updateInterviewStatus(id: number, status: string): Promise<Interview | undefined> {
     const [iv] = await db.update(interviews).set({ status }).where(eq(interviews.id, id)).returning();
+    return iv;
+  }
+  async updateInterview(id: number, data: { startTime: Date; endTime: Date }): Promise<Interview | undefined> {
+    const [iv] = await db
+      .update(interviews)
+      .set({ startTime: data.startTime, endTime: data.endTime, rescheduleCount: sql`${interviews.rescheduleCount} + 1` })
+      .where(eq(interviews.id, id))
+      .returning();
     return iv;
   }
   async deleteInterview(id: number): Promise<void> {

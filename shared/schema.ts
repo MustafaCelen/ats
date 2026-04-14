@@ -174,6 +174,7 @@ export const interviews = pgTable("interviews", {
   notes: text("notes"),
   interviewerName: text("interviewer_name"),
   calendarEventId: text("calendar_event_id"),
+  rescheduleCount: integer("reschedule_count").notNull().default(0),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
