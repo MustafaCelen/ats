@@ -277,7 +277,7 @@ export default function JobDetails() {
         {/* List view */}
         {viewMode === "list" && (
           <ApplicationListView
-            applications={(applications ?? []).filter((a) => listStageFilter === "all" || a.status === listStageFilter)}
+            applications={(applications ?? []).filter((a) => a.status !== "employed" && (listStageFilter === "all" || a.status === listStageFilter))}
             completingHiring={completingHiring}
             onStatusChange={handleStatusChange}
             onRateNote={(app) => setRateNoteApp(app)}
