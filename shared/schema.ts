@@ -1,4 +1,4 @@
-import { pgTable, text, serial, timestamp, integer, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, timestamp, integer, boolean, numeric } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { relations } from "drizzle-orm";
@@ -239,6 +239,7 @@ export const employees = pgTable("employees", {
   uretkenlikKocluguOran: text("uretkenlik_koclugu_oran"), // 5% | 10%
   capMonth: text("cap_month"),  // e.g. "2025-03"
   capValue: text("cap_value"),  // cap amount/target
+  capManualAdjustment: numeric("cap_manual_adjustment", { precision: 15, scale: 2 }).default("0"),
   // Billing / invoice info
   billingName: text("billing_name"),          // Şirket / Şahıs İsmi
   billingAddress: text("billing_address"),    // Fatura Adresi
@@ -329,6 +330,89 @@ export const candidateNotesRelations = relations(candidateNotes, ({ one }) => ({
 export const applicationDocumentsRelations = relations(applicationDocuments, ({ one }) => ({
   application: one(applications, { fields: [applicationDocuments.applicationId], references: [applications.id] }),
 }));
+
+// ── Cap Settings ─────────────────────────────────────────────────────────────
+export const capSettings = pgTable("cap_settings", {
+  id: serial("id").primaryKey(),
+  year: integer("year").notNull().unique(),
+  amount: numeric("amount", { precision: 15, scale: 2 }).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type CapSetting = typeof capSettings.$inferSelect;
+
+// ── Closings ──────────────────────────────────────────────────────────────────
+export const DEAL_TYPES = ["Konut", "Ticari", "Arsa", "Lüks", "Kiralık"] as const;
+export type DealType = (typeof DEAL_TYPES)[number];
+
+export const closings = pgTable("closings", {
+  id: serial("id").primaryKey(),
+  propertyAddress: text("property_address").notNull(),
+  dealType: text("deal_type").notNull().default("Konut"),
+  saleValue: numeric("sale_value", { precision: 15, scale: 2 }).notNull(),
+  closingDate: timestamp("closing_date").notNull(),
+  buyerName: text("buyer_name"),
+  sellerName: text("seller_name"),
+  notes: text("notes"),
+  createdByUserId: integer("created_by_user_id"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type Closing = typeof closings.$inferSelect;
+
+export const closingSides = pgTable("closing_sides", {
+  id: serial("id").primaryKey(),
+  closingId: integer("closing_id").notNull(),
+  sideType: text("side_type").notNull(), // "buyer" | "seller"
+  bhbTotal: numeric("bhb_total", { precision: 15, scale: 2 }).notNull(),
+});
+
+export type ClosingSide = typeof closingSides.$inferSelect;
+
+export const closingAgents = pgTable("closing_agents", {
+  id: serial("id").primaryKey(),
+  closingSideId: integer("closing_side_id").notNull(),
+  employeeId: integer("employee_id").notNull(),
+  splitPercentage: numeric("split_percentage", { precision: 5, scale: 2 }).notNull(),
+  bhbShare: numeric("bhb_share", { precision: 15, scale: 2 }).notNull(),
+  mainBranchShare: numeric("main_branch_share", { precision: 15, scale: 2 }).notNull(),
+  marketCenterDue: numeric("market_center_due", { precision: 15, scale: 2 }).notNull(),
+  marketCenterActual: numeric("market_center_actual", { precision: 15, scale: 2 }).notNull(),
+  ukShare: numeric("uk_share", { precision: 15, scale: 2 }).notNull().default("0"),
+  employeeNet: numeric("employee_net", { precision: 15, scale: 2 }).notNull(),
+  contractTypeSnapshot: text("contract_type_snapshot"),
+  ukRateSnapshot: numeric("uk_rate_snapshot", { precision: 5, scale: 2 }).notNull().default("0"),
+  capAmountApplied: numeric("cap_amount_applied", { precision: 15, scale: 2 }),
+  capUsedBefore: numeric("cap_used_before", { precision: 15, scale: 2 }).notNull().default("0"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type ClosingAgent = typeof closingAgents.$inferSelect;
+
+export interface CapStatus {
+  employeeId: number;
+  /** null = no cap configured for this year (unlimited) */
+  capAmount: number | null;
+  capUsed: number;
+  /** null = unlimited (no cap configured) */
+  capRemaining: number | null;
+  periodStart: Date;
+  capYear: number;
+}
+
+export interface ClosingAgentWithEmployee extends ClosingAgent {
+  employeeName?: string;
+  candidateName?: string;
+}
+
+export interface ClosingSideWithAgents extends ClosingSide {
+  agents: ClosingAgentWithEmployee[];
+}
+
+export interface ClosingWithDetails extends Closing {
+  sides: ClosingSideWithAgents[];
+  totalAgentNet: number;
+}
 
 // Insert schemas
 export const insertJobSchema = createInsertSchema(jobs).omit({ id: true, createdAt: true });

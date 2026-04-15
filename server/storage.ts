@@ -2,6 +2,7 @@ import { db } from "./db";
 import {
   jobs, candidates, applications, stageHistory, interviews, offers, candidateNotes,
   users, jobAssignments, applicationDocuments, tasks, employees,
+  capSettings, closings, closingSides, closingAgents,
   APPLICATION_STAGES,
   type Job, type InsertJob,
   type Candidate, type InsertCandidate,
@@ -14,6 +15,8 @@ import {
   type ApplicationDocuments,
   type Task, type InsertTask,
   type Employee, type InsertEmployee, type EmployeeWithRelations,
+  type CapSetting, type Closing, type ClosingSide, type ClosingAgent,
+  type CapStatus, type ClosingWithDetails,
 } from "@shared/schema";
 import { eq, desc, count, sql, gte, lte, and, or, isNull, inArray, notInArray } from "drizzle-orm";
 import { differenceInDays } from "date-fns";
@@ -127,6 +130,29 @@ export interface IStorage {
   createEmployee(data: InsertEmployee): Promise<Employee>;
   updateEmployee(id: number, data: Partial<InsertEmployee>): Promise<Employee | undefined>;
   deleteEmployee(id: number): Promise<void>;
+  updateEmployeeCapAdjustment(id: number, amount: string): Promise<void>;
+  getCapSettings(): Promise<CapSetting[]>;
+  upsertCapSetting(year: number, amount: string): Promise<CapSetting>;
+  deleteCapSetting(id: number): Promise<void>;
+  getEmployeeCapStatus(employeeId: number): Promise<CapStatus | null>;
+  getAllEmployeesCapStatus(): Promise<Record<number, CapStatus>>;
+  getClosings(): Promise<ClosingWithDetails[]>;
+  getClosing(id: number): Promise<ClosingWithDetails | null>;
+  createClosing(data: {
+    propertyAddress: string;
+    dealType: string;
+    saleValue: string;
+    closingDate: Date;
+    buyerName?: string | null;
+    sellerName?: string | null;
+    notes?: string | null;
+    createdByUserId?: number | null;
+    sides: Array<{
+      sideType: string;
+      agents: Array<{ employeeId: number; splitPercentage: string }>;
+    }>;
+  }): Promise<Closing>;
+  deleteClosing(id: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1349,6 +1375,255 @@ export class DatabaseStorage implements IStorage {
 
   async deleteTask(id: number): Promise<void> {
     await db.delete(tasks).where(eq(tasks.id, id));
+  }
+
+  async updateEmployeeCapAdjustment(id: number, amount: string): Promise<void> {
+    await db.update(employees).set({ capManualAdjustment: amount } as any).where(eq(employees.id, id));
+  }
+
+  async getCapSettings(): Promise<CapSetting[]> {
+    return db.select().from(capSettings).orderBy(capSettings.year);
+  }
+
+  async upsertCapSetting(year: number, amount: string): Promise<CapSetting> {
+    const existing = await db.select().from(capSettings).where(eq(capSettings.year, year));
+    if (existing.length > 0) {
+      const [updated] = await db.update(capSettings).set({ amount }).where(eq(capSettings.year, year)).returning();
+      return updated;
+    }
+    const [created] = await db.insert(capSettings).values({ year, amount }).returning();
+    return created;
+  }
+
+  async deleteCapSetting(id: number): Promise<void> {
+    await db.delete(capSettings).where(eq(capSettings.id, id));
+  }
+
+  async getEmployeeCapStatus(employeeId: number): Promise<CapStatus | null> {
+    const emp = await this.getEmployee(employeeId);
+    if (!emp || !emp.capMonth) return null;
+
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1; // 1-based
+
+    // Parse month from capMonth (format "YYYY-MM")
+    const parts = emp.capMonth.split("-");
+    const capMonthNum = parseInt(parts[1] ?? parts[0], 10);
+
+    let capYear: number;
+    if (currentMonth >= capMonthNum) {
+      capYear = currentYear;
+    } else {
+      capYear = currentYear - 1;
+    }
+
+    const periodStart = new Date(capYear, capMonthNum - 1, 1);
+
+    // Get global cap amount for capYear (null = no cap configured = unlimited)
+    const [capRow] = await db.select().from(capSettings).where(eq(capSettings.year, capYear));
+    const capAmount: number | null = capRow ? parseFloat(capRow.amount) : null;
+
+    // Sum marketCenterActual from closingAgents for this employee in current period
+    const agentRows = await db
+      .select({ marketCenterActual: closingAgents.marketCenterActual })
+      .from(closingAgents)
+      .innerJoin(closingSides, eq(closingAgents.closingSideId, closingSides.id))
+      .innerJoin(closings, eq(closingSides.closingId, closings.id))
+      .where(
+        and(
+          eq(closingAgents.employeeId, employeeId),
+          gte(closings.closingDate, periodStart)
+        )
+      );
+
+    const capUsedFromClosings = agentRows.reduce((sum, r) => sum + parseFloat(r.marketCenterActual ?? "0"), 0);
+    const manualAdj = parseFloat((emp as any).capManualAdjustment ?? "0");
+    const capUsed = capUsedFromClosings + manualAdj;
+    // null = unlimited (no cap configured for the year)
+    const capRemaining: number | null = capAmount === null ? null : Math.max(0, capAmount - capUsed);
+
+    return { employeeId, capAmount, capUsed, capRemaining, periodStart, capYear };
+  }
+
+  async getAllEmployeesCapStatus(): Promise<Record<number, CapStatus>> {
+    const allEmployees = await this.getEmployees();
+    const active = allEmployees.filter((e) => e.status === "active");
+    const results = await Promise.all(active.map((e) => this.getEmployeeCapStatus(e.id)));
+    const record: Record<number, CapStatus> = {};
+    for (let i = 0; i < active.length; i++) {
+      const status = results[i];
+      if (status) record[active[i].id] = status;
+    }
+    return record;
+  }
+
+  private async buildClosingWithDetails(closing: Closing): Promise<ClosingWithDetails> {
+    const sides = await db.select().from(closingSides).where(eq(closingSides.closingId, closing.id));
+    const sidesWithAgents = await Promise.all(
+      sides.map(async (side) => {
+        const agents = await db
+          .select({ agent: closingAgents, candidate: candidates })
+          .from(closingAgents)
+          .leftJoin(employees, eq(closingAgents.employeeId, employees.id))
+          .leftJoin(candidates, eq(employees.candidateId, candidates.id))
+          .where(eq(closingAgents.closingSideId, side.id));
+        return {
+          ...side,
+          agents: agents.map((r) => ({
+            ...r.agent,
+            employeeName: r.candidate?.name ?? undefined,
+            candidateName: r.candidate?.name ?? undefined,
+          })),
+        };
+      })
+    );
+
+    const totalAgentNet = sidesWithAgents.reduce((sum, side) =>
+      sum + side.agents.reduce((s, a) => s + parseFloat(a.employeeNet ?? "0"), 0), 0
+    );
+
+    return { ...closing, sides: sidesWithAgents, totalAgentNet };
+  }
+
+  async getClosings(): Promise<ClosingWithDetails[]> {
+    const all = await db.select().from(closings).orderBy(desc(closings.closingDate));
+    return Promise.all(all.map((c) => this.buildClosingWithDetails(c)));
+  }
+
+  async getClosing(id: number): Promise<ClosingWithDetails | null> {
+    const [closing] = await db.select().from(closings).where(eq(closings.id, id));
+    if (!closing) return null;
+    return this.buildClosingWithDetails(closing);
+  }
+
+  async createClosing(data: {
+    propertyAddress: string;
+    dealType: string;
+    saleValue: string;
+    closingDate: Date;
+    buyerName?: string | null;
+    sellerName?: string | null;
+    notes?: string | null;
+    createdByUserId?: number | null;
+    sides: Array<{
+      sideType: string;
+      agents: Array<{ employeeId: number; splitPercentage: string }>;
+    }>;
+  }): Promise<Closing> {
+    const saleValue = parseFloat(data.saleValue);
+
+    // Pre-calculate cap statuses for all involved employees
+    const allEmployeeIds = Array.from(new Set(data.sides.flatMap((s) => s.agents.map((a) => a.employeeId))));
+    const capStatusMap: Record<number, CapStatus | null> = {};
+    for (const empId of allEmployeeIds) {
+      capStatusMap[empId] = await this.getEmployeeCapStatus(empId);
+    }
+
+    // Fetch all employee records
+    const empMap: Record<number, EmployeeWithRelations> = {};
+    for (const empId of allEmployeeIds) {
+      const emp = await this.getEmployee(empId);
+      if (emp) empMap[empId] = emp;
+    }
+
+    // runningCap tracks how much cap has been used within this closing (buyer processed before seller)
+    const runningCapUsed: Record<number, number> = {};
+    for (const empId of allEmployeeIds) {
+      runningCapUsed[empId] = capStatusMap[empId]?.capUsed ?? 0;
+    }
+
+    return db.transaction(async (tx) => {
+      const [closing] = await tx.insert(closings).values({
+        propertyAddress: data.propertyAddress,
+        dealType: data.dealType,
+        saleValue: data.saleValue,
+        closingDate: data.closingDate,
+        buyerName: data.buyerName ?? null,
+        sellerName: data.sellerName ?? null,
+        notes: data.notes ?? null,
+        createdByUserId: data.createdByUserId ?? null,
+      }).returning();
+
+      // Process buyer side before seller side
+      const sortedSides = [...data.sides].sort((a, b) => {
+        if (a.sideType === "buyer") return -1;
+        if (b.sideType === "buyer") return 1;
+        return 0;
+      });
+
+      for (const side of sortedSides) {
+        // BHB = 2% of saleValue per side
+        const sideBHB = saleValue * 0.02;
+
+        const [closingSide] = await tx.insert(closingSides).values({
+          closingId: closing.id,
+          sideType: side.sideType,
+          bhbTotal: String(sideBHB),
+        }).returning();
+
+        for (const agentInput of side.agents) {
+          const emp = empMap[agentInput.employeeId];
+          if (!emp) continue;
+
+          const splitPct = parseFloat(agentInput.splitPercentage);
+          const bhbShare = sideBHB * (splitPct / 100);
+          const mainBranchShare = bhbShare * 0.10;
+
+          const contractType = emp.contractType ?? "70/30";
+          const mcRate = contractType === "50/50" ? 0.30 : 0.20;
+          const marketCenterDue = bhbShare * mcRate;
+
+          const capStatus = capStatusMap[agentInput.employeeId];
+          // null capAmount = no cap configured = unlimited; full marketCenterDue is collected
+          const capAmount = capStatus?.capAmount ?? null;
+          const capUsedSoFar = runningCapUsed[agentInput.employeeId] ?? 0;
+          const marketCenterActual = capAmount === null
+            ? marketCenterDue
+            : Math.min(marketCenterDue, Math.max(0, capAmount - capUsedSoFar));
+
+          // Update running cap for this employee
+          runningCapUsed[agentInput.employeeId] = capUsedSoFar + marketCenterActual;
+
+          // UK share
+          let ukShare = 0;
+          let ukRateSnapshot = 0;
+          if (emp.uretkenlikKoclugu && emp.uretkenlikKocluguOran) {
+            ukRateSnapshot = emp.uretkenlikKocluguOran === "10%" ? 10 : 5;
+            ukShare = bhbShare * (ukRateSnapshot / 100);
+          }
+
+          const employeeNet = bhbShare - mainBranchShare - marketCenterActual - ukShare;
+
+          await tx.insert(closingAgents).values({
+            closingSideId: closingSide.id,
+            employeeId: agentInput.employeeId,
+            splitPercentage: agentInput.splitPercentage,
+            bhbShare: String(bhbShare),
+            mainBranchShare: String(mainBranchShare),
+            marketCenterDue: String(marketCenterDue),
+            marketCenterActual: String(marketCenterActual),
+            ukShare: String(ukShare),
+            employeeNet: String(employeeNet),
+            contractTypeSnapshot: contractType,
+            ukRateSnapshot: String(ukRateSnapshot),
+            capAmountApplied: capAmount !== null ? String(capAmount) : null,
+            capUsedBefore: String(capUsedSoFar),
+          });
+        }
+      }
+
+      return closing;
+    });
+  }
+
+  async deleteClosing(id: number): Promise<void> {
+    const sides = await db.select().from(closingSides).where(eq(closingSides.closingId, id));
+    for (const side of sides) {
+      await db.delete(closingAgents).where(eq(closingAgents.closingSideId, side.id));
+    }
+    await db.delete(closingSides).where(eq(closingSides.closingId, id));
+    await db.delete(closings).where(eq(closings.id, id));
   }
 }
 
