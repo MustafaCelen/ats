@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo } from "react";
 import { Layout } from "@/components/Layout";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -18,8 +18,8 @@ import {
 } from "@/components/ui/table";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  Handshake, Plus, Trash2, TrendingUp, DollarSign, Users, BarChart2,
-  AlertCircle, CheckCircle2, Settings, ChevronRight,
+  Handshake, Plus, Trash2, TrendingUp, DollarSign, Users,
+  AlertCircle, CheckCircle2, Settings,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { DEAL_TYPES, type CapStatus, type ClosingWithDetails } from "@shared/schema";
@@ -1060,6 +1060,16 @@ export default function Closings() {
           </button>
         </div>
 
+        {/* ── Closings tab ── */}
+        {tab === "cap" && (
+          <div className="space-y-6">
+            <CapSettingsPanel />
+            <EmployeeCapStatusPanel employees={employees} capStatuses={capStatuses} />
+          </div>
+        )}
+
+        {tab === "closings" && <>
+
         {/* Summary cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <Card>
@@ -1179,6 +1189,8 @@ export default function Closings() {
             )}
           </CardContent>
         </Card>
+
+        </>}
       </div>
 
       <NewClosingDialog
