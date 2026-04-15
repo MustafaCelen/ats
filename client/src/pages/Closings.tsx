@@ -705,34 +705,45 @@ function NewClosingDialog({
 
   const saleValueNum = parseFloat(saleValue || "0");
 
-  // Compute running cap used per agent (buyer processed before seller for live preview)
-  const runningCapUsed = useMemo(() => {
-    const used: Record<number, number> = {};
+  // Compute per-side starting cap used:
+  // buyerRunningCap = DB values (cap used before this closing)
+  // sellerRunningCap = DB values + any buyer-side contributions for same employee
+  const { buyerRunningCap, sellerRunningCap } = useMemo(() => {
+    // Initialize from DB cap status
+    const allIds = new Set<number>();
+    buyerSide.agents.forEach((a) => { if (a.employeeId) allIds.add(a.employeeId); });
+    sellerSide.agents.forEach((a) => { if (a.employeeId) allIds.add(a.employeeId); });
 
-    const processAgents = (agents: AgentInputRow[]) => {
-      for (const agent of agents) {
+    const buyerStart: Record<number, number> = {};
+    const afterBuyer: Record<number, number> = {};
+    for (const empId of allIds) {
+      const dbUsed = capStatuses[empId]?.capUsed ?? 0;
+      buyerStart[empId] = dbUsed;
+      afterBuyer[empId] = dbUsed;
+    }
+
+    // Process buyer agents to update afterBuyer (which becomes seller starting point)
+    if (buyerSide.enabled) {
+      for (const agent of buyerSide.agents) {
         if (!agent.employeeId) continue;
-        const capStatus = capStatuses[agent.employeeId];
-        const capAmount = capStatus?.capAmount ?? null;
-        const capUsedSoFar = used[agent.employeeId] ?? capStatus?.capUsed ?? 0;
         const emp = employees.find((e) => e.id === agent.employeeId);
         if (!emp) continue;
+        const capAmount = capStatuses[agent.employeeId]?.capAmount ?? null;
+        const capUsedSoFar = afterBuyer[agent.employeeId] ?? 0;
         const splitPct = parseFloat(agent.splitPercentage || "0");
         if (splitPct <= 0 || saleValueNum <= 0) continue;
         const bd = calcAgentBreakdown(saleValueNum, splitPct, emp, capUsedSoFar, capAmount);
-        used[agent.employeeId] = bd.capUsedAfter;
+        afterBuyer[agent.employeeId] = bd.capUsedAfter;
       }
-    };
+    }
 
-    if (buyerSide.enabled) processAgents(buyerSide.agents);
-    if (sellerSide.enabled) processAgents(sellerSide.agents);
-
-    return used;
+    return { buyerRunningCap: buyerStart, sellerRunningCap: afterBuyer };
   }, [buyerSide, sellerSide, saleValueNum, employees, capStatuses]);
 
-  // Build summary rows
+  // Build summary rows (uses the same buyer-then-seller order as server)
   const summaryRows = useMemo((): SummaryRow[] => {
     const rows: SummaryRow[] = [];
+    // Start from DB cap used values
     const tmpCapUsed: Record<number, number> = {};
 
     const processAgents = (agents: AgentInputRow[], sideType: string) => {
@@ -742,6 +753,7 @@ function NewClosingDialog({
         if (!emp) continue;
         const capStatus = capStatuses[agent.employeeId];
         const capAmount = capStatus?.capAmount ?? null;
+        // Use accumulated value within this memo (starts from DB, accumulates across sides)
         const capUsedSoFar = tmpCapUsed[agent.employeeId] ?? capStatus?.capUsed ?? 0;
         const splitPct = parseFloat(agent.splitPercentage || "0");
         if (splitPct <= 0 || saleValueNum <= 0) continue;
@@ -950,7 +962,7 @@ function NewClosingDialog({
                 saleValue={saleValueNum}
                 employees={employees}
                 capStatuses={capStatuses}
-                runningCapUsed={runningCapUsed}
+                runningCapUsed={buyerRunningCap}
               />
               <SideSection
                 sideLabel="Satıcı Tarafı"
@@ -960,7 +972,7 @@ function NewClosingDialog({
                 saleValue={saleValueNum}
                 employees={employees}
                 capStatuses={capStatuses}
-                runningCapUsed={runningCapUsed}
+                runningCapUsed={sellerRunningCap}
               />
             </div>
           </section>

@@ -1407,9 +1407,23 @@ export class DatabaseStorage implements IStorage {
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth() + 1; // 1-based
 
-    // Parse month from capMonth (format "YYYY-MM")
-    const parts = emp.capMonth.split("-");
-    const capMonthNum = parseInt(parts[1] ?? parts[0], 10);
+    // Turkish month name → number mapping
+    const TR_MONTHS: Record<string, number> = {
+      "Ocak": 1, "Şubat": 2, "Mart": 3, "Nisan": 4, "Mayıs": 5, "Haziran": 6,
+      "Temmuz": 7, "Ağustos": 8, "Eylül": 9, "Ekim": 10, "Kasım": 11, "Aralık": 12,
+    };
+
+    // Parse capMonth: supports "YYYY-MM", "MM", single number, or Turkish month name
+    let capMonthNum: number;
+    const trimmed = emp.capMonth.trim();
+    if (TR_MONTHS[trimmed]) {
+      capMonthNum = TR_MONTHS[trimmed];
+    } else {
+      const parts = trimmed.split("-");
+      capMonthNum = parseInt(parts[1] ?? parts[0], 10);
+    }
+
+    if (isNaN(capMonthNum) || capMonthNum < 1 || capMonthNum > 12) return null;
 
     let capYear: number;
     if (currentMonth >= capMonthNum) {
@@ -1420,9 +1434,13 @@ export class DatabaseStorage implements IStorage {
 
     const periodStart = new Date(capYear, capMonthNum - 1, 1);
 
-    // Get global cap amount for capYear (null = no cap configured = unlimited)
-    const [capRow] = await db.select().from(capSettings).where(eq(capSettings.year, capYear));
-    const capAmount: number | null = capRow ? parseFloat(capRow.amount) : null;
+    // Per-employee capValue takes precedence; fall back to global cap setting for the year
+    const empCapValue = emp.capValue ? parseFloat(emp.capValue) : null;
+    let capAmount: number | null = empCapValue && empCapValue > 0 ? empCapValue : null;
+    if (capAmount === null) {
+      const [capRow] = await db.select().from(capSettings).where(eq(capSettings.year, capYear));
+      capAmount = capRow ? parseFloat(capRow.amount) : null;
+    }
 
     // Sum marketCenterActual from closingAgents for this employee in current period
     const agentRows = await db
