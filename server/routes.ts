@@ -1092,46 +1092,78 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.get("/api/closings/export", requireAuth, async (_req, res) => {
     try {
-      const closings = await storage.getClosings();
+      const allClosings = await storage.getClosings();
       const headers = [
-        "Tarih", "Mülk Adresi", "İl", "İlçe", "Tür", "İşlem Tipi", "Satış Bedeli", "Komisyon Oranı (%)",
-        "Taraf", "Alıcı Adı", "Satıcı Adı", "KWUID", "Danışman Adı", "Pay (%)",
-        "BHB", "KWTR", "KWTR KDV", "KWTR(+KDV)", "BM (PlatinKarma)", "BM KDV", "Danışman Net", "CAP",
-        "Notlar",
+        "Danışman", "KWUID", "İlgili Ay", "İşlem", "İşlem Tipi", "Taraf", "CAP", "ÜK",
+        "İşlem Tarihi", "İşlem Değeri", "BHB", "KWTR", "KWTR (+KDV)", "PlatinKarma", "PlatinKarma (KDV)",
+        "ÜK Tutarı", "Danışman Net", "Kasa", "Nakit", "Banka",
+        "BHB Oranı", "İşlem Hacmi", "İşlem Oranı (Taraf Sayısı)",
+        "İl", "İlçe", "Semt/Mahalle", "Adres", "Mülkle İlgili Detay Bilgiler",
+        "Açılış Rakamı", "Kapanış Rakamı", "İndirim Oranı",
+        "Süre/Gün", "Müşteri nereden buldu?", "Yönlendirme Bilgisi",
+        "Sözleşme Başlangıç Tarihi", "Sözleşme Bitiş Tarihi",
+        "Alıcı Adı", "Satıcı Adı", "Pay (%)", "Notlar",
       ];
+      const fmtDate = (v: any) => v ? new Date(v).toISOString().split("T")[0] : "";
+      const fmtMonth = (v: any) => {
+        if (!v) return "";
+        const d = new Date(v);
+        return `${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
+      };
       const rows: string[][] = [];
-      for (const c of closings) {
-        const date = c.closingDate ? new Date(c.closingDate).toISOString().split("T")[0] : "";
-        const commRate = parseFloat(c.commissionRate ?? "2");
+      for (const c of allClosings) {
+        const cv = c as any;
+        const saleVal = parseFloat(c.saleValue ?? "0");
+        const openingVal = parseFloat(cv.openingPrice ?? "0");
+        const discountRate = openingVal > 0 ? ((openingVal - saleVal) / openingVal * 100).toFixed(2) : "";
+        const sidesCount = c.sides.length;
         for (const side of c.sides) {
           for (const agent of side.agents) {
             const kwtr = parseFloat(agent.mainBranchShare ?? "0");
-            const kwtrKdv = parseFloat(agent.kwtrKdv ?? "0");
+            const kwtrKdv = parseFloat((agent as any).kwtrKdv ?? "0");
             const bm = parseFloat(agent.marketCenterActual ?? "0");
-            const isCapped = parseFloat(agent.marketCenterDue ?? "0") > bm ? 1 : 0;
+            const bmKdv = parseFloat((agent as any).bmKdv ?? "0");
+            const capAmt = parseFloat(agent.capAmountApplied ?? "0");
             rows.push([
-              date,
-              c.propertyAddress,
-              (c as any).il ?? "",
-              (c as any).ilce ?? "",
-              c.dealCategory ?? "Satış",
-              c.dealType,
-              c.saleValue,
-              String(commRate),
-              side.sideType === "buyer" ? "Alıcı" : "Satıcı",
-              c.buyerName ?? "",
-              c.sellerName ?? "",
-              agent.kwuid ?? "",
               agent.candidateName ?? agent.employeeName ?? "",
-              agent.splitPercentage,
+              (agent as any).kwuid ?? "",
+              fmtMonth(c.closingDate),
+              c.propertyAddress,
+              c.dealCategory ?? "Satış",
+              side.sideType === "buyer" ? "Alıcı" : "Satıcı",
+              capAmt > 0 ? String(capAmt) : "",
+              "",  // ÜK boolean — not stored per-agent in export
+              fmtDate(c.closingDate),
+              c.saleValue,
               agent.bhbShare ?? "0",
               String(kwtr),
-              String(kwtrKdv),
               String((kwtr + kwtrKdv).toFixed(2)),
               String(bm),
-              agent.bmKdv ?? "0",
+              String((bm + bmKdv).toFixed(2)),
+              agent.ukShare ?? "0",
               agent.employeeNet ?? "0",
-              String(isCapped),
+              cv.kasa ?? "0",
+              cv.nakit ?? "0",
+              cv.banka ?? "0",
+              c.commissionRate ?? "2",
+              c.saleValue,
+              String(sidesCount),
+              cv.il ?? "",
+              cv.ilce ?? "",
+              cv.mahalle ?? "",
+              c.propertyAddress,
+              cv.propertyDetails ?? "",
+              cv.openingPrice ?? "",
+              c.saleValue,
+              discountRate,
+              cv.durationDays ?? "",
+              cv.customerSource ?? "",
+              cv.referralInfo ?? "",
+              fmtDate(cv.contractStartDate),
+              fmtDate(cv.contractEndDate),
+              c.buyerName ?? "",
+              c.sellerName ?? "",
+              agent.splitPercentage,
               c.notes ?? "",
             ]);
           }
@@ -1171,10 +1203,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return null;
       };
 
-      // Group rows into closings by Tarih + Mülk Adresi + İşlem Tipi
+      // Group rows into closings by İşlem Tarihi + Adres + İşlem Tipi
       const groups = new Map<string, typeof rows>();
       for (const row of rows) {
-        const key = `${row["Tarih"] ?? ""}||${row["Mülk Adresi"] ?? ""}||${row["İşlem Tipi"] ?? ""}`;
+        // Support both old and new column names
+        const tarih = row["İşlem Tarihi"] ?? row["Tarih"] ?? "";
+        const adres = row["Adres"] ?? row["İşlem"] ?? row["Mülk Adresi"] ?? "";
+        const tip = row["İşlem Tipi"] ?? "";
+        const key = `${tarih}||${adres}||${tip}`;
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key)!.push(row);
       }
@@ -1182,15 +1218,27 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       let created = 0;
       const errors: string[] = [];
 
+      const safeDate = (v: string | undefined): Date | null => {
+        if (!v) return null;
+        const d = new Date(v.replace(/(\d{2})\.(\d{2})\.(\d{4})/, "$3-$2-$1"));
+        return isNaN(d.getTime()) ? null : d;
+      };
+
       for (const [, groupRows] of groups) {
         try {
           const first = groupRows[0];
-          const closingDate = new Date(first["Tarih"] ?? "");
-          if (isNaN(closingDate.getTime())) { errors.push(`Geçersiz tarih: ${first["Tarih"]}`); continue; }
+          const dateStr = first["İşlem Tarihi"] ?? first["Tarih"] ?? "";
+          const closingDate = safeDate(dateStr);
+          if (!closingDate) { errors.push(`Geçersiz tarih: ${dateStr}`); continue; }
+
+          const openingPriceStr = first["Açılış Rakamı"] || null;
+          const contractStartDate = safeDate(first["Sözleşme Başlangıç Tarihi"] ?? "");
+          const contractEndDate = safeDate(first["Sözleşme Bitiş Tarihi"] ?? "");
 
           const sidesMap = new Map<string, typeof rows>();
           for (const row of groupRows) {
-            const sideKey = row["Taraf"] === "Alıcı" ? "buyer" : "seller";
+            const taraf = row["Taraf"] ?? "";
+            const sideKey = taraf === "Alıcı" ? "buyer" : "seller";
             if (!sidesMap.has(sideKey)) sidesMap.set(sideKey, []);
             sidesMap.get(sideKey)!.push(row);
           }
@@ -1199,33 +1247,47 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           for (const [sideType, sideRows] of sidesMap) {
             const agents = [];
             for (const row of sideRows) {
-              const empId = resolveEmployee(row["KWUID"] ?? "", row["Danışman Adı"] ?? "");
-              if (!empId) { errors.push(`Danışman bulunamadı: ${row["Danışman Adı"] ?? row["KWUID"] ?? "?"}`); continue; }
+              const kwuid = row["KWUID"] ?? "";
+              const name = row["Danışman"] ?? row["Danışman Adı"] ?? "";
+              const empId = resolveEmployee(kwuid, name);
+              if (!empId) { errors.push(`Danışman bulunamadı: ${name || kwuid || "?"}`); continue; }
               agents.push({
                 employeeId: empId,
                 splitPercentage: row["Pay (%)"] || "100",
                 bhbShare: row["BHB"] || undefined,
                 mainBranchShare: row["KWTR"] || undefined,
-                kwtrKdv: row["KWTR KDV"] || undefined,
-                marketCenterActual: row["BM (PlatinKarma)"] || undefined,
-                bmKdv: row["BM KDV"] || undefined,
-                ukShare: undefined,
+                kwtrKdv: undefined,
+                marketCenterActual: row["PlatinKarma"] ?? row["BM (PlatinKarma)"] || undefined,
+                bmKdv: undefined,
+                ukShare: row["ÜK Tutarı"] || undefined,
                 employeeNet: row["Danışman Net"] || undefined,
               });
             }
             if (agents.length > 0) sides.push({ sideType, agents });
           }
 
-          if (sides.length === 0) { errors.push(`Taraf bulunamadı: ${first["Mülk Adresi"]}`); continue; }
+          if (sides.length === 0) { errors.push(`Taraf bulunamadı: ${first["Adres"] ?? first["İşlem"] ?? ""}`); continue; }
 
+          const adres = first["Adres"] ?? first["İşlem"] ?? first["Mülk Adresi"] ?? "";
           await storage.createClosing({
-            propertyAddress: first["Mülk Adresi"] ?? "",
+            propertyAddress: adres,
             il: first["İl"] || null,
             ilce: first["İlçe"] || null,
-            dealCategory: (first["Tür"] ?? "Satış") as any,
+            mahalle: first["Semt/Mahalle"] || null,
+            propertyDetails: first["Mülkle İlgili Detay Bilgiler"] || null,
+            dealCategory: (first["İşlem Tipi"] === "Kiralık" ? "Kiralık" : "Satış") as any,
             dealType: first["İşlem Tipi"] ?? "Çift Taraflı",
-            saleValue: first["Satış Bedeli"] ?? "0",
-            commissionRate: first["Komisyon Oranı (%)"] || "2",
+            saleValue: first["Kapanış Rakamı"] ?? first["İşlem Değeri"] ?? first["Satış Bedeli"] ?? "0",
+            commissionRate: first["BHB Oranı"] ?? first["Komisyon Oranı (%)"] || "2",
+            openingPrice: openingPriceStr,
+            durationDays: first["Süre/Gün"] ? parseInt(first["Süre/Gün"]) : null,
+            customerSource: first["Müşteri nereden buldu?"] || null,
+            referralInfo: first["Yönlendirme Bilgisi"] || null,
+            contractStartDate,
+            contractEndDate,
+            kasa: first["Kasa"] || null,
+            nakit: first["Nakit"] || null,
+            banka: first["Banka"] || null,
             closingDate,
             buyerName: first["Alıcı Adı"] || null,
             sellerName: first["Satıcı Adı"] || null,
@@ -1254,7 +1316,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/closings", requireAuth, async (req, res) => {
     try {
-      const { propertyAddress, il, ilce, dealCategory, dealType, saleValue, commissionRate, closingDate, buyerName, sellerName, notes, sides } = req.body;
+      const {
+        propertyAddress, il, ilce, mahalle, propertyDetails,
+        dealCategory, dealType, saleValue, commissionRate, openingPrice,
+        durationDays, customerSource, referralInfo, contractStartDate, contractEndDate,
+        kasa, nakit, banka,
+        closingDate, buyerName, sellerName, notes, sides,
+      } = req.body;
       if (!saleValue || !closingDate || !sides) {
         return res.status(400).json({ message: "saleValue, closingDate, and sides are required" });
       }
@@ -1262,10 +1330,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         propertyAddress: propertyAddress ?? "",
         il: il ?? null,
         ilce: ilce ?? null,
+        mahalle: mahalle ?? null,
+        propertyDetails: propertyDetails ?? null,
         dealCategory: dealCategory ?? "Satış",
         dealType: dealType ?? "Çift Taraflı",
         saleValue: String(saleValue),
         commissionRate: commissionRate ? String(commissionRate) : "2.00",
+        openingPrice: openingPrice ? String(openingPrice) : null,
+        durationDays: durationDays ? Number(durationDays) : null,
+        customerSource: customerSource ?? null,
+        referralInfo: referralInfo ?? null,
+        contractStartDate: contractStartDate ? new Date(contractStartDate) : null,
+        contractEndDate: contractEndDate ? new Date(contractEndDate) : null,
+        kasa: kasa ? String(kasa) : null,
+        nakit: nakit ? String(nakit) : null,
+        banka: banka ? String(banka) : null,
         closingDate: new Date(closingDate),
         buyerName: buyerName ?? null,
         sellerName: sellerName ?? null,
@@ -1292,6 +1371,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const data = { ...req.body };
       if (data.closingDate) data.closingDate = new Date(data.closingDate);
+      if (data.contractStartDate) data.contractStartDate = new Date(data.contractStartDate);
+      if (data.contractEndDate) data.contractEndDate = new Date(data.contractEndDate);
       await storage.updateClosing(Number(req.params.id), data);
       res.status(204).send();
     } catch {

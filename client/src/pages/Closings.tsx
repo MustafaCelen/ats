@@ -849,10 +849,21 @@ function NewClosingDialog({
   const [propertyAddress, setPropertyAddress] = useState("");
   const [il, setIl] = useState("");
   const [ilce, setIlce] = useState("");
+  const [mahalle, setMahalle] = useState("");
+  const [propertyDetails, setPropertyDetails] = useState("");
   const [dealCategory, setDealCategory] = useState<DealCategory>("Satış");
   const [dealType, setDealType] = useState<string>("Çift Taraflı");
   const [saleValue, setSaleValue] = useState("");
   const [commissionRate, setCommissionRate] = useState("2");
+  const [openingPrice, setOpeningPrice] = useState("");
+  const [durationDays, setDurationDays] = useState("");
+  const [customerSource, setCustomerSource] = useState("");
+  const [referralInfo, setReferralInfo] = useState("");
+  const [contractStartDate, setContractStartDate] = useState("");
+  const [contractEndDate, setContractEndDate] = useState("");
+  const [kasa, setKasa] = useState("");
+  const [nakit, setNakit] = useState("");
+  const [banka, setBanka] = useState("");
   const [closingDate, setClosingDate] = useState(new Date().toISOString().split("T")[0]);
   const [buyerName, setBuyerName] = useState("");
   const [sellerName, setSellerName] = useState("");
@@ -933,17 +944,13 @@ function NewClosingDialog({
   }, [buyerSide, sellerSide, employees]);
 
   const resetForm = () => {
-    setPropertyAddress("");
-    setIl("");
-    setIlce("");
-    setDealCategory("Satış");
-    setDealType("Çift Taraflı");
-    setSaleValue("");
-    setCommissionRate("2");
+    setPropertyAddress(""); setIl(""); setIlce(""); setMahalle(""); setPropertyDetails("");
+    setDealCategory("Satış"); setDealType("Çift Taraflı");
+    setSaleValue(""); setCommissionRate("2"); setOpeningPrice(""); setDurationDays("");
+    setCustomerSource(""); setReferralInfo(""); setContractStartDate(""); setContractEndDate("");
+    setKasa(""); setNakit(""); setBanka("");
     setClosingDate(new Date().toISOString().split("T")[0]);
-    setBuyerName("");
-    setSellerName("");
-    setNotes("");
+    setBuyerName(""); setSellerName(""); setNotes("");
     setBuyerSide({ enabled: false, agents: [newAgent()] });
     setSellerSide({ enabled: false, agents: [newAgent()] });
   };
@@ -996,10 +1003,21 @@ function NewClosingDialog({
         propertyAddress: propertyAddress.trim(),
         il: il.trim() || null,
         ilce: ilce.trim() || null,
+        mahalle: mahalle.trim() || null,
+        propertyDetails: propertyDetails.trim() || null,
         dealCategory,
         dealType,
         saleValue: String(saleValueNum),
         commissionRate: String(commissionRatePct),
+        openingPrice: openingPrice ? openingPrice : null,
+        durationDays: durationDays ? Number(durationDays) : null,
+        customerSource: customerSource.trim() || null,
+        referralInfo: referralInfo.trim() || null,
+        contractStartDate: contractStartDate ? new Date(contractStartDate).toISOString() : null,
+        contractEndDate: contractEndDate ? new Date(contractEndDate).toISOString() : null,
+        kasa: kasa || null,
+        nakit: nakit || null,
+        banka: banka || null,
         closingDate: new Date(closingDate).toISOString(),
         buyerName: buyerName.trim() || null,
         sellerName: sellerName.trim() || null,
@@ -1049,12 +1067,15 @@ function NewClosingDialog({
               </div>
               <div>
                 <Label className="text-xs">İlçe</Label>
-                <Input
-                  className="mt-1 h-8 text-sm"
-                  placeholder="İlçe..."
-                  value={ilce}
-                  onChange={(e) => setIlce(e.target.value)}
-                />
+                <Input className="mt-1 h-8 text-sm" placeholder="İlçe..." value={ilce} onChange={(e) => setIlce(e.target.value)} />
+              </div>
+              <div>
+                <Label className="text-xs">Semt/Mahalle</Label>
+                <Input className="mt-1 h-8 text-sm" placeholder="Mahalle..." value={mahalle} onChange={(e) => setMahalle(e.target.value)} />
+              </div>
+              <div className="col-span-2">
+                <Label className="text-xs">Mülkle İlgili Detay Bilgiler</Label>
+                <Input className="mt-1 h-8 text-sm" placeholder="Detay bilgiler..." value={propertyDetails} onChange={(e) => setPropertyDetails(e.target.value)} />
               </div>
               <div>
                 <Label className="text-xs">Tür</Label>
@@ -1119,12 +1140,43 @@ function NewClosingDialog({
               </div>
               <div>
                 <Label className="text-xs">Kapanış Tarihi *</Label>
-                <Input
-                  type="date"
-                  className="mt-1 h-8 text-sm"
-                  value={closingDate}
-                  onChange={(e) => setClosingDate(e.target.value)}
-                />
+                <Input type="date" className="mt-1 h-8 text-sm" value={closingDate} onChange={(e) => setClosingDate(e.target.value)} />
+              </div>
+              <div>
+                <Label className="text-xs">Açılış Rakamı (₺)</Label>
+                <Input type="number" min="0" className="mt-1 h-8 text-sm" placeholder="Liste fiyatı..." value={openingPrice} onChange={(e) => setOpeningPrice(e.target.value)} />
+              </div>
+              <div>
+                <Label className="text-xs">Süre/Gün</Label>
+                <Input type="number" min="0" className="mt-1 h-8 text-sm" placeholder="Pazarlama süresi..." value={durationDays} onChange={(e) => setDurationDays(e.target.value)} />
+              </div>
+              <div>
+                <Label className="text-xs">Sözleşme Başlangıç Tarihi</Label>
+                <Input type="date" className="mt-1 h-8 text-sm" value={contractStartDate} onChange={(e) => setContractStartDate(e.target.value)} />
+              </div>
+              <div>
+                <Label className="text-xs">Sözleşme Bitiş Tarihi</Label>
+                <Input type="date" className="mt-1 h-8 text-sm" value={contractEndDate} onChange={(e) => setContractEndDate(e.target.value)} />
+              </div>
+              <div>
+                <Label className="text-xs">Müşteri nereden buldu?</Label>
+                <Input className="mt-1 h-8 text-sm" placeholder="Sosyal medya, tavsiye..." value={customerSource} onChange={(e) => setCustomerSource(e.target.value)} />
+              </div>
+              <div>
+                <Label className="text-xs">Yönlendirme Bilgisi</Label>
+                <Input className="mt-1 h-8 text-sm" placeholder="Kim yönlendirdi..." value={referralInfo} onChange={(e) => setReferralInfo(e.target.value)} />
+              </div>
+              <div>
+                <Label className="text-xs">Kasa (₺)</Label>
+                <Input type="number" min="0" className="mt-1 h-8 text-sm" placeholder="0" value={kasa} onChange={(e) => setKasa(e.target.value)} />
+              </div>
+              <div>
+                <Label className="text-xs">Nakit (₺)</Label>
+                <Input type="number" min="0" className="mt-1 h-8 text-sm" placeholder="0" value={nakit} onChange={(e) => setNakit(e.target.value)} />
+              </div>
+              <div>
+                <Label className="text-xs">Banka (₺)</Label>
+                <Input type="number" min="0" className="mt-1 h-8 text-sm" placeholder="0" value={banka} onChange={(e) => setBanka(e.target.value)} />
               </div>
               <div>
                 <Label className="text-xs">Alıcı Adı</Label>

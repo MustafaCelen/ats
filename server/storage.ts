@@ -153,10 +153,21 @@ export interface IStorage {
     propertyAddress: string;
     il?: string | null;
     ilce?: string | null;
+    mahalle?: string | null;
+    propertyDetails?: string | null;
     dealCategory?: string | null;
     dealType: string;
     saleValue: string;
     commissionRate?: string | null;
+    openingPrice?: string | null;
+    durationDays?: number | null;
+    customerSource?: string | null;
+    referralInfo?: string | null;
+    contractStartDate?: Date | null;
+    contractEndDate?: Date | null;
+    kasa?: string | null;
+    nakit?: string | null;
+    banka?: string | null;
     closingDate: Date;
     buyerName?: string | null;
     sellerName?: string | null;
@@ -1564,10 +1575,21 @@ export class DatabaseStorage implements IStorage {
     propertyAddress: string;
     il?: string | null;
     ilce?: string | null;
+    mahalle?: string | null;
+    propertyDetails?: string | null;
     dealCategory?: string | null;
     dealType: string;
     saleValue: string;
     commissionRate?: string | null;
+    openingPrice?: string | null;
+    durationDays?: number | null;
+    customerSource?: string | null;
+    referralInfo?: string | null;
+    contractStartDate?: Date | null;
+    contractEndDate?: Date | null;
+    kasa?: string | null;
+    nakit?: string | null;
+    banka?: string | null;
     closingDate: Date;
     buyerName?: string | null;
     sellerName?: string | null;
@@ -1617,10 +1639,21 @@ export class DatabaseStorage implements IStorage {
         propertyAddress: data.propertyAddress,
         il: data.il ?? null,
         ilce: data.ilce ?? null,
+        mahalle: data.mahalle ?? null,
+        propertyDetails: data.propertyDetails ?? null,
         dealCategory: data.dealCategory ?? "Satış",
         dealType: data.dealType,
         saleValue: data.saleValue,
         commissionRate: data.commissionRate ?? "2.00",
+        openingPrice: data.openingPrice ?? null,
+        durationDays: data.durationDays ?? null,
+        customerSource: data.customerSource ?? null,
+        referralInfo: data.referralInfo ?? null,
+        contractStartDate: data.contractStartDate ?? null,
+        contractEndDate: data.contractEndDate ?? null,
+        kasa: data.kasa ?? "0",
+        nakit: data.nakit ?? "0",
+        banka: data.banka ?? "0",
         closingDate: data.closingDate,
         buyerName: data.buyerName ?? null,
         sellerName: data.sellerName ?? null,

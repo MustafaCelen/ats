@@ -353,10 +353,21 @@ export const closings = pgTable("closings", {
   propertyAddress: text("property_address").notNull().default(""),
   il: text("il"),
   ilce: text("ilce"),
+  mahalle: text("mahalle"),                                        // Semt/Mahalle
+  propertyDetails: text("property_details"),                       // Mülkle İlgili Detay Bilgiler
   dealCategory: text("deal_category").notNull().default("Satış"), // Satış | Kiralık
   dealType: text("deal_type").notNull().default("Çift Taraflı"),
   saleValue: numeric("sale_value", { precision: 15, scale: 2 }).notNull(),
   commissionRate: numeric("commission_rate", { precision: 5, scale: 2 }).notNull().default("2.00"),
+  openingPrice: numeric("opening_price", { precision: 15, scale: 2 }),  // Açılış Rakamı (listing price)
+  durationDays: integer("duration_days"),                               // Süre/Gün
+  customerSource: text("customer_source"),                              // Müşteri nereden buldu?
+  referralInfo: text("referral_info"),                                  // Yönlendirme Bilgisi
+  contractStartDate: timestamp("contract_start_date"),                  // Sözleşme Başlangıç
+  contractEndDate: timestamp("contract_end_date"),                      // Sözleşme Bitiş
+  kasa: numeric("kasa", { precision: 15, scale: 2 }).default("0"),
+  nakit: numeric("nakit", { precision: 15, scale: 2 }).default("0"),
+  banka: numeric("banka", { precision: 15, scale: 2 }).default("0"),
   closingDate: timestamp("closing_date").notNull(),
   buyerName: text("buyer_name"),
   sellerName: text("seller_name"),
