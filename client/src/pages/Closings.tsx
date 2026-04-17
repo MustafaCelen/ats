@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { Layout } from "@/components/Layout";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -19,10 +19,11 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Handshake, Plus, Trash2, TrendingUp, DollarSign, Users,
-  AlertCircle, CheckCircle2, Settings, ChevronDown, ChevronRight,
+  AlertCircle, CheckCircle2, Settings,
+  Download, Upload,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { DEAL_TYPES, type CapStatus, type ClosingWithDetails } from "@shared/schema";
+import { DEAL_TYPES, DEAL_CATEGORIES, type DealCategory, type CapStatus, type ClosingWithDetails } from "@shared/schema";
 import { format } from "date-fns";
 
 // ── Formatting ────────────────────────────────────────────────────────────────
@@ -52,6 +53,41 @@ interface AgentBreakdown {
   capRemaining: number | null; // null = unlimited
   capAmount: number | null;    // null = unlimited
   capUsedAfter: number;
+}
+
+// ── Inline editable cell components ──────────────────────────────────────────
+function InlineCell({ value, onSave, type = "text", className = "" }: {
+  value: string; onSave: (v: string) => void; type?: string; className?: string;
+}) {
+  const [local, setLocal] = useState(value);
+  useEffect(() => { setLocal(value); }, [value]);
+  return (
+    <input
+      type={type}
+      value={local}
+      onChange={(e) => setLocal(e.target.value)}
+      onBlur={() => { if (local !== value) onSave(local); }}
+      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+      className={`bg-transparent border-0 outline-none w-full min-w-[60px] px-1 py-0 text-xs hover:bg-muted/60 focus:bg-white dark:focus:bg-muted focus:ring-1 focus:ring-primary/50 focus:rounded ${className}`}
+    />
+  );
+}
+
+function InlineSelect({ value, options, onSave, className = "" }: {
+  value: string; options: readonly string[]; onSave: (v: string) => void; className?: string;
+}) {
+  const [local, setLocal] = useState(value);
+  useEffect(() => { setLocal(value); }, [value]);
+  return (
+    <select
+      value={local}
+      onChange={(e) => setLocal(e.target.value)}
+      onBlur={() => { if (local !== value) onSave(local); }}
+      className={`bg-transparent border-0 outline-none text-xs w-full min-w-[70px] px-1 py-0 hover:bg-muted/60 focus:bg-white dark:focus:bg-muted focus:ring-1 focus:ring-primary/50 focus:rounded ${className}`}
+    >
+      {options.map((o) => <option key={o} value={o}>{o}</option>)}
+    </select>
+  );
 }
 
 function calcAgentBreakdown(
@@ -811,6 +847,9 @@ function NewClosingDialog({
   const createClosing = useCreateClosing();
 
   const [propertyAddress, setPropertyAddress] = useState("");
+  const [il, setIl] = useState("");
+  const [ilce, setIlce] = useState("");
+  const [dealCategory, setDealCategory] = useState<DealCategory>("Satış");
   const [dealType, setDealType] = useState<string>("Çift Taraflı");
   const [saleValue, setSaleValue] = useState("");
   const [commissionRate, setCommissionRate] = useState("2");
@@ -822,8 +861,9 @@ function NewClosingDialog({
   const [sellerSide, setSellerSide] = useState<SideState>({ enabled: false, agents: [newAgent()] });
 
   const saleValueNum = parseFloat(saleValue || "0");
-  const commissionRatePct = Math.max(0, parseFloat(commissionRate || "2"));
+  const commissionRatePct = Math.max(0, parseFloat(commissionRate || (dealCategory === "Kiralık" ? "50" : "2")));
   const sideBHBPreview = saleValueNum > 0 ? saleValueNum * (commissionRatePct / 100) : 0;
+  const saleValueLabel = dealCategory === "Kiralık" ? "Aylık Kira Bedeli (₺) *" : "Satış Bedeli (₺) *";
 
   // Compute per-side starting cap used:
   // buyerRunningCap = DB values (cap used before this closing)
@@ -894,6 +934,9 @@ function NewClosingDialog({
 
   const resetForm = () => {
     setPropertyAddress("");
+    setIl("");
+    setIlce("");
+    setDealCategory("Satış");
     setDealType("Çift Taraflı");
     setSaleValue("");
     setCommissionRate("2");
@@ -906,7 +949,6 @@ function NewClosingDialog({
   };
 
   const validate = (): string | null => {
-    if (!propertyAddress.trim()) return "Mülk adresi zorunludur.";
     if (!saleValue || saleValueNum <= 0) return "Geçerli bir satış bedeli girin.";
     if (!closingDate) return "Kapanış tarihi zorunludur.";
     if (!buyerSide.enabled && !sellerSide.enabled) return "En az bir taraf seçilmelidir.";
@@ -952,6 +994,9 @@ function NewClosingDialog({
     try {
       await createClosing.mutateAsync({
         propertyAddress: propertyAddress.trim(),
+        il: il.trim() || null,
+        ilce: ilce.trim() || null,
+        dealCategory,
         dealType,
         saleValue: String(saleValueNum),
         commissionRate: String(commissionRatePct),
@@ -985,13 +1030,48 @@ function NewClosingDialog({
             <h3 className="text-sm font-semibold mb-3 text-foreground">Mülk Bilgileri</h3>
             <div className="grid grid-cols-2 gap-3">
               <div className="col-span-2">
-                <Label className="text-xs">Mülk Adresi *</Label>
+                <Label className="text-xs">Mülk Adresi</Label>
                 <Input
                   className="mt-1 h-8 text-sm"
                   placeholder="Adres..."
                   value={propertyAddress}
                   onChange={(e) => setPropertyAddress(e.target.value)}
                 />
+              </div>
+              <div>
+                <Label className="text-xs">İl</Label>
+                <Input
+                  className="mt-1 h-8 text-sm"
+                  placeholder="İl..."
+                  value={il}
+                  onChange={(e) => setIl(e.target.value)}
+                />
+              </div>
+              <div>
+                <Label className="text-xs">İlçe</Label>
+                <Input
+                  className="mt-1 h-8 text-sm"
+                  placeholder="İlçe..."
+                  value={ilce}
+                  onChange={(e) => setIlce(e.target.value)}
+                />
+              </div>
+              <div>
+                <Label className="text-xs">Tür</Label>
+                <Select value={dealCategory} onValueChange={(v) => {
+                  const cat = v as DealCategory;
+                  setDealCategory(cat);
+                  setCommissionRate(cat === "Kiralık" ? "50" : "2");
+                }}>
+                  <SelectTrigger className="mt-1 h-8 text-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DEAL_CATEGORIES.map((dc) => (
+                      <SelectItem key={dc} value={dc} className="text-sm">{dc}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div>
                 <Label className="text-xs">İşlem Tipi</Label>
@@ -1011,16 +1091,16 @@ function NewClosingDialog({
                 <Input
                   type="number"
                   min="0"
-                  max="10"
+                  max="100"
                   step="0.1"
                   className="mt-1 h-8 text-sm"
-                  placeholder="2"
+                  placeholder={dealCategory === "Kiralık" ? "50" : "2"}
                   value={commissionRate}
                   onChange={(e) => setCommissionRate(e.target.value)}
                 />
               </div>
               <div>
-                <Label className="text-xs">Satış Bedeli (₺) *</Label>
+                <Label className="text-xs">{saleValueLabel}</Label>
                 <Input
                   type="number"
                   min="0"
@@ -1138,22 +1218,112 @@ type Tab = "closings" | "cap";
 
 export default function Closings() {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [tab, setTab] = useState<Tab>("closings");
-  const [expandedClosingIds, setExpandedClosingIds] = useState<Set<number>>(new Set());
 
   const { data: closings = [], isLoading: closingsLoading } = useClosings();
   const { data: employees = [] } = useEmployees();
   const { data: capStatuses = {} } = useCapStatuses();
   const deleteClosing = useDeleteClosing();
 
-  // Summary stats
-  const totalClosings = closings.length;
+  // Summary stats (each side = 1 count)
+  const totalSides = closings.reduce((s, c) => s + c.sides.length, 0);
   const totalVolume = closings.reduce((s, c) => s + parseFloat(c.saleValue ?? "0"), 0);
   const totalBHB = closings.reduce((s, c) =>
     s + c.sides.reduce((ss, side) => ss + parseFloat(side.bhbTotal ?? "0"), 0), 0
   );
-  const totalAgentNet = closings.reduce((s, c) => s + (c.totalAgentNet ?? 0), 0);
+  const totalBM = closings.reduce((s, c) =>
+    s + c.sides.reduce((ss, side) =>
+      ss + side.agents.reduce((sa, a) => sa + parseFloat(a.marketCenterActual ?? "0"), 0), 0), 0
+  );
+
+  // Flatten closings into one row per agent per side
+  type FlatRow = {
+    closingId: number; sideId: number; agentId: number;
+    closingDate: string; propertyAddress: string; il: string; ilce: string;
+    dealCategory: string; dealType: string; saleValue: string; commissionRate: string;
+    buyerName: string; sellerName: string; notes: string;
+    sideType: string;
+    employeeId: number; employeeName: string;
+    splitPercentage: string; bhbShare: string; mainBranchShare: string;
+    kwtrKdv: string; marketCenterActual: string; marketCenterDue: string;
+    bmKdv: string; ukShare: string; employeeNet: string;
+    isFirstOfClosing: boolean;
+    closingAgentCount: number;
+  };
+
+  const flatRows: FlatRow[] = useMemo(() => {
+    const rows: FlatRow[] = [];
+    for (const c of closings) {
+      let firstOfClosing = true;
+      const agentCount = c.sides.reduce((s, side) => s + side.agents.length, 0);
+      for (const side of c.sides) {
+        for (const agent of side.agents) {
+          rows.push({
+            closingId: c.id,
+            sideId: side.id,
+            agentId: agent.id,
+            closingDate: c.closingDate ? new Date(c.closingDate).toISOString().split("T")[0] : "",
+            propertyAddress: c.propertyAddress ?? "",
+            il: (c as any).il ?? "",
+            ilce: (c as any).ilce ?? "",
+            dealCategory: c.dealCategory ?? "Satış",
+            dealType: c.dealType ?? "",
+            saleValue: c.saleValue ?? "",
+            commissionRate: c.commissionRate ?? "2",
+            buyerName: c.buyerName ?? "",
+            sellerName: c.sellerName ?? "",
+            notes: c.notes ?? "",
+            sideType: side.sideType,
+            employeeId: agent.employeeId,
+            employeeName: agent.candidateName ?? agent.employeeName ?? `#${agent.employeeId}`,
+            splitPercentage: agent.splitPercentage ?? "100",
+            bhbShare: agent.bhbShare ?? "0",
+            mainBranchShare: agent.mainBranchShare ?? "0",
+            kwtrKdv: agent.kwtrKdv ?? "0",
+            marketCenterActual: agent.marketCenterActual ?? "0",
+            marketCenterDue: agent.marketCenterDue ?? "0",
+            bmKdv: agent.bmKdv ?? "0",
+            ukShare: agent.ukShare ?? "0",
+            employeeNet: agent.employeeNet ?? "0",
+            isFirstOfClosing: firstOfClosing,
+            closingAgentCount: agentCount,
+          });
+          firstOfClosing = false;
+        }
+      }
+    }
+    return rows;
+  }, [closings]);
+
+  // Save a closing-level field on blur
+  const saveClosingField = useCallback(async (closingId: number, field: string, value: string) => {
+    try {
+      let body: Record<string, any> = { [field]: value };
+      if (field === "closingDate") body = { closingDate: new Date(value).toISOString() };
+      await fetch(`/api/closings/${closingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(body),
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/closings"] });
+    } catch { /* silent */ }
+  }, [queryClient]);
+
+  // Save an agent-level field on blur
+  const saveAgentField = useCallback(async (agentId: number, field: string, value: string) => {
+    try {
+      await fetch(`/api/closing-agents/${agentId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ [field]: value }),
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/closings"] });
+    } catch { /* silent */ }
+  }, [queryClient]);
 
   const handleDelete = async (id: number) => {
     if (!window.confirm("Bu kapanışı silmek istediğinize emin misiniz?")) return;
@@ -1162,6 +1332,65 @@ export default function Closings() {
       toast({ title: "Silindi", description: "Kapanış kaydı silindi." });
     } catch {
       toast({ title: "Hata", description: "Kapanış silinemedi.", variant: "destructive" });
+    }
+  };
+
+  const handleExport = () => {
+    window.open("/api/closings/export", "_blank");
+  };
+
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    try {
+      const text = await file.text();
+      const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/).filter(Boolean);
+      if (lines.length < 2) { toast({ title: "Hata", description: "CSV boş veya geçersiz.", variant: "destructive" }); return; }
+
+      const parseRow = (line: string): string[] => {
+        const result: string[] = [];
+        let cur = "", inQuote = false;
+        for (let i = 0; i < line.length; i++) {
+          const ch = line[i];
+          if (ch === '"') {
+            if (inQuote && line[i + 1] === '"') { cur += '"'; i++; }
+            else inQuote = !inQuote;
+          } else if (ch === ',' && !inQuote) { result.push(cur); cur = ""; }
+          else cur += ch;
+        }
+        result.push(cur);
+        return result;
+      };
+
+      const headers = parseRow(lines[0]);
+      const rows = lines.slice(1).map((line) => {
+        const vals = parseRow(line);
+        const obj: Record<string, string> = {};
+        headers.forEach((h, i) => { obj[h.trim()] = (vals[i] ?? "").trim(); });
+        return obj;
+      }).filter((r) => r["Mülk Adresi"]);
+
+      if (rows.length === 0) { toast({ title: "Hata", description: "İçe aktarılacak satır bulunamadı.", variant: "destructive" }); return; }
+
+      const res = await fetch("/api/closings/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ rows }),
+      });
+      const data = await res.json();
+      if (!res.ok) { toast({ title: "Hata", description: data.message, variant: "destructive" }); return; }
+
+      queryClient.invalidateQueries({ queryKey: ["/api/closings"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/employees/cap-statuses"] });
+
+      const msg = data.errors?.length
+        ? `${data.created} kapanış eklendi. ${data.errors.length} hata: ${data.errors.slice(0, 3).join("; ")}`
+        : `${data.created} kapanış başarıyla içe aktarıldı.`;
+      toast({ title: data.errors?.length ? "Kısmi başarı" : "Başarılı", description: msg });
+    } catch {
+      toast({ title: "Hata", description: "Dosya işlenemedi.", variant: "destructive" });
     }
   };
 
@@ -1180,10 +1409,23 @@ export default function Closings() {
             </p>
           </div>
           {tab === "closings" && (
-            <Button onClick={() => setDialogOpen(true)} className="gap-2">
-              <Plus className="h-4 w-4" />
-              Yeni Kapanış
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={handleExport} className="gap-1.5 text-xs h-8">
+                <Download className="h-3.5 w-3.5" />
+                Dışa Aktar
+              </Button>
+              <label className="cursor-pointer">
+                <input type="file" accept=".csv" className="hidden" onChange={handleImport} />
+                <span className="inline-flex items-center gap-1.5 text-xs h-8 px-3 rounded-md border border-input bg-background hover:bg-muted transition-colors font-medium">
+                  <Upload className="h-3.5 w-3.5" />
+                  İçe Aktar
+                </span>
+              </label>
+              <Button onClick={() => setDialogOpen(true)} className="gap-2">
+                <Plus className="h-4 w-4" />
+                Yeni Kapanış
+              </Button>
+            </div>
           )}
         </div>
 
@@ -1227,7 +1469,7 @@ export default function Closings() {
               </CardTitle>
             </CardHeader>
             <CardContent className="px-4 pb-4">
-              <p className="text-2xl font-bold">{totalClosings}</p>
+              <p className="text-2xl font-bold">{totalSides}</p>
             </CardContent>
           </Card>
           <Card>
@@ -1256,164 +1498,82 @@ export default function Closings() {
             <CardHeader className="pb-2 pt-4 px-4">
               <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
                 <Users className="h-3.5 w-3.5" />
-                Danışman Net
+                Toplam BM Payı
               </CardTitle>
             </CardHeader>
             <CardContent className="px-4 pb-4">
-              <p className="text-lg font-bold truncate text-emerald-700">{fmtTRY(totalAgentNet)}</p>
+              <p className="text-lg font-bold truncate text-blue-700">{fmtTRY(totalBM)}</p>
             </CardContent>
           </Card>
         </div>
 
-        {/* Table */}
+        {/* Flat inline-editable table */}
         <Card>
-          <CardContent className="p-0">
+          <CardContent className="p-0 overflow-x-auto">
             {closingsLoading ? (
               <div className="flex items-center justify-center py-16">
                 <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
               </div>
-            ) : closings.length === 0 ? (
+            ) : flatRows.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
                 <Handshake className="h-12 w-12 mb-3 opacity-30" />
                 <p className="text-sm font-medium">Henüz kapanış kaydı yok</p>
                 <p className="text-xs mt-1">Yeni bir kapanış ekleyin</p>
               </div>
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-8" />
-                    <TableHead className="text-xs">Tarih</TableHead>
-                    <TableHead className="text-xs">Mülk Adresi</TableHead>
-                    <TableHead className="text-xs">Tip</TableHead>
-                    <TableHead className="text-xs text-right">Satış Bedeli</TableHead>
-                    <TableHead className="text-xs">Taraflar</TableHead>
-                    <TableHead className="text-xs text-right text-amber-600">Toplam KDV</TableHead>
-                    <TableHead className="text-xs text-right">Danışman Net</TableHead>
-                    <TableHead className="text-xs w-12"></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {closings.map((closing) => {
-                    const totalKdv = closing.sides.reduce((s, side) =>
-                      s + side.agents.reduce((ss, a) =>
-                        ss + parseFloat(a.kwtrKdv ?? "0") + parseFloat(a.bmKdv ?? "0"), 0
-                      ), 0
-                    );
-                    const isExpanded = expandedClosingIds.has(closing.id);
+              <table className="w-full text-xs border-collapse min-w-[1400px]">
+                <thead>
+                  <tr className="border-b border-border bg-muted/40">
+                    {["Tarih","Mülk Adresi","İl","İlçe","Tür","İşlem Tipi","Bedel","Kom%","Taraf","Danışman","Pay%","BHB","KWTR","KWTR KDV","BM","BM KDV","Net",""].map((h) => (
+                      <th key={h} className="text-left font-medium py-2 px-2 text-muted-foreground whitespace-nowrap text-[11px]">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {flatRows.map((row) => {
+                    const sc = (field: string) => (v: string) => saveClosingField(row.closingId, field, v);
+                    const sa = (field: string) => (v: string) => saveAgentField(row.agentId, field, v);
+                    const isCapped = parseFloat(row.marketCenterDue) > parseFloat(row.marketCenterActual);
                     return (
-                      <>
-                      <TableRow
-                        key={closing.id}
-                        className="hover:bg-muted/40 cursor-pointer"
-                        onClick={() => setExpandedClosingIds((prev) => {
-                          const next = new Set(prev);
-                          if (next.has(closing.id)) next.delete(closing.id); else next.add(closing.id);
-                          return next;
-                        })}
-                      >
-                        <TableCell className="text-center p-1">
-                          {isExpanded
-                            ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground inline" />
-                            : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground inline" />}
-                        </TableCell>
-                        <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                          {safeFormatDate(closing.closingDate as any, "dd.MM.yyyy")}
-                        </TableCell>
-                        <TableCell className="text-xs font-medium max-w-[180px] truncate">
-                          {closing.propertyAddress}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className="text-[10px]">
-                            {closing.dealType}
+                      <tr key={row.agentId} className={`border-b border-border/50 hover:bg-muted/30 ${row.isFirstOfClosing ? "border-t-2 border-t-border" : ""}`}>
+                        <td className="px-2 py-1"><InlineCell value={row.closingDate} type="date" onSave={sc("closingDate")} /></td>
+                        <td className="px-2 py-1 min-w-[140px]"><InlineCell value={row.propertyAddress} onSave={sc("propertyAddress")} /></td>
+                        <td className="px-2 py-1 min-w-[80px]"><InlineCell value={row.il} onSave={sc("il")} /></td>
+                        <td className="px-2 py-1 min-w-[80px]"><InlineCell value={row.ilce} onSave={sc("ilce")} /></td>
+                        <td className="px-2 py-1"><InlineSelect value={row.dealCategory} options={DEAL_CATEGORIES} onSave={sc("dealCategory")} /></td>
+                        <td className="px-2 py-1"><InlineSelect value={row.dealType} options={DEAL_TYPES} onSave={sc("dealType")} /></td>
+                        <td className="px-2 py-1 min-w-[90px]"><InlineCell value={row.saleValue} type="number" onSave={sc("saleValue")} /></td>
+                        <td className="px-2 py-1 min-w-[50px]"><InlineCell value={row.commissionRate} type="number" onSave={sc("commissionRate")} /></td>
+                        <td className="px-2 py-1 whitespace-nowrap">
+                          <Badge variant={row.sideType === "buyer" ? "default" : "secondary"} className="text-[10px]">
+                            {row.sideType === "buyer" ? "Alıcı" : "Satıcı"}
                           </Badge>
-                        </TableCell>
-                        <TableCell className="text-xs text-right whitespace-nowrap">
-                          {fmtTRY(parseFloat(closing.saleValue ?? "0"))}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex gap-1 flex-wrap">
-                            {closing.sides.map((side) => (
-                              <Badge key={side.id} variant="secondary" className="text-[10px]">
-                                {side.sideType === "buyer" ? "Alıcı" : "Satıcı"}
-                              </Badge>
-                            ))}
+                        </td>
+                        <td className="px-2 py-1 whitespace-nowrap font-medium text-xs">{row.employeeName}</td>
+                        <td className="px-2 py-1 min-w-[50px]"><InlineCell value={row.splitPercentage} type="number" onSave={sa("splitPercentage")} /></td>
+                        <td className="px-2 py-1 min-w-[80px]"><InlineCell value={row.bhbShare} type="number" onSave={sa("bhbShare")} /></td>
+                        <td className="px-2 py-1 min-w-[80px] text-muted-foreground"><InlineCell value={row.mainBranchShare} type="number" onSave={sa("mainBranchShare")} /></td>
+                        <td className="px-2 py-1 min-w-[80px] text-muted-foreground"><InlineCell value={row.kwtrKdv} type="number" onSave={sa("kwtrKdv")} /></td>
+                        <td className="px-2 py-1 min-w-[80px] text-muted-foreground">
+                          <div className="flex items-center gap-1">
+                            <InlineCell value={row.marketCenterActual} type="number" onSave={sa("marketCenterActual")} />
+                            {isCapped && <span className="text-amber-500 text-[9px] shrink-0">caplı</span>}
                           </div>
-                        </TableCell>
-                        <TableCell className="text-xs text-right text-amber-600 whitespace-nowrap">
-                          {fmtTRY(totalKdv)}
-                        </TableCell>
-                        <TableCell className="text-xs text-right font-semibold text-emerald-700 whitespace-nowrap">
-                          {fmtTRY(closing.totalAgentNet ?? 0)}
-                        </TableCell>
-                        <TableCell onClick={(e) => e.stopPropagation()}>
-                          <button
-                            onClick={() => handleDelete(closing.id)}
-                            className="text-muted-foreground hover:text-destructive transition-colors p-1 rounded"
-                            title="Sil"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </TableCell>
-                      </TableRow>
-                      {isExpanded && (
-                        <TableRow key={`${closing.id}-detail`} className="bg-muted/20 hover:bg-muted/20">
-                          <TableCell colSpan={9} className="p-3">
-                            <div className="space-y-3">
-                              {closing.sides.map((side) => (
-                                <div key={side.id}>
-                                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
-                                    {side.sideType === "buyer" ? "Alıcı Tarafı" : "Satıcı Tarafı"}
-                                    {side.sideType === "buyer" && closing.buyerName ? ` — ${closing.buyerName}` : ""}
-                                    {side.sideType === "seller" && closing.sellerName ? ` — ${closing.sellerName}` : ""}
-                                  </p>
-                                  <table className="w-full text-xs border-collapse">
-                                    <thead>
-                                      <tr className="border-b border-border">
-                                        <th className="text-left font-medium py-1 pr-3 text-muted-foreground">Danışman</th>
-                                        <th className="text-right font-medium py-1 pr-3 text-muted-foreground">Pay %</th>
-                                        <th className="text-right font-medium py-1 pr-3 text-muted-foreground">BHB</th>
-                                        <th className="text-right font-medium py-1 pr-3 text-muted-foreground">KWTR</th>
-                                        <th className="text-right font-medium py-1 pr-3 text-muted-foreground">KWTR KDV</th>
-                                        <th className="text-right font-medium py-1 pr-3 text-muted-foreground">BM</th>
-                                        <th className="text-right font-medium py-1 pr-3 text-amber-600">BM KDV</th>
-                                        <th className="text-right font-medium py-1 text-emerald-700">Net</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody>
-                                      {side.agents.map((agent) => (
-                                        <tr key={agent.id} className="border-b border-border/40 last:border-0">
-                                          <td className="py-1 pr-3 font-medium">{agent.candidateName ?? agent.employeeName ?? `#${agent.employeeId}`}</td>
-                                          <td className="py-1 pr-3 text-right">%{parseFloat(agent.splitPercentage ?? "100").toFixed(0)}</td>
-                                          <td className="py-1 pr-3 text-right">{fmtTRY(parseFloat(agent.bhbShare ?? "0"))}</td>
-                                          <td className="py-1 pr-3 text-right text-muted-foreground">{fmtTRY(parseFloat(agent.mainBranchShare ?? "0"))}</td>
-                                          <td className="py-1 pr-3 text-right text-muted-foreground">{fmtTRY(parseFloat(agent.kwtrKdv ?? "0"))}</td>
-                                          <td className="py-1 pr-3 text-right text-muted-foreground">
-                                            {fmtTRY(parseFloat(agent.marketCenterActual ?? "0"))}
-                                            {parseFloat(agent.marketCenterDue ?? "0") > parseFloat(agent.marketCenterActual ?? "0") && (
-                                              <span className="ml-1 text-amber-500 text-[10px]">(caplı)</span>
-                                            )}
-                                          </td>
-                                          <td className="py-1 pr-3 text-right text-amber-600">{fmtTRY(parseFloat(agent.bmKdv ?? "0"))}</td>
-                                          <td className="py-1 text-right font-semibold text-emerald-700">{fmtTRY(parseFloat(agent.employeeNet ?? "0"))}</td>
-                                        </tr>
-                                      ))}
-                                    </tbody>
-                                  </table>
-                                </div>
-                              ))}
-                              {closing.notes && (
-                                <p className="text-xs text-muted-foreground italic">Not: {closing.notes}</p>
-                              )}
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      )}
-                      </>
+                        </td>
+                        <td className="px-2 py-1 min-w-[70px] text-amber-600"><InlineCell value={row.bmKdv} type="number" onSave={sa("bmKdv")} /></td>
+                        <td className="px-2 py-1 min-w-[80px] font-semibold text-emerald-700"><InlineCell value={row.employeeNet} type="number" onSave={sa("employeeNet")} /></td>
+                        <td className="px-2 py-1 text-center">
+                          {row.isFirstOfClosing && (
+                            <button onClick={() => handleDelete(row.closingId)} className="text-muted-foreground hover:text-destructive transition-colors p-1 rounded" title="Kapanışı sil">
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </td>
+                      </tr>
                     );
                   })}
-                </TableBody>
-              </Table>
+                </tbody>
+              </table>
             )}
           </CardContent>
         </Card>

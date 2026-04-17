@@ -345,9 +345,15 @@ export type CapSetting = typeof capSettings.$inferSelect;
 export const DEAL_TYPES = ["Çift Taraflı", "Ofis İçi", "Ofis Dışı"] as const;
 export type DealType = (typeof DEAL_TYPES)[number];
 
+export const DEAL_CATEGORIES = ["Satış", "Kiralık"] as const;
+export type DealCategory = (typeof DEAL_CATEGORIES)[number];
+
 export const closings = pgTable("closings", {
   id: serial("id").primaryKey(),
-  propertyAddress: text("property_address").notNull(),
+  propertyAddress: text("property_address").notNull().default(""),
+  il: text("il"),
+  ilce: text("ilce"),
+  dealCategory: text("deal_category").notNull().default("Satış"), // Satış | Kiralık
   dealType: text("deal_type").notNull().default("Çift Taraflı"),
   saleValue: numeric("sale_value", { precision: 15, scale: 2 }).notNull(),
   commissionRate: numeric("commission_rate", { precision: 5, scale: 2 }).notNull().default("2.00"),
@@ -406,6 +412,7 @@ export interface CapStatus {
 export interface ClosingAgentWithEmployee extends ClosingAgent {
   employeeName?: string;
   candidateName?: string;
+  kwuid?: string;
 }
 
 export interface ClosingSideWithAgents extends ClosingSide {

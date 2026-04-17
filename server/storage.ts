@@ -138,8 +138,22 @@ export interface IStorage {
   getAllEmployeesCapStatus(): Promise<Record<number, CapStatus>>;
   getClosings(): Promise<ClosingWithDetails[]>;
   getClosing(id: number): Promise<ClosingWithDetails | null>;
+  updateClosing(id: number, data: Partial<{
+    propertyAddress: string; il: string | null; ilce: string | null;
+    dealCategory: string; dealType: string; saleValue: string;
+    commissionRate: string; closingDate: Date; buyerName: string | null;
+    sellerName: string | null; notes: string | null;
+  }>): Promise<void>;
+  updateClosingAgent(id: number, data: Partial<{
+    splitPercentage: string; bhbShare: string; mainBranchShare: string;
+    kwtrKdv: string; marketCenterActual: string; bmKdv: string;
+    ukShare: string; employeeNet: string;
+  }>): Promise<void>;
   createClosing(data: {
     propertyAddress: string;
+    il?: string | null;
+    ilce?: string | null;
+    dealCategory?: string | null;
     dealType: string;
     saleValue: string;
     commissionRate?: string | null;
@@ -1492,7 +1506,7 @@ export class DatabaseStorage implements IStorage {
     const sidesWithAgents = await Promise.all(
       sides.map(async (side) => {
         const agents = await db
-          .select({ agent: closingAgents, candidate: candidates })
+          .select({ agent: closingAgents, candidate: candidates, emp: employees })
           .from(closingAgents)
           .leftJoin(employees, eq(closingAgents.employeeId, employees.id))
           .leftJoin(candidates, eq(employees.candidateId, candidates.id))
@@ -1503,6 +1517,7 @@ export class DatabaseStorage implements IStorage {
             ...r.agent,
             employeeName: r.candidate?.name ?? undefined,
             candidateName: r.candidate?.name ?? undefined,
+            kwuid: r.emp?.kwuid ?? undefined,
           })),
         };
       })
@@ -1526,8 +1541,30 @@ export class DatabaseStorage implements IStorage {
     return this.buildClosingWithDetails(closing);
   }
 
+  async updateClosing(id: number, data: Partial<{
+    propertyAddress: string; il: string | null; ilce: string | null;
+    dealCategory: string; dealType: string; saleValue: string;
+    commissionRate: string; closingDate: Date; buyerName: string | null;
+    sellerName: string | null; notes: string | null;
+  }>): Promise<void> {
+    if (Object.keys(data).length === 0) return;
+    await db.update(closings).set(data as any).where(eq(closings.id, id));
+  }
+
+  async updateClosingAgent(id: number, data: Partial<{
+    splitPercentage: string; bhbShare: string; mainBranchShare: string;
+    kwtrKdv: string; marketCenterActual: string; bmKdv: string;
+    ukShare: string; employeeNet: string;
+  }>): Promise<void> {
+    if (Object.keys(data).length === 0) return;
+    await db.update(closingAgents).set(data as any).where(eq(closingAgents.id, id));
+  }
+
   async createClosing(data: {
     propertyAddress: string;
+    il?: string | null;
+    ilce?: string | null;
+    dealCategory?: string | null;
     dealType: string;
     saleValue: string;
     commissionRate?: string | null;
@@ -1578,6 +1615,9 @@ export class DatabaseStorage implements IStorage {
     return db.transaction(async (tx) => {
       const [closing] = await tx.insert(closings).values({
         propertyAddress: data.propertyAddress,
+        il: data.il ?? null,
+        ilce: data.ilce ?? null,
+        dealCategory: data.dealCategory ?? "Satış",
         dealType: data.dealType,
         saleValue: data.saleValue,
         commissionRate: data.commissionRate ?? "2.00",

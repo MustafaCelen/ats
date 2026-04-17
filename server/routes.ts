@@ -1090,6 +1090,160 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // ── Closings ──────────────────────────────────────────────────────────────────
 
+  app.get("/api/closings/export", requireAuth, async (_req, res) => {
+    try {
+      const closings = await storage.getClosings();
+      const headers = [
+        "Tarih", "Mülk Adresi", "İl", "İlçe", "Tür", "İşlem Tipi", "Satış Bedeli", "Komisyon Oranı (%)",
+        "Taraf", "Alıcı Adı", "Satıcı Adı", "KWUID", "Danışman Adı", "Pay (%)",
+        "BHB", "KWTR", "KWTR KDV", "KWTR(+KDV)", "BM (PlatinKarma)", "BM KDV", "Danışman Net", "CAP",
+        "Notlar",
+      ];
+      const rows: string[][] = [];
+      for (const c of closings) {
+        const date = c.closingDate ? new Date(c.closingDate).toISOString().split("T")[0] : "";
+        const commRate = parseFloat(c.commissionRate ?? "2");
+        for (const side of c.sides) {
+          for (const agent of side.agents) {
+            const kwtr = parseFloat(agent.mainBranchShare ?? "0");
+            const kwtrKdv = parseFloat(agent.kwtrKdv ?? "0");
+            const bm = parseFloat(agent.marketCenterActual ?? "0");
+            const isCapped = parseFloat(agent.marketCenterDue ?? "0") > bm ? 1 : 0;
+            rows.push([
+              date,
+              c.propertyAddress,
+              (c as any).il ?? "",
+              (c as any).ilce ?? "",
+              c.dealCategory ?? "Satış",
+              c.dealType,
+              c.saleValue,
+              String(commRate),
+              side.sideType === "buyer" ? "Alıcı" : "Satıcı",
+              c.buyerName ?? "",
+              c.sellerName ?? "",
+              agent.kwuid ?? "",
+              agent.candidateName ?? agent.employeeName ?? "",
+              agent.splitPercentage,
+              agent.bhbShare ?? "0",
+              String(kwtr),
+              String(kwtrKdv),
+              String((kwtr + kwtrKdv).toFixed(2)),
+              String(bm),
+              agent.bmKdv ?? "0",
+              agent.employeeNet ?? "0",
+              String(isCapped),
+              c.notes ?? "",
+            ]);
+          }
+        }
+      }
+      const csv = [headers, ...rows]
+        .map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","))
+        .join("\n");
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="kapanislar_${new Date().toISOString().split("T")[0]}.csv"`);
+      res.send("\uFEFF" + csv);
+    } catch {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.post("/api/closings/import", requireAuth, async (req, res) => {
+    try {
+      const { rows } = req.body as { rows: Record<string, string>[] };
+      if (!Array.isArray(rows) || rows.length === 0) {
+        return res.status(400).json({ message: "No rows provided" });
+      }
+
+      // Look up all employees once for KWUID / name matching
+      const allEmployees = await storage.getEmployees() as any[];
+      const byKwuid: Record<string, number> = {};
+      const byName: Record<string, number> = {};
+      for (const emp of allEmployees) {
+        if (emp.kwuid) byKwuid[emp.kwuid.trim()] = emp.id;
+        const name = emp.candidate?.name?.trim().toLowerCase();
+        if (name) byName[name] = emp.id;
+      }
+
+      const resolveEmployee = (kwuid: string, name: string): number | null => {
+        if (kwuid && byKwuid[kwuid.trim()]) return byKwuid[kwuid.trim()];
+        if (name && byName[name.trim().toLowerCase()]) return byName[name.trim().toLowerCase()];
+        return null;
+      };
+
+      // Group rows into closings by Tarih + Mülk Adresi + İşlem Tipi
+      const groups = new Map<string, typeof rows>();
+      for (const row of rows) {
+        const key = `${row["Tarih"] ?? ""}||${row["Mülk Adresi"] ?? ""}||${row["İşlem Tipi"] ?? ""}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key)!.push(row);
+      }
+
+      let created = 0;
+      const errors: string[] = [];
+
+      for (const [, groupRows] of groups) {
+        try {
+          const first = groupRows[0];
+          const closingDate = new Date(first["Tarih"] ?? "");
+          if (isNaN(closingDate.getTime())) { errors.push(`Geçersiz tarih: ${first["Tarih"]}`); continue; }
+
+          const sidesMap = new Map<string, typeof rows>();
+          for (const row of groupRows) {
+            const sideKey = row["Taraf"] === "Alıcı" ? "buyer" : "seller";
+            if (!sidesMap.has(sideKey)) sidesMap.set(sideKey, []);
+            sidesMap.get(sideKey)!.push(row);
+          }
+
+          const sides = [];
+          for (const [sideType, sideRows] of sidesMap) {
+            const agents = [];
+            for (const row of sideRows) {
+              const empId = resolveEmployee(row["KWUID"] ?? "", row["Danışman Adı"] ?? "");
+              if (!empId) { errors.push(`Danışman bulunamadı: ${row["Danışman Adı"] ?? row["KWUID"] ?? "?"}`); continue; }
+              agents.push({
+                employeeId: empId,
+                splitPercentage: row["Pay (%)"] || "100",
+                bhbShare: row["BHB"] || undefined,
+                mainBranchShare: row["KWTR"] || undefined,
+                kwtrKdv: row["KWTR KDV"] || undefined,
+                marketCenterActual: row["BM (PlatinKarma)"] || undefined,
+                bmKdv: row["BM KDV"] || undefined,
+                ukShare: undefined,
+                employeeNet: row["Danışman Net"] || undefined,
+              });
+            }
+            if (agents.length > 0) sides.push({ sideType, agents });
+          }
+
+          if (sides.length === 0) { errors.push(`Taraf bulunamadı: ${first["Mülk Adresi"]}`); continue; }
+
+          await storage.createClosing({
+            propertyAddress: first["Mülk Adresi"] ?? "",
+            il: first["İl"] || null,
+            ilce: first["İlçe"] || null,
+            dealCategory: (first["Tür"] ?? "Satış") as any,
+            dealType: first["İşlem Tipi"] ?? "Çift Taraflı",
+            saleValue: first["Satış Bedeli"] ?? "0",
+            commissionRate: first["Komisyon Oranı (%)"] || "2",
+            closingDate,
+            buyerName: first["Alıcı Adı"] || null,
+            sellerName: first["Satıcı Adı"] || null,
+            notes: first["Notlar"] || null,
+            sides,
+          });
+          created++;
+        } catch (e: any) {
+          errors.push(e?.message ?? "Bilinmeyen hata");
+        }
+      }
+
+      res.json({ created, errors });
+    } catch {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   app.get("/api/closings", requireAuth, async (_req, res) => {
     try {
       res.json(await storage.getClosings());
@@ -1100,12 +1254,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/closings", requireAuth, async (req, res) => {
     try {
-      const { propertyAddress, dealType, saleValue, commissionRate, closingDate, buyerName, sellerName, notes, sides } = req.body;
-      if (!propertyAddress || !saleValue || !closingDate || !sides) {
-        return res.status(400).json({ message: "propertyAddress, saleValue, closingDate, and sides are required" });
+      const { propertyAddress, il, ilce, dealCategory, dealType, saleValue, commissionRate, closingDate, buyerName, sellerName, notes, sides } = req.body;
+      if (!saleValue || !closingDate || !sides) {
+        return res.status(400).json({ message: "saleValue, closingDate, and sides are required" });
       }
       const closing = await storage.createClosing({
-        propertyAddress,
+        propertyAddress: propertyAddress ?? "",
+        il: il ?? null,
+        ilce: ilce ?? null,
+        dealCategory: dealCategory ?? "Satış",
         dealType: dealType ?? "Çift Taraflı",
         saleValue: String(saleValue),
         commissionRate: commissionRate ? String(commissionRate) : "2.00",
@@ -1125,6 +1282,26 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.delete("/api/closings/:id", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
     try {
       await storage.deleteClosing(Number(req.params.id));
+      res.status(204).send();
+    } catch {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.patch("/api/closings/:id", requireAuth, async (req, res) => {
+    try {
+      const data = { ...req.body };
+      if (data.closingDate) data.closingDate = new Date(data.closingDate);
+      await storage.updateClosing(Number(req.params.id), data);
+      res.status(204).send();
+    } catch {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.patch("/api/closing-agents/:id", requireAuth, async (req, res) => {
+    try {
+      await storage.updateClosingAgent(Number(req.params.id), req.body);
       res.status(204).send();
     } catch {
       res.status(500).json({ message: "Internal server error" });
