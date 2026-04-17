@@ -342,14 +342,15 @@ export const capSettings = pgTable("cap_settings", {
 export type CapSetting = typeof capSettings.$inferSelect;
 
 // ── Closings ──────────────────────────────────────────────────────────────────
-export const DEAL_TYPES = ["Konut", "Ticari", "Arsa", "Lüks", "Kiralık"] as const;
+export const DEAL_TYPES = ["Çift Taraflı", "Ofis İçi", "Ofis Dışı"] as const;
 export type DealType = (typeof DEAL_TYPES)[number];
 
 export const closings = pgTable("closings", {
   id: serial("id").primaryKey(),
   propertyAddress: text("property_address").notNull(),
-  dealType: text("deal_type").notNull().default("Konut"),
+  dealType: text("deal_type").notNull().default("Çift Taraflı"),
   saleValue: numeric("sale_value", { precision: 15, scale: 2 }).notNull(),
+  commissionRate: numeric("commission_rate", { precision: 5, scale: 2 }).notNull().default("2.00"),
   closingDate: timestamp("closing_date").notNull(),
   buyerName: text("buyer_name"),
   sellerName: text("seller_name"),
@@ -376,8 +377,10 @@ export const closingAgents = pgTable("closing_agents", {
   splitPercentage: numeric("split_percentage", { precision: 5, scale: 2 }).notNull(),
   bhbShare: numeric("bhb_share", { precision: 15, scale: 2 }).notNull(),
   mainBranchShare: numeric("main_branch_share", { precision: 15, scale: 2 }).notNull(),
+  kwtrKdv: numeric("kwtr_kdv", { precision: 15, scale: 2 }).notNull().default("0"),
   marketCenterDue: numeric("market_center_due", { precision: 15, scale: 2 }).notNull(),
   marketCenterActual: numeric("market_center_actual", { precision: 15, scale: 2 }).notNull(),
+  bmKdv: numeric("bm_kdv", { precision: 15, scale: 2 }).notNull().default("0"),
   ukShare: numeric("uk_share", { precision: 15, scale: 2 }).notNull().default("0"),
   employeeNet: numeric("employee_net", { precision: 15, scale: 2 }).notNull(),
   contractTypeSnapshot: text("contract_type_snapshot"),

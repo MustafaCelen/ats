@@ -1,7 +1,7 @@
 import { Link, useLocation } from "wouter";
 import {
   LayoutDashboard, Users, Briefcase, BarChart2, ChevronRight, Menu, X,
-  Calendar, Shield, LogOut, ClipboardList, UserCheck, KanbanSquare,
+  Calendar, Shield, LogOut, ClipboardList, UserCheck, KanbanSquare, DollarSign,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { useState } from "react";
@@ -15,6 +15,7 @@ const hiringManagerNavItems = [
   { icon: UserCheck,       label: "Danışmanlar",  href: "/employees" },
   { icon: Calendar,        label: "Randevular",   href: "/interviews" },
   { icon: KanbanSquare,    label: "Onboarding",   href: "/onboarding" },
+  { icon: DollarSign,      label: "İşlem Kapanış", href: "/closings" },
   { icon: BarChart2,       label: "Raporlar",     href: "/reports" },
   { icon: ClipboardList,   label: "Görevler",     href: "/tasks" },
 ];
@@ -31,6 +32,7 @@ const assistantNavItems = [
   { icon: UserCheck,     label: "Danışmanlar",  href: "/employees" },
   { icon: Calendar,      label: "Randevular",   href: "/interviews" },
   { icon: KanbanSquare,  label: "Onboarding",   href: "/onboarding" },
+  { icon: DollarSign,    label: "İşlem Kapanış", href: "/closings" },
   { icon: ClipboardList, label: "Görevler",     href: "/tasks" },
 ];
 

@@ -1088,5 +1088,88 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // ── Closings ──────────────────────────────────────────────────────────────────
+
+  app.get("/api/closings", requireAuth, async (_req, res) => {
+    try {
+      res.json(await storage.getClosings());
+    } catch {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.post("/api/closings", requireAuth, async (req, res) => {
+    try {
+      const { propertyAddress, dealType, saleValue, commissionRate, closingDate, buyerName, sellerName, notes, sides } = req.body;
+      if (!propertyAddress || !saleValue || !closingDate || !sides) {
+        return res.status(400).json({ message: "propertyAddress, saleValue, closingDate, and sides are required" });
+      }
+      const closing = await storage.createClosing({
+        propertyAddress,
+        dealType: dealType ?? "Çift Taraflı",
+        saleValue: String(saleValue),
+        commissionRate: commissionRate ? String(commissionRate) : "2.00",
+        closingDate: new Date(closingDate),
+        buyerName: buyerName ?? null,
+        sellerName: sellerName ?? null,
+        notes: notes ?? null,
+        createdByUserId: req.user!.id,
+        sides,
+      });
+      res.status(201).json(closing);
+    } catch {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.delete("/api/closings/:id", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
+    try {
+      await storage.deleteClosing(Number(req.params.id));
+      res.status(204).send();
+    } catch {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Cap Settings ──────────────────────────────────────────────────────────────
+
+  app.get("/api/cap-settings", requireAuth, async (_req, res) => {
+    try {
+      res.json(await storage.getCapSettings());
+    } catch {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.post("/api/cap-settings", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
+    try {
+      const { year, amount } = req.body;
+      if (!year || !amount) return res.status(400).json({ message: "year and amount are required" });
+      const setting = await storage.upsertCapSetting(Number(year), String(amount));
+      res.status(201).json(setting);
+    } catch {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.delete("/api/cap-settings/:id", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
+    try {
+      await storage.deleteCapSetting(Number(req.params.id));
+      res.status(204).send();
+    } catch {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Cap Statuses ──────────────────────────────────────────────────────────────
+
+  app.get("/api/employees/cap-statuses", requireAuth, async (_req, res) => {
+    try {
+      res.json(await storage.getAllEmployeesCapStatus());
+    } catch {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   return httpServer;
 }

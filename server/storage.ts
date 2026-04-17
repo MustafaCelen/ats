@@ -142,6 +142,7 @@ export interface IStorage {
     propertyAddress: string;
     dealType: string;
     saleValue: string;
+    commissionRate?: string | null;
     closingDate: Date;
     buyerName?: string | null;
     sellerName?: string | null;
@@ -149,7 +150,17 @@ export interface IStorage {
     createdByUserId?: number | null;
     sides: Array<{
       sideType: string;
-      agents: Array<{ employeeId: number; splitPercentage: string }>;
+      agents: Array<{
+        employeeId: number;
+        splitPercentage: string;
+        bhbShare?: string;
+        mainBranchShare?: string;
+        kwtrKdv?: string;
+        marketCenterActual?: string;
+        bmKdv?: string;
+        ukShare?: string;
+        employeeNet?: string;
+      }>;
     }>;
   }): Promise<Closing>;
   deleteClosing(id: number): Promise<void>;
@@ -1519,6 +1530,7 @@ export class DatabaseStorage implements IStorage {
     propertyAddress: string;
     dealType: string;
     saleValue: string;
+    commissionRate?: string | null;
     closingDate: Date;
     buyerName?: string | null;
     sellerName?: string | null;
@@ -1526,10 +1538,22 @@ export class DatabaseStorage implements IStorage {
     createdByUserId?: number | null;
     sides: Array<{
       sideType: string;
-      agents: Array<{ employeeId: number; splitPercentage: string }>;
+      agents: Array<{
+        employeeId: number;
+        splitPercentage: string;
+        // Pre-calculated values from frontend (used as-is if provided)
+        bhbShare?: string;
+        mainBranchShare?: string;
+        kwtrKdv?: string;
+        marketCenterActual?: string;
+        bmKdv?: string;
+        ukShare?: string;
+        employeeNet?: string;
+      }>;
     }>;
   }): Promise<Closing> {
     const saleValue = parseFloat(data.saleValue);
+    const commissionRate = parseFloat(data.commissionRate ?? "2") / 100; // e.g. "2.00" → 0.02
 
     // Pre-calculate cap statuses for all involved employees
     const allEmployeeIds = Array.from(new Set(data.sides.flatMap((s) => s.agents.map((a) => a.employeeId))));
@@ -1556,6 +1580,7 @@ export class DatabaseStorage implements IStorage {
         propertyAddress: data.propertyAddress,
         dealType: data.dealType,
         saleValue: data.saleValue,
+        commissionRate: data.commissionRate ?? "2.00",
         closingDate: data.closingDate,
         buyerName: data.buyerName ?? null,
         sellerName: data.sellerName ?? null,
@@ -1571,8 +1596,8 @@ export class DatabaseStorage implements IStorage {
       });
 
       for (const side of sortedSides) {
-        // BHB = 2% of saleValue per side
-        const sideBHB = saleValue * 0.02;
+        // BHB = commissionRate% of saleValue per side
+        const sideBHB = saleValue * commissionRate;
 
         const [closingSide] = await tx.insert(closingSides).values({
           closingId: closing.id,
@@ -1585,33 +1610,54 @@ export class DatabaseStorage implements IStorage {
           if (!emp) continue;
 
           const splitPct = parseFloat(agentInput.splitPercentage);
-          const bhbShare = sideBHB * (splitPct / 100);
-          const mainBranchShare = bhbShare * 0.10;
-
           const contractType = emp.contractType ?? "70/30";
-          const mcRate = contractType === "50/50" ? 0.30 : 0.20;
-          const marketCenterDue = bhbShare * mcRate;
-
           const capStatus = capStatusMap[agentInput.employeeId];
-          // null capAmount = no cap configured = unlimited; full marketCenterDue is collected
           const capAmount = capStatus?.capAmount ?? null;
           const capUsedSoFar = runningCapUsed[agentInput.employeeId] ?? 0;
-          const marketCenterActual = capAmount === null
-            ? marketCenterDue
-            : Math.min(marketCenterDue, Math.max(0, capAmount - capUsedSoFar));
 
-          // Update running cap for this employee
-          runningCapUsed[agentInput.employeeId] = capUsedSoFar + marketCenterActual;
-
-          // UK share
-          let ukShare = 0;
+          let bhbShare: number;
+          let mainBranchShare: number;
+          let kwtrKdv: number;
+          let marketCenterDue: number;
+          let marketCenterActual: number;
+          let bmKdv: number;
+          let ukShare: number;
           let ukRateSnapshot = 0;
-          if (emp.uretkenlikKoclugu && emp.uretkenlikKocluguOran) {
-            ukRateSnapshot = emp.uretkenlikKocluguOran === "10%" ? 10 : 5;
-            ukShare = bhbShare * (ukRateSnapshot / 100);
+          let employeeNet: number;
+
+          if (agentInput.bhbShare !== undefined) {
+            // Use frontend pre-calculated (possibly manually edited) values
+            bhbShare = parseFloat(agentInput.bhbShare);
+            mainBranchShare = parseFloat(agentInput.mainBranchShare ?? "0");
+            kwtrKdv = parseFloat(agentInput.kwtrKdv ?? "0");
+            marketCenterDue = (bhbShare - mainBranchShare) * 0.30; // kept for reference
+            marketCenterActual = parseFloat(agentInput.marketCenterActual ?? "0");
+            bmKdv = parseFloat(agentInput.bmKdv ?? "0");
+            ukShare = parseFloat(agentInput.ukShare ?? "0");
+            employeeNet = parseFloat(agentInput.employeeNet ?? "0");
+            if (emp.uretkenlikKoclugu && emp.uretkenlikKocluguOran) {
+              ukRateSnapshot = emp.uretkenlikKocluguOran === "10%" ? 10 : 5;
+            }
+          } else {
+            // Fallback: calculate on the server (legacy path)
+            bhbShare = sideBHB * (splitPct / 100);
+            mainBranchShare = bhbShare * 0.10;
+            kwtrKdv = mainBranchShare * 0.20;
+            marketCenterDue = (bhbShare - mainBranchShare) * 0.30;
+            marketCenterActual = capAmount === null
+              ? marketCenterDue
+              : Math.min(marketCenterDue, Math.max(0, capAmount - capUsedSoFar));
+            bmKdv = marketCenterDue > 0 ? marketCenterActual * (0.016 / 0.27) : 0;
+            ukShare = 0;
+            if (emp.uretkenlikKoclugu && emp.uretkenlikKocluguOran) {
+              ukRateSnapshot = emp.uretkenlikKocluguOran === "10%" ? 10 : 5;
+              ukShare = bhbShare * (ukRateSnapshot / 100);
+            }
+            employeeNet = bhbShare - mainBranchShare - kwtrKdv - marketCenterActual - bmKdv - ukShare;
           }
 
-          const employeeNet = bhbShare - mainBranchShare - marketCenterActual - ukShare;
+          // Update running cap regardless of which path was taken
+          runningCapUsed[agentInput.employeeId] = capUsedSoFar + marketCenterActual;
 
           await tx.insert(closingAgents).values({
             closingSideId: closingSide.id,
@@ -1619,8 +1665,10 @@ export class DatabaseStorage implements IStorage {
             splitPercentage: agentInput.splitPercentage,
             bhbShare: String(bhbShare),
             mainBranchShare: String(mainBranchShare),
-            marketCenterDue: String(marketCenterDue),
+            kwtrKdv: String(kwtrKdv),
+            marketCenterDue: String(marketCenterDue ?? 0),
             marketCenterActual: String(marketCenterActual),
+            bmKdv: String(bmKdv),
             ukShare: String(ukShare),
             employeeNet: String(employeeNet),
             contractTypeSnapshot: contractType,

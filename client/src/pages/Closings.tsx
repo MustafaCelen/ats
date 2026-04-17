@@ -19,7 +19,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Handshake, Plus, Trash2, TrendingUp, DollarSign, Users,
-  AlertCircle, CheckCircle2, Settings,
+  AlertCircle, CheckCircle2, Settings, ChevronDown, ChevronRight,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { DEAL_TYPES, type CapStatus, type ClosingWithDetails } from "@shared/schema";
@@ -43,8 +43,10 @@ function safeFormatDate(value: string | Date | null | undefined, fmt: string): s
 interface AgentBreakdown {
   bhbShare: number;
   mainBranchShare: number;
+  kwtrKdv: number;
   marketCenterDue: number;
   marketCenterActual: number;
+  bmKdv: number;
   ukShare: number;
   employeeNet: number;
   capRemaining: number | null; // null = unlimited
@@ -58,14 +60,15 @@ function calcAgentBreakdown(
   employee: any,
   capUsedSoFar: number,
   capAmount: number | null, // null = unlimited (no cap configured)
+  commissionRatePct: number = 2, // e.g. 2 → 2%
 ): AgentBreakdown {
-  const sideBHB = saleValue * 0.02;
+  const sideBHB = saleValue * (commissionRatePct / 100);
   const bhbShare = sideBHB * (splitPct / 100);
-  const mainBranchShare = bhbShare * 0.10;
+  const mainBranchShare = bhbShare * 0.10;         // KWTR = 10% of agent BHB
+  const kwtrKdv = mainBranchShare * 0.20;          // 20% KDV on KWTR
 
-  const contractType = employee?.contractType ?? "70/30";
-  const mcRate = contractType === "50/50" ? 0.30 : 0.20;
-  const marketCenterDue = bhbShare * mcRate;
+  // BM = 30% of (BHB - KWTR) = 27% effective
+  const marketCenterDue = (bhbShare - mainBranchShare) * 0.30;
 
   // null capAmount = unlimited — full marketCenterDue is paid, no cap reduction
   const marketCenterActual = capAmount === null
@@ -73,19 +76,26 @@ function calcAgentBreakdown(
     : Math.min(marketCenterDue, Math.max(0, capAmount - capUsedSoFar));
   const capUsedAfter = capUsedSoFar + marketCenterActual;
 
+  // BM KDV proportional to actual BM paid (= bhbShare × 1.6% when not capped)
+  const bmKdv = marketCenterDue > 0
+    ? marketCenterActual * (0.016 / 0.27)
+    : 0;
+
   let ukShare = 0;
   if (employee?.uretkenlikKoclugu && employee?.uretkenlikKocluguOran) {
     const ukRate = employee.uretkenlikKocluguOran === "10%" ? 0.10 : 0.05;
     ukShare = bhbShare * ukRate;
   }
 
-  const employeeNet = bhbShare - mainBranchShare - marketCenterActual - ukShare;
+  const employeeNet = bhbShare - mainBranchShare - kwtrKdv - marketCenterActual - bmKdv - ukShare;
 
   return {
     bhbShare,
     mainBranchShare,
+    kwtrKdv,
     marketCenterDue,
     marketCenterActual,
+    bmKdv,
     ukShare,
     employeeNet,
     capRemaining: capAmount === null ? null : Math.max(0, capAmount - capUsedAfter),
@@ -186,9 +196,18 @@ function useDeleteCapSetting() {
 
 // ── Agent row inside side ─────────────────────────────────────────────────────
 interface AgentInputRow {
-  id: string; // local key
+  id: string;
   employeeId: number | null;
   splitPercentage: string;
+  // Breakdown values — auto-filled from calcAgentBreakdown, user can override any field
+  bhbShare: string;
+  mainBranchShare: string;
+  kwtrKdv: string;
+  marketCenterActual: string;
+  bmKdv: string;
+  ukShare: string;
+  employeeNet: string;
+  isManuallyEdited: boolean; // true = user has changed at least one field
 }
 
 interface SideState {
@@ -197,7 +216,44 @@ interface SideState {
 }
 
 function newAgent(): AgentInputRow {
-  return { id: Math.random().toString(36).slice(2), employeeId: null, splitPercentage: "100" };
+  return {
+    id: Math.random().toString(36).slice(2),
+    employeeId: null,
+    splitPercentage: "100",
+    bhbShare: "",
+    mainBranchShare: "",
+    kwtrKdv: "",
+    marketCenterActual: "",
+    bmKdv: "",
+    ukShare: "",
+    employeeNet: "",
+    isManuallyEdited: false,
+  };
+}
+
+function applyBreakdown(agent: AgentInputRow, bd: AgentBreakdown): AgentInputRow {
+  return {
+    ...agent,
+    bhbShare: bd.bhbShare.toFixed(2),
+    mainBranchShare: bd.mainBranchShare.toFixed(2),
+    kwtrKdv: bd.kwtrKdv.toFixed(2),
+    marketCenterActual: bd.marketCenterActual.toFixed(2),
+    bmKdv: bd.bmKdv.toFixed(2),
+    ukShare: bd.ukShare.toFixed(2),
+    employeeNet: bd.employeeNet.toFixed(2),
+    isManuallyEdited: false,
+  };
+}
+
+/** Recompute employeeNet from the stored deduction fields */
+function deriveNet(a: AgentInputRow): string {
+  const bhb = parseFloat(a.bhbShare || "0");
+  const kwtr = parseFloat(a.mainBranchShare || "0");
+  const kwtrKdv = parseFloat(a.kwtrKdv || "0");
+  const bm = parseFloat(a.marketCenterActual || "0");
+  const bmKdv = parseFloat(a.bmKdv || "0");
+  const uk = parseFloat(a.ukShare || "0");
+  return (bhb - kwtr - kwtrKdv - bm - bmKdv - uk).toFixed(2);
 }
 
 // ── Cap badge ─────────────────────────────────────────────────────────────────
@@ -229,20 +285,34 @@ function CapBadge({ remaining, amount }: { remaining: number | null; amount: num
   );
 }
 
-// ── Agent calculation row display ─────────────────────────────────────────────
-function AgentCalcRow({
+// ── Editable breakdown field ──────────────────────────────────────────────────
+function BreakdownField({
   label,
   value,
+  onChange,
   highlight,
+  prefix,
 }: {
   label: string;
   value: string;
+  onChange: (v: string) => void;
   highlight?: boolean;
+  prefix?: string;
 }) {
   return (
-    <div className={`flex justify-between text-xs ${highlight ? "font-semibold text-foreground" : "text-muted-foreground"}`}>
-      <span>{label}</span>
-      <span>{value}</span>
+    <div className={`flex items-center justify-between gap-2 text-xs ${highlight ? "font-semibold" : "text-muted-foreground"}`}>
+      <span className="shrink-0 w-36">{label}</span>
+      <div className="flex items-center gap-1">
+        {prefix && <span className="text-muted-foreground">{prefix}</span>}
+        <Input
+          type="number"
+          step="0.01"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className={`h-6 w-32 text-xs text-right px-1.5 ${highlight ? "font-semibold" : ""}`}
+        />
+        <span className="text-muted-foreground shrink-0">₺</span>
+      </div>
     </div>
   );
 }
@@ -254,6 +324,7 @@ function SideSection({
   side,
   setSide,
   saleValue,
+  commissionRatePct,
   employees,
   capStatuses,
   runningCapUsed,
@@ -263,6 +334,7 @@ function SideSection({
   side: SideState;
   setSide: (s: SideState) => void;
   saleValue: number;
+  commissionRatePct: number;
   employees: any[];
   capStatuses: Record<number, CapStatus>;
   runningCapUsed: Record<number, number>;
@@ -312,7 +384,7 @@ function SideSection({
         </div>
         {side.enabled && (
           <span className="text-xs text-muted-foreground">
-            BHB: {fmtTRY(saleValue * 0.02)}
+            BHB: {fmtTRY(saleValue * (commissionRatePct / 100))}
           </span>
         )}
       </div>
@@ -325,18 +397,41 @@ function SideSection({
             const capAmount = capStatus?.capAmount ?? null;
             const capUsedSoFar = agent.employeeId ? (runningCapUsed[agent.employeeId] ?? capStatus?.capUsed ?? 0) : 0;
             const splitPct = parseFloat(agent.splitPercentage || "0");
-            const breakdown = emp && saleValue > 0 && splitPct > 0
-              ? calcAgentBreakdown(saleValue, splitPct, emp, capUsedSoFar, capAmount)
-              : null;
+
+            const recalc = () => {
+              if (!emp || saleValue <= 0 || splitPct <= 0) return;
+              const bd = calcAgentBreakdown(saleValue, splitPct, emp, capUsedSoFar, capAmount, commissionRatePct);
+              updateAgent(agent.id, applyBreakdown(agent, bd));
+            };
+
+            // Auto-fill when agent/split is first set and fields are empty
+            const showBreakdown = !!emp && saleValue > 0 && splitPct > 0;
+            if (showBreakdown && !agent.isManuallyEdited && agent.bhbShare === "") {
+              const bd = calcAgentBreakdown(saleValue, splitPct, emp, capUsedSoFar, capAmount, commissionRatePct);
+              // Trigger in next tick to avoid render-time setState
+              setTimeout(() => updateAgent(agent.id, applyBreakdown(agent, bd)), 0);
+            }
+
+            const updateField = (field: keyof AgentInputRow, val: string) => {
+              const updated = { ...agent, [field]: val, isManuallyEdited: true };
+              // Auto-derive net whenever a deduction field changes (except net itself)
+              if (field !== "employeeNet") {
+                updated.employeeNet = deriveNet({ ...updated, [field]: val });
+              }
+              updateAgent(agent.id, updated);
+            };
 
             return (
               <div key={agent.id} className="border border-border rounded-md p-3 bg-background space-y-2">
+                {/* Agent selector + split */}
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-medium text-muted-foreground w-5">{idx + 1}.</span>
                   <div className="flex-1">
                     <Select
                       value={agent.employeeId ? String(agent.employeeId) : ""}
-                      onValueChange={(v) => updateAgent(agent.id, { employeeId: Number(v) })}
+                      onValueChange={(v) => {
+                        updateAgent(agent.id, { ...newAgent(), id: agent.id, employeeId: Number(v), splitPercentage: agent.splitPercentage });
+                      }}
                     >
                       <SelectTrigger className="h-8 text-xs">
                         <SelectValue placeholder="Danışman seçin..." />
@@ -357,40 +452,49 @@ function SideSection({
                       max="100"
                       step="0.01"
                       value={agent.splitPercentage}
-                      onChange={(e) => updateAgent(agent.id, { splitPercentage: e.target.value })}
+                      onChange={(e) => updateAgent(agent.id, { ...newAgent(), id: agent.id, employeeId: agent.employeeId, splitPercentage: e.target.value })}
                       className="h-8 text-xs text-right"
                       placeholder="% Pay"
                     />
                   </div>
                   <span className="text-xs text-muted-foreground">%</span>
                   {side.agents.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => removeAgent(agent.id)}
-                      className="text-muted-foreground hover:text-destructive transition-colors"
-                    >
+                    <button type="button" onClick={() => removeAgent(agent.id)} className="text-muted-foreground hover:text-destructive transition-colors">
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   )}
                 </div>
 
-                {emp && breakdown && (
-                  <div className="ml-5 p-2 bg-muted/50 rounded space-y-1">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-medium">Hesaplama</span>
-                      <CapBadge remaining={breakdown.capRemaining} amount={capAmount} />
+                {/* Editable breakdown */}
+                {showBreakdown && agent.bhbShare !== "" && (
+                  <div className="ml-5 p-2 bg-muted/50 rounded space-y-1.5">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-medium">Hesaplama</span>
+                        {agent.isManuallyEdited && (
+                          <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-medium">Manuel</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <CapBadge remaining={capStatus?.capRemaining ?? null} amount={capAmount} />
+                        <button
+                          type="button"
+                          onClick={recalc}
+                          title="Otomatik hesapla"
+                          className="text-[10px] text-primary hover:underline flex items-center gap-0.5"
+                        >
+                          ↺ Hesapla
+                        </button>
+                      </div>
                     </div>
-                    <AgentCalcRow label="BHB Payı" value={fmtTRY(breakdown.bhbShare)} />
-                    <AgentCalcRow label="Ana Merkez (10%)" value={`- ${fmtTRY(breakdown.mainBranchShare)}`} />
-                    <AgentCalcRow
-                      label={`Ofis (${emp.contractType === "50/50" ? "30" : "20"}%${breakdown.marketCenterDue > breakdown.marketCenterActual ? ", caplı" : ""})`}
-                      value={`- ${fmtTRY(breakdown.marketCenterActual)}`}
-                    />
-                    {breakdown.ukShare > 0 && (
-                      <AgentCalcRow label="Üretkenlik Koçluğu" value={`- ${fmtTRY(breakdown.ukShare)}`} />
-                    )}
-                    <div className="border-t border-border mt-1 pt-1">
-                      <AgentCalcRow label="Danışman Net" value={fmtTRY(breakdown.employeeNet)} highlight />
+                    <BreakdownField label="BHB Payı" value={agent.bhbShare} onChange={(v) => updateField("bhbShare", v)} />
+                    <BreakdownField label="KWTR (10%)" prefix="−" value={agent.mainBranchShare} onChange={(v) => updateField("mainBranchShare", v)} />
+                    <BreakdownField label="KWTR KDV (20%)" prefix="−" value={agent.kwtrKdv} onChange={(v) => updateField("kwtrKdv", v)} />
+                    <BreakdownField label="BM (27%)" prefix="−" value={agent.marketCenterActual} onChange={(v) => updateField("marketCenterActual", v)} />
+                    <BreakdownField label="BM KDV (1.6%)" prefix="−" value={agent.bmKdv} onChange={(v) => updateField("bmKdv", v)} />
+                    <BreakdownField label="Üretkenlik Koçluğu" prefix="−" value={agent.ukShare} onChange={(v) => updateField("ukShare", v)} />
+                    <div className="border-t border-border mt-1 pt-1.5">
+                      <BreakdownField label="Danışman Net" value={agent.employeeNet} onChange={(v) => updateField("employeeNet", v)} highlight />
                     </div>
                   </div>
                 )}
@@ -425,7 +529,9 @@ interface SummaryRow {
   splitPct: number;
   bhbShare: number;
   mainBranch: number;
+  kwtrKdv: number;
   mcActual: number;
+  bmKdv: number;
   uk: number;
   net: number;
 }
@@ -433,6 +539,7 @@ interface SummaryRow {
 function SummaryTable({ rows }: { rows: SummaryRow[] }) {
   if (rows.length === 0) return null;
   const totalNet = rows.reduce((s, r) => s + r.net, 0);
+  const totalKdv = rows.reduce((s, r) => s + r.kwtrKdv + r.bmKdv, 0);
   return (
     <div className="rounded-lg border overflow-hidden">
       <Table>
@@ -442,8 +549,9 @@ function SummaryTable({ rows }: { rows: SummaryRow[] }) {
             <TableHead className="text-xs">Taraf</TableHead>
             <TableHead className="text-xs text-right">Pay %</TableHead>
             <TableHead className="text-xs text-right">BHB</TableHead>
-            <TableHead className="text-xs text-right">A.Merkez</TableHead>
-            <TableHead className="text-xs text-right">Ofis</TableHead>
+            <TableHead className="text-xs text-right">KWTR</TableHead>
+            <TableHead className="text-xs text-right">BM</TableHead>
+            <TableHead className="text-xs text-right text-amber-600">KDV</TableHead>
             <TableHead className="text-xs text-right">UK</TableHead>
             <TableHead className="text-xs text-right font-semibold">Net</TableHead>
           </TableRow>
@@ -461,12 +569,15 @@ function SummaryTable({ rows }: { rows: SummaryRow[] }) {
               <TableCell className="text-xs text-right">{fmtTRY(r.bhbShare)}</TableCell>
               <TableCell className="text-xs text-right text-muted-foreground">{fmtTRY(r.mainBranch)}</TableCell>
               <TableCell className="text-xs text-right text-muted-foreground">{fmtTRY(r.mcActual)}</TableCell>
+              <TableCell className="text-xs text-right text-amber-600">{fmtTRY(r.kwtrKdv + r.bmKdv)}</TableCell>
               <TableCell className="text-xs text-right text-muted-foreground">{fmtTRY(r.uk)}</TableCell>
               <TableCell className="text-xs text-right font-semibold text-emerald-700">{fmtTRY(r.net)}</TableCell>
             </TableRow>
           ))}
           <TableRow className="bg-muted/30 font-semibold">
-            <TableCell colSpan={7} className="text-xs">Toplam</TableCell>
+            <TableCell colSpan={6} className="text-xs">Toplam</TableCell>
+            <TableCell className="text-xs text-right text-amber-600">{fmtTRY(totalKdv)}</TableCell>
+            <TableCell />
             <TableCell className="text-xs text-right text-emerald-700">{fmtTRY(totalNet)}</TableCell>
           </TableRow>
         </TableBody>
@@ -581,7 +692,7 @@ function EmployeeCapStatusPanel({
   employees: any[];
   capStatuses: Record<number, CapStatus>;
 }) {
-  const active = employees.filter((e) => e.status === "active" && e.capMonth);
+  const active = employees.filter((e) => e.status === "active");
   if (active.length === 0) {
     return (
       <Card>
@@ -592,7 +703,7 @@ function EmployeeCapStatusPanel({
           </CardTitle>
         </CardHeader>
         <CardContent className="px-4 pb-4">
-          <p className="text-xs text-muted-foreground italic">Cap dönemi tanımlı aktif danışman bulunamadı.</p>
+          <p className="text-xs text-muted-foreground italic">Aktif danışman bulunamadı.</p>
         </CardContent>
       </Card>
     );
@@ -626,7 +737,13 @@ function EmployeeCapStatusPanel({
                 return (
                   <TableRow key={emp.id}>
                     <TableCell className="text-xs font-medium pl-4">{name}</TableCell>
-                    <TableCell colSpan={5} className="text-xs text-muted-foreground italic">Hesaplanıyor...</TableCell>
+                    <TableCell className="text-xs text-muted-foreground italic">—</TableCell>
+                    <TableCell className="text-xs text-right text-muted-foreground italic">Cap tanımsız</TableCell>
+                    <TableCell className="text-xs text-right text-muted-foreground">—</TableCell>
+                    <TableCell className="text-xs text-right text-muted-foreground">—</TableCell>
+                    <TableCell className="text-center">
+                      <Badge variant="outline" className="text-[10px] text-muted-foreground">Tanımsız</Badge>
+                    </TableCell>
                   </TableRow>
                 );
               }
@@ -694,8 +811,9 @@ function NewClosingDialog({
   const createClosing = useCreateClosing();
 
   const [propertyAddress, setPropertyAddress] = useState("");
-  const [dealType, setDealType] = useState<string>("Konut");
+  const [dealType, setDealType] = useState<string>("Çift Taraflı");
   const [saleValue, setSaleValue] = useState("");
+  const [commissionRate, setCommissionRate] = useState("2");
   const [closingDate, setClosingDate] = useState(new Date().toISOString().split("T")[0]);
   const [buyerName, setBuyerName] = useState("");
   const [sellerName, setSellerName] = useState("");
@@ -704,6 +822,8 @@ function NewClosingDialog({
   const [sellerSide, setSellerSide] = useState<SideState>({ enabled: false, agents: [newAgent()] });
 
   const saleValueNum = parseFloat(saleValue || "0");
+  const commissionRatePct = Math.max(0, parseFloat(commissionRate || "2"));
+  const sideBHBPreview = saleValueNum > 0 ? saleValueNum * (commissionRatePct / 100) : 0;
 
   // Compute per-side starting cap used:
   // buyerRunningCap = DB values (cap used before this closing)
@@ -732,42 +852,36 @@ function NewClosingDialog({
         const capUsedSoFar = afterBuyer[agent.employeeId] ?? 0;
         const splitPct = parseFloat(agent.splitPercentage || "0");
         if (splitPct <= 0 || saleValueNum <= 0) continue;
-        const bd = calcAgentBreakdown(saleValueNum, splitPct, emp, capUsedSoFar, capAmount);
+        const bd = calcAgentBreakdown(saleValueNum, splitPct, emp, capUsedSoFar, capAmount, commissionRatePct);
         afterBuyer[agent.employeeId] = bd.capUsedAfter;
       }
     }
 
     return { buyerRunningCap: buyerStart, sellerRunningCap: afterBuyer };
-  }, [buyerSide, sellerSide, saleValueNum, employees, capStatuses]);
+  }, [buyerSide, sellerSide, saleValueNum, commissionRatePct, employees, capStatuses]);
 
-  // Build summary rows (uses the same buyer-then-seller order as server)
+  // Build summary rows — reads directly from stored agent fields (which may be manually edited)
   const summaryRows = useMemo((): SummaryRow[] => {
     const rows: SummaryRow[] = [];
-    // Start from DB cap used values
-    const tmpCapUsed: Record<number, number> = {};
 
     const processAgents = (agents: AgentInputRow[], sideType: string) => {
       for (const agent of agents) {
-        if (!agent.employeeId) continue;
+        if (!agent.employeeId || agent.bhbShare === "") continue;
         const emp = employees.find((e) => e.id === agent.employeeId);
         if (!emp) continue;
-        const capStatus = capStatuses[agent.employeeId];
-        const capAmount = capStatus?.capAmount ?? null;
-        // Use accumulated value within this memo (starts from DB, accumulates across sides)
-        const capUsedSoFar = tmpCapUsed[agent.employeeId] ?? capStatus?.capUsed ?? 0;
         const splitPct = parseFloat(agent.splitPercentage || "0");
-        if (splitPct <= 0 || saleValueNum <= 0) continue;
-        const bd = calcAgentBreakdown(saleValueNum, splitPct, emp, capUsedSoFar, capAmount);
-        tmpCapUsed[agent.employeeId] = bd.capUsedAfter;
+        if (splitPct <= 0) continue;
         rows.push({
           name: emp.candidate?.name ?? `Danışman #${agent.employeeId}`,
           side: sideType,
           splitPct,
-          bhbShare: bd.bhbShare,
-          mainBranch: bd.mainBranchShare,
-          mcActual: bd.marketCenterActual,
-          uk: bd.ukShare,
-          net: bd.employeeNet,
+          bhbShare: parseFloat(agent.bhbShare || "0"),
+          mainBranch: parseFloat(agent.mainBranchShare || "0"),
+          kwtrKdv: parseFloat(agent.kwtrKdv || "0"),
+          mcActual: parseFloat(agent.marketCenterActual || "0"),
+          bmKdv: parseFloat(agent.bmKdv || "0"),
+          uk: parseFloat(agent.ukShare || "0"),
+          net: parseFloat(agent.employeeNet || "0"),
         });
       }
     };
@@ -776,12 +890,13 @@ function NewClosingDialog({
     if (sellerSide.enabled) processAgents(sellerSide.agents, "seller");
 
     return rows;
-  }, [buyerSide, sellerSide, saleValueNum, employees, capStatuses]);
+  }, [buyerSide, sellerSide, employees]);
 
   const resetForm = () => {
     setPropertyAddress("");
-    setDealType("Konut");
+    setDealType("Çift Taraflı");
     setSaleValue("");
+    setCommissionRate("2");
     setClosingDate(new Date().toISOString().split("T")[0]);
     setBuyerName("");
     setSellerName("");
@@ -817,31 +932,29 @@ function NewClosingDialog({
       return;
     }
 
+    const mapAgents = (agents: AgentInputRow[]) =>
+      agents.map((a) => ({
+        employeeId: a.employeeId,
+        splitPercentage: String(parseFloat(a.splitPercentage || "0")),
+        bhbShare: a.bhbShare || "0",
+        mainBranchShare: a.mainBranchShare || "0",
+        kwtrKdv: a.kwtrKdv || "0",
+        marketCenterActual: a.marketCenterActual || "0",
+        bmKdv: a.bmKdv || "0",
+        ukShare: a.ukShare || "0",
+        employeeNet: a.employeeNet || "0",
+      }));
+
     const sides = [];
-    if (buyerSide.enabled) {
-      sides.push({
-        sideType: "buyer",
-        agents: buyerSide.agents.map((a) => ({
-          employeeId: a.employeeId,
-          splitPercentage: String(parseFloat(a.splitPercentage || "0")),
-        })),
-      });
-    }
-    if (sellerSide.enabled) {
-      sides.push({
-        sideType: "seller",
-        agents: sellerSide.agents.map((a) => ({
-          employeeId: a.employeeId,
-          splitPercentage: String(parseFloat(a.splitPercentage || "0")),
-        })),
-      });
-    }
+    if (buyerSide.enabled) sides.push({ sideType: "buyer", agents: mapAgents(buyerSide.agents) });
+    if (sellerSide.enabled) sides.push({ sideType: "seller", agents: mapAgents(sellerSide.agents) });
 
     try {
       await createClosing.mutateAsync({
         propertyAddress: propertyAddress.trim(),
         dealType,
         saleValue: String(saleValueNum),
+        commissionRate: String(commissionRatePct),
         closingDate: new Date(closingDate).toISOString(),
         buyerName: buyerName.trim() || null,
         sellerName: sellerName.trim() || null,
@@ -894,6 +1007,19 @@ function NewClosingDialog({
                 </Select>
               </div>
               <div>
+                <Label className="text-xs">Komisyon Oranı (%)</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  max="10"
+                  step="0.1"
+                  className="mt-1 h-8 text-sm"
+                  placeholder="2"
+                  value={commissionRate}
+                  onChange={(e) => setCommissionRate(e.target.value)}
+                />
+              </div>
+              <div>
                 <Label className="text-xs">Satış Bedeli (₺) *</Label>
                 <Input
                   type="number"
@@ -904,6 +1030,12 @@ function NewClosingDialog({
                   value={saleValue}
                   onChange={(e) => setSaleValue(e.target.value)}
                 />
+              </div>
+              <div className="flex items-end">
+                <div className="w-full rounded-md border border-border bg-muted/40 px-3 py-2">
+                  <p className="text-[10px] text-muted-foreground">BHB (taraf başına)</p>
+                  <p className="text-sm font-semibold text-foreground">{sideBHBPreview > 0 ? fmtTRY(sideBHBPreview) : "—"}</p>
+                </div>
               </div>
               <div>
                 <Label className="text-xs">Kapanış Tarihi *</Label>
@@ -960,6 +1092,7 @@ function NewClosingDialog({
                 side={buyerSide}
                 setSide={setBuyerSide}
                 saleValue={saleValueNum}
+                commissionRatePct={commissionRatePct}
                 employees={employees}
                 capStatuses={capStatuses}
                 runningCapUsed={buyerRunningCap}
@@ -970,6 +1103,7 @@ function NewClosingDialog({
                 side={sellerSide}
                 setSide={setSellerSide}
                 saleValue={saleValueNum}
+                commissionRatePct={commissionRatePct}
                 employees={employees}
                 capStatuses={capStatuses}
                 runningCapUsed={sellerRunningCap}
@@ -1006,6 +1140,7 @@ export default function Closings() {
   const { toast } = useToast();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [tab, setTab] = useState<Tab>("closings");
+  const [expandedClosingIds, setExpandedClosingIds] = useState<Set<number>>(new Set());
 
   const { data: closings = [], isLoading: closingsLoading } = useClosings();
   const { data: employees = [] } = useEmployees();
@@ -1147,55 +1282,136 @@ export default function Closings() {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead className="w-8" />
                     <TableHead className="text-xs">Tarih</TableHead>
                     <TableHead className="text-xs">Mülk Adresi</TableHead>
                     <TableHead className="text-xs">Tip</TableHead>
                     <TableHead className="text-xs text-right">Satış Bedeli</TableHead>
                     <TableHead className="text-xs">Taraflar</TableHead>
+                    <TableHead className="text-xs text-right text-amber-600">Toplam KDV</TableHead>
                     <TableHead className="text-xs text-right">Danışman Net</TableHead>
                     <TableHead className="text-xs w-12"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {closings.map((closing) => (
-                    <TableRow key={closing.id} className="hover:bg-muted/40">
-                      <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                        {safeFormatDate(closing.closingDate as any, "dd.MM.yyyy")}
-                      </TableCell>
-                      <TableCell className="text-xs font-medium max-w-[180px] truncate">
-                        {closing.propertyAddress}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className="text-[10px]">
-                          {closing.dealType}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-xs text-right whitespace-nowrap">
-                        {fmtTRY(parseFloat(closing.saleValue ?? "0"))}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex gap-1 flex-wrap">
-                          {closing.sides.map((side) => (
-                            <Badge key={side.id} variant="secondary" className="text-[10px]">
-                              {side.sideType === "buyer" ? "Alıcı" : "Satıcı"}
-                            </Badge>
-                          ))}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-xs text-right font-semibold text-emerald-700 whitespace-nowrap">
-                        {fmtTRY(closing.totalAgentNet ?? 0)}
-                      </TableCell>
-                      <TableCell>
-                        <button
-                          onClick={() => handleDelete(closing.id)}
-                          className="text-muted-foreground hover:text-destructive transition-colors p-1 rounded"
-                          title="Sil"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {closings.map((closing) => {
+                    const totalKdv = closing.sides.reduce((s, side) =>
+                      s + side.agents.reduce((ss, a) =>
+                        ss + parseFloat(a.kwtrKdv ?? "0") + parseFloat(a.bmKdv ?? "0"), 0
+                      ), 0
+                    );
+                    const isExpanded = expandedClosingIds.has(closing.id);
+                    return (
+                      <>
+                      <TableRow
+                        key={closing.id}
+                        className="hover:bg-muted/40 cursor-pointer"
+                        onClick={() => setExpandedClosingIds((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(closing.id)) next.delete(closing.id); else next.add(closing.id);
+                          return next;
+                        })}
+                      >
+                        <TableCell className="text-center p-1">
+                          {isExpanded
+                            ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground inline" />
+                            : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground inline" />}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                          {safeFormatDate(closing.closingDate as any, "dd.MM.yyyy")}
+                        </TableCell>
+                        <TableCell className="text-xs font-medium max-w-[180px] truncate">
+                          {closing.propertyAddress}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="text-[10px]">
+                            {closing.dealType}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-xs text-right whitespace-nowrap">
+                          {fmtTRY(parseFloat(closing.saleValue ?? "0"))}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex gap-1 flex-wrap">
+                            {closing.sides.map((side) => (
+                              <Badge key={side.id} variant="secondary" className="text-[10px]">
+                                {side.sideType === "buyer" ? "Alıcı" : "Satıcı"}
+                              </Badge>
+                            ))}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-xs text-right text-amber-600 whitespace-nowrap">
+                          {fmtTRY(totalKdv)}
+                        </TableCell>
+                        <TableCell className="text-xs text-right font-semibold text-emerald-700 whitespace-nowrap">
+                          {fmtTRY(closing.totalAgentNet ?? 0)}
+                        </TableCell>
+                        <TableCell onClick={(e) => e.stopPropagation()}>
+                          <button
+                            onClick={() => handleDelete(closing.id)}
+                            className="text-muted-foreground hover:text-destructive transition-colors p-1 rounded"
+                            title="Sil"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </TableCell>
+                      </TableRow>
+                      {isExpanded && (
+                        <TableRow key={`${closing.id}-detail`} className="bg-muted/20 hover:bg-muted/20">
+                          <TableCell colSpan={9} className="p-3">
+                            <div className="space-y-3">
+                              {closing.sides.map((side) => (
+                                <div key={side.id}>
+                                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
+                                    {side.sideType === "buyer" ? "Alıcı Tarafı" : "Satıcı Tarafı"}
+                                    {side.sideType === "buyer" && closing.buyerName ? ` — ${closing.buyerName}` : ""}
+                                    {side.sideType === "seller" && closing.sellerName ? ` — ${closing.sellerName}` : ""}
+                                  </p>
+                                  <table className="w-full text-xs border-collapse">
+                                    <thead>
+                                      <tr className="border-b border-border">
+                                        <th className="text-left font-medium py-1 pr-3 text-muted-foreground">Danışman</th>
+                                        <th className="text-right font-medium py-1 pr-3 text-muted-foreground">Pay %</th>
+                                        <th className="text-right font-medium py-1 pr-3 text-muted-foreground">BHB</th>
+                                        <th className="text-right font-medium py-1 pr-3 text-muted-foreground">KWTR</th>
+                                        <th className="text-right font-medium py-1 pr-3 text-muted-foreground">KWTR KDV</th>
+                                        <th className="text-right font-medium py-1 pr-3 text-muted-foreground">BM</th>
+                                        <th className="text-right font-medium py-1 pr-3 text-amber-600">BM KDV</th>
+                                        <th className="text-right font-medium py-1 text-emerald-700">Net</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {side.agents.map((agent) => (
+                                        <tr key={agent.id} className="border-b border-border/40 last:border-0">
+                                          <td className="py-1 pr-3 font-medium">{agent.candidateName ?? agent.employeeName ?? `#${agent.employeeId}`}</td>
+                                          <td className="py-1 pr-3 text-right">%{parseFloat(agent.splitPercentage ?? "100").toFixed(0)}</td>
+                                          <td className="py-1 pr-3 text-right">{fmtTRY(parseFloat(agent.bhbShare ?? "0"))}</td>
+                                          <td className="py-1 pr-3 text-right text-muted-foreground">{fmtTRY(parseFloat(agent.mainBranchShare ?? "0"))}</td>
+                                          <td className="py-1 pr-3 text-right text-muted-foreground">{fmtTRY(parseFloat(agent.kwtrKdv ?? "0"))}</td>
+                                          <td className="py-1 pr-3 text-right text-muted-foreground">
+                                            {fmtTRY(parseFloat(agent.marketCenterActual ?? "0"))}
+                                            {parseFloat(agent.marketCenterDue ?? "0") > parseFloat(agent.marketCenterActual ?? "0") && (
+                                              <span className="ml-1 text-amber-500 text-[10px]">(caplı)</span>
+                                            )}
+                                          </td>
+                                          <td className="py-1 pr-3 text-right text-amber-600">{fmtTRY(parseFloat(agent.bmKdv ?? "0"))}</td>
+                                          <td className="py-1 text-right font-semibold text-emerald-700">{fmtTRY(parseFloat(agent.employeeNet ?? "0"))}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              ))}
+                              {closing.notes && (
+                                <p className="text-xs text-muted-foreground italic">Not: {closing.notes}</p>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                      </>
+                    );
+                  })}
                 </TableBody>
               </Table>
             )}
