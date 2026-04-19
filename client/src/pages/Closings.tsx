@@ -1034,7 +1034,7 @@ function NewClosingDialog({
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) { resetForm(); onClose(); } }}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Handshake className="h-5 w-5" />
@@ -1294,7 +1294,12 @@ export default function Closings() {
   type FlatRow = {
     closingId: number; sideId: number; agentId: number;
     closingDate: string; propertyAddress: string; il: string; ilce: string;
+    mahalle: string; propertyDetails: string;
     dealCategory: string; dealType: string; saleValue: string; commissionRate: string;
+    openingPrice: string; durationDays: string;
+    customerSource: string; referralInfo: string;
+    contractStartDate: string; contractEndDate: string;
+    kasa: string; nakit: string; banka: string;
     buyerName: string; sellerName: string; notes: string;
     sideType: string;
     employeeId: number; employeeName: string;
@@ -1320,10 +1325,21 @@ export default function Closings() {
             propertyAddress: c.propertyAddress ?? "",
             il: (c as any).il ?? "",
             ilce: (c as any).ilce ?? "",
+            mahalle: (c as any).mahalle ?? "",
+            propertyDetails: (c as any).propertyDetails ?? "",
             dealCategory: c.dealCategory ?? "Satış",
             dealType: c.dealType ?? "",
             saleValue: c.saleValue ?? "",
             commissionRate: c.commissionRate ?? "2",
+            openingPrice: (c as any).openingPrice ?? "",
+            durationDays: (c as any).durationDays != null ? String((c as any).durationDays) : "",
+            customerSource: (c as any).customerSource ?? "",
+            referralInfo: (c as any).referralInfo ?? "",
+            contractStartDate: (c as any).contractStartDate ? new Date((c as any).contractStartDate).toISOString().split("T")[0] : "",
+            contractEndDate: (c as any).contractEndDate ? new Date((c as any).contractEndDate).toISOString().split("T")[0] : "",
+            kasa: (c as any).kasa ?? "",
+            nakit: (c as any).nakit ?? "",
+            banka: (c as any).banka ?? "",
             buyerName: c.buyerName ?? "",
             sellerName: c.sellerName ?? "",
             notes: c.notes ?? "",
@@ -1421,7 +1437,7 @@ export default function Closings() {
         const obj: Record<string, string> = {};
         headers.forEach((h, i) => { obj[h.trim()] = (vals[i] ?? "").trim(); });
         return obj;
-      }).filter((r) => r["Mülk Adresi"]);
+      }).filter((r) => r["Mülk Adresi"] || r["Adres"] || r["İşlem"]);
 
       if (rows.length === 0) { toast({ title: "Hata", description: "İçe aktarılacak satır bulunamadı.", variant: "destructive" }); return; }
 
@@ -1573,10 +1589,10 @@ export default function Closings() {
                 <p className="text-xs mt-1">Yeni bir kapanış ekleyin</p>
               </div>
             ) : (
-              <table className="w-full text-xs border-collapse min-w-[1400px]">
+              <table className="w-full text-xs border-collapse min-w-[2400px]">
                 <thead>
                   <tr className="border-b border-border bg-muted/40">
-                    {["Tarih","Mülk Adresi","İl","İlçe","Tür","İşlem Tipi","Bedel","Kom%","Taraf","Danışman","Pay%","BHB","KWTR","KWTR KDV","BM","BM KDV","Net",""].map((h) => (
+                    {["Tarih","Mülk Adresi","İl","İlçe","Mahalle","Mülk Detayı","Tür","İşlem Tipi","Bedel","Açılış Fiyatı","İndirim%","Süre/Gün","Kom%","Söz. Başlangıç","Söz. Bitiş","Müşteri Kaynağı","Yönlendirme","Kasa","Nakit","Banka","Taraf","Danışman","Pay%","BHB","KWTR","KWTR KDV","BM","BM KDV","Net",""].map((h) => (
                       <th key={h} className="text-left font-medium py-2 px-2 text-muted-foreground whitespace-nowrap text-[11px]">{h}</th>
                     ))}
                   </tr>
@@ -1592,10 +1608,26 @@ export default function Closings() {
                         <td className="px-2 py-1 min-w-[140px]"><InlineCell value={row.propertyAddress} onSave={sc("propertyAddress")} /></td>
                         <td className="px-2 py-1 min-w-[80px]"><InlineCell value={row.il} onSave={sc("il")} /></td>
                         <td className="px-2 py-1 min-w-[80px]"><InlineCell value={row.ilce} onSave={sc("ilce")} /></td>
+                        <td className="px-2 py-1 min-w-[80px]"><InlineCell value={row.mahalle} onSave={sc("mahalle")} /></td>
+                        <td className="px-2 py-1 min-w-[120px]"><InlineCell value={row.propertyDetails} onSave={sc("propertyDetails")} /></td>
                         <td className="px-2 py-1"><InlineSelect value={row.dealCategory} options={DEAL_CATEGORIES} onSave={sc("dealCategory")} /></td>
                         <td className="px-2 py-1"><InlineSelect value={row.dealType} options={DEAL_TYPES} onSave={sc("dealType")} /></td>
                         <td className="px-2 py-1 min-w-[90px]"><InlineCell value={row.saleValue} type="number" onSave={sc("saleValue")} /></td>
+                        <td className="px-2 py-1 min-w-[90px]"><InlineCell value={row.openingPrice} type="number" onSave={sc("openingPrice")} /></td>
+                        <td className="px-2 py-1 min-w-[60px] text-muted-foreground text-right">
+                          {row.openingPrice && parseFloat(row.openingPrice) > 0 && parseFloat(row.saleValue) > 0
+                            ? `%${((parseFloat(row.openingPrice) - parseFloat(row.saleValue)) / parseFloat(row.openingPrice) * 100).toFixed(1)}`
+                            : "—"}
+                        </td>
+                        <td className="px-2 py-1 min-w-[60px]"><InlineCell value={row.durationDays} type="number" onSave={sc("durationDays")} /></td>
                         <td className="px-2 py-1 min-w-[50px]"><InlineCell value={row.commissionRate} type="number" onSave={sc("commissionRate")} /></td>
+                        <td className="px-2 py-1 min-w-[100px]"><InlineCell value={row.contractStartDate} type="date" onSave={sc("contractStartDate")} /></td>
+                        <td className="px-2 py-1 min-w-[100px]"><InlineCell value={row.contractEndDate} type="date" onSave={sc("contractEndDate")} /></td>
+                        <td className="px-2 py-1 min-w-[100px]"><InlineCell value={row.customerSource} onSave={sc("customerSource")} /></td>
+                        <td className="px-2 py-1 min-w-[100px]"><InlineCell value={row.referralInfo} onSave={sc("referralInfo")} /></td>
+                        <td className="px-2 py-1 min-w-[80px]"><InlineCell value={row.kasa} type="number" onSave={sc("kasa")} /></td>
+                        <td className="px-2 py-1 min-w-[80px]"><InlineCell value={row.nakit} type="number" onSave={sc("nakit")} /></td>
+                        <td className="px-2 py-1 min-w-[80px]"><InlineCell value={row.banka} type="number" onSave={sc("banka")} /></td>
                         <td className="px-2 py-1 whitespace-nowrap">
                           <Badge variant={row.sideType === "buyer" ? "default" : "secondary"} className="text-[10px]">
                             {row.sideType === "buyer" ? "Alıcı" : "Satıcı"}
