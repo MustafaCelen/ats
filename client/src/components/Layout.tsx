@@ -10,6 +10,7 @@ import { useAuth, useLogout } from "@/hooks/use-auth";
 interface LayoutProps { children: React.ReactNode; }
 
 const hiringManagerNavItems = [
+  { icon: LayoutDashboard, label: "Dashboard",    href: "/dashboard" },
   { icon: Briefcase,       label: "Üretim Bandı", href: "/jobs" },
   { icon: Users,           label: "Adaylar",      href: "/candidates" },
   { icon: UserCheck,       label: "Danışmanlar",  href: "/employees" },
