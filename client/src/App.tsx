@@ -59,7 +59,7 @@ function Router() {
       <Route path="/tasks" component={() => <ProtectedRoute><Tasks /></ProtectedRoute>} />
       <Route path="/employees" component={() => <ProtectedRoute><Employees /></ProtectedRoute>} />
       <Route path="/onboarding" component={() => <ProtectedRoute><OnboardingBoard /></ProtectedRoute>} />
-      <Route path="/closings" component={() => <ProtectedRoute><Closings /></ProtectedRoute>} />
+      <Route path="/closings" component={() => <ProtectedRoute adminOnly><Closings /></ProtectedRoute>} />
       <Route component={NotFound} />
     </Switch>
   );

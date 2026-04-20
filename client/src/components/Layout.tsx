@@ -15,7 +15,6 @@ const hiringManagerNavItems = [
   { icon: UserCheck,       label: "Danışmanlar",  href: "/employees" },
   { icon: Calendar,        label: "Randevular",   href: "/interviews" },
   { icon: KanbanSquare,    label: "Onboarding",   href: "/onboarding" },
-  { icon: DollarSign,      label: "İşlem Kapanış", href: "/closings" },
   { icon: BarChart2,       label: "Raporlar",     href: "/reports" },
   { icon: ClipboardList,   label: "Görevler",     href: "/tasks" },
 ];
@@ -32,7 +31,6 @@ const assistantNavItems = [
   { icon: UserCheck,     label: "Danışmanlar",  href: "/employees" },
   { icon: Calendar,      label: "Randevular",   href: "/interviews" },
   { icon: KanbanSquare,  label: "Onboarding",   href: "/onboarding" },
-  { icon: DollarSign,    label: "İşlem Kapanış", href: "/closings" },
   { icon: ClipboardList, label: "Görevler",     href: "/tasks" },
 ];
 

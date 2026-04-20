@@ -125,8 +125,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
 
     const candidate = interview.candidate;
-    const title = `Randevu: ${candidate?.name ?? "Aday"} — ${interview.job?.title ?? ""}`;
-    const description = interview.notes ?? "";
+    const title = `Randevu: ${candidate?.name ?? "Aday"}`;
+    const refLines: string[] = [];
+    if (candidate?.phone) refLines.push(`Telefon: ${candidate.phone}`);
+    if (candidate?.referredBy) refLines.push(`Referans: ${candidate.referredBy}`);
+    const description = [...refLines, ...(interview.notes ? [interview.notes] : [])].join("\n");
 
     // Collect attendee emails: candidate + all hiring managers assigned to this job
     const assignees = await storage.getJobAssignees(interview.jobId);
@@ -597,15 +600,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           const full = await storage.getInterview(id);
           const candidate = full?.candidate;
           const job = full?.job;
-          const title = `Randevu: ${candidate?.name ?? "Aday"} — ${job?.title ?? ""}`;
+          const title = `Randevu: ${candidate?.name ?? "Aday"}`;
           const assignees = await storage.getJobAssignees(updated.jobId);
           const attendeeEmails = [
             ...(candidate?.email ? [candidate.email] : []),
             ...assignees.map((a) => a.email).filter(Boolean),
           ] as string[];
+          const updRefLines: string[] = [];
+          if (candidate?.phone) updRefLines.push(`Telefon: ${candidate.phone}`);
+          if (candidate?.referredBy) updRefLines.push(`Referans: ${candidate.referredBy}`);
+          const updDescription = [...updRefLines, ...(updated.notes ? [updated.notes] : [])].join("\n");
           await updateCalendarEvent(user, updated.calendarEventId, {
             title,
-            description: updated.notes ?? undefined,
+            description: updDescription || undefined,
             startTime: new Date(startTime),
             endTime: new Date(endTime),
             location: updated.location ?? undefined,
@@ -1090,7 +1097,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // ── Closings ──────────────────────────────────────────────────────────────────
 
-  app.get("/api/closings/export", requireAuth, async (_req, res) => {
+  app.get("/api/closings/export", requireAuth, requireAdmin, async (_req, res) => {
     try {
       const allClosings = await storage.getClosings();
       const headers = [
@@ -1180,7 +1187,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.post("/api/closings/import", requireAuth, async (req, res) => {
+  app.post("/api/closings/import", requireAuth, requireAdmin, async (req, res) => {
     try {
       const { rows } = req.body as { rows: Record<string, string>[] };
       if (!Array.isArray(rows) || rows.length === 0) {
@@ -1306,7 +1313,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.get("/api/closings", requireAuth, async (_req, res) => {
+  app.get("/api/closings", requireAuth, requireAdmin, async (_req, res) => {
     try {
       res.json(await storage.getClosings());
     } catch {
@@ -1314,7 +1321,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.post("/api/closings", requireAuth, async (req, res) => {
+  app.post("/api/closings", requireAuth, requireAdmin, async (req, res) => {
     try {
       const {
         propertyAddress, il, ilce, mahalle, propertyDetails,
@@ -1358,7 +1365,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.delete("/api/closings/:id", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
+  app.delete("/api/closings/:id", requireAuth, requireAdmin, async (req, res) => {
     try {
       await storage.deleteClosing(Number(req.params.id));
       res.status(204).send();
@@ -1367,7 +1374,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.patch("/api/closings/:id", requireAuth, async (req, res) => {
+  app.patch("/api/closings/:id", requireAuth, requireAdmin, async (req, res) => {
     try {
       const data = { ...req.body };
       if (data.closingDate) data.closingDate = new Date(data.closingDate);
@@ -1380,7 +1387,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.patch("/api/closing-agents/:id", requireAuth, async (req, res) => {
+  app.patch("/api/closing-agents/:id", requireAuth, requireAdmin, async (req, res) => {
     try {
       await storage.updateClosingAgent(Number(req.params.id), req.body);
       res.status(204).send();
@@ -1391,7 +1398,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // ── Cap Settings ──────────────────────────────────────────────────────────────
 
-  app.get("/api/cap-settings", requireAuth, async (_req, res) => {
+  app.get("/api/cap-settings", requireAuth, requireAdmin, async (_req, res) => {
     try {
       res.json(await storage.getCapSettings());
     } catch {
@@ -1399,7 +1406,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.post("/api/cap-settings", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
+  app.post("/api/cap-settings", requireAuth, requireAdmin, async (req, res) => {
     try {
       const { year, amount } = req.body;
       if (!year || !amount) return res.status(400).json({ message: "year and amount are required" });
@@ -1410,7 +1417,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.delete("/api/cap-settings/:id", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
+  app.delete("/api/cap-settings/:id", requireAuth, requireAdmin, async (req, res) => {
     try {
       await storage.deleteCapSetting(Number(req.params.id));
       res.status(204).send();
@@ -1421,7 +1428,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // ── Cap Statuses ──────────────────────────────────────────────────────────────
 
-  app.get("/api/employees/cap-statuses", requireAuth, async (_req, res) => {
+  app.get("/api/employees/cap-statuses", requireAuth, requireAdmin, async (_req, res) => {
     try {
       res.json(await storage.getAllEmployeesCapStatus());
     } catch {
