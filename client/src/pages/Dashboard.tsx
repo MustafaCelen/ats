@@ -11,9 +11,9 @@ import { useAuth } from "@/hooks/use-auth";
 // ── Hooks ─────────────────────────────────────────────────────────────────────
 function useInterviews() {
   return useQuery<any[]>({
-    queryKey: ["/api/interviews"],
+    queryKey: ["/api/interviews?all=true"],
     queryFn: async () => {
-      const res = await fetch("/api/interviews", { credentials: "include" });
+      const res = await fetch("/api/interviews?all=true", { credentials: "include" });
       if (!res.ok) throw new Error("Failed");
       return res.json();
     },
@@ -22,9 +22,9 @@ function useInterviews() {
 
 function useJobs() {
   return useQuery<any[]>({
-    queryKey: ["/api/jobs"],
+    queryKey: ["/api/jobs?all=true"],
     queryFn: async () => {
-      const res = await fetch("/api/jobs", { credentials: "include" });
+      const res = await fetch("/api/jobs?all=true", { credentials: "include" });
       if (!res.ok) throw new Error("Failed");
       return res.json();
     },
@@ -46,12 +46,13 @@ function useSaveTarget() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (data: { jobId: number; year: number; month: number; category: string; target: number }) => {
-      await fetch("/api/interview-targets", {
+      const res = await fetch("/api/interview-targets", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify(data),
       });
+      if (!res.ok) throw new Error(await res.text());
     },
     onSuccess: (_d, vars) => {
       qc.invalidateQueries({ queryKey: ["/api/interview-targets", vars.year, vars.month] });

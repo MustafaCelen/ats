@@ -249,8 +249,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ── Jobs ────────────────────────────────────────────────────────────────────
 
   app.get(api.jobs.list.path, requireAuth, async (req, res) => {
-    // Admins and hiring managers see all jobs; assistants are scoped (?all=true bypasses for dropdowns)
-    const bypassScope = req.user!.role !== "assistant" || req.query.all === "true";
+    // ?all=true lets any role fetch every job (e.g. dashboard overview, candidate-assignment dropdowns)
+    const bypassScope = req.query.all === "true";
     res.json(await storage.getJobs(bypassScope ? undefined : jobFilter(req)));
   });
 
@@ -551,8 +551,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ── Interviews ─────────────────────────────────────────────────────────────
 
   app.get(api.interviews.list.path, requireAuth, async (req, res) => {
-    // Admins and hiring managers see all interviews; assistants are scoped to their jobs
-    const filter = req.user!.role === "assistant" ? jobFilter(req) : undefined;
+    // ?all=true bypasses job scoping (used by dashboard for full overview)
+    const bypassScope = req.query.all === "true";
+    const filter = bypassScope ? undefined : (req.user!.role === "assistant" ? undefined : jobFilter(req));
     res.json(await storage.getInterviews(undefined, filter));
   });
 
@@ -1112,8 +1113,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const { jobId, year, month, category, target } = req.body;
       if (!jobId || !year || !month || !category) return res.status(400).json({ message: "Missing fields" });
-      const jobIds = jobFilter(req);
-      if (jobIds && !jobIds.includes(Number(jobId))) return res.status(403).json({ message: "Access denied" });
       await storage.upsertInterviewTarget({ jobId: Number(jobId), year: Number(year), month: Number(month), category, target: Number(target) || 0 });
       res.status(204).send();
     } catch {
