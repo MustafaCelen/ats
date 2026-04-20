@@ -67,8 +67,8 @@ export async function createCalendarEvent(user: User, params: {
     summary: params.title,
     description: params.description,
     location: params.location,
-    start: { dateTime: params.startTime.toISOString(), timeZone: "Europe/Istanbul" },
-    end: { dateTime: params.endTime.toISOString(), timeZone: "Europe/Istanbul" },
+    start: { dateTime: params.startTime.toISOString() },
+    end: { dateTime: params.endTime.toISOString() },
   };
 
   if (validEmails.length > 0) {
@@ -100,8 +100,8 @@ export async function updateCalendarEvent(user: User, eventId: string, params: {
     summary: params.title,
     description: params.description,
     location: params.location,
-    start: { dateTime: params.startTime.toISOString(), timeZone: "Europe/Istanbul" },
-    end: { dateTime: params.endTime.toISOString(), timeZone: "Europe/Istanbul" },
+    start: { dateTime: params.startTime.toISOString() },
+    end: { dateTime: params.endTime.toISOString() },
   };
   if (validEmails.length > 0) {
     event.attendees = validEmails.map((email) => ({ email }));
