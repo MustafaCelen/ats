@@ -558,10 +558,12 @@ function RescheduleInterviewDialog({
     onOpenChange(v);
   };
 
+  const toTurkeyISO = (v: string) => v ? `${v}:00+03:00` : v;
+
   const handleConfirm = () => {
     if (!interview || !startTime || !endTime) return;
     reschedule(
-      { id: interview.id, startTime, endTime },
+      { id: interview.id, startTime: toTurkeyISO(startTime), endTime: toTurkeyISO(endTime) },
       {
         onSuccess: () => {
           toast({
