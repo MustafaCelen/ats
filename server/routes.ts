@@ -249,8 +249,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ── Jobs ────────────────────────────────────────────────────────────────────
 
   app.get(api.jobs.list.path, requireAuth, async (req, res) => {
-    // ?all=true lets assistants fetch every job (e.g. for candidate-assignment dropdowns)
-    const bypassScope = req.query.all === "true" && req.user!.role === "assistant";
+    // Admins and hiring managers see all jobs; assistants are scoped (?all=true bypasses for dropdowns)
+    const bypassScope = req.user!.role !== "assistant" || req.query.all === "true";
     res.json(await storage.getJobs(bypassScope ? undefined : jobFilter(req)));
   });
 
@@ -551,8 +551,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ── Interviews ─────────────────────────────────────────────────────────────
 
   app.get(api.interviews.list.path, requireAuth, async (req, res) => {
-    // Assistants bypass job scoping (same as applications list) so they see all interviews
-    const filter = req.user!.role === "assistant" ? undefined : jobFilter(req);
+    // Admins and hiring managers see all interviews; assistants are scoped to their jobs
+    const filter = req.user!.role === "assistant" ? jobFilter(req) : undefined;
     res.json(await storage.getInterviews(undefined, filter));
   });
 
@@ -1090,6 +1090,32 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
 
       res.json({ created, updated, errors });
+    } catch {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Interview Targets ─────────────────────────────────────────────────────────
+
+  app.get("/api/interview-targets", requireAuth, async (req, res) => {
+    try {
+      const year = parseInt(req.query.year as string) || new Date().getFullYear();
+      const month = parseInt(req.query.month as string) || new Date().getMonth() + 1;
+      const jobIds = jobFilter(req);
+      res.json(await storage.getInterviewTargets(year, month, jobIds));
+    } catch {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.post("/api/interview-targets", requireAuth, async (req, res) => {
+    try {
+      const { jobId, year, month, category, target } = req.body;
+      if (!jobId || !year || !month || !category) return res.status(400).json({ message: "Missing fields" });
+      const jobIds = jobFilter(req);
+      if (jobIds && !jobIds.includes(Number(jobId))) return res.status(403).json({ message: "Access denied" });
+      await storage.upsertInterviewTarget({ jobId: Number(jobId), year: Number(year), month: Number(month), category, target: Number(target) || 0 });
+      res.status(204).send();
     } catch {
       res.status(500).json({ message: "Internal server error" });
     }

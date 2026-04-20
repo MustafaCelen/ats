@@ -21,7 +21,6 @@ const hiringManagerNavItems = [
 ];
 
 const adminNavItems = [
-  { icon: LayoutDashboard, label: "Dashboard",   href: "/dashboard" },
   ...hiringManagerNavItems,
   { icon: DollarSign,      label: "İşlem Kapanış", href: "/closings" },
   { icon: Shield, label: "Users", href: "/users" },

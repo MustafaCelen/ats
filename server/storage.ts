@@ -2,7 +2,7 @@ import { db } from "./db";
 import {
   jobs, candidates, applications, stageHistory, interviews, offers, candidateNotes,
   users, jobAssignments, applicationDocuments, tasks, employees,
-  capSettings, closings, closingSides, closingAgents,
+  capSettings, closings, closingSides, closingAgents, interviewTargets,
   APPLICATION_STAGES,
   type Job, type InsertJob,
   type Candidate, type InsertCandidate,
@@ -16,7 +16,7 @@ import {
   type Task, type InsertTask,
   type Employee, type InsertEmployee, type EmployeeWithRelations,
   type CapSetting, type Closing, type ClosingSide, type ClosingAgent,
-  type CapStatus, type ClosingWithDetails,
+  type CapStatus, type ClosingWithDetails, type InterviewTarget,
 } from "@shared/schema";
 import { eq, desc, count, sql, gte, lte, and, or, isNull, inArray, notInArray } from "drizzle-orm";
 import { differenceInDays } from "date-fns";
@@ -189,6 +189,8 @@ export interface IStorage {
     }>;
   }): Promise<Closing>;
   deleteClosing(id: number): Promise<void>;
+  getInterviewTargets(year: number, month: number, jobIds?: number[]): Promise<import("@shared/schema").InterviewTarget[]>;
+  upsertInterviewTarget(data: { jobId: number; year: number; month: number; category: string; target: number }): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1763,6 +1765,36 @@ export class DatabaseStorage implements IStorage {
     }
     await db.delete(closingSides).where(eq(closingSides.closingId, id));
     await db.delete(closings).where(eq(closings.id, id));
+  }
+
+  async getInterviewTargets(year: number, month: number, jobIds?: number[]): Promise<InterviewTarget[]> {
+    let query = db.select().from(interviewTargets)
+      .where(and(eq(interviewTargets.year, year), eq(interviewTargets.month, month)));
+    if (jobIds && jobIds.length > 0) {
+      query = db.select().from(interviewTargets)
+        .where(and(
+          eq(interviewTargets.year, year),
+          eq(interviewTargets.month, month),
+          inArray(interviewTargets.jobId, jobIds),
+        ));
+    }
+    return query;
+  }
+
+  async upsertInterviewTarget(data: { jobId: number; year: number; month: number; category: string; target: number }): Promise<void> {
+    const [existing] = await db.select().from(interviewTargets).where(
+      and(
+        eq(interviewTargets.jobId, data.jobId),
+        eq(interviewTargets.year, data.year),
+        eq(interviewTargets.month, data.month),
+        eq(interviewTargets.category, data.category),
+      )
+    );
+    if (existing) {
+      await db.update(interviewTargets).set({ target: data.target }).where(eq(interviewTargets.id, existing.id));
+    } else {
+      await db.insert(interviewTargets).values(data);
+    }
   }
 }
 

@@ -435,6 +435,19 @@ export interface ClosingWithDetails extends Closing {
   totalAgentNet: number;
 }
 
+// ── Interview Targets ─────────────────────────────────────────────────────────
+export const interviewTargets = pgTable("interview_targets", {
+  id: serial("id").primaryKey(),
+  jobId: integer("job_id").notNull(),
+  year: integer("year").notNull(),
+  month: integer("month").notNull(), // 1-12
+  category: text("category").notNull(), // K0 | K1 | K2
+  target: integer("target").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type InterviewTarget = typeof interviewTargets.$inferSelect;
+
 // Insert schemas
 export const insertJobSchema = createInsertSchema(jobs).omit({ id: true, createdAt: true });
 export const insertCandidateSchema = createInsertSchema(candidates).omit({ id: true, createdAt: true, createdByUserId: true });
