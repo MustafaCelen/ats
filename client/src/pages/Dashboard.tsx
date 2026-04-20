@@ -294,7 +294,7 @@ export default function Dashboard() {
           <div className="lg:col-span-2 rounded-xl border border-border bg-card shadow-sm overflow-hidden">
             <div className="flex items-center gap-2 px-5 py-3 border-b border-border">
               <Target className="h-4 w-4 text-muted-foreground" />
-              <h2 className="text-sm font-semibold text-foreground">Pozisyon Bazlı Hedefler</h2>
+              <h2 className="text-sm font-semibold text-foreground">Hedefler</h2>
               <span className="text-xs text-muted-foreground ml-1">(hedef rakamına tıklayarak düzenleyin)</span>
             </div>
 
@@ -395,7 +395,6 @@ export default function Dashboard() {
           <div className="flex items-center gap-2 px-5 py-3 border-b border-border">
             <Calendar className="h-4 w-4 text-muted-foreground" />
             <h2 className="text-sm font-semibold text-foreground">Günlük Görüşme Takvimi</h2>
-            <span className="text-xs text-muted-foreground ml-1">(tamamlanan görüşmeler, pozisyon bazlı)</span>
           </div>
           <div className="overflow-x-auto">
             <table className="text-xs border-collapse">

@@ -52,6 +52,7 @@ function useCreateInterview() {
     mutationFn: (data: any) => apiRequest("POST", "/api/interviews", data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/interviews"] });
+      qc.invalidateQueries({ queryKey: ["/api/interviews?all=true"] });
       qc.invalidateQueries({ queryKey: ["/api/stats/dashboard"] });
     },
     onError: () => {
@@ -67,6 +68,7 @@ function useUpdateInterview() {
       apiRequest("PATCH", `/api/interviews/${id}`, { status }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/interviews"] });
+      qc.invalidateQueries({ queryKey: ["/api/interviews?all=true"] });
       qc.invalidateQueries({ queryKey: ["/api/stats/dashboard"] });
     },
   });
@@ -78,6 +80,7 @@ function useDeleteInterview() {
     mutationFn: (id: number) => apiRequest("DELETE", `/api/interviews/${id}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/interviews"] });
+      qc.invalidateQueries({ queryKey: ["/api/interviews?all=true"] });
     },
   });
 }
@@ -90,6 +93,7 @@ function useSyncCalendar() {
     mutationFn: (id: number) => apiRequest("POST", `/api/interviews/${id}/calendar`, {}),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/interviews"] });
+      qc.invalidateQueries({ queryKey: ["/api/interviews?all=true"] });
       toast({ title: "Takvime eklendi", description: "Mülakat Google Takvim'e eklendi." });
     },
     onError: async () => {
@@ -111,6 +115,7 @@ function useRescheduleInterview() {
       apiRequest("PATCH", `/api/interviews/${id}`, { startTime, endTime }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/interviews"] });
+      qc.invalidateQueries({ queryKey: ["/api/interviews?all=true"] });
     },
   });
 }

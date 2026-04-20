@@ -597,7 +597,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       // Update Google Calendar event if one is linked
       if (updated.calendarEventId) {
         try {
-          const user = req.user!;
+          const user = await storage.getUserById(req.user!.id);
+          if (!user?.googleAccessToken) throw new Error("No Google token");
           const full = await storage.getInterview(id);
           const candidate = full?.candidate;
           const job = full?.job;
