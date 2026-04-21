@@ -585,9 +585,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
     // Reschedule: update times + increment rescheduleCount + sync calendar
     if (startTime && endTime) {
-      if (req.user!.role === "assistant") {
-        return res.status(403).json({ message: "Assistants cannot reschedule interviews" });
-      }
       const updated = await storage.updateInterview(id, {
         startTime: new Date(startTime),
         endTime: new Date(endTime),
@@ -628,10 +625,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       return res.json(updated);
     }
 
-    // Status update (existing behaviour)
-    if (req.user!.role === "assistant" && status !== "cancelled") {
-      return res.status(403).json({ message: "Assistants can only cancel interviews" });
-    }
+    // Status update
     const interview = await storage.updateInterviewStatus(id, status);
     if (!interview) return res.status(404).json({ message: "Not found" });
     res.json(interview);
