@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRoute, Link } from "wouter";
 import { Layout } from "@/components/Layout";
 import { useJob, useUpdateJob } from "@/hooks/use-jobs";
@@ -402,13 +402,14 @@ function ApplicationListView({
   return (
     <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
       {/* Header */}
-      <div className="grid grid-cols-[2fr_1fr_0.8fr_1.5fr_2fr_0.9fr_auto] gap-3 px-4 py-2.5 bg-muted/40 border-b border-border text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+      <div className="grid grid-cols-[2fr_130px_72px_150px_2fr_2fr_100px_148px] gap-3 px-4 py-2.5 bg-muted/40 border-b border-border text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
         <div>Aday</div>
         <div>Aşama</div>
         <div>Puan</div>
         <div>İletişim</div>
+        <div>Özet</div>
         <div>Son Not</div>
-        <div>Başvuru Tarihi</div>
+        <div>Tarih</div>
         <div />
       </div>
 
@@ -419,7 +420,7 @@ function ApplicationListView({
           return (
             <div
               key={app.id}
-              className="grid grid-cols-[2fr_1fr_0.8fr_1.5fr_2fr_0.9fr_auto] gap-3 px-4 py-3 items-center hover:bg-muted/20 transition-colors group"
+              className="grid grid-cols-[2fr_130px_72px_150px_2fr_2fr_100px_148px] gap-3 px-4 py-3 items-start hover:bg-muted/20 transition-colors group"
               data-testid={`list-row-${app.id}`}
             >
               {/* Candidate */}
@@ -472,16 +473,27 @@ function ApplicationListView({
                 ) : (
                   <span className="text-xs text-muted-foreground/40">—</span>
                 )}
-                {app.candidate?.email && (
-                  <a href={`mailto:${app.candidate.email}`} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors truncate">
-                    <Mail className="h-3 w-3 shrink-0" />
-                    <span className="truncate">{app.candidate.email}</span>
-                  </a>
+                {app.candidate?.referredBy ? (
+                  <span className="flex items-center gap-1 text-xs text-muted-foreground truncate">
+                    <Users className="h-3 w-3 shrink-0" />
+                    <span className="truncate">{app.candidate.referredBy}</span>
+                  </span>
+                ) : null}
+              </div>
+
+              {/* Özet */}
+              <div className="min-w-0 overflow-hidden">
+                {app.candidate?.resumeText ? (
+                  <p className="text-xs text-muted-foreground line-clamp-2" title={app.candidate.resumeText}>
+                    {app.candidate.resumeText}
+                  </p>
+                ) : (
+                  <span className="text-xs text-muted-foreground/40">—</span>
                 )}
               </div>
 
               {/* Latest note */}
-              <div className="min-w-0">
+              <div className="min-w-0 overflow-hidden">
                 {app.latestNote ? (
                   <p className="text-xs text-muted-foreground line-clamp-2" title={app.latestNote}>
                     {app.latestNote}
@@ -496,17 +508,19 @@ function ApplicationListView({
                 {app.appliedAt ? formatDistanceToNow(new Date(app.appliedAt), { addSuffix: true }) : "—"}
               </div>
 
-              {/* Actions */}
-              <div className="flex items-center gap-1">
-                {app.status === "documents" && (
+              {/* Actions — fixed width so Tamamla button never shifts layout */}
+              <div className="flex items-center gap-1 justify-end w-full">
+                {app.status === "documents" ? (
                   <button
                     onClick={() => onCompleteHiring(app)}
                     disabled={completingHiring}
-                    className="flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-md bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 transition-colors disabled:opacity-50"
+                    className="flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-md bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 transition-colors disabled:opacity-50 whitespace-nowrap"
                     title="İşe Alımı Tamamla"
                   >
                     <CheckCircle2 className="h-3 w-3" /> Tamamla
                   </button>
+                ) : (
+                  <div className="w-[72px]" />
                 )}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -699,7 +713,16 @@ function DraggableCard({
         </DropdownMenu>
       </div>
 
-      <p className="text-xs text-muted-foreground truncate">{app.candidate?.email}</p>
+      {app.candidate?.phone && (
+        <p className="text-xs text-muted-foreground truncate flex items-center gap-1">
+          <Phone className="h-3 w-3 shrink-0" />{app.candidate.phone}
+        </p>
+      )}
+      {app.candidate?.referredBy && (
+        <p className="text-xs text-muted-foreground truncate flex items-center gap-1">
+          <Users className="h-3 w-3 shrink-0" />{app.candidate.referredBy}
+        </p>
+      )}
       <div className="flex items-center justify-between mt-2 mb-0.5">
         <ScoreBadge score={app.score} size="sm" showLabel />
       </div>
@@ -749,7 +772,11 @@ function CardDragPreview({ app }: { app: ApplicationWithRelations }) {
           {app.candidate?.name}
         </p>
       </div>
-      <p className="text-xs text-muted-foreground truncate">{app.candidate?.email}</p>
+      {app.candidate?.phone && (
+        <p className="text-xs text-muted-foreground truncate flex items-center gap-1">
+          <Phone className="h-3 w-3 shrink-0" />{app.candidate.phone}
+        </p>
+      )}
       <div className="mt-1.5">
         <ScoreBadge score={app.score} size="sm" showLabel />
       </div>
@@ -984,47 +1011,107 @@ function QuickOfferDialog({ app, open, onOpenChange }: { app: ApplicationWithRel
 }
 
 function AddCandidateDialog({ open, onOpenChange, jobId }: { open: boolean; onOpenChange: (v: boolean) => void; jobId: number }) {
-  const { data: candidates } = useCandidates();
+  const { data: allCandidates } = useCandidates();
+  const { data: allApplications } = useApplications();
   const { mutate, isPending } = useCreateApplication();
-  const [selectedCandidate, setSelectedCandidate] = useState("");
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [search, setSearch] = useState("");
+  const [dropdownOpen, setDropdownOpen] = useState(false);
   const { toast } = useToast();
 
+  // Build set of candidateIds already assigned to any job
+  const assignedIds = useMemo(() => {
+    const s = new Set<number>();
+    allApplications?.forEach((a) => s.add(a.candidateId));
+    return s;
+  }, [allApplications]);
+
+  const unassigned = useMemo(() =>
+    (allCandidates ?? []).filter((c) => !assignedIds.has(c.id)),
+    [allCandidates, assignedIds]
+  );
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return unassigned;
+    return unassigned.filter((c) =>
+      c.name.toLowerCase().includes(q) || (c.phone ?? "").toLowerCase().includes(q)
+    );
+  }, [unassigned, search]);
+
+  const handleSelect = (c: { id: number; name: string }) => {
+    setSelectedId(c.id);
+    setSearch(c.name);
+    setDropdownOpen(false);
+  };
+
   const handleAdd = () => {
-    if (!selectedCandidate) return;
-    mutate({ jobId, candidateId: parseInt(selectedCandidate), status: "applied", notes: "Added via admin panel" }, {
+    if (!selectedId) return;
+    mutate({ jobId, candidateId: selectedId, status: "applied", notes: "Added via admin panel" }, {
       onSuccess: () => {
         onOpenChange(false);
-        setSelectedCandidate("");
+        setSelectedId(null);
+        setSearch("");
         toast({ title: "Aday eklendi", description: "Başvuru oluşturuldu." });
       },
       onError: (err: Error) => toast({ title: "Aday eklenemedi", description: err.message, variant: "destructive" }),
     });
   };
 
+  // Reset when dialog closes
+  useEffect(() => {
+    if (!open) { setSelectedId(null); setSearch(""); setDropdownOpen(false); }
+  }, [open]);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent aria-describedby="add-candidate-desc">
         <DialogHeader>
-          <DialogTitle>Add Candidate to Pipeline</DialogTitle>
+          <DialogTitle>Aday Ekle</DialogTitle>
           <p id="add-candidate-desc" className="text-sm text-muted-foreground">
-            Select an existing candidate to add to this job's pipeline.
+            Henüz bir ilana atanmamış adaylardan seçin.
           </p>
         </DialogHeader>
         <div className="space-y-4 pt-2">
-          <Select value={selectedCandidate} onValueChange={setSelectedCandidate}>
-            <SelectTrigger data-testid="select-candidate-to-add">
-              <SelectValue placeholder="Choose a candidate..." />
-            </SelectTrigger>
-            <SelectContent>
-              {candidates?.map((c) => (
-                <SelectItem key={c.id} value={c.id.toString()}>
-                  {c.name}{c.email ? ` — ${c.email}` : ""}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button onClick={handleAdd} disabled={!selectedCandidate || isPending} className="w-full" data-testid="btn-confirm-add-candidate">
-            {isPending ? "Adding..." : "Add to Pipeline"}
+          <div className="relative">
+            <input
+              type="text"
+              value={search}
+              placeholder="İsim veya telefon ile ara..."
+              className="w-full border border-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setSelectedId(null);
+                setSelectedName("");
+                setDropdownOpen(true);
+              }}
+              onFocus={() => setDropdownOpen(true)}
+              onBlur={() => setTimeout(() => setDropdownOpen(false), 150)}
+              data-testid="input-candidate-search"
+            />
+            {dropdownOpen && filtered.length > 0 && (
+              <div className="absolute z-50 mt-1 w-full bg-white border border-border rounded-md shadow-lg max-h-56 overflow-y-auto">
+                {filtered.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-muted flex items-center justify-between gap-2"
+                    onMouseDown={() => handleSelect(c)}
+                  >
+                    <span className="font-medium">{c.name}</span>
+                    {c.phone && <span className="text-xs text-muted-foreground">{c.phone}</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+            {dropdownOpen && search.trim() && filtered.length === 0 && (
+              <div className="absolute z-50 mt-1 w-full bg-white border border-border rounded-md shadow-lg px-3 py-2 text-sm text-muted-foreground">
+                Aday bulunamadı
+              </div>
+            )}
+          </div>
+          <Button onClick={handleAdd} disabled={!selectedId || isPending} className="w-full" data-testid="btn-confirm-add-candidate">
+            {isPending ? "Ekleniyor..." : "Pipeline'a Ekle"}
           </Button>
         </div>
       </DialogContent>

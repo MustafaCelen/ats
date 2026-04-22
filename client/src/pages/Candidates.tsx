@@ -141,7 +141,7 @@ export default function Candidates() {
 
         {/* Table */}
         <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-          <div className="hidden md:grid grid-cols-[auto_2fr_1.5fr_1.5fr_auto_auto_auto] gap-4 px-5 py-3 bg-muted/30 border-b border-border text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <div className="hidden md:grid grid-cols-[56px_2fr_180px_1.5fr_100px_72px_160px] gap-4 px-5 py-3 bg-muted/30 border-b border-border text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             <div>Kat.</div>
             <div>Aday</div>
             <div>İletişim</div>
@@ -178,7 +178,7 @@ export default function Candidates() {
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     transition={{ delay: idx * 0.03 }}
-                    className="grid grid-cols-1 md:grid-cols-[auto_2fr_1.5fr_1.5fr_auto_auto_auto] gap-4 px-5 py-4 items-center hover:bg-muted/20 transition-colors group"
+                    className="grid grid-cols-1 md:grid-cols-[56px_2fr_180px_1.5fr_100px_72px_160px] gap-4 px-5 py-3 items-start hover:bg-muted/20 transition-colors group"
                     data-testid={`row-candidate-${candidate.id}`}
                   >
                     {/* Category badge */}
@@ -204,17 +204,17 @@ export default function Candidates() {
                     </div>
 
                     {/* Contact */}
-                    <div className="text-sm space-y-0.5">
+                    <div className="space-y-0.5 min-w-0 overflow-hidden">
                       {candidate.email && (
-                        <div className="flex items-center gap-1.5 text-muted-foreground">
+                        <div className="flex items-center gap-1.5 text-muted-foreground min-w-0">
                           <Mail className="h-3 w-3 shrink-0" />
-                          <span className="truncate max-w-[180px] text-xs">{candidate.email}</span>
+                          <span className="truncate text-xs">{candidate.email}</span>
                         </div>
                       )}
                       {candidate.phone && (
-                        <div className="flex items-center gap-1.5 text-muted-foreground">
+                        <div className="flex items-center gap-1.5 text-muted-foreground min-w-0">
                           <Phone className="h-3 w-3 shrink-0" />
-                          <span className="text-xs">{candidate.phone}</span>
+                          <span className="truncate text-xs">{candidate.phone}</span>
                         </div>
                       )}
                     </div>
@@ -239,8 +239,8 @@ export default function Candidates() {
                     </div>
 
                     {/* City */}
-                    <div className="text-xs text-muted-foreground flex items-center gap-1">
-                      {candidate.city ? <><MapPin className="h-3 w-3" />{candidate.city}</> : "—"}
+                    <div className="text-xs text-muted-foreground flex items-center gap-1 min-w-0 overflow-hidden">
+                      {candidate.city ? <><MapPin className="h-3 w-3 shrink-0" /><span className="truncate">{candidate.city}</span></> : "—"}
                     </div>
 
                     {/* Experience */}
