@@ -220,6 +220,9 @@ export class DatabaseStorage implements IStorage {
     return u ? toPublicUser(u) : undefined;
   }
   async deleteUser(id: number): Promise<void> {
+    // Delete tasks assigned to or created by this user
+    await db.delete(tasks).where(eq(tasks.assignedToUserId, id));
+    await db.delete(tasks).where(eq(tasks.createdByUserId, id));
     // Clear job assignments for this user
     await db.delete(jobAssignments).where(eq(jobAssignments.userId, id));
     // Null out coaching manager references so employee records stay intact
