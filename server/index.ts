@@ -1,8 +1,12 @@
 import express, { type Request, Response, NextFunction } from "express";
 import session from "express-session";
+import connectPgSimple from "connect-pg-simple";
+import { pool } from "./db";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+
+const PgStore = connectPgSimple(session);
 
 const app = express();
 const httpServer = createServer(app);
@@ -25,11 +29,16 @@ app.use(express.urlencoded({ extended: false }));
 
 app.use(
   session({
+    store: new PgStore({
+      pool,
+      createTableIfMissing: true,
+      tableName: "user_sessions",
+    }),
     secret: process.env.SESSION_SECRET!,
     resave: false,
     saveUninitialized: false,
     cookie: {
-      secure: false,
+      secure: process.env.NODE_ENV === "production",
       maxAge: 7 * 24 * 60 * 60 * 1000,
       httpOnly: true,
       sameSite: "lax",
