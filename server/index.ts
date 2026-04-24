@@ -9,6 +9,7 @@ import { createServer } from "http";
 const PgStore = connectPgSimple(session);
 
 const app = express();
+app.set("trust proxy", 1);
 const httpServer = createServer(app);
 
 declare module "http" {
@@ -27,13 +28,14 @@ app.use(
 
 app.use(express.urlencoded({ extended: false }));
 
+const sessionStore = new PgStore({
+  pool,
+  tableName: "user_sessions",
+});
+
 app.use(
   session({
-    store: new PgStore({
-      pool,
-      createTableIfMissing: true,
-      tableName: "user_sessions",
-    }),
+    store: sessionStore,
     secret: process.env.SESSION_SECRET!,
     resave: false,
     saveUninitialized: false,
@@ -84,6 +86,15 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS "user_sessions" (
+      "sid" varchar PRIMARY KEY NOT NULL,
+      "sess" json NOT NULL,
+      "expire" timestamp(6) NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON "user_sessions" ("expire");
+  `);
+
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
