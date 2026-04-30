@@ -502,6 +502,24 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const application = await storage.updateApplicationStatus(Number(req.params.id), status);
       if (!application) return res.status(404).json({ message: "Not found" });
       await storage.addStageHistory({ applicationId: application.id, candidateId: application.candidateId, jobId: application.jobId, fromStatus, toStatus: status });
+      if (status === "documents") {
+        // Entering documents → immediately become an active employee
+        const existingEmp = await storage.getEmployeeByCandidateId(existing.candidateId);
+        if (!existingEmp) {
+          await storage.createEmployee({
+            candidateId: existing.candidateId,
+            jobId: existing.jobId,
+            applicationId: existing.id,
+            status: "active",
+          });
+        }
+      } else if (fromStatus === "documents" && status !== "employed") {
+        // Moved back out of documents → remove the auto-created employee record
+        const existingEmp = await storage.getEmployeeByCandidateId(existing.candidateId);
+        if (existingEmp) {
+          await storage.deleteEmployee(existingEmp.id);
+        }
+      }
       res.json(application);
     } catch (err) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0].message });
@@ -812,11 +830,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return res.status(400).json({ message: "candidateId, jobId and applicationId are required" });
       }
       const existing = await storage.getEmployeeByCandidateId(candidateId);
-      if (existing) {
-        return res.status(409).json({ message: "Candidate is already an active employee" });
-      }
       const currentApp = await storage.getApplication(applicationId);
-      const emp = await storage.createEmployee({
+      // Employee may already exist (auto-created when candidate reached documents stage)
+      const emp = existing ?? await storage.createEmployee({
         candidateId, jobId, applicationId,
         startDate: startDate ? new Date(startDate) : new Date(),
         status: "active",
