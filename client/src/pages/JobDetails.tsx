@@ -25,7 +25,7 @@ import {
 import {
   MapPin, Building2, MoreHorizontal, UserPlus, DollarSign,
   ArrowLeft, Users, Calendar, ChevronDown, ExternalLink, Star, CheckCircle2, GripVertical,
-  LayoutGrid, List, Phone, Mail, MessageSquare, FileText,
+  LayoutGrid, List, Phone, Mail, MessageSquare, FileText, Search,
 } from "lucide-react";
 import { useCompleteHiring } from "@/hooks/use-employees";
 import { motion, AnimatePresence } from "framer-motion";
@@ -79,6 +79,7 @@ export default function JobDetails() {
   const [activeApp, setActiveApp] = useState<ApplicationWithRelations | null>(null);
   const [viewMode, setViewMode] = useState<"kanban" | "list">("kanban");
   const [listStageFilter, setListStageFilter] = useState<string>("all");
+  const [search, setSearch] = useState("");
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
@@ -131,6 +132,15 @@ export default function JobDetails() {
   const totalApps = applications?.length ?? 0;
   const interviewCount = applications?.filter((a) => a.status === "interview").length ?? 0;
 
+  const visibleApps = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return applications ?? [];
+    return (applications ?? []).filter((a) =>
+      a.candidate?.name?.toLowerCase().includes(q) ||
+      a.candidate?.referredBy?.toLowerCase().includes(q)
+    );
+  }, [applications, search]);
+
   return (
     <Layout>
       <div className="space-y-5">
@@ -182,6 +192,18 @@ export default function JobDetails() {
               </p>
             </div>
           </div>
+        </div>
+
+        {/* Search */}
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="İsim veya referans ile ara..."
+            className="w-full border border-input rounded-md pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 bg-background"
+          />
         </div>
 
         {/* View toggle */}
@@ -237,7 +259,7 @@ export default function JobDetails() {
               <div className="flex gap-3 min-w-[1100px]">
                 {APPLICATION_STAGES.map((stage) => {
                   const meta = COLUMN_META[stage] ?? { color: "text-gray-600", bg: "bg-gray-50", dot: "bg-gray-400" };
-                  const columnApps = applications?.filter((a) => a.status === stage) ?? [];
+                  const columnApps = visibleApps.filter((a) => a.status === stage);
 
                   return (
                     <DroppableColumn key={stage} stage={stage} meta={meta} count={columnApps.length}>
@@ -277,7 +299,7 @@ export default function JobDetails() {
         {/* List view */}
         {viewMode === "list" && (
           <ApplicationListView
-            applications={(applications ?? []).filter((a) => a.status !== "employed" && (listStageFilter === "all" || a.status === listStageFilter))}
+            applications={visibleApps.filter((a) => a.status !== "employed" && (listStageFilter === "all" || a.status === listStageFilter))}
             completingHiring={completingHiring}
             onStatusChange={handleStatusChange}
             onRateNote={(app) => setRateNoteApp(app)}
