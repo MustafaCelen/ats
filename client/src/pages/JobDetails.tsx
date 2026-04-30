@@ -81,6 +81,15 @@ export default function JobDetails() {
   const [listStageFilter, setListStageFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
 
+  const visibleApps = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return applications ?? [];
+    return (applications ?? []).filter((a) =>
+      a.candidate?.name?.toLowerCase().includes(q) ||
+      a.candidate?.referredBy?.toLowerCase().includes(q)
+    );
+  }, [applications, search]);
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
   );
@@ -131,15 +140,6 @@ export default function JobDetails() {
 
   const totalApps = applications?.length ?? 0;
   const interviewCount = applications?.filter((a) => a.status === "interview").length ?? 0;
-
-  const visibleApps = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return applications ?? [];
-    return (applications ?? []).filter((a) =>
-      a.candidate?.name?.toLowerCase().includes(q) ||
-      a.candidate?.referredBy?.toLowerCase().includes(q)
-    );
-  }, [applications, search]);
 
   return (
     <Layout>
