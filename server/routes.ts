@@ -502,6 +502,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const application = await storage.updateApplicationStatus(Number(req.params.id), status);
       if (!application) return res.status(404).json({ message: "Not found" });
       await storage.addStageHistory({ applicationId: application.id, candidateId: application.candidateId, jobId: application.jobId, fromStatus, toStatus: status });
+      // Auto-create a draft employee record when candidate reaches documents stage
+      if (status === "documents") {
+        const existingEmp = await storage.getEmployeeByCandidateId(existing.candidateId);
+        if (!existingEmp) {
+          await storage.createEmployee({
+            candidateId: existing.candidateId,
+            jobId: existing.jobId,
+            applicationId: existing.id,
+            status: "draft",
+          });
+        }
+      }
       res.json(application);
     } catch (err) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0].message });
@@ -812,17 +824,29 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return res.status(400).json({ message: "candidateId, jobId and applicationId are required" });
       }
       const existing = await storage.getEmployeeByCandidateId(candidateId);
-      if (existing) {
+      if (existing && existing.status !== "draft") {
         return res.status(409).json({ message: "Candidate is already an active employee" });
       }
       const currentApp = await storage.getApplication(applicationId);
-      const emp = await storage.createEmployee({
-        candidateId, jobId, applicationId,
-        startDate: startDate ? new Date(startDate) : new Date(),
-        status: "active",
-        title: title ?? null,
-        notes: notes ?? null,
-      });
+      let emp;
+      if (existing && existing.status === "draft") {
+        // Activate the draft employee record created when candidate reached documents stage
+        await storage.updateEmployee(existing.id, {
+          status: "active",
+          startDate: startDate ? new Date(startDate) : new Date(),
+          title: title ?? existing.title ?? null,
+          notes: notes ?? existing.notes ?? null,
+        });
+        emp = { ...existing, status: "active" };
+      } else {
+        emp = await storage.createEmployee({
+          candidateId, jobId, applicationId,
+          startDate: startDate ? new Date(startDate) : new Date(),
+          status: "active",
+          title: title ?? null,
+          notes: notes ?? null,
+        });
+      }
       // Archive the application so it disappears from the pipeline and candidate list
       await storage.updateApplicationStatus(applicationId, "employed");
       // Record the completion in stage history so it appears in hiring manager reports
