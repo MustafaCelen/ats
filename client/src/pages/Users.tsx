@@ -376,8 +376,8 @@ function DeleteUserConfirm({ user, onDone }: { user: PublicUser | null; onDone: 
   const qc = useQueryClient();
   const { toast } = useToast();
   const { mutate, isPending } = useMutation({
-    mutationFn: async () => {
-      const res = await fetch(`/api/users/${user!.id}`, { method: "DELETE", credentials: "include" });
+    mutationFn: async (userId: number) => {
+      const res = await fetch(`/api/users/${userId}`, { method: "DELETE", credentials: "include" });
       if (!res.ok) { const b = await res.json(); throw new Error(b.message); }
     },
     onSuccess: () => {
@@ -389,7 +389,7 @@ function DeleteUserConfirm({ user, onDone }: { user: PublicUser | null; onDone: 
     onError: (err) => toast({ title: (err as Error).message, variant: "destructive" }),
   });
   return (
-    <AlertDialogAction onClick={() => user && mutate()} disabled={isPending} className="bg-destructive hover:bg-destructive/90">
+    <AlertDialogAction onClick={() => user && mutate(user.id)} disabled={isPending} className="bg-destructive hover:bg-destructive/90">
       {isPending ? "Siliniyor..." : "Sil"}
     </AlertDialogAction>
   );
