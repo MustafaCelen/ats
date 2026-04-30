@@ -39,15 +39,7 @@ function StatusPill({ status }: { status: string }) {
       </span>
     );
   }
-  if (status === "draft") {
-    return (
-      <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 ring-1 ring-amber-200">
-        <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
-        Belgeler
-      </span>
-    );
-  }
-  return (
+return (
     <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 ring-1 ring-gray-200">
       <span className="h-1.5 w-1.5 rounded-full bg-gray-400" />
       Pasif
@@ -465,7 +457,7 @@ export default function Employees() {
   const { toast } = useToast();
 
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive" | "draft">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
   const [detailEmployee, setDetailEmployee] = useState<any | null>(null);
   const [editEmployee, setEditEmployee] = useState<any | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -485,7 +477,6 @@ export default function Employees() {
 
   const activeCount = (employees ?? []).filter((e: any) => e.status === "active").length;
   const inactiveCount = (employees ?? []).filter((e: any) => e.status === "inactive").length;
-  const draftCount = (employees ?? []).filter((e: any) => e.status === "draft").length;
 
   const handleToggleStatus = (emp: any) => {
     const newStatus = emp.status === "active" ? "inactive" : "active";
@@ -595,17 +586,6 @@ export default function Employees() {
           >
             <XCircle className="h-3.5 w-3.5 mr-1" /> Pasif ({inactiveCount})
           </Button>
-          {draftCount > 0 && (
-            <Button
-              size="sm"
-              variant={statusFilter === "draft" ? "default" : "outline"}
-              onClick={() => setStatusFilter("draft")}
-              data-testid="filter-draft"
-              className={statusFilter !== "draft" ? "border-amber-200 text-amber-700 hover:bg-amber-50" : ""}
-            >
-              Belgeler ({draftCount})
-            </Button>
-          )}
         </div>
 
         {/* Search */}
@@ -804,13 +784,11 @@ export default function Employees() {
                             </DropdownMenuItem>
                           )}
                           <DropdownMenuSeparator />
-                          {emp.status !== "draft" && (
-                            <DropdownMenuItem onClick={() => handleToggleStatus(emp)} disabled={updating} data-testid={`toggle-status-${emp.id}`}>
-                              {emp.status === "active"
-                                ? <><XCircle className="h-3.5 w-3.5 mr-2 text-gray-500" /> Pasife Al</>
-                                : <><CheckCircle2 className="h-3.5 w-3.5 mr-2 text-emerald-500" /> Aktifleştir</>}
-                            </DropdownMenuItem>
-                          )}
+                          <DropdownMenuItem onClick={() => handleToggleStatus(emp)} disabled={updating} data-testid={`toggle-status-${emp.id}`}>
+                            {emp.status === "active"
+                              ? <><XCircle className="h-3.5 w-3.5 mr-2 text-gray-500" /> Pasife Al</>
+                              : <><CheckCircle2 className="h-3.5 w-3.5 mr-2 text-emerald-500" /> Aktifleştir</>}
+                          </DropdownMenuItem>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem className="text-red-600" onClick={() => handleDelete(emp)} data-testid={`delete-employee-${emp.id}`}>
                             Listeden Kaldır

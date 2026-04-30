@@ -213,7 +213,7 @@ export const applicationDocuments = pgTable("application_documents", {
 });
 
 // ── Employees (Active Realtors) ───────────────────────────────────────────────
-export const EMPLOYEE_STATUSES = ["draft", "active", "inactive"] as const;
+export const EMPLOYEE_STATUSES = ["active", "inactive"] as const;
 export type EmployeeStatus = (typeof EMPLOYEE_STATUSES)[number];
 
 export const CONTRACT_TYPES = ["50/50", "70/30"] as const;

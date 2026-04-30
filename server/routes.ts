@@ -502,25 +502,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const application = await storage.updateApplicationStatus(Number(req.params.id), status);
       if (!application) return res.status(404).json({ message: "Not found" });
       await storage.addStageHistory({ applicationId: application.id, candidateId: application.candidateId, jobId: application.jobId, fromStatus, toStatus: status });
-      // Manage draft employee record based on stage transitions
-      if (status === "documents") {
-        // Entering documents → create draft employee so KW fields become available
-        const existingEmp = await storage.getEmployeeByCandidateId(existing.candidateId);
-        if (!existingEmp) {
-          await storage.createEmployee({
-            candidateId: existing.candidateId,
-            jobId: existing.jobId,
-            applicationId: existing.id,
-            status: "draft",
-          });
-        }
-      } else if (fromStatus === "documents" && status !== "employed") {
-        // Moving back out of documents → remove the draft (only if still draft, never touch active/inactive)
-        const existingEmp = await storage.getEmployeeByCandidateId(existing.candidateId);
-        if (existingEmp && existingEmp.status === "draft") {
-          await storage.deleteEmployee(existingEmp.id);
-        }
-      }
       res.json(application);
     } catch (err) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0].message });
@@ -831,29 +812,17 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return res.status(400).json({ message: "candidateId, jobId and applicationId are required" });
       }
       const existing = await storage.getEmployeeByCandidateId(candidateId);
-      if (existing && existing.status === "active") {
+      if (existing) {
         return res.status(409).json({ message: "Candidate is already an active employee" });
       }
       const currentApp = await storage.getApplication(applicationId);
-      let emp;
-      if (existing && existing.status === "draft") {
-        // Activate the draft created when candidate reached documents stage
-        await storage.updateEmployee(existing.id, {
-          status: "active",
-          startDate: startDate ? new Date(startDate) : new Date(),
-          title: title ?? existing.title ?? null,
-          notes: notes ?? existing.notes ?? null,
-        });
-        emp = { ...existing, status: "active" };
-      } else {
-        emp = await storage.createEmployee({
-          candidateId, jobId, applicationId,
-          startDate: startDate ? new Date(startDate) : new Date(),
-          status: "active",
-          title: title ?? null,
-          notes: notes ?? null,
-        });
-      }
+      const emp = await storage.createEmployee({
+        candidateId, jobId, applicationId,
+        startDate: startDate ? new Date(startDate) : new Date(),
+        status: "active",
+        title: title ?? null,
+        notes: notes ?? null,
+      });
       // Archive the application so it disappears from the pipeline and candidate list
       await storage.updateApplicationStatus(applicationId, "employed");
       // Record the completion in stage history so it appears in hiring manager reports
