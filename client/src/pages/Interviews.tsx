@@ -20,7 +20,7 @@ import { format, isPast, isFuture } from "date-fns";
 import {
   Calendar, Clock, MapPin, Plus, CheckCircle2, XCircle, Trash2,
   Video, AlertCircle, CalendarPlus, CalendarCheck, Star, MessageSquarePlus,
-  RefreshCcw,
+  RefreshCcw, Search,
 } from "lucide-react";
 import { StarPicker, ScoreBadge } from "@/components/ScoreBadge";
 import { MentionTextarea } from "@/components/MentionTextarea";
@@ -124,6 +124,7 @@ export default function Interviews() {
   const { data: interviews, isLoading } = useInterviews();
   const { data: authUser } = useAuth();
   const [filter, setFilter] = useState<"all" | "scheduled" | "completed" | "cancelled">("all");
+  const [search, setSearch] = useState("");
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [evaluateTarget, setEvaluateTarget] = useState<InterviewWithRelations | null>(null);
   const [completeTarget, setCompleteTarget] = useState<InterviewWithRelations | null>(null);
@@ -133,7 +134,14 @@ export default function Interviews() {
   const { mutate: syncCalendar, isPending: isSyncing } = useSyncCalendar();
   const { toast } = useToast();
 
-  const filtered = interviews?.filter((iv) => filter === "all" || iv.status === filter) ?? [];
+  const filtered = (interviews ?? []).filter((iv) => {
+    const matchesStatus = filter === "all" || iv.status === filter;
+    const q = search.trim().toLowerCase();
+    const matchesSearch = !q ||
+      iv.candidate?.name?.toLowerCase().includes(q) ||
+      iv.candidate?.referredBy?.toLowerCase().includes(q);
+    return matchesStatus && matchesSearch;
+  });
 
   const upcoming = interviews?.filter((iv) => iv.status === "scheduled" && isFuture(new Date(iv.startTime))).length ?? 0;
   const todayCount = interviews?.filter((iv) => {
@@ -234,6 +242,17 @@ export default function Interviews() {
               <p className={`text-2xl font-display font-bold mt-0.5 ${kpi.color}`}>{kpi.value}</p>
             </div>
           ))}
+        </div>
+
+        {/* Search */}
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="İsim veya referans ile ara..."
+            className="pl-9"
+          />
         </div>
 
         {/* Filter tabs */}
