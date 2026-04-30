@@ -502,16 +502,23 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const application = await storage.updateApplicationStatus(Number(req.params.id), status);
       if (!application) return res.status(404).json({ message: "Not found" });
       await storage.addStageHistory({ applicationId: application.id, candidateId: application.candidateId, jobId: application.jobId, fromStatus, toStatus: status });
-      // Auto-create an active employee record when candidate reaches documents stage
+      // Manage draft employee record based on stage transitions
       if (status === "documents") {
+        // Entering documents → create draft employee so KW fields become available
         const existingEmp = await storage.getEmployeeByCandidateId(existing.candidateId);
         if (!existingEmp) {
           await storage.createEmployee({
             candidateId: existing.candidateId,
             jobId: existing.jobId,
             applicationId: existing.id,
-            status: "active",
+            status: "draft",
           });
+        }
+      } else if (fromStatus === "documents" && status !== "employed") {
+        // Moving back out of documents → remove the draft (only if still draft, never touch active/inactive)
+        const existingEmp = await storage.getEmployeeByCandidateId(existing.candidateId);
+        if (existingEmp && existingEmp.status === "draft") {
+          await storage.deleteEmployee(existingEmp.id);
         }
       }
       res.json(application);
@@ -824,11 +831,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return res.status(400).json({ message: "candidateId, jobId and applicationId are required" });
       }
       const existing = await storage.getEmployeeByCandidateId(candidateId);
+      if (existing && existing.status === "active") {
+        return res.status(409).json({ message: "Candidate is already an active employee" });
+      }
       const currentApp = await storage.getApplication(applicationId);
       let emp;
-      if (existing) {
-        // Employee was auto-created when candidate reached documents stage — just use it
-        emp = existing;
+      if (existing && existing.status === "draft") {
+        // Activate the draft created when candidate reached documents stage
+        await storage.updateEmployee(existing.id, {
+          status: "active",
+          startDate: startDate ? new Date(startDate) : new Date(),
+          title: title ?? existing.title ?? null,
+          notes: notes ?? existing.notes ?? null,
+        });
+        emp = { ...existing, status: "active" };
       } else {
         emp = await storage.createEmployee({
           candidateId, jobId, applicationId,

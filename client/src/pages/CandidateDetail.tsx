@@ -407,10 +407,16 @@ export default function CandidateDetail() {
                 <div className="flex items-center gap-2 mb-4">
                   <BadgeCheck className="h-5 w-5 text-[#CC0000]" />
                   <h2 className="text-sm font-bold text-[#CC0000] uppercase tracking-wide">KW Çalışan Bilgileri</h2>
-                  <span className="ml-auto inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200">
-                    <CheckCircle2 className="h-3 w-3" />
-                    {employeeRecord.status === "active" ? "Aktif Çalışan" : "Pasif"}
-                  </span>
+                  {employeeRecord.status === "draft" ? (
+                    <span className="ml-auto inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 ring-1 ring-amber-200">
+                      Belgeler Aşamasında
+                    </span>
+                  ) : (
+                    <span className="ml-auto inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200">
+                      <CheckCircle2 className="h-3 w-3" />
+                      {employeeRecord.status === "active" ? "Aktif Çalışan" : "Pasif"}
+                    </span>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
