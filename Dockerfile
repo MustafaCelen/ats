@@ -28,4 +28,4 @@ ENV PORT=5000
 EXPOSE 5000
 
 # Push schema (creates/updates tables) then start the server
-CMD ["sh", "-c", "npx drizzle-kit push && node dist/index.cjs"]
+CMD ["sh", "-c", "npx drizzle-kit push --force && node dist/index.cjs"]
