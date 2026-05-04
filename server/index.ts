@@ -40,6 +40,7 @@ app.use(
     secret: process.env.SESSION_SECRET!,
     resave: false,
     saveUninitialized: false,
+    rolling: true,
     cookie: {
       secure: process.env.COOKIE_SECURE === "true",
       maxAge: 7 * 24 * 60 * 60 * 1000,
