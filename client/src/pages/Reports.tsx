@@ -4,15 +4,11 @@ import { useReportStats } from "@/hooks/use-stats";
 import { STAGE_COLORS } from "@/components/StatusBadge";
 import { STAGE_LABELS } from "@shared/schema";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, AreaChart, Area, CartesianGrid } from "recharts";
-import { Calendar, Clock, TrendingUp, Users, CheckCircle, DollarSign, Briefcase, Activity, TimerReset, XCircle, UserMinus } from "lucide-react";
+import { Calendar, Clock, TrendingUp, Users, CheckCircle, DollarSign, Briefcase, Activity, TimerReset, XCircle, UserMinus, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-
-const RANGES = [
-  { label: "Last 7 days", days: 7 },
-  { label: "Last 30 days", days: 30 },
-  { label: "Last 90 days", days: 90 },
-];
+import { format } from "date-fns";
+import { tr } from "date-fns/locale";
 
 function MetricCard({ icon: Icon, label, value, sub, color }: { icon: React.ElementType; label: string; value: number | string; sub?: string; color: string; }) {
   return (
@@ -47,15 +43,30 @@ const OFFICE_OPTIONS = [
   { label: "Zekeriyaköy", value: "Zekeriyaköy" },
 ] as const;
 
+function formatYMD(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 export default function Reports() {
-  const [activeDays, setActiveDays] = useState(30);
+  const [viewDate, setViewDate] = useState(() => new Date());
   const [useCustomRange, setUseCustomRange] = useState(false);
   const [fromDate, setFromDate] = useState(formatDateInput(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)));
   const [toDate, setToDate] = useState(formatDateInput(new Date()));
   const [officeFilter, setOfficeFilter] = useState<string | undefined>(undefined);
 
-  const computedStart = useCustomRange ? fromDate : formatDateInput(new Date(Date.now() - activeDays * 24 * 60 * 60 * 1000));
-  const computedEnd = useCustomRange ? toDate : formatDateInput(new Date());
+  const viewYear = viewDate.getFullYear();
+  const viewMonth = viewDate.getMonth();
+  const prevMonth = () => setViewDate(new Date(viewYear, viewMonth - 1, 1));
+  const nextMonth = () => setViewDate(new Date(viewYear, viewMonth + 1, 1));
+
+  const monthStart = formatYMD(new Date(viewYear, viewMonth, 1));
+  const monthEnd = formatYMD(new Date(viewYear, viewMonth + 1, 0));
+
+  const computedStart = useCustomRange ? fromDate : monthStart;
+  const computedEnd = useCustomRange ? toDate : monthEnd;
   const { data: stats, isLoading } = useReportStats(computedStart, computedEnd, officeFilter);
 
   const funnelData = (stats?.funnel ?? []).filter((f: any) => f.stage !== "rejected");
@@ -86,16 +97,50 @@ export default function Reports() {
                 </Button>
               ))}
             </div>
-            <Button variant={useCustomRange ? "outline" : "default"} size="sm" onClick={() => setUseCustomRange(false)} data-testid="btn-range-presets">Presets</Button>
-            <Button variant={useCustomRange ? "default" : "outline"} size="sm" onClick={() => setUseCustomRange(true)} data-testid="btn-range-custom">Custom Range</Button>
-            {!useCustomRange && RANGES.map((r) => (
-              <Button key={r.days} size="sm" variant={activeDays === r.days ? "default" : "outline"} onClick={() => setActiveDays(r.days)} data-testid={`btn-range-${r.days}`}>{r.label}</Button>
-            ))}
+
+            {/* Mode toggle */}
+            <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-1">
+              <Button
+                size="sm"
+                variant={!useCustomRange ? "default" : "ghost"}
+                className="h-7 text-xs px-3"
+                onClick={() => setUseCustomRange(false)}
+                data-testid="btn-range-monthly"
+              >
+                Aylık
+              </Button>
+              <Button
+                size="sm"
+                variant={useCustomRange ? "default" : "ghost"}
+                className="h-7 text-xs px-3"
+                onClick={() => setUseCustomRange(true)}
+                data-testid="btn-range-custom"
+              >
+                Özel Aralık
+              </Button>
+            </div>
+
+            {/* Monthly navigator */}
+            {!useCustomRange && (
+              <div className="flex items-center gap-1 rounded-lg border border-border bg-card px-2 py-1">
+                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={prevMonth} data-testid="btn-prev-month">
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                </Button>
+                <span className="text-xs font-medium px-2 min-w-[110px] text-center capitalize" data-testid="label-month">
+                  {format(viewDate, "MMMM yyyy", { locale: tr })}
+                </span>
+                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={nextMonth} data-testid="btn-next-month">
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            )}
+
+            {/* Custom date range */}
             {useCustomRange && (
               <div className="flex items-center gap-2 rounded-lg border border-border bg-card p-2">
                 <Calendar className="h-4 w-4 text-muted-foreground" />
                 <Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="w-[140px]" data-testid="input-report-from" />
-                <span className="text-xs text-muted-foreground">to</span>
+                <span className="text-xs text-muted-foreground">—</span>
                 <Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="w-[140px]" data-testid="input-report-to" />
               </div>
             )}

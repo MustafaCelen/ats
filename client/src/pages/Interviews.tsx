@@ -33,6 +33,12 @@ import { STAGE_COLORS } from "@/components/StatusBadge";
 
 type InterviewWithRelations = Interview & { candidate?: Candidate; job?: Job; application?: Application };
 
+const TIME_SLOTS = Array.from({ length: 96 }, (_, i) => {
+  const h = String(Math.floor(i / 4)).padStart(2, "0");
+  const m = String((i % 4) * 15).padStart(2, "0");
+  return `${h}:${m}`;
+});
+
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: any }> = {
   scheduled: { label: "Scheduled",  color: "bg-blue-100 text-blue-700 border-blue-200",    icon: Calendar },
   completed: { label: "Completed",  color: "bg-emerald-100 text-emerald-700 border-emerald-200", icon: CheckCircle2 },
@@ -561,28 +567,31 @@ function RescheduleInterviewDialog({
 }) {
   const { toast } = useToast();
   const { mutate: reschedule, isPending } = useRescheduleInterview();
+  const [date, setDate] = useState("");
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
 
-  const toLocalInput = (d: Date) => {
-    const pad = (n: number) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  };
+  const pad = (n: number) => String(n).padStart(2, "0");
 
   const handleOpen = (v: boolean) => {
     if (v && interview) {
-      setStartTime(toLocalInput(new Date(interview.startTime)));
-      setEndTime(toLocalInput(new Date(interview.endTime)));
+      const s = new Date(interview.startTime);
+      const e = new Date(interview.endTime);
+      setDate(`${s.getFullYear()}-${pad(s.getMonth() + 1)}-${pad(s.getDate())}`);
+      // Snap to nearest 15-min slot
+      const snapMin = (d: Date) => pad(Math.round(d.getMinutes() / 15) * 15 === 60 ? 0 : Math.round(d.getMinutes() / 15) * 15);
+      setStartTime(`${pad(s.getHours())}:${snapMin(s)}`);
+      setEndTime(`${pad(e.getHours())}:${snapMin(e)}`);
     }
     onOpenChange(v);
   };
 
-  const toTurkeyISO = (v: string) => v ? `${v}:00+03:00` : v;
+  const toTurkeyISO = (d: string, t: string) => d && t ? `${d}T${t}:00+03:00` : "";
 
   const handleConfirm = () => {
-    if (!interview || !startTime || !endTime) return;
+    if (!interview || !date || !startTime || !endTime) return;
     reschedule(
-      { id: interview.id, startTime: toTurkeyISO(startTime), endTime: toTurkeyISO(endTime) },
+      { id: interview.id, startTime: toTurkeyISO(date, startTime), endTime: toTurkeyISO(date, endTime) },
       {
         onSuccess: () => {
           toast({
@@ -612,24 +621,37 @@ function RescheduleInterviewDialog({
         </DialogHeader>
 
         <div className="space-y-4 pt-2">
+          <div>
+            <Label className="text-xs font-medium mb-1.5 block">Tarih *</Label>
+            <Input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              data-testid="input-reschedule-date"
+            />
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label className="text-xs font-medium mb-1.5 block">Yeni Başlangıç *</Label>
-              <Input
-                type="datetime-local"
-                value={startTime}
-                onChange={(e) => setStartTime(e.target.value)}
-                data-testid="input-reschedule-start"
-              />
+              <Label className="text-xs font-medium mb-1.5 block">Başlangıç *</Label>
+              <Select value={startTime} onValueChange={setStartTime}>
+                <SelectTrigger data-testid="select-reschedule-start">
+                  <SelectValue placeholder="Saat seçin" />
+                </SelectTrigger>
+                <SelectContent>
+                  {TIME_SLOTS.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
             <div>
-              <Label className="text-xs font-medium mb-1.5 block">Yeni Bitiş *</Label>
-              <Input
-                type="datetime-local"
-                value={endTime}
-                onChange={(e) => setEndTime(e.target.value)}
-                data-testid="input-reschedule-end"
-              />
+              <Label className="text-xs font-medium mb-1.5 block">Bitiş *</Label>
+              <Select value={endTime} onValueChange={setEndTime}>
+                <SelectTrigger data-testid="select-reschedule-end">
+                  <SelectValue placeholder="Saat seçin" />
+                </SelectTrigger>
+                <SelectContent>
+                  {TIME_SLOTS.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
           </div>
           {(interview as any)?.rescheduleCount > 0 && (
@@ -644,7 +666,7 @@ function RescheduleInterviewDialog({
             <Button
               className="flex-1 bg-violet-600 hover:bg-violet-700 text-white"
               onClick={handleConfirm}
-              disabled={isPending || !startTime || !endTime}
+              disabled={isPending || !date || !startTime || !endTime}
               data-testid="btn-confirm-reschedule"
             >
               {isPending ? "Kaydediliyor..." : "Ertele & Kaydet"}
@@ -663,7 +685,8 @@ function ScheduleInterviewDialog({ open, onOpenChange }: { open: boolean; onOpen
 
   const [form, setForm] = useState({
     applicationId: "",
-    title: "Technical Interview",
+    title: "Randevu",
+    date: "",
     startTime: "",
     endTime: "",
     location: "",
@@ -672,31 +695,30 @@ function ScheduleInterviewDialog({ open, onOpenChange }: { open: boolean; onOpen
 
   const selectedApp = applications?.find((a) => a.id === parseInt(form.applicationId));
 
+  const toTurkeyISO = (d: string, t: string) => d && t ? `${d}T${t}:00+03:00` : "";
+
   const handleSubmit = () => {
-    if (!form.applicationId || !form.startTime || !form.endTime) {
-      toast({ title: "Missing fields", description: "Please fill in all required fields.", variant: "destructive" });
+    if (!form.applicationId || !form.date || !form.startTime || !form.endTime) {
+      toast({ title: "Eksik alan", description: "Lütfen tüm zorunlu alanları doldurun.", variant: "destructive" });
       return;
     }
     if (!selectedApp) return;
-
-    // Append Turkey timezone offset so server stores the correct UTC time
-    const toTurkeyISO = (v: string) => v ? `${v}:00+03:00` : v;
 
     mutate({
       applicationId: parseInt(form.applicationId),
       jobId: selectedApp.jobId,
       candidateId: selectedApp.candidateId,
-      title: form.title || "Interview",
-      startTime: toTurkeyISO(form.startTime),
-      endTime: toTurkeyISO(form.endTime),
+      title: form.title || "Randevu",
+      startTime: toTurkeyISO(form.date, form.startTime),
+      endTime: toTurkeyISO(form.date, form.endTime),
       location: form.location || null,
       notes: form.notes || null,
       status: "scheduled",
     }, {
       onSuccess: () => {
-        toast({ title: "Interview scheduled!" });
+        toast({ title: "Randevu oluşturuldu!" });
         onOpenChange(false);
-        setForm({ applicationId: "", title: "Technical Interview", startTime: "", endTime: "", location: "", notes: "" });
+        setForm({ applicationId: "", title: "Randevu", date: "", startTime: "", endTime: "", location: "", notes: "" });
       },
     });
   };
@@ -705,17 +727,17 @@ function ScheduleInterviewDialog({ open, onOpenChange }: { open: boolean; onOpen
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg" aria-describedby="schedule-interview-desc">
         <DialogHeader>
-          <DialogTitle>Schedule Interview</DialogTitle>
+          <DialogTitle>Randevu Planla</DialogTitle>
           <p id="schedule-interview-desc" className="text-sm text-muted-foreground">
-            Set up an interview with a candidate from the pipeline.
+            Pipeline'daki bir aday ile randevu oluşturun.
           </p>
         </DialogHeader>
         <div className="space-y-4 pt-2">
           <div>
-            <Label className="text-xs font-medium mb-1.5 block">Application *</Label>
+            <Label className="text-xs font-medium mb-1.5 block">Başvuru *</Label>
             <Select value={form.applicationId} onValueChange={(v) => setForm((f) => ({ ...f, applicationId: v }))}>
               <SelectTrigger data-testid="select-interview-application">
-                <SelectValue placeholder="Select candidate application..." />
+                <SelectValue placeholder="Aday başvurusu seçin..." />
               </SelectTrigger>
               <SelectContent>
                 {applications?.filter((a) => a.candidate?.name && a.status !== "employed" && a.status !== "rejected").map((a) => (
@@ -728,59 +750,73 @@ function ScheduleInterviewDialog({ open, onOpenChange }: { open: boolean; onOpen
           </div>
 
           <div>
-            <Label className="text-xs font-medium mb-1.5 block">Interview Title</Label>
+            <Label className="text-xs font-medium mb-1.5 block">Randevu Başlığı</Label>
             <Input
               value={form.title}
               onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-              placeholder="e.g. Technical Interview"
+              placeholder="örn. Teknik Mülakat"
               data-testid="input-interview-title"
+            />
+          </div>
+
+          <div>
+            <Label className="text-xs font-medium mb-1.5 block">Tarih *</Label>
+            <Input
+              type="date"
+              value={form.date}
+              onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))}
+              data-testid="input-interview-date"
             />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label className="text-xs font-medium mb-1.5 block">Start Time *</Label>
-              <Input
-                type="datetime-local"
-                value={form.startTime}
-                onChange={(e) => setForm((f) => ({ ...f, startTime: e.target.value }))}
-                data-testid="input-interview-start"
-              />
+              <Label className="text-xs font-medium mb-1.5 block">Başlangıç *</Label>
+              <Select value={form.startTime} onValueChange={(v) => setForm((f) => ({ ...f, startTime: v }))}>
+                <SelectTrigger data-testid="select-interview-start">
+                  <SelectValue placeholder="Saat seçin" />
+                </SelectTrigger>
+                <SelectContent>
+                  {TIME_SLOTS.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
             <div>
-              <Label className="text-xs font-medium mb-1.5 block">End Time *</Label>
-              <Input
-                type="datetime-local"
-                value={form.endTime}
-                onChange={(e) => setForm((f) => ({ ...f, endTime: e.target.value }))}
-                data-testid="input-interview-end"
-              />
+              <Label className="text-xs font-medium mb-1.5 block">Bitiş *</Label>
+              <Select value={form.endTime} onValueChange={(v) => setForm((f) => ({ ...f, endTime: v }))}>
+                <SelectTrigger data-testid="select-interview-end">
+                  <SelectValue placeholder="Saat seçin" />
+                </SelectTrigger>
+                <SelectContent>
+                  {TIME_SLOTS.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
           <div>
-            <Label className="text-xs font-medium mb-1.5 block">Location / Link</Label>
+            <Label className="text-xs font-medium mb-1.5 block">Konum / Link</Label>
             <Input
               value={form.location}
               onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))}
-              placeholder="e.g. Zoom, Google Meet, Office Room 3"
+              placeholder="örn. Zoom, Google Meet, Toplantı Odası 3"
               data-testid="input-interview-location"
             />
           </div>
 
           <div>
-            <Label className="text-xs font-medium mb-1.5 block">Notes</Label>
+            <Label className="text-xs font-medium mb-1.5 block">Notlar</Label>
             <Textarea
               value={form.notes}
               onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
-              placeholder="Any preparation notes or agenda..."
+              placeholder="Hazırlık notları veya gündem..."
               rows={2}
               data-testid="input-interview-notes"
             />
           </div>
 
           <Button onClick={handleSubmit} disabled={isPending} className="w-full" data-testid="btn-submit-interview">
-            {isPending ? "Scheduling..." : "Schedule Interview"}
+            {isPending ? "Kaydediliyor..." : "Randevu Oluştur"}
           </Button>
         </div>
       </DialogContent>

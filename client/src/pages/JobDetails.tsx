@@ -35,6 +35,12 @@ import { useToast } from "@/hooks/use-toast";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { ScoreBadge, StarPicker } from "@/components/ScoreBadge";
+
+const TIME_SLOTS = Array.from({ length: 96 }, (_, i) => {
+  const h = String(Math.floor(i / 4)).padStart(2, "0");
+  const m = String((i % 4) * 15).padStart(2, "0");
+  return `${h}:${m}`;
+});
 import { MentionTextarea } from "@/components/MentionTextarea";
 import type { PublicUser } from "@shared/schema";
 import {
@@ -918,28 +924,30 @@ function RateNoteDialog({ app, open, onOpenChange }: { app: ApplicationWithRelat
 function QuickInterviewDialog({ app, open, onOpenChange }: { app: ApplicationWithRelations; open: boolean; onOpenChange: (v: boolean) => void }) {
   const qc = useQueryClient();
   const { toast } = useToast();
-  const [form, setForm] = useState({ title: "Technical Interview", startTime: "", endTime: "", location: "" });
+  const [form, setForm] = useState({ title: "Randevu", date: "", startTime: "", endTime: "", location: "" });
 
   const { mutate, isPending } = useMutation({
     mutationFn: (data: any) => apiRequest("POST", "/api/interviews", data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/interviews"] });
       qc.invalidateQueries({ queryKey: ["/api/stats/dashboard"] });
-      toast({ title: "Interview scheduled!" });
+      toast({ title: "Randevu oluşturuldu!" });
       onOpenChange(false);
     },
   });
 
+  const toTurkeyISO = (d: string, t: string) => d && t ? `${d}T${t}:00+03:00` : "";
+
   const handleSubmit = () => {
-    if (!form.startTime || !form.endTime) {
-      toast({ title: "Missing fields", variant: "destructive" });
+    if (!form.date || !form.startTime || !form.endTime) {
+      toast({ title: "Eksik alan", description: "Tarih ve saatleri seçin.", variant: "destructive" });
       return;
     }
-    const toTurkeyISO = (v: string) => v ? `${v}:00+03:00` : v;
     mutate({
       applicationId: app.id, jobId: app.jobId, candidateId: app.candidateId,
-      title: form.title || "Interview",
-      startTime: toTurkeyISO(form.startTime), endTime: toTurkeyISO(form.endTime),
+      title: form.title || "Randevu",
+      startTime: toTurkeyISO(form.date, form.startTime),
+      endTime: toTurkeyISO(form.date, form.endTime),
       location: form.location || null, status: "scheduled",
     });
   };
@@ -948,30 +956,44 @@ function QuickInterviewDialog({ app, open, onOpenChange }: { app: ApplicationWit
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md" aria-describedby="quick-interview-desc">
         <DialogHeader>
-          <DialogTitle>Schedule Interview — {app.candidate?.name}</DialogTitle>
+          <DialogTitle>Randevu Planla — {app.candidate?.name}</DialogTitle>
           <p id="quick-interview-desc" className="text-sm text-muted-foreground">{app.job?.title}</p>
         </DialogHeader>
         <div className="space-y-3 pt-2">
           <div>
-            <Label className="text-xs mb-1 block">Title</Label>
-            <Input value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} placeholder="Interview title" />
+            <Label className="text-xs mb-1 block">Başlık</Label>
+            <Input value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} placeholder="Randevu başlığı" />
+          </div>
+          <div>
+            <Label className="text-xs mb-1 block">Tarih *</Label>
+            <Input type="date" value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))} />
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <Label className="text-xs mb-1 block">Start *</Label>
-              <Input type="datetime-local" value={form.startTime} onChange={(e) => setForm((f) => ({ ...f, startTime: e.target.value }))} />
+              <Label className="text-xs mb-1 block">Başlangıç *</Label>
+              <Select value={form.startTime} onValueChange={(v) => setForm((f) => ({ ...f, startTime: v }))}>
+                <SelectTrigger><SelectValue placeholder="Saat seçin" /></SelectTrigger>
+                <SelectContent>
+                  {TIME_SLOTS.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
             <div>
-              <Label className="text-xs mb-1 block">End *</Label>
-              <Input type="datetime-local" value={form.endTime} onChange={(e) => setForm((f) => ({ ...f, endTime: e.target.value }))} />
+              <Label className="text-xs mb-1 block">Bitiş *</Label>
+              <Select value={form.endTime} onValueChange={(v) => setForm((f) => ({ ...f, endTime: v }))}>
+                <SelectTrigger><SelectValue placeholder="Saat seçin" /></SelectTrigger>
+                <SelectContent>
+                  {TIME_SLOTS.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
           </div>
           <div>
-            <Label className="text-xs mb-1 block">Location / Link</Label>
-            <Input value={form.location} onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))} placeholder="Zoom, office room..." />
+            <Label className="text-xs mb-1 block">Konum / Link</Label>
+            <Input value={form.location} onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))} placeholder="Zoom, toplantı odası..." />
           </div>
           <Button onClick={handleSubmit} disabled={isPending} className="w-full">
-            {isPending ? "Scheduling..." : "Schedule Interview"}
+            {isPending ? "Kaydediliyor..." : "Randevu Oluştur"}
           </Button>
         </div>
       </DialogContent>
