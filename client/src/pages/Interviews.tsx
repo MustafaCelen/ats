@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Link } from "wouter";
 import { Layout } from "@/components/Layout";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import { useApplications, useUpdateApplicationStatus } from "@/hooks/use-applications";
+import { useApplications, useUpdateApplicationStatus, type ApplicationWithRelations } from "@/hooks/use-applications";
 import { useAuth } from "@/hooks/use-auth";
 import { format, isPast, isFuture } from "date-fns";
 import {
@@ -692,8 +692,24 @@ function ScheduleInterviewDialog({ open, onOpenChange }: { open: boolean; onOpen
     location: "",
     notes: "",
   });
+  const [candidateSearch, setCandidateSearch] = useState("");
+  const [candidateDropdownOpen, setCandidateDropdownOpen] = useState(false);
 
   const selectedApp = applications?.find((a) => a.id === parseInt(form.applicationId));
+
+  const filteredApps = useMemo(() => {
+    const q = candidateSearch.trim().toLowerCase();
+    const base = (applications ?? []).filter(
+      (a) => a.candidate?.name && a.status !== "employed" && a.status !== "rejected"
+    );
+    if (!q) return base;
+    return base.filter(
+      (a) =>
+        a.candidate?.name?.toLowerCase().includes(q) ||
+        (a.candidate?.phone ?? "").toLowerCase().includes(q) ||
+        a.job?.title?.toLowerCase().includes(q)
+    );
+  }, [applications, candidateSearch]);
 
   const toTurkeyISO = (d: string, t: string) => d && t ? `${d}T${t}:00+03:00` : "";
 
@@ -719,6 +735,7 @@ function ScheduleInterviewDialog({ open, onOpenChange }: { open: boolean; onOpen
         toast({ title: "Randevu oluşturuldu!" });
         onOpenChange(false);
         setForm({ applicationId: "", title: "Randevu", date: "", startTime: "", endTime: "", location: "", notes: "" });
+        setCandidateSearch("");
       },
     });
   };
@@ -735,18 +752,46 @@ function ScheduleInterviewDialog({ open, onOpenChange }: { open: boolean; onOpen
         <div className="space-y-4 pt-2">
           <div>
             <Label className="text-xs font-medium mb-1.5 block">Başvuru *</Label>
-            <Select value={form.applicationId} onValueChange={(v) => setForm((f) => ({ ...f, applicationId: v }))}>
-              <SelectTrigger data-testid="select-interview-application">
-                <SelectValue placeholder="Aday başvurusu seçin..." />
-              </SelectTrigger>
-              <SelectContent>
-                {applications?.filter((a) => a.candidate?.name && a.status !== "employed" && a.status !== "rejected").map((a) => (
-                  <SelectItem key={a.id} value={a.id.toString()}>
-                    {a.candidate?.name} — {a.job?.title}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="relative">
+              <input
+                type="text"
+                value={candidateSearch}
+                placeholder="İsim, telefon veya ilan ile ara..."
+                className="w-full border border-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                data-testid="select-interview-application"
+                onChange={(e) => {
+                  setCandidateSearch(e.target.value);
+                  setForm((f) => ({ ...f, applicationId: "" }));
+                  setCandidateDropdownOpen(true);
+                }}
+                onFocus={() => setCandidateDropdownOpen(true)}
+                onBlur={() => setTimeout(() => setCandidateDropdownOpen(false), 150)}
+              />
+              {candidateDropdownOpen && filteredApps.length > 0 && (
+                <div className="absolute z-50 mt-1 w-full bg-white border border-border rounded-md shadow-lg max-h-56 overflow-y-auto">
+                  {filteredApps.map((a: ApplicationWithRelations) => (
+                    <button
+                      key={a.id}
+                      type="button"
+                      className="w-full text-left px-3 py-2 text-sm hover:bg-muted flex items-center justify-between gap-2"
+                      onMouseDown={() => {
+                        setForm((f) => ({ ...f, applicationId: a.id.toString() }));
+                        setCandidateSearch(`${a.candidate?.name} — ${a.job?.title}`);
+                        setCandidateDropdownOpen(false);
+                      }}
+                    >
+                      <span className="font-medium">{a.candidate?.name}</span>
+                      <span className="text-xs text-muted-foreground truncate">{a.job?.title}{a.candidate?.phone ? ` · ${a.candidate.phone}` : ""}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {candidateDropdownOpen && candidateSearch.trim() && filteredApps.length === 0 && (
+                <div className="absolute z-50 mt-1 w-full bg-white border border-border rounded-md shadow-lg px-3 py-2 text-sm text-muted-foreground">
+                  Aday bulunamadı
+                </div>
+              )}
+            </div>
           </div>
 
           <div>
