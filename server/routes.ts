@@ -646,6 +646,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     // Status update
     const interview = await storage.updateInterviewStatus(id, status);
     if (!interview) return res.status(404).json({ message: "Not found" });
+
+    // Delete calendar event when interview is cancelled
+    if (status === "cancelled" && interview.calendarEventId) {
+      try {
+        const user = await storage.getUserById(req.user!.id);
+        if (user?.googleAccessToken) {
+          await deleteCalendarEvent(user, interview.calendarEventId);
+          await storage.setInterviewCalendarEventId(id, "");
+        }
+      } catch (err) {
+        console.error("Calendar delete failed (non-fatal):", err);
+      }
+    }
+
     res.json(interview);
   });
 
