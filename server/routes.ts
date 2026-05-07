@@ -527,7 +527,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.patch("/api/applications/:id/score", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
+  app.patch("/api/applications/:id/score", requireAuth, async (req, res) => {
     const { score } = req.body;
     if (typeof score !== "number") return res.status(400).json({ message: "Score must be a number" });
     const application = await storage.updateApplicationScore(Number(req.params.id), score);
