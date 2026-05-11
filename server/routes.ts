@@ -1007,7 +1007,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           const boolCol = (...keys: string[]) => {
             const v = col(...keys);
             if (!v) return undefined;
-            return v === "Evet" || v === "true" || v === "1" || v.toLowerCase() === "yes";
+            return v === "Evet" || v === "true" || v === "1" || v.toLowerCase() === "yes" || v === "ÜK" || v.toLowerCase() === "ük";
           };
 
           const kwuid   = col("KWUID", "kwuid");
@@ -1026,14 +1026,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           if (!cand) {
             cand = await storage.getCandidateByName(name);
           }
+          const referredBy = col("SPONSORU", "referredBy");
           if (!cand) {
             cand = await storage.createCandidate({
               name,
               email: email || undefined,
               phone: col("Telefon", "phone") ?? undefined,
-              city: col("Şehir", "city") ?? undefined,
+              city: col("Şehir", "city", "Fatura İli") ?? undefined,
               category: (col("Kategori", "category") ?? "K0") as any,
+              referredBy: referredBy ?? undefined,
             });
+          } else if (referredBy && !cand.referredBy) {
+            await storage.updateCandidate(cand.id, { referredBy });
           }
 
           const kwMail  = col("KW E-posta", "kwmail", "kwMail");
@@ -1041,10 +1045,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           const status  = col("Durum", "status");
           const birthDate     = col("Doğum Tarihi", "birthDate");
           const contractType  = col("Sözleşme Tipi", "contractType");
-          const uretkenlik    = boolCol("Üretkenlik Koçluğu", "uretkenlikKoclugu");
+          const uretkenlik    = boolCol("ÜK", "Üretkenlik Koçluğu", "uretkenlikKoclugu");
           const koçlukOran    = col("Koçluk Oranı", "uretkenlikKocluguOran");
-          const capMonth      = col("Cap Ayı", "capMonth");
-          const capValue      = col("Cap Miktarı", "capValue");
+          const capMonth      = col("KEP AYI", "Cap Ayı", "capMonth");
+          const capValue      = col("KEP TUTARI", "Cap Miktarı", "capValue");
           const billingName   = col("Fatura Adı", "billingName");
           const billingAddr   = col("Fatura Adresi", "billingAddress");
           const billingDist   = col("Fatura İlçesi", "billingDistrict");
@@ -1053,7 +1057,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           const taxOffice     = col("Vergi Dairesi", "taxOffice");
           const taxId         = col("Vergi No / TCKN", "taxId");
           const notes         = col("Notlar", "notes");
+          const passiveAtStr  = col("ÇIKIŞ TARİHİ", "passiveAt");
           const parsedBirth   = parseTRDate(birthDate);
+          const parsedPassiveAt = parseTRDate(passiveAtStr);
           const mappedStatus  = mapStatus(status);
 
           const patch: any = {};
@@ -1075,6 +1081,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           if (taxOffice) patch.taxOffice = taxOffice;
           if (taxId) patch.taxId = taxId;
           if (notes) patch.notes = notes;
+          if (parsedPassiveAt) patch.passiveAt = parsedPassiveAt;
 
           // Check if already an employee (re-use existingEmployee found by KWUID above)
           if (!existingEmployee) existingEmployee = await storage.getEmployeeByCandidateId(cand.id);
@@ -1107,6 +1114,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
               taxOffice: patch.taxOffice ?? null,
               taxId: patch.taxId ?? null,
               birthDate: patch.birthDate ?? null,
+              passiveAt: patch.passiveAt ?? null,
             });
             created++;
           }
