@@ -991,8 +991,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       };
 
       for (const row of rows) {
-        const name = (row["Ad Soyad"] ?? row.name ?? "").trim();
-        const email = (row["E-posta"] ?? row.email ?? "").trim().toLowerCase();
+        const name = (row["Ad Soyad"] ?? row["İSİM SOYİSİM"] ?? row.name ?? "").trim();
+        const email = (row["E-posta"] ?? row["E-mail Adresi"] ?? row.email ?? "").trim().toLowerCase();
         if (!name) {
           errors.push(`Eksik ad: ${JSON.stringify(row)}`);
           continue;
@@ -1010,7 +1010,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             return v === "Evet" || v === "true" || v === "1" || v.toLowerCase() === "yes" || v === "ÜK" || v.toLowerCase() === "ük";
           };
 
-          const kwuid   = col("KWUID", "kwuid");
+          const kwuid   = col("KWUID", "KW UID", "kwuid");
 
           // Lookup order: 1) by KWUID in employees, 2) by email, 3) by name
           let cand: any = null;
@@ -1031,8 +1031,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             cand = await storage.createCandidate({
               name,
               email: email || undefined,
-              phone: col("Telefon", "phone") ?? undefined,
-              city: col("Şehir", "city", "Fatura İli") ?? undefined,
+              phone: col("Telefon", "Telefon No", "phone") ?? undefined,
+              city: col("Şehir", "city", "Fatura İli", "İl") ?? undefined,
               category: (col("Kategori", "category") ?? "K0") as any,
               referredBy: referredBy ?? undefined,
             });
@@ -1042,20 +1042,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
           const kwMail  = col("KW E-posta", "kwmail", "kwMail");
           const title   = col("Ünvan", "title");
-          const status  = col("Durum", "status");
-          const birthDate     = col("Doğum Tarihi", "birthDate");
+          const status  = col("Durum", "AKTİF/PASİF", "status");
+          const birthDate     = col("Doğum Tarihi", "DOĞUM TARİHİ", "birthDate");
           const contractType  = col("Sözleşme Tipi", "contractType");
           const uretkenlik    = boolCol("ÜK", "Üretkenlik Koçluğu", "uretkenlikKoclugu");
           const koçlukOran    = col("Koçluk Oranı", "uretkenlikKocluguOran");
           const capMonth      = col("KEP AYI", "Cap Ayı", "capMonth");
           const capValue      = col("KEP TUTARI", "Cap Miktarı", "capValue");
-          const billingName   = col("Fatura Adı", "billingName");
+          const billingName   = col("Fatura Adı", "Şirket / Şahıs İsmi", "billingName");
           const billingAddr   = col("Fatura Adresi", "billingAddress");
-          const billingDist   = col("Fatura İlçesi", "billingDistrict");
-          const billingCity   = col("Fatura İli", "billingCity");
-          const billingCountry= col("Fatura Ülkesi", "billingCountry");
+          const billingDist   = col("Fatura İlçesi", "İlçe", "billingDistrict");
+          const billingCity   = col("Fatura İli", "İl", "billingCity");
+          const billingCountry= col("Fatura Ülkesi", "Ülke", "billingCountry");
           const taxOffice     = col("Vergi Dairesi", "taxOffice");
-          const taxId         = col("Vergi No / TCKN", "taxId");
+          const taxId         = col("Vergi No / TCKN", "Vergi / TCK No", "taxId");
           const notes         = col("Notlar", "notes");
           const passiveAtStr  = col("ÇIKIŞ TARİHİ", "passiveAt");
           const parsedBirth   = parseTRDate(birthDate);
@@ -1089,7 +1089,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             if (Object.keys(patch).length) await storage.updateEmployee(existingEmployee.id, patch);
             updated++;
           } else {
-            const startDateStr = col("Başlangıç Tarihi", "startDate") ?? "";
+            const startDateStr = col("Başlangıç Tarihi", "GİRİŞ TARİHİ", "startDate") ?? "";
             const parsedStart = parseTRDate(startDateStr);
             await storage.createEmployee({
               candidateId: cand.id,

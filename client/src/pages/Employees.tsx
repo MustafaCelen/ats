@@ -62,7 +62,22 @@ function CategoryBadge({ category }: { category?: string }) {
 
 // Simple CSV parser (handles quoted fields)
 function parseCsv(text: string): Record<string, string>[] {
-  const lines = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n").filter((l) => l.trim());
+  const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  // Replace newlines inside quoted fields with "/" so multi-line headers don't break parsing
+  let processed = "";
+  let inQ = false;
+  for (let i = 0; i < normalized.length; i++) {
+    const ch = normalized[i];
+    if (ch === '"') {
+      if (inQ && normalized[i + 1] === '"') { processed += '""'; i++; }
+      else { inQ = !inQ; processed += ch; }
+    } else if (ch === "\n" && inQ) {
+      processed += "/";
+    } else {
+      processed += ch;
+    }
+  }
+  const lines = processed.split("\n").filter((l) => l.trim());
   if (lines.length < 2) return [];
 
   // Strip BOM if present
