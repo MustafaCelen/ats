@@ -42,7 +42,7 @@ export function useImportEmployees() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (rows: Record<string, string>[]) =>
-      apiRequest("POST", `${KEY}/import`, { rows }),
+      apiRequest("POST", `${KEY}/import`, { rows }).then(r => r.json()),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: [KEY] });
     },
