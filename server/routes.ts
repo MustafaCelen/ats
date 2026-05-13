@@ -1048,7 +1048,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           const title   = col("Ünvan", "title");
           const status  = col("Durum", "AKTİF/PASİF", "status");
           const birthDate     = col("Doğum Tarihi", "DOĞUM TARİHİ", "birthDate");
-          const contractType  = col("Sözleşme Tipi", "Sözleşme", "contractType");
+          const contractType  = col("SÖZLEŞME TİPİ", "Sözleşme Tipi", "Sözleşme", "contractType");
           const uretkenlik    = boolCol("ÜK", "Üretkenlik Koçluğu", "uretkenlikKoclugu");
           const koçlukOran    = col("ÜK Oranı", "Koçluk Oranı", "uretkenlikKocluguOran");
           const koçAdı        = col("ÜK Koçu", "uretkenlikKocluguManagerName");
