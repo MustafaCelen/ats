@@ -83,8 +83,10 @@ function parseCsv(text: string): Record<string, string>[] {
   // Strip BOM if present
   const rawHeader = lines[0].startsWith("\uFEFF") ? lines[0].slice(1) : lines[0];
 
-  // Auto-detect delimiter: if header has tabs, treat as TSV
-  const delimiter = rawHeader.includes("\t") ? "\t" : ",";
+  // Auto-detect delimiter: use tabs only if tabs are as frequent as commas (true TSV)
+  const tabCount = (rawHeader.match(/\t/g) ?? []).length;
+  const commaCount = (rawHeader.match(/,/g) ?? []).length;
+  const delimiter = tabCount > 0 && tabCount >= commaCount ? "\t" : ",";
 
   const parseRow = (line: string): string[] => {
     if (delimiter === "\t") return line.split("\t");
