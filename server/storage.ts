@@ -463,7 +463,7 @@ export class DatabaseStorage implements IStorage {
       .leftJoin(candidates, eq(interviews.candidateId, candidates.id))
       .leftJoin(jobs, eq(interviews.jobId, jobs.id))
       .leftJoin(applications, eq(interviews.applicationId, applications.id))
-      .orderBy(interviews.startTime);
+      .orderBy(desc(interviews.startTime));
     const conditions: any[] = [];
     if (applicationId) conditions.push(eq(interviews.applicationId, applicationId));
     if (jobIds && jobIds.length > 0) conditions.push(inArray(interviews.jobId, jobIds));
