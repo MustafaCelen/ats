@@ -990,6 +990,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return s;
       };
 
+      // Build name → userId map for ÜK coach lookup
+      const allUsers = await storage.getUsers();
+      const userByName = new Map(allUsers.map(u => [u.name.trim().toLowerCase(), u.id]));
+
       for (const row of rows) {
         const name = (row["Ad Soyad"] ?? row["İSİM SOYİSİM"] ?? row.name ?? "").trim();
         const email = (row["E-posta"] ?? row["E-mail Adresi"] ?? row.email ?? "").trim().toLowerCase();
@@ -1044,9 +1048,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           const title   = col("Ünvan", "title");
           const status  = col("Durum", "AKTİF/PASİF", "status");
           const birthDate     = col("Doğum Tarihi", "DOĞUM TARİHİ", "birthDate");
-          const contractType  = col("Sözleşme Tipi", "contractType");
+          const contractType  = col("Sözleşme Tipi", "Sözleşme", "contractType");
           const uretkenlik    = boolCol("ÜK", "Üretkenlik Koçluğu", "uretkenlikKoclugu");
-          const koçlukOran    = col("Koçluk Oranı", "uretkenlikKocluguOran");
+          const koçlukOran    = col("ÜK Oranı", "Koçluk Oranı", "uretkenlikKocluguOran");
+          const koçAdı        = col("ÜK Koçu", "uretkenlikKocluguManagerName");
+          const koçId         = koçAdı ? (userByName.get(koçAdı.trim().toLowerCase()) ?? null) : null;
           const capMonth      = col("KEP AYI", "Cap Ayı", "capMonth");
           const capValue      = col("KEP TUTARI", "Cap Miktarı", "capValue");
           const billingName   = col("Fatura Adı", "Şirket / Şahıs İsmi", "billingName");
@@ -1071,6 +1077,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           if (contractType) patch.contractType = contractType;
           if (uretkenlik !== undefined) patch.uretkenlikKoclugu = uretkenlik;
           if (koçlukOran) patch.uretkenlikKocluguOran = koçlukOran;
+          if (koçId) patch.uretkenlikKocluguManagerId = koçId;
           if (capMonth) patch.capMonth = capMonth;
           if (capValue) patch.capValue = capValue;
           if (billingName) patch.billingName = billingName;
@@ -1103,6 +1110,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
               kwMail: patch.kwMail ?? null,
               contractType: patch.contractType ?? null,
               uretkenlikKoclugu: patch.uretkenlikKoclugu ?? false,
+              uretkenlikKocluguManagerId: patch.uretkenlikKocluguManagerId ?? null,
               uretkenlikKocluguOran: patch.uretkenlikKocluguOran ?? null,
               capMonth: patch.capMonth ?? null,
               capValue: patch.capValue ?? null,
