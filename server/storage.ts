@@ -782,10 +782,16 @@ export class DatabaseStorage implements IStorage {
     const hiredHistoryRows = Array.from(hiredEarliestMap.entries()).map(([applicationId, hiredAt]) => ({ applicationId, hiredAt }));
 
     // Merge manual contractSignedAt overrides — override takes priority over stageHistory
-    const contractOverrides = await db
-      .select({ applicationId: employees.applicationId, contractSignedAt: employees.contractSignedAt })
-      .from(employees)
-      .where(and(isNotNull(employees.contractSignedAt), isNotNull(employees.applicationId), gte(employees.contractSignedAt as any, start), lte(employees.contractSignedAt as any, end)));
+    const contractOverrideConds: any[] = [isNotNull(employees.contractSignedAt), isNotNull(employees.applicationId), gte(employees.contractSignedAt as any, start), lte(employees.contractSignedAt as any, end)];
+    if (hasJobScope) contractOverrideConds.push(inArray(applications.jobId, jobIds!));
+    if (hasOfficeCandidates) contractOverrideConds.push(inArray(employees.candidateId, officeCandidateIds!));
+    const contractOverrides = (scoped && !hasJobScope) || (hasOfficeFilter && !hasOfficeCandidates)
+      ? []
+      : await db
+          .select({ applicationId: employees.applicationId, contractSignedAt: employees.contractSignedAt })
+          .from(employees)
+          .innerJoin(applications, eq(applications.id, employees.applicationId as any))
+          .where(and(...contractOverrideConds));
     const contractDateMap = new Map<number, Date | string>();
     for (const row of hiredHistoryRows) { if (row.hiredAt) contractDateMap.set(row.applicationId, row.hiredAt); }
     for (const row of contractOverrides) { if (row.applicationId && row.contractSignedAt) contractDateMap.set(row.applicationId, row.contractSignedAt); }
@@ -829,10 +835,16 @@ export class DatabaseStorage implements IStorage {
           .where(and(...employedHistoryConds, inArray(applications.status, ["documents", "employed"])));
 
     // Merge manual employedAt overrides — override takes priority over stageHistory
-    const employedOverrides = await db
-      .select({ applicationId: employees.applicationId, employedAt: employees.employedAt })
-      .from(employees)
-      .where(and(isNotNull(employees.employedAt), isNotNull(employees.applicationId), gte(employees.employedAt as any, start), lte(employees.employedAt as any, end)));
+    const employedOverrideConds: any[] = [isNotNull(employees.employedAt), isNotNull(employees.applicationId), gte(employees.employedAt as any, start), lte(employees.employedAt as any, end)];
+    if (hasJobScope) employedOverrideConds.push(inArray(applications.jobId, jobIds!));
+    if (hasOfficeCandidates) employedOverrideConds.push(inArray(employees.candidateId, officeCandidateIds!));
+    const employedOverrides = (scoped && !hasJobScope) || (hasOfficeFilter && !hasOfficeCandidates)
+      ? []
+      : await db
+          .select({ applicationId: employees.applicationId, employedAt: employees.employedAt })
+          .from(employees)
+          .innerJoin(applications, eq(applications.id, employees.applicationId as any))
+          .where(and(...employedOverrideConds));
     const employedDateMap = new Map<number, Date | string>();
     for (const row of employedHistoryRows) { if (row.employedAt) employedDateMap.set(row.applicationId, row.employedAt); }
     for (const row of employedOverrides) { if (row.applicationId && row.employedAt) employedDateMap.set(row.applicationId, row.employedAt); }
