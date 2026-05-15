@@ -250,6 +250,8 @@ export const employees = pgTable("employees", {
   taxId: text("tax_id"),                      // Vergi / TCK No
   birthDate: text("birth_date"),              // Doğum Tarihi
   passiveAt: timestamp("passive_at"),
+  contractSignedAt: timestamp("contract_signed_at"), // manual override for report metric
+  employedAt: timestamp("employed_at"),              // manual override for report metric
   createdAt: timestamp("created_at").defaultNow(),
 });
 
