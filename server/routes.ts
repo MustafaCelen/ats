@@ -1274,7 +1274,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       // Normalize Turkish number format: "30.000,00" → "30000.00", "4,17%" → "4.17"
       const normNum = (v: string | undefined | null): string | null => {
         if (!v) return null;
-        let s = v.trim().replace(/\s/g, "").replace(/%$/, "");
+        let s = v.trim().replace(/\s/g, "").replace(/%$/, "").replace(/[₺$€£]/g, "");
         if (!s || s === "-") return null;
         if (s.includes(",")) {
           // dot = thousands sep, comma = decimal

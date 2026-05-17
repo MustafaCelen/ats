@@ -1496,7 +1496,7 @@ export default function Closings() {
         const obj: Record<string, string> = {};
         headers.forEach((h, i) => { if (h) obj[h] = (vals[i] ?? "").trim(); });
         return obj;
-      }).filter((r) => r["Mülk Adresi"] || r["Adres"] || r["Danışman"] || r["KWUID"]);
+      }).filter((r) => (r["Mülk Adresi"] || r["Adres"] || r["Danışman"] || r["KWUID"]) && (r["İşlem Tarihi"] || r["Tarih"]));
 
       if (rows.length === 0) { toast({ title: "Hata", description: "İçe aktarılacak satır bulunamadı.", variant: "destructive" }); return; }
 
