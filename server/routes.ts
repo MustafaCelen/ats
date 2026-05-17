@@ -1054,7 +1054,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           const koçAdı        = col("ÜK Koçu", "uretkenlikKocluguManagerName");
           const koçId         = koçAdı ? (userByName.get(koçAdı.trim().toLowerCase()) ?? null) : null;
           const capMonth      = col("KEP AYI", "Cap Ayı", "capMonth");
-          const capValue      = col("KEP TUTARI", "Cap Miktarı", "capValue");
+          const capValueRaw   = col("KEP TUTARI", "Cap Miktarı", "capValue");
+          // Normalize Turkish number format: "540.000" → "540000", "540.000,50" → "540000.50"
+          const capValue      = capValueRaw
+            ? capValueRaw.includes(",")
+              ? capValueRaw.replace(/\./g, "").replace(",", ".")
+              : capValueRaw.replace(/\.(?=\d{3}(?:[.,]|$))/g, "")
+            : null;
           const billingName   = col("Fatura Adı", "Şirket / Şahıs İsmi", "billingName");
           const billingAddr   = col("Fatura Adresi", "billingAddress");
           const billingDist   = col("Fatura İlçesi", "İlçe", "billingDistrict");
