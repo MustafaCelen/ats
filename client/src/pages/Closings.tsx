@@ -1448,8 +1448,20 @@ export default function Closings() {
     if (!file) return;
     e.target.value = "";
     try {
-      const text = await file.text();
-      const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/).filter(Boolean);
+      const raw = await file.text();
+      // Normalize newlines inside quoted fields before splitting \u2014 handles multiline Excel headers like "PlatinKarma\n(KDV)"
+      let cleaned = raw.replace(/^\uFEFF/, "");
+      {
+        let result = "", inQ = false;
+        for (let i = 0; i < cleaned.length; i++) {
+          const c = cleaned[i];
+          if (c === '"') { inQ = !inQ; result += c; }
+          else if (inQ && (c === '\r' || c === '\n')) { result += ' '; }
+          else result += c;
+        }
+        cleaned = result;
+      }
+      const lines = cleaned.split(/\r?\n/).filter(Boolean);
       if (lines.length < 2) { toast({ title: "Hata", description: "CSV boş veya geçersiz.", variant: "destructive" }); return; }
 
       const isTab = lines[0].includes('\t');

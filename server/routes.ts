@@ -1380,7 +1380,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             mahalle: first["Semt/Mahalle"] || null,
             propertyDetails: first["Mülkle İlgili Detay Bilgiler"] || null,
             dealCategory: dealCategory as any,
-            dealType: first["İşlem Tipi"] ?? "Çift Taraflı",
+            dealType: "Çift Taraflı",
             saleValue: normNum(first["İşlem Değeri"] ?? first["Kapanış Rakamı"] ?? first["Satış Bedeli"]) ?? "0",
             commissionRate: normNum(first["BHB Oranı"] ?? first["Komisyon Oranı (%)"]) || "2",
             openingPrice: normNum(openingPriceStr),
