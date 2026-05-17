@@ -1116,8 +1116,8 @@ export class DatabaseStorage implements IStorage {
           k0: mgrIvMap["K0"] || 0,
           k1: mgrIvMap["K1"] || 0,
           k2: mgrIvMap["K2"] || 0,
-          totalHires: mgrHiredHistory.length,
-          employedCount,
+          totalHires: mgrMergedHiredRows.length,
+          employedCount: mgrMergedEmployedRows.length,
         };
       }),
     );
