@@ -1088,7 +1088,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           if (taxOffice) patch.taxOffice = taxOffice;
           if (taxId) patch.taxId = taxId;
           if (notes) patch.notes = notes;
-          if (parsedPassiveAt) patch.passiveAt = parsedPassiveAt;
+          if (parsedPassiveAt) { patch.passiveAt = parsedPassiveAt; patch.status = "inactive"; }
 
           // Check if already an employee (re-use existingEmployee found by KWUID above)
           if (!existingEmployee) existingEmployee = await storage.getEmployeeByCandidateId(cand.id);
