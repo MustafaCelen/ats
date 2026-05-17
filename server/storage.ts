@@ -996,20 +996,6 @@ export class DatabaseStorage implements IStorage {
         const mgrAcc = mgrOfferMap["accepted"] || 0;
         const mgrDec = mgrAcc + (mgrOfferMap["rejected"] || 0);
 
-        // Employed candidates: current status is "documents" or "employed"
-        // Check current application status (not history) so moving a candidate back removes them from the count
-        const mgrEmployedConds: any[] = [
-          inArray(applications.jobId, assignedJobs),
-          inArray(applications.status, ["documents", "employed"]),
-          gte(applications.appliedAt, start),
-          lte(applications.appliedAt, end),
-        ];
-        if (hasOfficeCandidates) mgrEmployedConds.push(inArray(applications.candidateId, officeCandidateIds!));
-        const mgrEmployedRaw = await db
-          .select({ id: applications.id })
-          .from(applications)
-          .where(and(...mgrEmployedConds));
-        const employedCount = mgrEmployedRaw.length;
 
         // Avg time to employ per manager: from appliedAt to when they first reached 'documents' stage
         // Deduplicate by applicationId — keep earliest entry to avoid inflating averages from stage bouncing
@@ -1034,6 +1020,7 @@ export class DatabaseStorage implements IStorage {
           }
         }
         const mgrEmployedHistoryRows = Array.from(mgrEmployedMap.values());
+        const employedCount = mgrEmployedHistoryRows.length;
         let mgrAvgTimeToEmploy = 0;
         if (mgrEmployedHistoryRows.length > 0) {
           const empAppIds = mgrEmployedHistoryRows.map((r) => r.applicationId);
