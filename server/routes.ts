@@ -1336,7 +1336,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           const sidesMap = new Map<string, typeof rows>();
           for (const row of groupRows) {
             const taraf = row["Taraf"] ?? "";
-            const sideKey = taraf === "Alıcı" ? "buyer" : "seller";
+            const sideKey = taraf === "Alıcı" ? "buyer" : taraf === "Yönlendirme" ? "referral" : "seller";
             if (!sidesMap.has(sideKey)) sidesMap.set(sideKey, []);
             sidesMap.get(sideKey)!.push(row);
           }

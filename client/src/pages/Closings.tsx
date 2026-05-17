@@ -366,7 +366,7 @@ function SideSection({
   runningCapUsed,
 }: {
   sideLabel: string;
-  sideKey: "buyer" | "seller";
+  sideKey: "buyer" | "seller" | "referral";
   side: SideState;
   setSide: (s: SideState) => void;
   saleValue: number;
@@ -598,7 +598,7 @@ function SummaryTable({ rows }: { rows: SummaryRow[] }) {
               <TableCell className="text-xs font-medium">{r.name}</TableCell>
               <TableCell className="text-xs">
                 <Badge variant="outline" className="text-[10px]">
-                  {r.side === "buyer" ? "Alıcı" : "Satıcı"}
+                  {r.side === "buyer" ? "Alıcı" : r.side === "referral" ? "Yönlendirme" : "Satıcı"}
                 </Badge>
               </TableCell>
               <TableCell className="text-xs text-right">%{r.splitPct.toFixed(2)}</TableCell>
@@ -870,6 +870,7 @@ function NewClosingDialog({
   const [notes, setNotes] = useState("");
   const [buyerSide, setBuyerSide] = useState<SideState>({ enabled: false, agents: [newAgent()] });
   const [sellerSide, setSellerSide] = useState<SideState>({ enabled: false, agents: [newAgent()] });
+  const [referralSide, setReferralSide] = useState<SideState>({ enabled: false, agents: [newAgent()] });
 
   const saleValueNum = parseFloat(saleValue || "0");
   const commissionRatePct = Math.max(0, parseFloat(commissionRate || (dealCategory === "Kiralık" ? "50" : "2")));
@@ -879,21 +880,21 @@ function NewClosingDialog({
   // Compute per-side starting cap used:
   // buyerRunningCap = DB values (cap used before this closing)
   // sellerRunningCap = DB values + any buyer-side contributions for same employee
-  const { buyerRunningCap, sellerRunningCap } = useMemo(() => {
-    // Initialize from DB cap status
+  const { buyerRunningCap, sellerRunningCap, referralRunningCap } = useMemo(() => {
     const allIds = new Set<number>();
     buyerSide.agents.forEach((a) => { if (a.employeeId) allIds.add(a.employeeId); });
     sellerSide.agents.forEach((a) => { if (a.employeeId) allIds.add(a.employeeId); });
+    referralSide.agents.forEach((a) => { if (a.employeeId) allIds.add(a.employeeId); });
 
     const buyerStart: Record<number, number> = {};
     const afterBuyer: Record<number, number> = {};
+    const afterSeller: Record<number, number> = {};
     for (const empId of allIds) {
       const dbUsed = capStatuses[empId]?.capUsed ?? 0;
       buyerStart[empId] = dbUsed;
       afterBuyer[empId] = dbUsed;
     }
 
-    // Process buyer agents to update afterBuyer (which becomes seller starting point)
     if (buyerSide.enabled) {
       for (const agent of buyerSide.agents) {
         if (!agent.employeeId) continue;
@@ -908,8 +909,23 @@ function NewClosingDialog({
       }
     }
 
-    return { buyerRunningCap: buyerStart, sellerRunningCap: afterBuyer };
-  }, [buyerSide, sellerSide, saleValueNum, commissionRatePct, employees, capStatuses]);
+    for (const empId of allIds) afterSeller[empId] = afterBuyer[empId] ?? 0;
+    if (sellerSide.enabled) {
+      for (const agent of sellerSide.agents) {
+        if (!agent.employeeId) continue;
+        const emp = employees.find((e) => e.id === agent.employeeId);
+        if (!emp) continue;
+        const capAmount = capStatuses[agent.employeeId]?.capAmount ?? null;
+        const capUsedSoFar = afterSeller[agent.employeeId] ?? 0;
+        const splitPct = parseFloat(agent.splitPercentage || "0");
+        if (splitPct <= 0 || saleValueNum <= 0) continue;
+        const bd = calcAgentBreakdown(saleValueNum, splitPct, emp, capUsedSoFar, capAmount, commissionRatePct);
+        afterSeller[agent.employeeId] = bd.capUsedAfter;
+      }
+    }
+
+    return { buyerRunningCap: buyerStart, sellerRunningCap: afterBuyer, referralRunningCap: afterSeller };
+  }, [buyerSide, sellerSide, referralSide, saleValueNum, commissionRatePct, employees, capStatuses]);
 
   // Build summary rows — reads directly from stored agent fields (which may be manually edited)
   const summaryRows = useMemo((): SummaryRow[] => {
@@ -939,9 +955,10 @@ function NewClosingDialog({
 
     if (buyerSide.enabled) processAgents(buyerSide.agents, "buyer");
     if (sellerSide.enabled) processAgents(sellerSide.agents, "seller");
+    if (referralSide.enabled) processAgents(referralSide.agents, "referral");
 
     return rows;
-  }, [buyerSide, sellerSide, employees]);
+  }, [buyerSide, sellerSide, referralSide, employees]);
 
   const resetForm = () => {
     setPropertyAddress(""); setIl(""); setIlce(""); setMahalle(""); setPropertyDetails("");
@@ -953,12 +970,13 @@ function NewClosingDialog({
     setBuyerName(""); setSellerName(""); setNotes("");
     setBuyerSide({ enabled: false, agents: [newAgent()] });
     setSellerSide({ enabled: false, agents: [newAgent()] });
+    setReferralSide({ enabled: false, agents: [newAgent()] });
   };
 
   const validate = (): string | null => {
     if (!saleValue || saleValueNum <= 0) return "Geçerli bir satış bedeli girin.";
     if (!closingDate) return "Kapanış tarihi zorunludur.";
-    if (!buyerSide.enabled && !sellerSide.enabled) return "En az bir taraf seçilmelidir.";
+    if (!buyerSide.enabled && !sellerSide.enabled && !referralSide.enabled) return "En az bir taraf seçilmelidir.";
     if (buyerSide.enabled) {
       if (buyerSide.agents.length === 0) return "Alıcı tarafında en az bir danışman olmalıdır.";
       if (buyerSide.agents.some((a) => !a.employeeId)) return "Alıcı tarafındaki tüm danışmanları seçin.";
@@ -970,6 +988,12 @@ function NewClosingDialog({
       if (sellerSide.agents.some((a) => !a.employeeId)) return "Satıcı tarafındaki tüm danışmanları seçin.";
       const total = sellerSide.agents.reduce((s, a) => s + parseFloat(a.splitPercentage || "0"), 0);
       if (Math.abs(total - 100) > 0.01) return `Satıcı tarafı pay toplamı %100 olmalı (şu an: %${total.toFixed(2)}).`;
+    }
+    if (referralSide.enabled) {
+      if (referralSide.agents.length === 0) return "Yönlendirme tarafında en az bir danışman olmalıdır.";
+      if (referralSide.agents.some((a) => !a.employeeId)) return "Yönlendirme tarafındaki tüm danışmanları seçin.";
+      const total = referralSide.agents.reduce((s, a) => s + parseFloat(a.splitPercentage || "0"), 0);
+      if (Math.abs(total - 100) > 0.01) return `Yönlendirme tarafı pay toplamı %100 olmalı (şu an: %${total.toFixed(2)}).`;
     }
     return null;
   };
@@ -997,6 +1021,7 @@ function NewClosingDialog({
     const sides = [];
     if (buyerSide.enabled) sides.push({ sideType: "buyer", agents: mapAgents(buyerSide.agents) });
     if (sellerSide.enabled) sides.push({ sideType: "seller", agents: mapAgents(sellerSide.agents) });
+    if (referralSide.enabled) sides.push({ sideType: "referral", agents: mapAgents(referralSide.agents) });
 
     try {
       await createClosing.mutateAsync({
@@ -1239,6 +1264,17 @@ function NewClosingDialog({
                 employees={employees}
                 capStatuses={capStatuses}
                 runningCapUsed={sellerRunningCap}
+              />
+              <SideSection
+                sideLabel="Yönlendirme Tarafı"
+                sideKey="referral"
+                side={referralSide}
+                setSide={setReferralSide}
+                saleValue={saleValueNum}
+                commissionRatePct={commissionRatePct}
+                employees={employees}
+                capStatuses={capStatuses}
+                runningCapUsed={referralRunningCap}
               />
             </div>
           </section>
@@ -1640,8 +1676,8 @@ export default function Closings() {
                         <td className="px-2 py-1 min-w-[80px]"><InlineCell value={row.nakit} type="number" onSave={sc("nakit")} /></td>
                         <td className="px-2 py-1 min-w-[80px]"><InlineCell value={row.banka} type="number" onSave={sc("banka")} /></td>
                         <td className="px-2 py-1 whitespace-nowrap">
-                          <Badge variant={row.sideType === "buyer" ? "default" : "secondary"} className="text-[10px]">
-                            {row.sideType === "buyer" ? "Alıcı" : "Satıcı"}
+                          <Badge variant={row.sideType === "buyer" ? "default" : row.sideType === "referral" ? "outline" : "secondary"} className="text-[10px]">
+                            {row.sideType === "buyer" ? "Alıcı" : row.sideType === "referral" ? "Yönlendirme" : "Satıcı"}
                           </Badge>
                         </td>
                         <td className="px-2 py-1 whitespace-nowrap font-medium text-xs">{row.employeeName}</td>
