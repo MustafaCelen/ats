@@ -1416,7 +1416,10 @@ export default function Closings() {
       const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/).filter(Boolean);
       if (lines.length < 2) { toast({ title: "Hata", description: "CSV boş veya geçersiz.", variant: "destructive" }); return; }
 
+      const isTab = lines[0].includes('\t');
+
       const parseRow = (line: string): string[] => {
+        if (isTab) return line.split('\t');
         const result: string[] = [];
         let cur = "", inQuote = false;
         for (let i = 0; i < line.length; i++) {
@@ -1431,13 +1434,21 @@ export default function Closings() {
         return result;
       };
 
-      const headers = parseRow(lines[0]);
+      // Deduplicate headers — second "ÜK" becomes "ÜK_1", second "Danışman" → "Danışman_1", etc.
+      const rawHeaders = parseRow(lines[0]);
+      const seen: Record<string, number> = {};
+      const headers = rawHeaders.map((h) => {
+        const k = h.trim().replace(/\s+/g, " ");
+        if (seen[k] !== undefined) { seen[k]++; return `${k}_${seen[k]}`; }
+        seen[k] = 0; return k;
+      });
+
       const rows = lines.slice(1).map((line) => {
         const vals = parseRow(line);
         const obj: Record<string, string> = {};
-        headers.forEach((h, i) => { obj[h.trim()] = (vals[i] ?? "").trim(); });
+        headers.forEach((h, i) => { if (h) obj[h] = (vals[i] ?? "").trim(); });
         return obj;
-      }).filter((r) => r["Mülk Adresi"] || r["Adres"] || r["İşlem"]);
+      }).filter((r) => r["Mülk Adresi"] || r["Adres"] || r["Danışman"] || r["KWUID"]);
 
       if (rows.length === 0) { toast({ title: "Hata", description: "İçe aktarılacak satır bulunamadı.", variant: "destructive" }); return; }
 

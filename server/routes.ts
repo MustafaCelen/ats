@@ -1271,6 +1271,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return res.status(400).json({ message: "No rows provided" });
       }
 
+      // Normalize Turkish number format: "30.000,00" → "30000.00", "4,17%" → "4.17"
+      const normNum = (v: string | undefined | null): string | null => {
+        if (!v) return null;
+        let s = v.trim().replace(/\s/g, "").replace(/%$/, "");
+        if (!s || s === "-") return null;
+        if (s.includes(",")) {
+          // dot = thousands sep, comma = decimal
+          s = s.replace(/\./g, "").replace(",", ".");
+        } else {
+          // dot might be thousands sep (e.g. "30.000")
+          s = s.replace(/\.(?=\d{3}(?:\.|$))/g, "");
+        }
+        return isNaN(parseFloat(s)) ? null : s;
+      };
+
       // Look up all employees once for KWUID / name matching
       const allEmployees = await storage.getEmployees() as any[];
       const byKwuid: Record<string, number> = {};
@@ -1290,9 +1305,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       // Group rows into closings by İşlem Tarihi + Adres + İşlem Tipi
       const groups = new Map<string, typeof rows>();
       for (const row of rows) {
-        // Support both old and new column names
         const tarih = row["İşlem Tarihi"] ?? row["Tarih"] ?? "";
-        const adres = row["Adres"] ?? row["İşlem"] ?? row["Mülk Adresi"] ?? "";
+        const adres = row["Adres"] ?? row["Mülk Adresi"] ?? "";
         const tip = row["İşlem Tipi"] ?? "";
         const key = `${tarih}||${adres}||${tip}`;
         if (!groups.has(key)) groups.set(key, []);
@@ -1335,43 +1349,49 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
               const name = row["Danışman"] ?? row["Danışman Adı"] ?? "";
               const empId = resolveEmployee(kwuid, name);
               if (!empId) { errors.push(`Danışman bulunamadı: ${name || kwuid || "?"}`); continue; }
+              // "Danışman_1" = second "Danışman" column = agent net payment
+              // "ÜK_1" = second "ÜK" column = ÜK share amount
+              const bhbShare = normNum(row["BHB"]);
               agents.push({
                 employeeId: empId,
-                splitPercentage: row["Pay (%)"] || "100",
-                bhbShare: row["BHB"] || undefined,
-                mainBranchShare: row["KWTR"] || undefined,
-                kwtrKdv: undefined,
-                marketCenterActual: (row["PlatinKarma"] ?? row["BM (PlatinKarma)"]) || undefined,
-                bmKdv: undefined,
-                ukShare: row["ÜK Tutarı"] || undefined,
-                employeeNet: row["Danışman Net"] || undefined,
+                splitPercentage: normNum(row["Pay (%)"]) || "100",
+                bhbShare: bhbShare ?? undefined,
+                mainBranchShare: normNum(row["KWTR"]) ?? undefined,
+                kwtrKdv: normNum(row["KWTR (+KDV)"]) ?? undefined,
+                marketCenterActual: normNum(row["PlatinKarma"] ?? row["BM (PlatinKarma)"]) ?? undefined,
+                bmKdv: normNum(row["PlatinKarma (KDV)"] ?? row["PlatinKarma (KDV)_1"]) ?? undefined,
+                ukShare: normNum(row["ÜK_1"] ?? row["ÜK Tutarı"]) ?? undefined,
+                employeeNet: normNum(row["Danışman_1"] ?? row["Danışman Net"]) ?? undefined,
               });
             }
             if (agents.length > 0) sides.push({ sideType, agents });
           }
 
-          if (sides.length === 0) { errors.push(`Taraf bulunamadı: ${first["Adres"] ?? first["İşlem"] ?? ""}`); continue; }
+          if (sides.length === 0) { errors.push(`Taraf bulunamadı: ${first["Adres"] ?? first["Mülk Adresi"] ?? ""}`); continue; }
 
-          const adres = first["Adres"] ?? first["İşlem"] ?? first["Mülk Adresi"] ?? "";
+          const adres = first["Adres"] ?? first["Mülk Adresi"] ?? "";
+          // "İşlem" column = Kiralama/Satış (deal category); "İşlem Tipi" = property type (Konut etc.)
+          const islemCol = first["İşlem"] ?? "";
+          const dealCategory = islemCol === "Kiralama" ? "Kiralık" : islemCol === "Kiralık" ? "Kiralık" : "Satış";
           await storage.createClosing({
             propertyAddress: adres,
             il: first["İl"] || null,
             ilce: first["İlçe"] || null,
             mahalle: first["Semt/Mahalle"] || null,
             propertyDetails: first["Mülkle İlgili Detay Bilgiler"] || null,
-            dealCategory: (first["İşlem Tipi"] === "Kiralık" ? "Kiralık" : "Satış") as any,
+            dealCategory: dealCategory as any,
             dealType: first["İşlem Tipi"] ?? "Çift Taraflı",
-            saleValue: first["Kapanış Rakamı"] ?? first["İşlem Değeri"] ?? first["Satış Bedeli"] ?? "0",
-            commissionRate: (first["BHB Oranı"] ?? first["Komisyon Oranı (%)"]) || "2",
-            openingPrice: openingPriceStr,
+            saleValue: normNum(first["İşlem Değeri"] ?? first["Kapanış Rakamı"] ?? first["Satış Bedeli"]) ?? "0",
+            commissionRate: normNum(first["BHB Oranı"] ?? first["Komisyon Oranı (%)"]) || "2",
+            openingPrice: normNum(openingPriceStr),
             durationDays: first["Süre/Gün"] ? parseInt(first["Süre/Gün"]) : null,
             customerSource: first["Müşteri nereden buldu?"] || null,
             referralInfo: first["Yönlendirme Bilgisi"] || null,
             contractStartDate,
             contractEndDate,
-            kasa: first["Kasa"] || null,
-            nakit: first["Nakit"] || null,
-            banka: first["Banka"] || null,
+            kasa: normNum(first["Kasa"]),
+            nakit: normNum(first["Nakit"]),
+            banka: normNum(first["Banka"]),
             closingDate,
             buyerName: first["Alıcı Adı"] || null,
             sellerName: first["Satıcı Adı"] || null,
