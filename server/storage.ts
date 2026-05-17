@@ -1336,8 +1336,7 @@ export class DatabaseStorage implements IStorage {
 
   async updateEmployee(id: number, data: Partial<InsertEmployee>): Promise<Employee | undefined> {
     const update: any = { ...data };
-    if (data.status === "inactive") {
-      // Always stamp the latest passive date so the report date filter works correctly
+    if (data.status === "inactive" && !data.passiveAt) {
       update.passiveAt = new Date();
     }
     const [emp] = await db.update(employees).set(update).where(eq(employees.id, id)).returning();
