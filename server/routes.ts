@@ -1031,6 +1031,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             cand = await storage.getCandidateByName(name);
           }
           const referredBy = col("SPONSORU", "referredBy");
+          const office = col("Ofis", "OFİS", "office");
           if (!cand) {
             cand = await storage.createCandidate({
               name,
@@ -1039,9 +1040,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
               city: col("Şehir", "city", "Fatura İli", "İl") ?? undefined,
               category: (col("Kategori", "category") ?? "K0") as any,
               referredBy: referredBy ?? undefined,
+              office: office ?? undefined,
             });
-          } else if (referredBy && !cand.referredBy) {
-            await storage.updateCandidate(cand.id, { referredBy });
+          } else {
+            const candUpdate: any = {};
+            if (referredBy && !cand.referredBy) candUpdate.referredBy = referredBy;
+            if (office) candUpdate.office = office;
+            if (Object.keys(candUpdate).length) await storage.updateCandidate(cand.id, candUpdate);
           }
 
           const kwMail  = col("KW E-posta", "kwmail", "kwMail");
