@@ -872,7 +872,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.patch("/api/employees/:id", requireAuth, async (req, res) => {
     try {
       const id = Number(req.params.id);
-      const { status, title, notes, startDate, kwuid, kwMail, contractType, uretkenlikKoclugu, uretkenlikKocluguManagerId, uretkenlikKocluguOran, capMonth, capValue, billingName, billingAddress, billingDistrict, billingCity, billingCountry, taxOffice, taxId, birthDate, contractSignedAt, employedAt } = req.body;
+      const { status, title, notes, startDate, kwuid, kwMail, contractType, uretkenlikKoclugu, uretkenlikKocluguManagerId, uretkenlikKocluguOran, capMonth, capValue, billingName, billingAddress, billingDistrict, billingCity, billingCountry, taxOffice, taxId, birthDate } = req.body;
       const update: any = {};
       if (status !== undefined) update.status = status;
       if (title !== undefined) update.title = title;
@@ -894,8 +894,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (taxOffice !== undefined) update.taxOffice = taxOffice || null;
       if (taxId !== undefined) update.taxId = taxId || null;
       if (birthDate !== undefined) update.birthDate = birthDate || null;
-      if (contractSignedAt !== undefined) update.contractSignedAt = contractSignedAt ? new Date(contractSignedAt) : null;
-      if (employedAt !== undefined) update.employedAt = employedAt ? new Date(employedAt) : null;
       const emp = await storage.updateEmployee(id, update);
       if (!emp) return res.status(404).json({ message: "Employee not found" });
       res.json(emp);

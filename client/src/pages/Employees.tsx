@@ -183,12 +183,6 @@ function EditEmployeeDialog({ emp, open, onOpenChange }: { emp: any; open: boole
   const [taxOffice, setTaxOffice] = useState(emp.taxOffice ?? "");
   const [taxId, setTaxId] = useState(emp.taxId ?? "");
   const [birthDate, setBirthDate] = useState(emp.birthDate ?? "");
-  const [contractSignedAt, setContractSignedAt] = useState(
-    emp.contractSignedAt ? new Date(emp.contractSignedAt).toISOString().split("T")[0] : ""
-  );
-  const [employedAt, setEmployedAt] = useState(
-    emp.employedAt ? new Date(emp.employedAt).toISOString().split("T")[0] : ""
-  );
 
   // ── Candidate personal fields ──
   const c = emp.candidate ?? {};
@@ -255,8 +249,6 @@ function EditEmployeeDialog({ emp, open, onOpenChange }: { emp: any; open: boole
               taxOffice: taxOffice || undefined,
               taxId: taxId || undefined,
               birthDate: birthDate || undefined,
-              contractSignedAt: contractSignedAt || null,
-              employedAt: employedAt || null,
             },
             {
               onSuccess: () => { toast({ title: "Profil güncellendi" }); onOpenChange(false); },
@@ -376,12 +368,6 @@ function EditEmployeeDialog({ emp, open, onOpenChange }: { emp: any; open: boole
             </EmpField>
             <EmpField label="Başlangıç Tarihi">
               <Input value={startDate} onChange={(e) => setStartDate(e.target.value)} type="date" data-testid="input-startdate" />
-            </EmpField>
-            <EmpField label="Sözleşme İmza Tarihi">
-              <Input value={contractSignedAt} onChange={(e) => setContractSignedAt(e.target.value)} type="date" />
-            </EmpField>
-            <EmpField label="İşe Başlama Tarihi">
-              <Input value={employedAt} onChange={(e) => setEmployedAt(e.target.value)} type="date" />
             </EmpField>
             <EmpField label="Sözleşme Türü">
               <Select value={contractType} onValueChange={setContractType}>

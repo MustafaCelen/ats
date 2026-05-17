@@ -18,7 +18,7 @@ import {
   type CapSetting, type Closing, type ClosingSide, type ClosingAgent,
   type CapStatus, type ClosingWithDetails, type InterviewTarget,
 } from "@shared/schema";
-import { eq, desc, count, sql, gte, lte, and, or, isNull, isNotNull, inArray, notInArray } from "drizzle-orm";
+import { eq, desc, count, sql, gte, lte, and, or, isNull, inArray, notInArray } from "drizzle-orm";
 import { differenceInDays } from "date-fns";
 
 export type ApplicationWithRelations = Application & { candidate?: Candidate; job?: Job };
@@ -781,36 +781,20 @@ export class DatabaseStorage implements IStorage {
     }
     const hiredHistoryRows = Array.from(hiredEarliestMap.entries()).map(([applicationId, hiredAt]) => ({ applicationId, hiredAt }));
 
-    // Merge manual contractSignedAt overrides — override takes priority over stageHistory
-    const contractOverrideConds: any[] = [isNotNull(employees.contractSignedAt), isNotNull(employees.applicationId), gte(employees.contractSignedAt as any, start), lte(employees.contractSignedAt as any, end)];
-    if (hasJobScope) contractOverrideConds.push(inArray(applications.jobId, jobIds!));
-    if (hasOfficeCandidates) contractOverrideConds.push(inArray(employees.candidateId, officeCandidateIds!));
-    const contractOverrides = (scoped && !hasJobScope) || (hasOfficeFilter && !hasOfficeCandidates)
-      ? []
-      : await db
-          .select({ applicationId: employees.applicationId, contractSignedAt: employees.contractSignedAt })
-          .from(employees)
-          .innerJoin(applications, eq(applications.id, employees.applicationId as any))
-          .where(and(...contractOverrideConds));
-    const contractDateMap = new Map<number, Date | string>();
-    for (const row of hiredHistoryRows) { if (row.hiredAt) contractDateMap.set(row.applicationId, row.hiredAt); }
-    for (const row of contractOverrides) { if (row.applicationId && row.contractSignedAt) contractDateMap.set(row.applicationId, row.contractSignedAt); }
-    const mergedHiredRows = Array.from(contractDateMap.entries()).map(([applicationId, hiredAt]) => ({ applicationId, hiredAt }));
-
     let avgTimeToContractSign = 0;
-    if (mergedHiredRows.length > 0) {
-      const appIds = mergedHiredRows.map((r) => r.applicationId);
+    if (hiredHistoryRows.length > 0) {
+      const appIds = hiredHistoryRows.map((r) => r.applicationId);
       const appRows = await db
         .select({ id: applications.id, appliedAt: applications.appliedAt })
         .from(applications)
         .where(inArray(applications.id, appIds));
       const appAppliedMap = Object.fromEntries(appRows.map((r) => [r.id, r.appliedAt]));
 
-      const diffs = mergedHiredRows
+      const diffs = hiredHistoryRows
         .map((h) => {
           const appliedAt = appAppliedMap[h.applicationId];
           if (!appliedAt || !h.hiredAt) return null;
-          return differenceInDays(new Date(h.hiredAt as any), new Date(appliedAt));
+          return differenceInDays(new Date(h.hiredAt), new Date(appliedAt));
         })
         .filter((d): d is number => d !== null && d >= 0);
 
@@ -834,36 +818,20 @@ export class DatabaseStorage implements IStorage {
           .innerJoin(applications, eq(applications.id, stageHistory.applicationId))
           .where(and(...employedHistoryConds, inArray(applications.status, ["documents", "employed"])));
 
-    // Merge manual employedAt overrides — override takes priority over stageHistory
-    const employedOverrideConds: any[] = [isNotNull(employees.employedAt), isNotNull(employees.applicationId), gte(employees.employedAt as any, start), lte(employees.employedAt as any, end)];
-    if (hasJobScope) employedOverrideConds.push(inArray(applications.jobId, jobIds!));
-    if (hasOfficeCandidates) employedOverrideConds.push(inArray(employees.candidateId, officeCandidateIds!));
-    const employedOverrides = (scoped && !hasJobScope) || (hasOfficeFilter && !hasOfficeCandidates)
-      ? []
-      : await db
-          .select({ applicationId: employees.applicationId, employedAt: employees.employedAt })
-          .from(employees)
-          .innerJoin(applications, eq(applications.id, employees.applicationId as any))
-          .where(and(...employedOverrideConds));
-    const employedDateMap = new Map<number, Date | string>();
-    for (const row of employedHistoryRows) { if (row.employedAt) employedDateMap.set(row.applicationId, row.employedAt); }
-    for (const row of employedOverrides) { if (row.applicationId && row.employedAt) employedDateMap.set(row.applicationId, row.employedAt); }
-    const mergedEmployedRows = Array.from(employedDateMap.entries()).map(([applicationId, employedAt]) => ({ applicationId, employedAt }));
-
     let avgTimeToEmploy = 0;
-    if (mergedEmployedRows.length > 0) {
-      const empAppIds = mergedEmployedRows.map((r) => r.applicationId);
+    if (employedHistoryRows.length > 0) {
+      const empAppIds = employedHistoryRows.map((r) => r.applicationId);
       const empAppRows = await db
         .select({ id: applications.id, appliedAt: applications.appliedAt })
         .from(applications)
         .where(inArray(applications.id, empAppIds));
       const empAppliedMap = Object.fromEntries(empAppRows.map((r) => [r.id, r.appliedAt]));
 
-      const empDiffs = mergedEmployedRows
+      const empDiffs = employedHistoryRows
         .map((h) => {
           const appliedAt = empAppliedMap[h.applicationId];
           if (!appliedAt || !h.employedAt) return null;
-          return differenceInDays(new Date(h.employedAt as any), new Date(appliedAt));
+          return differenceInDays(new Date(h.employedAt), new Date(appliedAt));
         })
         .filter((d): d is number => d !== null && d >= 0);
 
@@ -978,29 +946,18 @@ export class DatabaseStorage implements IStorage {
         }
         const mgrHiredHistory = Array.from(mgrHiredMap.values());
 
-        // Merge manual contractSignedAt overrides for this manager's jobs
-        const mgrContractOverrides = await db
-          .select({ applicationId: employees.applicationId, contractSignedAt: employees.contractSignedAt })
-          .from(employees)
-          .innerJoin(applications, eq(applications.id, employees.applicationId as any))
-          .where(and(isNotNull(employees.contractSignedAt), isNotNull(employees.applicationId), inArray(applications.jobId, assignedJobs), gte(employees.contractSignedAt as any, start), lte(employees.contractSignedAt as any, end)));
-        const mgrContractDateMap = new Map<number, Date | string | null>();
-        for (const row of mgrHiredHistory) { if (row.hiredAt) mgrContractDateMap.set(row.applicationId, row.hiredAt); }
-        for (const row of mgrContractOverrides) { if (row.applicationId && row.contractSignedAt) mgrContractDateMap.set(row.applicationId, row.contractSignedAt); }
-        const mgrMergedHiredRows = Array.from(mgrContractDateMap.entries()).map(([applicationId, hiredAt]) => ({ applicationId, hiredAt }));
-
         let mgrAvgTimeToContractSign = 0;
-        if (mgrMergedHiredRows.length > 0) {
-          const hiredAppIds = mgrMergedHiredRows.map((r) => r.applicationId);
+        if (mgrHiredHistory.length > 0) {
+          const hiredAppIds = mgrHiredHistory.map((r) => r.applicationId);
           const hiredAppRows = await db
             .select({ id: applications.id, appliedAt: applications.appliedAt })
             .from(applications)
             .where(inArray(applications.id, hiredAppIds));
           const appliedMap = Object.fromEntries(hiredAppRows.map((r) => [r.id, r.appliedAt]));
-          const diffs = mgrMergedHiredRows
+          const diffs = mgrHiredHistory
             .map((h) => {
               const a = appliedMap[h.applicationId];
-              return a && h.hiredAt ? differenceInDays(new Date(h.hiredAt as any), new Date(a)) : null;
+              return a && h.hiredAt ? differenceInDays(new Date(h.hiredAt), new Date(a)) : null;
             })
             .filter((d): d is number => d !== null && d >= 0);
           mgrAvgTimeToContractSign = diffs.length > 0 ? Math.round(diffs.reduce((s, d) => s + d, 0) / diffs.length) : 0;
@@ -1077,30 +1034,18 @@ export class DatabaseStorage implements IStorage {
           }
         }
         const mgrEmployedHistoryRows = Array.from(mgrEmployedMap.values());
-
-        // Merge manual employedAt overrides for this manager's jobs
-        const mgrEmployedOverrides = await db
-          .select({ applicationId: employees.applicationId, employedAt: employees.employedAt })
-          .from(employees)
-          .innerJoin(applications, eq(applications.id, employees.applicationId as any))
-          .where(and(isNotNull(employees.employedAt), isNotNull(employees.applicationId), inArray(applications.jobId, assignedJobs), gte(employees.employedAt as any, start), lte(employees.employedAt as any, end)));
-        const mgrEmployedDateMap = new Map<number, Date | string | null>();
-        for (const row of mgrEmployedHistoryRows) { if (row.employedAt) mgrEmployedDateMap.set(row.applicationId, row.employedAt); }
-        for (const row of mgrEmployedOverrides) { if (row.applicationId && row.employedAt) mgrEmployedDateMap.set(row.applicationId, row.employedAt); }
-        const mgrMergedEmployedRows = Array.from(mgrEmployedDateMap.entries()).map(([applicationId, employedAt]) => ({ applicationId, employedAt }));
-
         let mgrAvgTimeToEmploy = 0;
-        if (mgrMergedEmployedRows.length > 0) {
-          const empAppIds = mgrMergedEmployedRows.map((r) => r.applicationId);
+        if (mgrEmployedHistoryRows.length > 0) {
+          const empAppIds = mgrEmployedHistoryRows.map((r) => r.applicationId);
           const empAppRows = await db
             .select({ id: applications.id, appliedAt: applications.appliedAt })
             .from(applications)
             .where(inArray(applications.id, empAppIds));
           const empAppliedMap = Object.fromEntries(empAppRows.map((r) => [r.id, r.appliedAt]));
-          const empDiffs = mgrMergedEmployedRows
+          const empDiffs = mgrEmployedHistoryRows
             .map((h) => {
               const a = empAppliedMap[h.applicationId];
-              return a && h.employedAt ? differenceInDays(new Date(h.employedAt as any), new Date(a)) : null;
+              return a && h.employedAt ? differenceInDays(new Date(h.employedAt), new Date(a)) : null;
             })
             .filter((d): d is number => d !== null && d >= 0);
           mgrAvgTimeToEmploy = empDiffs.length > 0 ? Math.round(empDiffs.reduce((s, d) => s + d, 0) / empDiffs.length) : 0;
@@ -1116,8 +1061,8 @@ export class DatabaseStorage implements IStorage {
           k0: mgrIvMap["K0"] || 0,
           k1: mgrIvMap["K1"] || 0,
           k2: mgrIvMap["K2"] || 0,
-          totalHires: mgrMergedHiredRows.length,
-          employedCount: mgrMergedEmployedRows.length,
+          totalHires: mgrHiredHistory.length,
+          employedCount,
         };
       }),
     );
