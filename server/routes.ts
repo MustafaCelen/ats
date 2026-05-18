@@ -994,18 +994,22 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const allUsers = await storage.getUsers();
       const userByName = new Map(allUsers.map(u => [u.name.trim().toLowerCase(), u.id]));
 
+      // Treat spreadsheet error values as empty
+      const EMPTY_VALS = new Set(["#n/a", "#na", "n/a", "#ref!", "#value!", "#div/0!", "#name?", "#null!", "-"]);
+      const cleanCell = (v: string) => { const t = v.trim(); return EMPTY_VALS.has(t.toLowerCase()) ? "" : t; };
+
       for (const row of rows) {
-        const name = (row["Ad Soyad"] ?? row["İSİM SOYİSİM"] ?? row.name ?? "").trim();
-        const email = (row["E-posta"] ?? row["E-mail Adresi"] ?? row.email ?? "").trim().toLowerCase();
+        const name = cleanCell(row["Ad Soyad"] ?? row["İSİM SOYİSİM"] ?? row.name ?? "");
+        const email = cleanCell((row["E-posta"] ?? row["E-mail Adresi"] ?? row.email ?? "").toLowerCase());
         if (!name) {
           errors.push(`Eksik ad: ${JSON.stringify(row)}`);
           continue;
         }
 
         try {
-          // Helper to pick first non-empty string from row columns
+          // Helper to pick first non-empty, non-error string from row columns
           const col = (...keys: string[]) => {
-            for (const k of keys) { const v = (row[k] ?? "").trim(); if (v) return v; }
+            for (const k of keys) { const v = cleanCell(row[k] ?? ""); if (v) return v; }
             return null;
           };
           const boolCol = (...keys: string[]) => {
@@ -1036,7 +1040,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             cand = await storage.createCandidate({
               name,
               email: email || undefined,
-              phone: col("Telefon", "Telefon No", "phone")?.replace(/\s+/g, "") ?? undefined,
+              phone: col("Telefon", "Telefon No", "TelefonNo", "phone")?.replace(/\s+/g, "") ?? undefined,
               city: col("Şehir", "city", "Fatura İli", "İl") ?? undefined,
               category: (col("Kategori", "category") ?? "K0") as any,
               referredBy: referredBy ?? undefined,
@@ -1046,7 +1050,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             const candUpdate: any = {};
             if (referredBy && !cand.referredBy) candUpdate.referredBy = referredBy;
             if (office) candUpdate.office = office;
-            const importedPhone = col("Telefon", "Telefon No", "phone");
+            const importedPhone = col("Telefon", "Telefon No", "TelefonNo", "phone");
             if (importedPhone) candUpdate.phone = importedPhone.replace(/\s+/g, "");
             const importedEmail = col("E-posta", "E-mail Adresi", "email");
             if (importedEmail) candUpdate.email = importedEmail;
