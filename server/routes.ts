@@ -1020,17 +1020,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
           const kwuid   = col("KWUID", "KW UID", "kwuid");
 
-          // Lookup order: KWUID → email → phone. Name is never used to avoid merging same-name people.
+          // Lookup order: KWUID → email only. Phone and name are never used as identifiers.
           let cand: any = null;
           let existingEmployee: any = null;
+          const importedPhone = col("Telefon", "Telefon No", "TelefonNo", "phone")?.replace(/\s+/g, "");
 
           if (kwuid) {
             existingEmployee = await storage.getEmployeeByKwuid(kwuid);
             if (existingEmployee) cand = existingEmployee.candidate;
           }
-          const importedPhone = col("Telefon", "Telefon No", "TelefonNo", "phone")?.replace(/\s+/g, "");
           if (!cand && email) cand = await storage.getCandidateByEmail(email);
-          if (!cand && importedPhone) cand = await storage.getCandidateByPhone(importedPhone);
           const referredBy = col("SPONSORU", "referredBy");
           const office = col("Ofis", "OFİS", "office");
           if (!cand) {
