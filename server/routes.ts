@@ -1015,7 +1015,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           const boolCol = (...keys: string[]) => {
             const v = col(...keys);
             if (!v) return undefined;
-            return v === "Evet" || v === "true" || v === "1" || v.toLowerCase() === "yes" || v === "ÜK" || v.toLowerCase() === "ük";
+            return v === "Evet" || v === "true" || v === "1" || v.toLowerCase() === "yes" || v === "ÜK" || v.toLowerCase() === "ük" || v === "ÖHB" || v.toLowerCase() === "öhb";
           };
 
           const kwuid   = col("KWUID", "KW UID", "kwuid");
