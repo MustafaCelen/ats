@@ -1036,7 +1036,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             cand = await storage.createCandidate({
               name,
               email: email || undefined,
-              phone: col("Telefon", "Telefon No", "phone") ?? undefined,
+              phone: col("Telefon", "Telefon No", "phone")?.replace(/\s+/g, "") ?? undefined,
               city: col("Şehir", "city", "Fatura İli", "İl") ?? undefined,
               category: (col("Kategori", "category") ?? "K0") as any,
               referredBy: referredBy ?? undefined,
@@ -1046,6 +1046,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             const candUpdate: any = {};
             if (referredBy && !cand.referredBy) candUpdate.referredBy = referredBy;
             if (office) candUpdate.office = office;
+            const importedPhone = col("Telefon", "Telefon No", "phone");
+            if (importedPhone) candUpdate.phone = importedPhone.replace(/\s+/g, "");
+            const importedEmail = col("E-posta", "E-mail Adresi", "email");
+            if (importedEmail) candUpdate.email = importedEmail;
+            const importedCity = col("Şehir", "city", "Fatura İli", "İl");
+            if (importedCity) candUpdate.city = importedCity;
             if (Object.keys(candUpdate).length) await storage.updateCandidate(cand.id, candUpdate);
           }
 
