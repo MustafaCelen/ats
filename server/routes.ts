@@ -1020,26 +1020,24 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
           const kwuid   = col("KWUID", "KW UID", "kwuid");
 
-          // If KWUID present: match only by KWUID — unique KWUID always means a distinct person.
-          // If no KWUID: fall back to email then name.
+          // Lookup order: KWUID → email → phone. Name is never used to avoid merging same-name people.
           let cand: any = null;
           let existingEmployee: any = null;
 
           if (kwuid) {
             existingEmployee = await storage.getEmployeeByKwuid(kwuid);
             if (existingEmployee) cand = existingEmployee.candidate;
-            // KWUID not found → cand stays null → will create new candidate below
-          } else {
-            if (email) cand = await storage.getCandidateByEmail(email);
-            if (!cand) cand = await storage.getCandidateByName(name);
           }
+          const importedPhone = col("Telefon", "Telefon No", "TelefonNo", "phone")?.replace(/\s+/g, "");
+          if (!cand && email) cand = await storage.getCandidateByEmail(email);
+          if (!cand && importedPhone) cand = await storage.getCandidateByPhone(importedPhone);
           const referredBy = col("SPONSORU", "referredBy");
           const office = col("Ofis", "OFİS", "office");
           if (!cand) {
             cand = await storage.createCandidate({
               name,
               email: email || undefined,
-              phone: col("Telefon", "Telefon No", "TelefonNo", "phone")?.replace(/\s+/g, "") ?? undefined,
+              phone: importedPhone ?? undefined,
               city: col("Şehir", "city", "Fatura İli", "İl") ?? undefined,
               category: (col("Kategori", "category") ?? "K0") as any,
               referredBy: referredBy ?? undefined,
@@ -1049,8 +1047,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             const candUpdate: any = {};
             if (referredBy && !cand.referredBy) candUpdate.referredBy = referredBy;
             if (office) candUpdate.office = office;
-            const importedPhone = col("Telefon", "Telefon No", "TelefonNo", "phone");
-            if (importedPhone) candUpdate.phone = importedPhone.replace(/\s+/g, "");
+            if (importedPhone) candUpdate.phone = importedPhone;
             const importedEmail = col("E-posta", "E-mail Adresi", "email");
             if (importedEmail) candUpdate.email = importedEmail;
             const importedCity = col("Şehir", "city", "Fatura İli", "İl");
