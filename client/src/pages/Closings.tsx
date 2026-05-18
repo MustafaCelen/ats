@@ -19,7 +19,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Handshake, Plus, Trash2, TrendingUp, DollarSign, Users,
-  AlertCircle, CheckCircle2, Settings,
+  AlertCircle, CheckCircle2, Settings, Pencil,
   Download, Upload,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -189,6 +189,17 @@ function useDeleteClosing() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => apiRequest("DELETE", `/api/closings/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/closings"] });
+      qc.invalidateQueries({ queryKey: ["/api/employees/cap-statuses"] });
+    },
+  });
+}
+
+function useUpdateClosing() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...data }: any) => apiRequest("PATCH", `/api/closings/${id}`, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/closings"] });
       qc.invalidateQueries({ queryKey: ["/api/employees/cap-statuses"] });
@@ -837,14 +848,18 @@ function NewClosingDialog({
   onClose,
   employees,
   capStatuses,
+  editingClosing,
 }: {
   open: boolean;
   onClose: () => void;
   employees: any[];
   capStatuses: Record<number, CapStatus>;
+  editingClosing?: ClosingWithDetails | null;
 }) {
   const { toast } = useToast();
   const createClosing = useCreateClosing();
+  const updateClosing = useUpdateClosing();
+  const isEditing = !!editingClosing;
 
   const [propertyAddress, setPropertyAddress] = useState("");
   const [il, setIl] = useState("");
@@ -973,6 +988,58 @@ function NewClosingDialog({
     setReferralSide({ enabled: false, agents: [newAgent()] });
   };
 
+  // Populate form when editing an existing closing
+  useEffect(() => {
+    if (!editingClosing) return;
+    const e = editingClosing as any;
+    setPropertyAddress(e.propertyAddress ?? "");
+    setIl(e.il ?? "");
+    setIlce(e.ilce ?? "");
+    setMahalle(e.mahalle ?? "");
+    setPropertyDetails(e.propertyDetails ?? "");
+    setDealCategory((e.dealCategory ?? "Satış") as DealCategory);
+    setDealType(e.dealType ?? "Çift Taraflı");
+    setSaleValue(e.saleValue ?? "");
+    setCommissionRate(e.commissionRate ?? "2");
+    setOpeningPrice(e.openingPrice ?? "");
+    setDurationDays(e.durationDays != null ? String(e.durationDays) : "");
+    setCustomerSource(e.customerSource ?? "");
+    setReferralInfo(e.referralInfo ?? "");
+    setContractStartDate(e.contractStartDate ? new Date(e.contractStartDate).toISOString().split("T")[0] : "");
+    setContractEndDate(e.contractEndDate ? new Date(e.contractEndDate).toISOString().split("T")[0] : "");
+    setKasa(e.kasa ?? "");
+    setNakit(e.nakit ?? "");
+    setBanka(e.banka ?? "");
+    setClosingDate(e.closingDate ? new Date(e.closingDate).toISOString().split("T")[0] : new Date().toISOString().split("T")[0]);
+    setBuyerName(e.buyerName ?? "");
+    setSellerName(e.sellerName ?? "");
+    setNotes(e.notes ?? "");
+
+    const makeSideState = (sideType: string): SideState => {
+      const matching = (e.sides ?? []).filter((s: any) => s.sideType === sideType);
+      if (!matching.length) return { enabled: false, agents: [newAgent()] };
+      return {
+        enabled: true,
+        agents: matching[0].agents.map((a: any) => ({
+          id: Math.random().toString(36).slice(2),
+          employeeId: a.employeeId,
+          splitPercentage: a.splitPercentage ?? "100",
+          bhbShare: a.bhbShare ?? "",
+          mainBranchShare: a.mainBranchShare ?? "",
+          kwtrKdv: a.kwtrKdv ?? "",
+          marketCenterActual: a.marketCenterActual ?? "",
+          bmKdv: a.bmKdv ?? "",
+          ukShare: a.ukShare ?? "",
+          employeeNet: a.employeeNet ?? "",
+          isManuallyEdited: true,
+        })),
+      };
+    };
+    setBuyerSide(makeSideState("buyer"));
+    setSellerSide(makeSideState("seller"));
+    setReferralSide(makeSideState("referral"));
+  }, [editingClosing]);
+
   const validate = (): string | null => {
     if (!saleValue || saleValueNum <= 0) return "Geçerli bir satış bedeli girin.";
     if (!closingDate) return "Kapanış tarihi zorunludur.";
@@ -1023,33 +1090,40 @@ function NewClosingDialog({
     if (sellerSide.enabled) sides.push({ sideType: "seller", agents: mapAgents(sellerSide.agents) });
     if (referralSide.enabled) sides.push({ sideType: "referral", agents: mapAgents(referralSide.agents) });
 
+    const payload = {
+      propertyAddress: propertyAddress.trim(),
+      il: il.trim() || null,
+      ilce: ilce.trim() || null,
+      mahalle: mahalle.trim() || null,
+      propertyDetails: propertyDetails.trim() || null,
+      dealCategory,
+      dealType,
+      saleValue: String(saleValueNum),
+      commissionRate: String(commissionRatePct),
+      openingPrice: openingPrice ? openingPrice : null,
+      durationDays: durationDays ? Number(durationDays) : null,
+      customerSource: customerSource.trim() || null,
+      referralInfo: referralInfo.trim() || null,
+      contractStartDate: contractStartDate ? new Date(contractStartDate).toISOString() : null,
+      contractEndDate: contractEndDate ? new Date(contractEndDate).toISOString() : null,
+      kasa: kasa || null,
+      nakit: nakit || null,
+      banka: banka || null,
+      closingDate: new Date(closingDate).toISOString(),
+      buyerName: buyerName.trim() || null,
+      sellerName: sellerName.trim() || null,
+      notes: notes.trim() || null,
+      sides,
+    };
+
     try {
-      await createClosing.mutateAsync({
-        propertyAddress: propertyAddress.trim(),
-        il: il.trim() || null,
-        ilce: ilce.trim() || null,
-        mahalle: mahalle.trim() || null,
-        propertyDetails: propertyDetails.trim() || null,
-        dealCategory,
-        dealType,
-        saleValue: String(saleValueNum),
-        commissionRate: String(commissionRatePct),
-        openingPrice: openingPrice ? openingPrice : null,
-        durationDays: durationDays ? Number(durationDays) : null,
-        customerSource: customerSource.trim() || null,
-        referralInfo: referralInfo.trim() || null,
-        contractStartDate: contractStartDate ? new Date(contractStartDate).toISOString() : null,
-        contractEndDate: contractEndDate ? new Date(contractEndDate).toISOString() : null,
-        kasa: kasa || null,
-        nakit: nakit || null,
-        banka: banka || null,
-        closingDate: new Date(closingDate).toISOString(),
-        buyerName: buyerName.trim() || null,
-        sellerName: sellerName.trim() || null,
-        notes: notes.trim() || null,
-        sides,
-      });
-      toast({ title: "Başarılı", description: "Kapanış kaydedildi." });
+      if (isEditing && editingClosing) {
+        await updateClosing.mutateAsync({ id: editingClosing.id, ...payload });
+        toast({ title: "Başarılı", description: "Kapanış güncellendi." });
+      } else {
+        await createClosing.mutateAsync(payload);
+        toast({ title: "Başarılı", description: "Kapanış kaydedildi." });
+      }
       resetForm();
       onClose();
     } catch (e: any) {
@@ -1063,7 +1137,7 @@ function NewClosingDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Handshake className="h-5 w-5" />
-            Yeni Kapanış
+            {isEditing ? "Kapanışı Düzenle" : "Yeni Kapanış"}
           </DialogTitle>
         </DialogHeader>
 
@@ -1292,8 +1366,8 @@ function NewClosingDialog({
           <Button variant="outline" onClick={() => { resetForm(); onClose(); }}>
             İptal
           </Button>
-          <Button onClick={handleSubmit} disabled={createClosing.isPending}>
-            {createClosing.isPending ? "Kaydediliyor..." : "Kaydet"}
+          <Button onClick={handleSubmit} disabled={createClosing.isPending || updateClosing.isPending}>
+            {(createClosing.isPending || updateClosing.isPending) ? "Kaydediliyor..." : isEditing ? "Güncelle" : "Kaydet"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1308,7 +1382,23 @@ export default function Closings() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingClosing, setEditingClosing] = useState<ClosingWithDetails | null>(null);
   const [tab, setTab] = useState<Tab>("closings");
+  const [search, setSearch] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const PAGE_SIZE = 50;
+
+  const handleDialogClose = () => {
+    setDialogOpen(false);
+    setEditingClosing(null);
+  };
+
+  const handleEdit = (closingId: number) => {
+    const c = closings.find((x) => x.id === closingId);
+    if (!c) return;
+    setEditingClosing(c);
+    setDialogOpen(true);
+  };
 
   const { data: closings = [], isLoading: closingsLoading } = useClosings();
   const { data: employees = [] } = useEmployees();
@@ -1319,7 +1409,8 @@ export default function Closings() {
   const totalSides = closings.reduce((s, c) => s + c.sides.length, 0);
   const totalVolume = closings.reduce((s, c) => s + parseFloat(c.saleValue ?? "0"), 0);
   const totalBHB = closings.reduce((s, c) =>
-    s + c.sides.reduce((ss, side) => ss + parseFloat(side.bhbTotal ?? "0"), 0), 0
+    s + c.sides.reduce((ss, side) =>
+      ss + side.agents.reduce((sa, a) => sa + parseFloat(a.bhbShare ?? "0"), 0), 0), 0
   );
   const totalBM = closings.reduce((s, c) =>
     s + c.sides.reduce((ss, side) =>
@@ -1400,6 +1491,44 @@ export default function Closings() {
     }
     return rows;
   }, [closings]);
+
+  // Filter by search query
+  const filteredRows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return flatRows;
+    const matchingIds = new Set<number>();
+    for (const row of flatRows) {
+      if (
+        row.propertyAddress.toLowerCase().includes(q) ||
+        row.employeeName.toLowerCase().includes(q) ||
+        row.buyerName.toLowerCase().includes(q) ||
+        row.sellerName.toLowerCase().includes(q) ||
+        row.il.toLowerCase().includes(q) ||
+        row.ilce.toLowerCase().includes(q) ||
+        row.closingDate.includes(q)
+      ) matchingIds.add(row.closingId);
+    }
+    return flatRows.filter((r) => matchingIds.has(r.closingId));
+  }, [flatRows, search]);
+
+  // Reset to page 1 when search changes
+  useEffect(() => { setCurrentPage(1); }, [search]);
+
+  // Paginate by closing (keep agent rows of the same closing together)
+  const { pagedRows, totalClosingsFiltered, totalPages } = useMemo(() => {
+    const seenIds: number[] = [];
+    const seen = new Set<number>();
+    for (const row of filteredRows) {
+      if (!seen.has(row.closingId)) { seenIds.push(row.closingId); seen.add(row.closingId); }
+    }
+    const total = seenIds.length;
+    const pageIds = new Set(seenIds.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE));
+    return {
+      pagedRows: filteredRows.filter((r) => pageIds.has(r.closingId)),
+      totalClosingsFiltered: total,
+      totalPages: Math.ceil(total / PAGE_SIZE) || 1,
+    };
+  }, [filteredRows, currentPage, PAGE_SIZE]);
 
   // Save a closing-level field on blur
   const saveClosingField = useCallback(async (closingId: number, field: string, value: string) => {
@@ -1634,6 +1763,25 @@ export default function Closings() {
           </Card>
         </div>
 
+        {/* Search bar */}
+        <div className="flex items-center gap-2">
+          <Input
+            placeholder="Ara: adres, danışman, alıcı, satıcı, il, tarih..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="h-8 text-sm max-w-sm"
+          />
+          {search && (
+            <button onClick={() => setSearch("")} className="text-xs text-muted-foreground hover:text-foreground">
+              Temizle
+            </button>
+          )}
+          <span className="text-xs text-muted-foreground ml-auto">
+            {totalClosingsFiltered} kapanış
+            {totalPages > 1 && ` · Sayfa ${currentPage}/${totalPages}`}
+          </span>
+        </div>
+
         {/* Flat inline-editable table */}
         <Card>
           <CardContent className="p-0 overflow-x-auto">
@@ -1641,59 +1789,38 @@ export default function Closings() {
               <div className="flex items-center justify-center py-16">
                 <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
               </div>
-            ) : flatRows.length === 0 ? (
+            ) : pagedRows.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
                 <Handshake className="h-12 w-12 mb-3 opacity-30" />
                 <p className="text-sm font-medium">Henüz kapanış kaydı yok</p>
                 <p className="text-xs mt-1">Yeni bir kapanış ekleyin</p>
               </div>
             ) : (
-              <table className="w-full text-xs border-collapse min-w-[2400px]">
+              <table className="w-full text-xs border-collapse min-w-[2800px]">
                 <thead>
                   <tr className="border-b border-border bg-muted/40">
-                    {["Tarih","Mülk Adresi","İl","İlçe","Mahalle","Mülk Detayı","Tür","İşlem Tipi","Bedel","Açılış Fiyatı","İndirim%","Süre/Gün","Kom%","Söz. Başlangıç","Söz. Bitiş","Müşteri Kaynağı","Yönlendirme","Kasa","Nakit","Banka","Taraf","Danışman","Pay%","BHB","KWTR","KWTR KDV","BM","BM KDV","Net",""].map((h) => (
+                    {["Danışman","İşlem","İşlem Tipi","Taraf","İşlem Tarihi","İşlem Değeri","BHB","KWTR","KWTR (+KDV)","PlatinKarma","PlatinKarma (KDV)","Danışman Net","Kasa","Nakit","Banka","BHB Oranı","İl","İlçe","Semt/Mahalle","Adres","Mülkle İlgili Detay","Açılış Rakamı","İndirim Oranı","Pay%","Süre/Gün","Söz. Başlangıç","Söz. Bitiş","Müşteri Kaynağı","Yönlendirme",""].map((h) => (
                       <th key={h} className="text-left font-medium py-2 px-2 text-muted-foreground whitespace-nowrap text-[11px]">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {flatRows.map((row) => {
+                  {pagedRows.map((row) => {
                     const sc = (field: string) => (v: string) => saveClosingField(row.closingId, field, v);
                     const sa = (field: string) => (v: string) => saveAgentField(row.agentId, field, v);
                     const isCapped = parseFloat(row.marketCenterDue) > parseFloat(row.marketCenterActual);
                     return (
                       <tr key={row.agentId} className={`border-b border-border/50 hover:bg-muted/30 ${row.isFirstOfClosing ? "border-t-2 border-t-border" : ""}`}>
-                        <td className="px-2 py-1"><InlineCell value={row.closingDate} type="date" onSave={sc("closingDate")} /></td>
-                        <td className="px-2 py-1 min-w-[140px]"><InlineCell value={row.propertyAddress} onSave={sc("propertyAddress")} /></td>
-                        <td className="px-2 py-1 min-w-[80px]"><InlineCell value={row.il} onSave={sc("il")} /></td>
-                        <td className="px-2 py-1 min-w-[80px]"><InlineCell value={row.ilce} onSave={sc("ilce")} /></td>
-                        <td className="px-2 py-1 min-w-[80px]"><InlineCell value={row.mahalle} onSave={sc("mahalle")} /></td>
-                        <td className="px-2 py-1 min-w-[120px]"><InlineCell value={row.propertyDetails} onSave={sc("propertyDetails")} /></td>
+                        <td className="px-2 py-1 whitespace-nowrap font-medium text-xs">{row.employeeName}</td>
                         <td className="px-2 py-1"><InlineSelect value={row.dealCategory} options={DEAL_CATEGORIES} onSave={sc("dealCategory")} /></td>
                         <td className="px-2 py-1"><InlineSelect value={row.dealType} options={DEAL_TYPES} onSave={sc("dealType")} /></td>
-                        <td className="px-2 py-1 min-w-[90px]"><InlineCell value={row.saleValue} type="number" onSave={sc("saleValue")} /></td>
-                        <td className="px-2 py-1 min-w-[90px]"><InlineCell value={row.openingPrice} type="number" onSave={sc("openingPrice")} /></td>
-                        <td className="px-2 py-1 min-w-[60px] text-muted-foreground text-right">
-                          {row.openingPrice && parseFloat(row.openingPrice) > 0 && parseFloat(row.saleValue) > 0
-                            ? `%${((parseFloat(row.openingPrice) - parseFloat(row.saleValue)) / parseFloat(row.openingPrice) * 100).toFixed(1)}`
-                            : "—"}
-                        </td>
-                        <td className="px-2 py-1 min-w-[60px]"><InlineCell value={row.durationDays} type="number" onSave={sc("durationDays")} /></td>
-                        <td className="px-2 py-1 min-w-[50px]"><InlineCell value={row.commissionRate} type="number" onSave={sc("commissionRate")} /></td>
-                        <td className="px-2 py-1 min-w-[100px]"><InlineCell value={row.contractStartDate} type="date" onSave={sc("contractStartDate")} /></td>
-                        <td className="px-2 py-1 min-w-[100px]"><InlineCell value={row.contractEndDate} type="date" onSave={sc("contractEndDate")} /></td>
-                        <td className="px-2 py-1 min-w-[100px]"><InlineCell value={row.customerSource} onSave={sc("customerSource")} /></td>
-                        <td className="px-2 py-1 min-w-[100px]"><InlineCell value={row.referralInfo} onSave={sc("referralInfo")} /></td>
-                        <td className="px-2 py-1 min-w-[80px]"><InlineCell value={row.kasa} type="number" onSave={sc("kasa")} /></td>
-                        <td className="px-2 py-1 min-w-[80px]"><InlineCell value={row.nakit} type="number" onSave={sc("nakit")} /></td>
-                        <td className="px-2 py-1 min-w-[80px]"><InlineCell value={row.banka} type="number" onSave={sc("banka")} /></td>
                         <td className="px-2 py-1 whitespace-nowrap">
                           <Badge variant={row.sideType === "buyer" ? "default" : row.sideType === "referral" ? "outline" : "secondary"} className="text-[10px]">
                             {row.sideType === "buyer" ? "Alıcı" : row.sideType === "referral" ? "Yönlendirme" : "Satıcı"}
                           </Badge>
                         </td>
-                        <td className="px-2 py-1 whitespace-nowrap font-medium text-xs">{row.employeeName}</td>
-                        <td className="px-2 py-1 min-w-[50px]"><InlineCell value={row.splitPercentage} type="number" onSave={sa("splitPercentage")} /></td>
+                        <td className="px-2 py-1"><InlineCell value={row.closingDate} type="date" onSave={sc("closingDate")} /></td>
+                        <td className="px-2 py-1 min-w-[90px]"><InlineCell value={row.saleValue} type="number" onSave={sc("saleValue")} /></td>
                         <td className="px-2 py-1 min-w-[80px]"><InlineCell value={row.bhbShare} type="number" onSave={sa("bhbShare")} /></td>
                         <td className="px-2 py-1 min-w-[80px] text-muted-foreground"><InlineCell value={row.mainBranchShare} type="number" onSave={sa("mainBranchShare")} /></td>
                         <td className="px-2 py-1 min-w-[80px] text-muted-foreground"><InlineCell value={row.kwtrKdv} type="number" onSave={sa("kwtrKdv")} /></td>
@@ -1705,11 +1832,37 @@ export default function Closings() {
                         </td>
                         <td className="px-2 py-1 min-w-[70px] text-amber-600"><InlineCell value={row.bmKdv} type="number" onSave={sa("bmKdv")} /></td>
                         <td className="px-2 py-1 min-w-[80px] font-semibold text-emerald-700"><InlineCell value={row.employeeNet} type="number" onSave={sa("employeeNet")} /></td>
+                        <td className="px-2 py-1 min-w-[80px]"><InlineCell value={row.kasa} type="number" onSave={sc("kasa")} /></td>
+                        <td className="px-2 py-1 min-w-[80px]"><InlineCell value={row.nakit} type="number" onSave={sc("nakit")} /></td>
+                        <td className="px-2 py-1 min-w-[80px]"><InlineCell value={row.banka} type="number" onSave={sc("banka")} /></td>
+                        <td className="px-2 py-1 min-w-[50px]"><InlineCell value={row.commissionRate} type="number" onSave={sc("commissionRate")} /></td>
+                        <td className="px-2 py-1 min-w-[80px]"><InlineCell value={row.il} onSave={sc("il")} /></td>
+                        <td className="px-2 py-1 min-w-[80px]"><InlineCell value={row.ilce} onSave={sc("ilce")} /></td>
+                        <td className="px-2 py-1 min-w-[80px]"><InlineCell value={row.mahalle} onSave={sc("mahalle")} /></td>
+                        <td className="px-2 py-1 min-w-[140px]"><InlineCell value={row.propertyAddress} onSave={sc("propertyAddress")} /></td>
+                        <td className="px-2 py-1 min-w-[120px]"><InlineCell value={row.propertyDetails} onSave={sc("propertyDetails")} /></td>
+                        <td className="px-2 py-1 min-w-[90px]"><InlineCell value={row.openingPrice} type="number" onSave={sc("openingPrice")} /></td>
+                        <td className="px-2 py-1 min-w-[60px] text-muted-foreground text-right">
+                          {row.openingPrice && parseFloat(row.openingPrice) > 0 && parseFloat(row.saleValue) > 0
+                            ? `%${((parseFloat(row.openingPrice) - parseFloat(row.saleValue)) / parseFloat(row.openingPrice) * 100).toFixed(1)}`
+                            : "—"}
+                        </td>
+                        <td className="px-2 py-1 min-w-[50px]"><InlineCell value={row.splitPercentage} type="number" onSave={sa("splitPercentage")} /></td>
+                        <td className="px-2 py-1 min-w-[60px]"><InlineCell value={row.durationDays} type="number" onSave={sc("durationDays")} /></td>
+                        <td className="px-2 py-1 min-w-[100px]"><InlineCell value={row.contractStartDate} type="date" onSave={sc("contractStartDate")} /></td>
+                        <td className="px-2 py-1 min-w-[100px]"><InlineCell value={row.contractEndDate} type="date" onSave={sc("contractEndDate")} /></td>
+                        <td className="px-2 py-1 min-w-[100px]"><InlineCell value={row.customerSource} onSave={sc("customerSource")} /></td>
+                        <td className="px-2 py-1 min-w-[100px]"><InlineCell value={row.referralInfo} onSave={sc("referralInfo")} /></td>
                         <td className="px-2 py-1 text-center">
                           {row.isFirstOfClosing && (
-                            <button onClick={() => handleDelete(row.closingId)} className="text-muted-foreground hover:text-destructive transition-colors p-1 rounded" title="Kapanışı sil">
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
+                            <div className="flex items-center gap-0.5">
+                              <button onClick={() => handleEdit(row.closingId)} className="text-muted-foreground hover:text-primary transition-colors p-1 rounded" title="Kapanışı düzenle">
+                                <Pencil className="h-3.5 w-3.5" />
+                              </button>
+                              <button onClick={() => handleDelete(row.closingId)} className="text-muted-foreground hover:text-destructive transition-colors p-1 rounded" title="Kapanışı sil">
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
                           )}
                         </td>
                       </tr>
@@ -1717,6 +1870,20 @@ export default function Closings() {
                   })}
                 </tbody>
               </table>
+            )}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between px-4 py-3 border-t border-border">
+                <span className="text-xs text-muted-foreground">
+                  Sayfa {currentPage} / {totalPages} · {totalClosingsFiltered} kapanış
+                </span>
+                <div className="flex items-center gap-1">
+                  <Button size="sm" variant="outline" className="h-7 w-7 p-0 text-xs" onClick={() => setCurrentPage(1)} disabled={currentPage === 1}>«</Button>
+                  <Button size="sm" variant="outline" className="h-7 w-7 p-0 text-xs" onClick={() => setCurrentPage((p) => p - 1)} disabled={currentPage === 1}>‹</Button>
+                  <span className="text-xs px-2">{currentPage}</span>
+                  <Button size="sm" variant="outline" className="h-7 w-7 p-0 text-xs" onClick={() => setCurrentPage((p) => p + 1)} disabled={currentPage === totalPages}>›</Button>
+                  <Button size="sm" variant="outline" className="h-7 w-7 p-0 text-xs" onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages}>»</Button>
+                </div>
+              </div>
             )}
           </CardContent>
         </Card>
@@ -1726,9 +1893,10 @@ export default function Closings() {
 
       <NewClosingDialog
         open={dialogOpen}
-        onClose={() => setDialogOpen(false)}
+        onClose={handleDialogClose}
         employees={employees}
         capStatuses={capStatuses}
+        editingClosing={editingClosing}
       />
     </Layout>
   );

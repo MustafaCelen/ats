@@ -189,6 +189,20 @@ export interface IStorage {
     }>;
   }): Promise<Closing>;
   deleteClosing(id: number): Promise<void>;
+  replaceClosingSides(closingId: number, saleValue: string, commissionRate: string, sides: Array<{
+    sideType: string;
+    agents: Array<{
+      employeeId: number;
+      splitPercentage: string;
+      bhbShare?: string;
+      mainBranchShare?: string;
+      kwtrKdv?: string;
+      marketCenterActual?: string;
+      bmKdv?: string;
+      ukShare?: string;
+      employeeNet?: string;
+    }>;
+  }>): Promise<void>;
   getInterviewTargets(year: number, month: number, jobIds?: number[]): Promise<import("@shared/schema").InterviewTarget[]>;
   upsertInterviewTarget(data: { jobId: number; year: number; month: number; category: string; target: number }): Promise<void>;
 }
@@ -1754,6 +1768,126 @@ export class DatabaseStorage implements IStorage {
     }
     await db.delete(closingSides).where(eq(closingSides.closingId, id));
     await db.delete(closings).where(eq(closings.id, id));
+  }
+
+  async replaceClosingSides(closingId: number, saleValue: string, commissionRate: string, sides: Array<{
+    sideType: string;
+    agents: Array<{
+      employeeId: number;
+      splitPercentage: string;
+      bhbShare?: string;
+      mainBranchShare?: string;
+      kwtrKdv?: string;
+      marketCenterActual?: string;
+      bmKdv?: string;
+      ukShare?: string;
+      employeeNet?: string;
+    }>;
+  }>): Promise<void> {
+    const saleValueNum = parseFloat(saleValue);
+    const commissionRateNum = parseFloat(commissionRate ?? "2") / 100;
+
+    const allEmployeeIds = Array.from(new Set(sides.flatMap((s) => s.agents.map((a) => a.employeeId))));
+    const capStatusMap: Record<number, CapStatus | null> = {};
+    for (const empId of allEmployeeIds) {
+      capStatusMap[empId] = await this.getEmployeeCapStatus(empId);
+    }
+    const empMap: Record<number, EmployeeWithRelations> = {};
+    for (const empId of allEmployeeIds) {
+      const emp = await this.getEmployee(empId);
+      if (emp) empMap[empId] = emp;
+    }
+    const runningCapUsed: Record<number, number> = {};
+    for (const empId of allEmployeeIds) {
+      runningCapUsed[empId] = capStatusMap[empId]?.capUsed ?? 0;
+    }
+
+    await db.transaction(async (tx) => {
+      const existingSides = await tx.select().from(closingSides).where(eq(closingSides.closingId, closingId));
+      for (const side of existingSides) {
+        await tx.delete(closingAgents).where(eq(closingAgents.closingSideId, side.id));
+      }
+      await tx.delete(closingSides).where(eq(closingSides.closingId, closingId));
+
+      const sortedSides = [...sides].sort((a, b) => {
+        if (a.sideType === "buyer") return -1;
+        if (b.sideType === "buyer") return 1;
+        return 0;
+      });
+
+      for (const side of sortedSides) {
+        const sideBHB = saleValueNum * commissionRateNum;
+        const [closingSide] = await tx.insert(closingSides).values({
+          closingId,
+          sideType: side.sideType,
+          bhbTotal: String(sideBHB),
+        }).returning();
+
+        for (const agentInput of side.agents) {
+          const emp = empMap[agentInput.employeeId];
+          if (!emp) continue;
+
+          const splitPct = parseFloat(agentInput.splitPercentage);
+          const contractType = emp.contractType ?? "70/30";
+          const capStatus = capStatusMap[agentInput.employeeId];
+          const capAmount = capStatus?.capAmount ?? null;
+          const capUsedSoFar = runningCapUsed[agentInput.employeeId] ?? 0;
+
+          let bhbShare: number, mainBranchShare: number, kwtrKdv: number;
+          let marketCenterDue: number, marketCenterActual: number, bmKdv: number;
+          let ukShare: number, ukRateSnapshot = 0, employeeNet: number;
+
+          if (agentInput.bhbShare !== undefined) {
+            bhbShare = parseFloat(agentInput.bhbShare);
+            mainBranchShare = parseFloat(agentInput.mainBranchShare ?? "0");
+            kwtrKdv = parseFloat(agentInput.kwtrKdv ?? "0");
+            marketCenterDue = (bhbShare - mainBranchShare) * 0.30;
+            marketCenterActual = parseFloat(agentInput.marketCenterActual ?? "0");
+            bmKdv = parseFloat(agentInput.bmKdv ?? "0");
+            ukShare = parseFloat(agentInput.ukShare ?? "0");
+            employeeNet = parseFloat(agentInput.employeeNet ?? "0");
+            if (emp.uretkenlikKoclugu && emp.uretkenlikKocluguOran) {
+              ukRateSnapshot = emp.uretkenlikKocluguOran === "10%" ? 10 : 5;
+            }
+          } else {
+            bhbShare = sideBHB * (splitPct / 100);
+            mainBranchShare = bhbShare * 0.10;
+            kwtrKdv = mainBranchShare * 0.20;
+            marketCenterDue = (bhbShare - mainBranchShare) * 0.30;
+            marketCenterActual = capAmount === null
+              ? marketCenterDue
+              : Math.min(marketCenterDue, Math.max(0, capAmount - capUsedSoFar));
+            bmKdv = marketCenterDue > 0 ? marketCenterActual * (0.016 / 0.27) : 0;
+            ukShare = 0;
+            if (emp.uretkenlikKoclugu && emp.uretkenlikKocluguOran) {
+              ukRateSnapshot = emp.uretkenlikKocluguOran === "10%" ? 10 : 5;
+              ukShare = bhbShare * (ukRateSnapshot / 100);
+            }
+            employeeNet = bhbShare - mainBranchShare - kwtrKdv - marketCenterActual - bmKdv - ukShare;
+          }
+
+          runningCapUsed[agentInput.employeeId] = capUsedSoFar + marketCenterActual;
+
+          await tx.insert(closingAgents).values({
+            closingSideId: closingSide.id,
+            employeeId: agentInput.employeeId,
+            splitPercentage: agentInput.splitPercentage,
+            bhbShare: String(bhbShare),
+            mainBranchShare: String(mainBranchShare),
+            kwtrKdv: String(kwtrKdv),
+            marketCenterDue: String(marketCenterDue ?? 0),
+            marketCenterActual: String(marketCenterActual),
+            bmKdv: String(bmKdv),
+            ukShare: String(ukShare),
+            employeeNet: String(employeeNet),
+            contractTypeSnapshot: contractType,
+            ukRateSnapshot: String(ukRateSnapshot),
+            capAmountApplied: capAmount !== null ? String(capAmount) : null,
+            capUsedBefore: String(capUsedSoFar),
+          });
+        }
+      }
+    });
   }
 
   async getInterviewTargets(year: number, month: number, jobIds?: number[]): Promise<InterviewTarget[]> {

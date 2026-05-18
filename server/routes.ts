@@ -1307,13 +1307,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return null;
       };
 
-      // Group rows into closings by İşlem Tarihi + Adres + İşlem Tipi
+      // Group rows into closings by Adres + İşlem Tipi + İşlem Bedeli
       const groups = new Map<string, typeof rows>();
       for (const row of rows) {
-        const tarih = row["İşlem Tarihi"] ?? row["Tarih"] ?? "";
         const adres = row["Adres"] ?? row["Mülk Adresi"] ?? "";
         const tip = row["İşlem Tipi"] ?? "";
-        const key = `${tarih}||${adres}||${tip}`;
+        const bedel = normNum(row["İşlem Değeri"] ?? row["Kapanış Rakamı"] ?? row["Satış Bedeli"] ?? "") ?? "";
+        const key = `${adres}||${tip}||${bedel}`;
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key)!.push(row);
       }
@@ -1478,11 +1478,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.patch("/api/closings/:id", requireAuth, requireAdmin, async (req, res) => {
     try {
-      const data = { ...req.body };
+      const { sides, ...rest } = req.body;
+      const data = { ...rest };
       if (data.closingDate) data.closingDate = new Date(data.closingDate);
       if (data.contractStartDate) data.contractStartDate = new Date(data.contractStartDate);
       if (data.contractEndDate) data.contractEndDate = new Date(data.contractEndDate);
       await storage.updateClosing(Number(req.params.id), data);
+      if (sides && Array.isArray(sides)) {
+        await storage.replaceClosingSides(Number(req.params.id), String(rest.saleValue ?? "0"), String(rest.commissionRate ?? "2"), sides);
+      }
       res.status(204).send();
     } catch {
       res.status(500).json({ message: "Internal server error" });
