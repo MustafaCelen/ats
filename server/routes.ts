@@ -1020,19 +1020,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
           const kwuid   = col("KWUID", "KW UID", "kwuid");
 
-          // Lookup order: 1) by KWUID in employees, 2) by email, 3) by name
+          // If KWUID present: match only by KWUID — unique KWUID always means a distinct person.
+          // If no KWUID: fall back to email then name.
           let cand: any = null;
           let existingEmployee: any = null;
 
           if (kwuid) {
             existingEmployee = await storage.getEmployeeByKwuid(kwuid);
             if (existingEmployee) cand = existingEmployee.candidate;
-          }
-          if (!cand && email) {
-            cand = await storage.getCandidateByEmail(email);
-          }
-          if (!cand) {
-            cand = await storage.getCandidateByName(name);
+            // KWUID not found → cand stays null → will create new candidate below
+          } else {
+            if (email) cand = await storage.getCandidateByEmail(email);
+            if (!cand) cand = await storage.getCandidateByName(name);
           }
           const referredBy = col("SPONSORU", "referredBy");
           const office = col("Ofis", "OFİS", "office");
