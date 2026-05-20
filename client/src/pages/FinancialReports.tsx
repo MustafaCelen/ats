@@ -212,10 +212,10 @@ export default function FinancialReports() {
           />
         </div>
 
-        {/* ── Monthly Trend + Top Agents ── */}
+        {/* ── Monthly Trend ── */}
         <div className="grid lg:grid-cols-2 gap-6">
           <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-            <h2 className="text-base font-semibold mb-4">Aylık İşlem Hacmi &amp; BHB</h2>
+            <h2 className="text-base font-semibold mb-4">Aylık İşlem Hacmi</h2>
             {isLoading ? <Skeleton /> : monthlyData.length === 0 ? <Empty /> : (
               <ResponsiveContainer width="100%" height={260}>
                 <AreaChart data={monthlyData} margin={{ top: 4, right: 8, bottom: 0, left: 8 }}>
@@ -224,6 +224,23 @@ export default function FinancialReports() {
                       <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.25} />
                       <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
                     </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+                  <YAxis tickFormatter={fmtShort} tick={{ fontSize: 11 }} width={48} />
+                  <Tooltip content={<TRYTooltip />} />
+                  <Area type="monotone" dataKey="volume" name="İşlem Hacmi" stroke="#3b82f6" fill="url(#gVol)" strokeWidth={2} />
+                </AreaChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
+            <h2 className="text-base font-semibold mb-4">Aylık BHB Geliri</h2>
+            {isLoading ? <Skeleton /> : monthlyData.length === 0 ? <Empty /> : (
+              <ResponsiveContainer width="100%" height={260}>
+                <AreaChart data={monthlyData} margin={{ top: 4, right: 8, bottom: 0, left: 8 }}>
+                  <defs>
                     <linearGradient id="gBHB" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#10b981" stopOpacity={0.25} />
                       <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
@@ -233,14 +250,15 @@ export default function FinancialReports() {
                   <XAxis dataKey="month" tick={{ fontSize: 11 }} />
                   <YAxis tickFormatter={fmtShort} tick={{ fontSize: 11 }} width={48} />
                   <Tooltip content={<TRYTooltip />} />
-                  <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
-                  <Area type="monotone" dataKey="volume" name="İşlem Hacmi" stroke="#3b82f6" fill="url(#gVol)" strokeWidth={2} />
-                  <Area type="monotone" dataKey="bhb"    name="BHB"         stroke="#10b981" fill="url(#gBHB)" strokeWidth={2} />
+                  <Area type="monotone" dataKey="bhb" name="BHB" stroke="#10b981" fill="url(#gBHB)" strokeWidth={2} />
                 </AreaChart>
               </ResponsiveContainer>
             )}
           </div>
+        </div>
 
+        {/* ── Top Agents ── */}
+        <div className="grid lg:grid-cols-1 gap-6">
           <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
             <h2 className="text-base font-semibold mb-4">Danışman BHB Performansı (Top 12)</h2>
             {isLoading ? <Skeleton /> : topAgents.length === 0 ? <Empty /> : (
