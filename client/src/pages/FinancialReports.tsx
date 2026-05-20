@@ -138,17 +138,39 @@ export default function FinancialReports() {
   const cappers       = capList.filter((s: any) => s.pct >= 100);
   const almostCappers = capList.filter((s: any) => s.pct >= 75 && s.pct < 100);
 
-  // Group all capped agents by their reset month (0-indexed)
+  const probableCappers = useMemo(() => {
+    const today = new Date();
+    return capList.filter((s: any) => {
+      if (s.pct >= 75 || !s.periodStart || s.capAmount <= 0) return false;
+      const start = new Date(s.periodStart);
+      const monthsElapsed = (today.getFullYear() - start.getFullYear()) * 12 + (today.getMonth() - start.getMonth());
+      if (monthsElapsed <= 0) return false;
+      const monthsRemaining = 12 - monthsElapsed;
+      if (monthsRemaining <= 0) return false;
+      const ratePerMonth = s.capUsed / monthsElapsed;
+      const projected = s.capUsed + ratePerMonth * monthsRemaining;
+      return projected >= s.capAmount;
+    });
+  }, [capList]);
+
+  const MONTH_NAMES_TR = ["Oca", "Şub", "Mar", "Nis", "May", "Haz", "Tem", "Ağu", "Eyl", "Eki", "Kas", "Ara"];
+  const capResetMonth = (s: any): string | null => {
+    if (!s.periodStart) return null;
+    return MONTH_NAMES_TR[new Date(s.periodStart).getMonth()];
+  };
+
+  // Group productive + probable agents by their reset month (0-indexed)
   const resetByMonth = useMemo(() => {
     const map: Record<number, any[]> = {};
     for (let i = 0; i < 12; i++) map[i] = [];
-    for (const s of capList) {
+    const productiveSet = new Set([...cappers, ...almostCappers, ...probableCappers].map((s: any) => s.employeeId));
+    for (const s of capList.filter((s: any) => productiveSet.has(s.employeeId))) {
       if (!s.periodStart) continue;
-      const resetMonth = new Date(s.periodStart).getMonth(); // 0-indexed
+      const resetMonth = new Date(s.periodStart).getMonth();
       map[resetMonth].push(s);
     }
     return map;
-  }, [capList]);
+  }, [capList, cappers, almostCappers, probableCappers]);
 
   const fmtMonthKey = (key: string) => {
     const [y, m] = key.split("-");
@@ -539,6 +561,9 @@ export default function FinancialReports() {
                       <div className="font-medium text-sm truncate">{s.name}</div>
                       <div className="text-xs text-muted-foreground">{s.kwuid || "—"}</div>
                     </div>
+                    {capResetMonth(s) && (
+                      <span className="text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full shrink-0">{capResetMonth(s)}</span>
+                    )}
                     <div className="text-right shrink-0">
                       <div className="text-xs font-semibold text-emerald-600">{fmtTRY(s.capUsed)} / {fmtTRY(s.capAmount)}</div>
                       <div className="text-xs text-muted-foreground">{s.pct}% kullanıldı</div>
@@ -567,6 +592,9 @@ export default function FinancialReports() {
                       <div className="font-medium text-sm truncate">{s.name}</div>
                       <div className="text-xs text-muted-foreground">{s.kwuid || "—"}</div>
                     </div>
+                    {capResetMonth(s) && (
+                      <span className="text-xs bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full shrink-0">{capResetMonth(s)}</span>
+                    )}
                     <div className="text-right shrink-0">
                       <div className="text-xs font-semibold text-amber-600">{fmtTRY(s.capUsed)} / {fmtTRY(s.capAmount)}</div>
                       <div className="text-xs text-muted-foreground">{fmtTRY(s.capRemaining ?? 0)} kaldı · {s.pct}%</div>
@@ -574,6 +602,46 @@ export default function FinancialReports() {
                     <div className="w-2 h-8 rounded-full shrink-0" style={{ backgroundColor: s.pct >= 90 ? "#f97316" : "#f59e0b" }} />
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+
+          {/* Probable Cappers */}
+          <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+            <div className="px-5 py-4 border-b border-border flex items-center gap-2">
+              <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-700 text-xs font-bold">~</span>
+              <h2 className="text-base font-semibold">Cap Yapabilecekler</h2>
+              <span className="ml-auto text-xs bg-blue-100 text-blue-700 font-semibold px-2 py-0.5 rounded-full">{probableCappers.length} danışman</span>
+            </div>
+            {probableCappers.length === 0 ? (
+              <div className="p-8 text-center text-sm text-muted-foreground">Mevcut hızda cap yapabilecek danışman yok</div>
+            ) : (
+              <div className="divide-y divide-border/50">
+                {probableCappers.map((s: any) => {
+                  const today = new Date();
+                  const start = new Date(s.periodStart);
+                  const monthsElapsed = (today.getFullYear() - start.getFullYear()) * 12 + (today.getMonth() - start.getMonth());
+                  const monthsRemaining = 12 - monthsElapsed;
+                  const ratePerMonth = monthsElapsed > 0 ? s.capUsed / monthsElapsed : 0;
+                  const projected = s.capUsed + ratePerMonth * monthsRemaining;
+                  const projPct = s.capAmount > 0 ? Math.round((projected / s.capAmount) * 100) : 0;
+                  return (
+                    <div key={s.employeeId} className="px-5 py-3 flex items-center gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-sm truncate">{s.name}</div>
+                        <div className="text-xs text-muted-foreground">{s.kwuid || "—"}</div>
+                      </div>
+                      {capResetMonth(s) && (
+                        <span className="text-xs bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full shrink-0">{capResetMonth(s)}</span>
+                      )}
+                      <div className="text-right shrink-0">
+                        <div className="text-xs font-semibold text-blue-600">{s.pct}% → proj. {projPct}%</div>
+                        <div className="text-xs text-muted-foreground">{fmtTRY(s.capUsed)} / {fmtTRY(s.capAmount)}</div>
+                      </div>
+                      <div className="w-2 h-8 rounded-full bg-blue-400 shrink-0" />
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
