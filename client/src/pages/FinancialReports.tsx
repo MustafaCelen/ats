@@ -135,8 +135,20 @@ export default function FinancialReports() {
       .sort((a: any, b: any) => b.pct - a.pct);
   }, [capStatuses]);
 
-  const cappers     = capList.filter((s: any) => s.pct >= 100);
+  const cappers       = capList.filter((s: any) => s.pct >= 100);
   const almostCappers = capList.filter((s: any) => s.pct >= 75 && s.pct < 100);
+
+  // Group all capped agents by their reset month (0-indexed)
+  const resetByMonth = useMemo(() => {
+    const map: Record<number, any[]> = {};
+    for (let i = 0; i < 12; i++) map[i] = [];
+    for (const s of capList) {
+      if (!s.periodStart) continue;
+      const resetMonth = new Date(s.periodStart).getMonth(); // 0-indexed
+      map[resetMonth].push(s);
+    }
+    return map;
+  }, [capList]);
 
   const fmtMonthKey = (key: string) => {
     const [y, m] = key.split("-");
@@ -472,6 +484,40 @@ export default function FinancialReports() {
               </table>
             </div>
           )}
+        </div>
+
+        {/* ── Cap Reset Calendar ── */}
+        <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+          <div className="px-5 py-4 border-b border-border">
+            <h2 className="text-base font-semibold">Cap Yenileme Takvimi</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">Her danışmanın cap döneminin başladığı ay</p>
+          </div>
+          <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 divide-x divide-y divide-border/50">
+            {["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"].map((monthName, i) => {
+              const agents = resetByMonth[i] ?? [];
+              const now = new Date();
+              const isCurrentMonth = i === now.getMonth();
+              return (
+                <div key={i} className={`p-3 min-h-[110px] ${isCurrentMonth ? "bg-blue-50/60 dark:bg-blue-950/20" : ""}`}>
+                  <div className={`text-xs font-semibold mb-2 ${isCurrentMonth ? "text-blue-600" : "text-muted-foreground"}`}>
+                    {monthName}
+                  </div>
+                  {agents.length === 0 ? (
+                    <div className="text-xs text-muted-foreground/50">—</div>
+                  ) : (
+                    <div className="space-y-1">
+                      {agents.map((s: any) => (
+                        <div key={s.employeeId} className="flex items-center gap-1">
+                          <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${s.pct >= 100 ? "bg-emerald-500" : s.pct >= 75 ? "bg-amber-500" : "bg-muted-foreground/40"}`} />
+                          <span className="text-xs truncate leading-tight">{s.name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
 
         {/* ── Capper Lists ── */}
