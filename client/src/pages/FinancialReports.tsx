@@ -208,7 +208,7 @@ export default function FinancialReports() {
             icon={Users} color="bg-purple-50 text-purple-600"
             label="BM Geliri (Ofis)"
             value={stats ? fmtTRY(stats.completedBM) : "—"}
-            sub={stats?.expectedBHB ? `+ ${fmtTRY(stats.expectedBHB)} beklenen BHB` : undefined}
+            sub={stats?.expectedBM ? `+ ${fmtTRY(stats.expectedBM)} beklenen` : undefined}
           />
         </div>
 

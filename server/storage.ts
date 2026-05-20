@@ -1964,7 +1964,7 @@ export class DatabaseStorage implements IStorage {
       ));
 
     const expectedRows = await db
-      .select({ closingId: closings.id, saleValue: closings.saleValue, bhbShare: closingAgents.bhbShare, employeeId: closingAgents.employeeId })
+      .select({ closingId: closings.id, saleValue: closings.saleValue, bhbShare: closingAgents.bhbShare, marketCenterActual: closingAgents.marketCenterActual, employeeId: closingAgents.employeeId })
       .from(closings)
       .leftJoin(closingSides, eq(closingSides.closingId, closings.id))
       .leftJoin(closingAgents, eq(closingAgents.closingSideId, closingSides.id))
@@ -1990,10 +1990,11 @@ export class DatabaseStorage implements IStorage {
 
     // ── Expected summary ──
     const eIds = new Set<number>();
-    let expectedVolume = 0, expectedBHB = 0;
+    let expectedVolume = 0, expectedBHB = 0, expectedBM = 0;
     for (const r of expectedRows) {
       if (!eIds.has(r.closingId)) { expectedVolume += parseFloat(r.saleValue ?? "0"); eIds.add(r.closingId); }
       if (r.bhbShare) expectedBHB += parseFloat(r.bhbShare);
+      if (r.marketCenterActual) expectedBM += parseFloat(r.marketCenterActual);
     }
 
     // ── Monthly trend ──
@@ -2061,7 +2062,7 @@ export class DatabaseStorage implements IStorage {
     return {
       completedCount: cIds.size, expectedCount: eIds.size,
       completedVolume, expectedVolume,
-      completedBHB, expectedBHB, completedBM,
+      completedBHB, expectedBHB, completedBM, expectedBM,
       monthlyTrend, byAgent, byCategory, byIl, byIlce,
     };
   }
