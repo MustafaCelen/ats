@@ -1307,13 +1307,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return null;
       };
 
-      // Group rows into closings by Adres + İşlem Tipi + İşlem Bedeli
+      // Group rows into closings by date + transaction value + deal type.
+      // Using transaction value instead of address because the same deal's buyer/seller
+      // rows may have slightly different address strings in the CSV.
       const groups = new Map<string, typeof rows>();
       for (const row of rows) {
-        const adres = row["Adres"] ?? row["Mülk Adresi"] ?? "";
-        const tip = row["İşlem Tipi"] ?? "";
+        const tarih = row["İşlem Tarihi"] ?? row["Tarih"] ?? "";
         const bedel = normNum(row["İşlem Değeri"] ?? row["Kapanış Rakamı"] ?? row["Satış Bedeli"] ?? "") ?? "";
-        const key = `${adres}||${tip}||${bedel}`;
+        const islem = row["İşlem"] ?? "";        // Kiralama | Satış
+        const tip   = row["İşlem Tipi"] ?? "";   // Konut | Ticari | …
+        const key = `${tarih}||${bedel}||${islem}||${tip}`;
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key)!.push(row);
       }
