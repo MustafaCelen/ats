@@ -1508,14 +1508,21 @@ export class DatabaseStorage implements IStorage {
     return { employeeId, capAmount, capUsed, capRemaining, periodStart, capYear };
   }
 
-  async getAllEmployeesCapStatus(): Promise<Record<number, CapStatus>> {
+  async getAllEmployeesCapStatus(): Promise<Record<number, CapStatus & { name: string; kwuid: string }>> {
     const allEmployees = await this.getEmployees();
     const active = allEmployees.filter((e) => e.status === "active");
     const results = await Promise.all(active.map((e) => this.getEmployeeCapStatus(e.id)));
-    const record: Record<number, CapStatus> = {};
+    const record: Record<number, CapStatus & { name: string; kwuid: string }> = {};
     for (let i = 0; i < active.length; i++) {
       const status = results[i];
-      if (status) record[active[i].id] = status;
+      if (status) {
+        const emp = active[i] as any;
+        record[active[i].id] = {
+          ...status,
+          name: emp.candidate?.name ?? `#${active[i].id}`,
+          kwuid: emp.kwuid ?? "",
+        };
+      }
     }
     return record;
   }

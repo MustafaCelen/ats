@@ -80,7 +80,18 @@ function Empty() {
   return <div className="h-48 flex items-center justify-center text-sm text-muted-foreground">Bu dönem için veri yok</div>;
 }
 
-// ── Hook ──────────────────────────────────────────────────────────────────────
+// ── Hooks ─────────────────────────────────────────────────────────────────────
+function useCapStatuses() {
+  return useQuery<Record<string, any>>({
+    queryKey: ["/api/employees/cap-statuses"],
+    queryFn: async () => {
+      const res = await fetch("/api/employees/cap-statuses", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+  });
+}
+
 function useClosingStats(startDate: string, endDate: string, office?: string) {
   return useQuery<any>({
     queryKey: ["/api/closings/stats", startDate, endDate, office ?? "all"],
@@ -112,6 +123,20 @@ export default function FinancialReports() {
   const computedStart = useCustomRange ? fromDate : monthStart;
   const computedEnd   = useCustomRange ? toDate   : monthEnd;
   const { data: stats, isLoading } = useClosingStats(computedStart, computedEnd, officeFilter);
+  const { data: capStatuses = {} } = useCapStatuses();
+
+  const capList = useMemo(() => {
+    return Object.values(capStatuses as Record<string, any>)
+      .filter((s: any) => s.capAmount !== null)
+      .map((s: any) => ({
+        ...s,
+        pct: s.capAmount > 0 ? Math.min(100, Math.round((s.capUsed / s.capAmount) * 100)) : 0,
+      }))
+      .sort((a: any, b: any) => b.pct - a.pct);
+  }, [capStatuses]);
+
+  const cappers     = capList.filter((s: any) => s.pct >= 100);
+  const almostCappers = capList.filter((s: any) => s.pct >= 75 && s.pct < 100);
 
   const fmtMonthKey = (key: string) => {
     const [y, m] = key.split("-");
@@ -447,6 +472,65 @@ export default function FinancialReports() {
               </table>
             </div>
           )}
+        </div>
+
+        {/* ── Capper Lists ── */}
+        <div className="grid lg:grid-cols-2 gap-6">
+          {/* Current Cappers */}
+          <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+            <div className="px-5 py-4 border-b border-border flex items-center gap-2">
+              <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold">✓</span>
+              <h2 className="text-base font-semibold">Cap Yapanlar</h2>
+              <span className="ml-auto text-xs bg-emerald-100 text-emerald-700 font-semibold px-2 py-0.5 rounded-full">{cappers.length} danışman</span>
+            </div>
+            {cappers.length === 0 ? (
+              <div className="p-8 text-center text-sm text-muted-foreground">Henüz cap yapan danışman yok</div>
+            ) : (
+              <div className="divide-y divide-border/50">
+                {cappers.map((s: any) => (
+                  <div key={s.employeeId} className="px-5 py-3 flex items-center gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-sm truncate">{s.name}</div>
+                      <div className="text-xs text-muted-foreground">{s.kwuid || "—"}</div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="text-xs font-semibold text-emerald-600">{fmtTRY(s.capUsed)} / {fmtTRY(s.capAmount)}</div>
+                      <div className="text-xs text-muted-foreground">{s.pct}% kullanıldı</div>
+                    </div>
+                    <div className="w-2 h-8 rounded-full bg-emerald-500 shrink-0" />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Almost Cappers */}
+          <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+            <div className="px-5 py-4 border-b border-border flex items-center gap-2">
+              <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-100 text-amber-700 text-xs font-bold">!</span>
+              <h2 className="text-base font-semibold">Cap'e Yaklaşanlar</h2>
+              <span className="ml-auto text-xs bg-amber-100 text-amber-700 font-semibold px-2 py-0.5 rounded-full">{almostCappers.length} danışman</span>
+            </div>
+            {almostCappers.length === 0 ? (
+              <div className="p-8 text-center text-sm text-muted-foreground">75% eşiğinde danışman yok</div>
+            ) : (
+              <div className="divide-y divide-border/50">
+                {almostCappers.map((s: any) => (
+                  <div key={s.employeeId} className="px-5 py-3 flex items-center gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-sm truncate">{s.name}</div>
+                      <div className="text-xs text-muted-foreground">{s.kwuid || "—"}</div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="text-xs font-semibold text-amber-600">{fmtTRY(s.capUsed)} / {fmtTRY(s.capAmount)}</div>
+                      <div className="text-xs text-muted-foreground">{fmtTRY(s.capRemaining ?? 0)} kaldı · {s.pct}%</div>
+                    </div>
+                    <div className="w-2 h-8 rounded-full shrink-0" style={{ backgroundColor: s.pct >= 90 ? "#f97316" : "#f59e0b" }} />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
       </div>
