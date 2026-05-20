@@ -880,6 +880,7 @@ function NewClosingDialog({
   const [nakit, setNakit] = useState("");
   const [banka, setBanka] = useState("");
   const [closingDate, setClosingDate] = useState(new Date().toISOString().split("T")[0]);
+  const [isExpected, setIsExpected] = useState(false);
   const [buyerName, setBuyerName] = useState("");
   const [sellerName, setSellerName] = useState("");
   const [notes, setNotes] = useState("");
@@ -982,6 +983,7 @@ function NewClosingDialog({
     setCustomerSource(""); setReferralInfo(""); setContractStartDate(""); setContractEndDate("");
     setKasa(""); setNakit(""); setBanka("");
     setClosingDate(new Date().toISOString().split("T")[0]);
+    setIsExpected(false);
     setBuyerName(""); setSellerName(""); setNotes("");
     setBuyerSide({ enabled: false, agents: [newAgent()] });
     setSellerSide({ enabled: false, agents: [newAgent()] });
@@ -1010,7 +1012,8 @@ function NewClosingDialog({
     setKasa(e.kasa ?? "");
     setNakit(e.nakit ?? "");
     setBanka(e.banka ?? "");
-    setClosingDate(e.closingDate ? new Date(e.closingDate).toISOString().split("T")[0] : new Date().toISOString().split("T")[0]);
+    setClosingDate(e.closingDate ? new Date(e.closingDate).toISOString().split("T")[0] : "");
+    setIsExpected(e.status === "expected");
     setBuyerName(e.buyerName ?? "");
     setSellerName(e.sellerName ?? "");
     setNotes(e.notes ?? "");
@@ -1042,7 +1045,6 @@ function NewClosingDialog({
 
   const validate = (): string | null => {
     if (!saleValue || saleValueNum <= 0) return "Geçerli bir satış bedeli girin.";
-    if (!closingDate) return "Kapanış tarihi zorunludur.";
     if (!buyerSide.enabled && !sellerSide.enabled && !referralSide.enabled) return "En az bir taraf seçilmelidir.";
     if (buyerSide.enabled) {
       if (buyerSide.agents.length === 0) return "Alıcı tarafında en az bir danışman olmalıdır.";
@@ -1109,7 +1111,8 @@ function NewClosingDialog({
       kasa: kasa || null,
       nakit: nakit || null,
       banka: banka || null,
-      closingDate: new Date(closingDate).toISOString(),
+      closingDate: (!isExpected && closingDate) ? new Date(closingDate).toISOString() : null,
+      status: isExpected ? "expected" : "completed",
       buyerName: buyerName.trim() || null,
       sellerName: sellerName.trim() || null,
       notes: notes.trim() || null,
@@ -1238,9 +1241,30 @@ function NewClosingDialog({
                 </div>
               </div>
               <div>
-                <Label className="text-xs">Kapanış Tarihi *</Label>
+                <Label className="text-xs">Kapanış Durumu</Label>
+                <div className="mt-1 flex items-center gap-1 border rounded-md p-0.5 bg-muted/30 w-fit">
+                  <button
+                    type="button"
+                    onClick={() => setIsExpected(false)}
+                    className={`px-3 py-1 text-xs rounded font-medium transition-colors ${!isExpected ? "bg-white dark:bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    Tamamlanan
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsExpected(true)}
+                    className={`px-3 py-1 text-xs rounded font-medium transition-colors ${isExpected ? "bg-amber-100 text-amber-700 shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    Beklenen
+                  </button>
+                </div>
+              </div>
+              {!isExpected && (
+              <div>
+                <Label className="text-xs">Kapanış Tarihi</Label>
                 <Input type="date" className="mt-1 h-8 text-sm" value={closingDate} onChange={(e) => setClosingDate(e.target.value)} />
               </div>
+              )}
               <div>
                 <Label className="text-xs">Açılış Rakamı (₺)</Label>
                 <Input type="number" min="0" className="mt-1 h-8 text-sm" placeholder="Liste fiyatı..." value={openingPrice} onChange={(e) => setOpeningPrice(e.target.value)} />
@@ -1386,6 +1410,7 @@ export default function Closings() {
   const [tab, setTab] = useState<Tab>("closings");
   const [search, setSearch] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
+  const [statusFilter, setStatusFilter] = useState<"all" | "completed" | "expected">("all");
   const PAGE_SIZE = 50;
 
   const handleDialogClose = () => {
@@ -1405,21 +1430,32 @@ export default function Closings() {
   const { data: capStatuses = {} } = useCapStatuses();
   const deleteClosing = useDeleteClosing();
 
-  // Summary stats (each side = 1 count)
-  const totalSides = closings.reduce((s, c) => s + c.sides.length, 0);
-  const totalVolume = closings.reduce((s, c) => s + parseFloat(c.saleValue ?? "0"), 0);
-  const totalBHB = closings.reduce((s, c) =>
+  // Summary stats
+  const completedClosings = closings.filter((c) => (c as any).status !== "expected");
+  const expectedClosings = closings.filter((c) => (c as any).status === "expected");
+
+  const sumSides = (list: typeof closings) => list.reduce((s, c) => s + c.sides.length, 0);
+  const sumVolume = (list: typeof closings) => list.reduce((s, c) => s + parseFloat(c.saleValue ?? "0"), 0);
+  const sumBHB = (list: typeof closings) => list.reduce((s, c) =>
     s + c.sides.reduce((ss, side) =>
-      ss + side.agents.reduce((sa, a) => sa + parseFloat(a.bhbShare ?? "0"), 0), 0), 0
-  );
-  const totalBM = closings.reduce((s, c) =>
+      ss + side.agents.reduce((sa, a) => sa + parseFloat(a.bhbShare ?? "0"), 0), 0), 0);
+  const sumBM = (list: typeof closings) => list.reduce((s, c) =>
     s + c.sides.reduce((ss, side) =>
-      ss + side.agents.reduce((sa, a) => sa + parseFloat(a.marketCenterActual ?? "0"), 0), 0), 0
-  );
+      ss + side.agents.reduce((sa, a) => sa + parseFloat(a.marketCenterActual ?? "0"), 0), 0), 0);
+
+  const completedSides = sumSides(completedClosings);
+  const expectedSides = sumSides(expectedClosings);
+  const completedVolume = sumVolume(completedClosings);
+  const expectedVolume = sumVolume(expectedClosings);
+  const completedBHB = sumBHB(completedClosings);
+  const expectedBHB = sumBHB(expectedClosings);
+  const completedBM = sumBM(completedClosings);
+  const expectedBM = sumBM(expectedClosings);
 
   // Flatten closings into one row per agent per side
   type FlatRow = {
     closingId: number; sideId: number; agentId: number;
+    status: string;
     closingDate: string; propertyAddress: string; il: string; ilce: string;
     mahalle: string; propertyDetails: string;
     dealCategory: string; dealType: string; saleValue: string; commissionRate: string;
@@ -1448,6 +1484,7 @@ export default function Closings() {
             closingId: c.id,
             sideId: side.id,
             agentId: agent.id,
+            status: (c as any).status ?? "completed",
             closingDate: c.closingDate ? new Date(c.closingDate).toISOString().split("T")[0] : "",
             propertyAddress: c.propertyAddress ?? "",
             il: (c as any).il ?? "",
@@ -1492,12 +1529,13 @@ export default function Closings() {
     return rows;
   }, [closings]);
 
-  // Filter by search query
+  // Filter by status + search query
   const filteredRows = useMemo(() => {
+    let rows = statusFilter === "all" ? flatRows : flatRows.filter(r => r.status === statusFilter);
     const q = search.trim().toLowerCase();
-    if (!q) return flatRows;
+    if (!q) return rows;
     const matchingIds = new Set<number>();
-    for (const row of flatRows) {
+    for (const row of rows) {
       if (
         row.propertyAddress.toLowerCase().includes(q) ||
         row.employeeName.toLowerCase().includes(q) ||
@@ -1508,11 +1546,11 @@ export default function Closings() {
         row.closingDate.includes(q)
       ) matchingIds.add(row.closingId);
     }
-    return flatRows.filter((r) => matchingIds.has(r.closingId));
-  }, [flatRows, search]);
+    return rows.filter((r) => matchingIds.has(r.closingId));
+  }, [flatRows, search, statusFilter]);
 
-  // Reset to page 1 when search changes
-  useEffect(() => { setCurrentPage(1); }, [search]);
+  // Reset to page 1 when search or status filter changes
+  useEffect(() => { setCurrentPage(1); }, [search, statusFilter]);
 
   // Paginate by closing (keep agent rows of the same closing together)
   const { pagedRows, totalClosingsFiltered, totalPages } = useMemo(() => {
@@ -1565,6 +1603,30 @@ export default function Closings() {
       toast({ title: "Silindi", description: "Kapanış kaydı silindi." });
     } catch {
       toast({ title: "Hata", description: "Kapanış silinemedi.", variant: "destructive" });
+    }
+  };
+
+  const handleConfirm = async (closingId: number) => {
+    const date = window.prompt("Kapanış tarihini girin (YYYY-MM-DD):", new Date().toISOString().split("T")[0]);
+    if (!date) return;
+    const parsed = new Date(date);
+    if (isNaN(parsed.getTime())) {
+      toast({ title: "Hata", description: "Geçersiz tarih formatı.", variant: "destructive" });
+      return;
+    }
+    try {
+      await fetch(`/api/closings/${closingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ closingDate: parsed.toISOString(), status: "completed" }),
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/closings"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/employees/cap-statuses"] });
+      setStatusFilter("all");
+      toast({ title: "Onaylandı", description: "Kapanış tamamlandı olarak işaretlendi." });
+    } catch {
+      toast({ title: "Hata", description: "Güncelleme başarısız.", variant: "destructive" });
     }
   };
 
@@ -1625,9 +1687,9 @@ export default function Closings() {
         const obj: Record<string, string> = {};
         headers.forEach((h, i) => { if (h) obj[h] = (vals[i] ?? "").trim(); });
         return obj;
-      }).filter((r) => (r["Mülk Adresi"] || r["Adres"] || r["Danışman"] || r["KWUID"]) && (r["İşlem Tarihi"] || r["Tarih"]));
+      }).filter((r) => r["Mülk Adresi"] || r["Adres"] || r["Danışman"] || r["KWUID"]);
 
-      if (rows.length === 0) { toast({ title: "Hata", description: "İçe aktarılacak satır bulunamadı.", variant: "destructive" }); return; }
+      if (rows.length === 0) { toast({ title: "Hata", description: `İçe aktarılacak satır bulunamadı. Sütunlar: ${headers.slice(0, 8).join(", ")}`, variant: "destructive" }); return; }
 
       const res = await fetch("/api/closings/import", {
         method: "POST",
@@ -1715,56 +1777,71 @@ export default function Closings() {
 
         {tab === "closings" && <>
 
-        {/* Summary cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Card>
-            <CardHeader className="pb-2 pt-4 px-4">
-              <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-                <Handshake className="h-3.5 w-3.5" />
-                Toplam Kapanış
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="px-4 pb-4">
-              <p className="text-2xl font-bold">{totalSides}</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2 pt-4 px-4">
-              <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-                <TrendingUp className="h-3.5 w-3.5" />
-                İşlem Hacmi
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="px-4 pb-4">
-              <p className="text-lg font-bold truncate">{fmtTRY(totalVolume)}</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2 pt-4 px-4">
-              <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-                <DollarSign className="h-3.5 w-3.5" />
-                Toplam BHB
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="px-4 pb-4">
-              <p className="text-lg font-bold truncate">{fmtTRY(totalBHB)}</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2 pt-4 px-4">
-              <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-                <Users className="h-3.5 w-3.5" />
-                Toplam BM Payı
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="px-4 pb-4">
-              <p className="text-lg font-bold truncate text-blue-700">{fmtTRY(totalBM)}</p>
-            </CardContent>
-          </Card>
-        </div>
+        {/* Summary table */}
+        <Card>
+          <CardContent className="p-0">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted/40">
+                  <th className="text-left text-xs font-medium text-muted-foreground py-2 px-4 w-32"></th>
+                  <th className="text-right text-xs font-medium text-muted-foreground py-2 px-4">
+                    <span className="flex items-center justify-end gap-1"><Handshake className="h-3 w-3" />Kapanış</span>
+                  </th>
+                  <th className="text-right text-xs font-medium text-muted-foreground py-2 px-4">
+                    <span className="flex items-center justify-end gap-1"><TrendingUp className="h-3 w-3" />İşlem Hacmi</span>
+                  </th>
+                  <th className="text-right text-xs font-medium text-muted-foreground py-2 px-4">
+                    <span className="flex items-center justify-end gap-1"><DollarSign className="h-3 w-3" />BHB</span>
+                  </th>
+                  <th className="text-right text-xs font-medium text-muted-foreground py-2 px-4">
+                    <span className="flex items-center justify-end gap-1"><Users className="h-3 w-3" />BM Payı</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr className="border-b border-border/50">
+                  <td className="py-2.5 px-4 text-xs font-medium text-emerald-700">Tamamlanan</td>
+                  <td className="py-2.5 px-4 text-right font-semibold">{completedSides}</td>
+                  <td className="py-2.5 px-4 text-right font-semibold">{fmtTRY(completedVolume)}</td>
+                  <td className="py-2.5 px-4 text-right font-semibold">{fmtTRY(completedBHB)}</td>
+                  <td className="py-2.5 px-4 text-right font-semibold text-blue-700">{fmtTRY(completedBM)}</td>
+                </tr>
+                <tr className="border-b border-border/50">
+                  <td className="py-2.5 px-4 text-xs font-medium text-amber-600">Beklenen</td>
+                  <td className="py-2.5 px-4 text-right text-amber-600 font-semibold">{expectedSides}</td>
+                  <td className="py-2.5 px-4 text-right text-amber-600 font-semibold">{fmtTRY(expectedVolume)}</td>
+                  <td className="py-2.5 px-4 text-right text-amber-600 font-semibold">{fmtTRY(expectedBHB)}</td>
+                  <td className="py-2.5 px-4 text-right text-amber-600 font-semibold">{fmtTRY(expectedBM)}</td>
+                </tr>
+                <tr className="bg-muted/30">
+                  <td className="py-2.5 px-4 text-xs font-semibold">Toplam</td>
+                  <td className="py-2.5 px-4 text-right font-bold">{completedSides + expectedSides}</td>
+                  <td className="py-2.5 px-4 text-right font-bold">{fmtTRY(completedVolume + expectedVolume)}</td>
+                  <td className="py-2.5 px-4 text-right font-bold">{fmtTRY(completedBHB + expectedBHB)}</td>
+                  <td className="py-2.5 px-4 text-right font-bold text-blue-700">{fmtTRY(completedBM + expectedBM)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
 
-        {/* Search bar */}
-        <div className="flex items-center gap-2">
+        {/* Status filter + Search bar */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1 border rounded-md p-0.5 bg-muted/30">
+            {(["all", "completed", "expected"] as const).map((f) => (
+              <button
+                key={f}
+                onClick={() => { setStatusFilter(f); setCurrentPage(1); }}
+                className={`px-3 py-1 text-xs rounded font-medium transition-colors ${
+                  statusFilter === f
+                    ? "bg-white dark:bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {f === "all" ? "Tümü" : f === "completed" ? "Tamamlanan" : "Beklenen"}
+              </button>
+            ))}
+          </div>
           <Input
             placeholder="Ara: adres, danışman, alıcı, satıcı, il, tarih..."
             value={search}
@@ -1811,7 +1888,14 @@ export default function Closings() {
                     const isCapped = parseFloat(row.marketCenterDue) > parseFloat(row.marketCenterActual);
                     return (
                       <tr key={row.agentId} className={`border-b border-border/50 hover:bg-muted/30 ${row.isFirstOfClosing ? "border-t-2 border-t-border" : ""}`}>
-                        <td className="px-2 py-1 whitespace-nowrap font-medium text-xs">{row.employeeName}</td>
+                        <td className="px-2 py-1 whitespace-nowrap font-medium text-xs">
+                          <div className="flex items-center gap-1">
+                            {row.employeeName}
+                            {row.isFirstOfClosing && row.status === "expected" && (
+                              <Badge className="text-[9px] px-1 py-0 bg-amber-100 text-amber-700 border-amber-200 border">Beklenen</Badge>
+                            )}
+                          </div>
+                        </td>
                         <td className="px-2 py-1"><InlineSelect value={row.dealCategory} options={DEAL_CATEGORIES} onSave={sc("dealCategory")} /></td>
                         <td className="px-2 py-1"><InlineSelect value={row.dealType} options={DEAL_TYPES} onSave={sc("dealType")} /></td>
                         <td className="px-2 py-1 whitespace-nowrap">
@@ -1856,6 +1940,15 @@ export default function Closings() {
                         <td className="px-2 py-1 text-center">
                           {row.isFirstOfClosing && (
                             <div className="flex items-center gap-0.5">
+                              {row.status === "expected" && (
+                                <button
+                                  onClick={() => handleConfirm(row.closingId)}
+                                  className="text-amber-600 hover:text-amber-800 transition-colors p-1 rounded text-[10px] font-medium whitespace-nowrap"
+                                  title="Kapanışı onayla"
+                                >
+                                  Onayla
+                                </button>
+                              )}
                               <button onClick={() => handleEdit(row.closingId)} className="text-muted-foreground hover:text-primary transition-colors p-1 rounded" title="Kapanışı düzenle">
                                 <Pencil className="h-3.5 w-3.5" />
                               </button>

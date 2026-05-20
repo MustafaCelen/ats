@@ -1332,7 +1332,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           const first = groupRows[0];
           const dateStr = first["İşlem Tarihi"] ?? first["Tarih"] ?? "";
           const closingDate = safeDate(dateStr);
-          if (!closingDate) { errors.push(`Geçersiz tarih: ${dateStr}`); continue; }
+          const status = closingDate ? "completed" : "expected";
 
           const openingPriceStr = first["Açılış Rakamı"] || null;
           const contractStartDate = safeDate(first["Sözleşme Başlangıç Tarihi"] ?? "");
@@ -1379,6 +1379,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           const islemCol = first["İşlem"] ?? "";
           const dealCategory = islemCol === "Kiralama" ? "Kiralık" : islemCol === "Kiralık" ? "Kiralık" : "Satış";
           await storage.createClosing({
+            disableCap: true,
             propertyAddress: adres,
             il: first["İl"] || null,
             ilce: first["İlçe"] || null,
@@ -1397,10 +1398,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             kasa: normNum(first["Kasa"]),
             nakit: normNum(first["Nakit"]),
             banka: normNum(first["Banka"]),
-            closingDate,
             buyerName: first["Alıcı Adı"] || null,
             sellerName: first["Satıcı Adı"] || null,
             notes: first["Notlar"] || null,
+            closingDate: closingDate ?? null,
+            status,
             sides,
           });
           created++;
@@ -1432,8 +1434,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         kasa, nakit, banka,
         closingDate, buyerName, sellerName, notes, sides,
       } = req.body;
-      if (!saleValue || !closingDate || !sides) {
-        return res.status(400).json({ message: "saleValue, closingDate, and sides are required" });
+      if (!saleValue || !sides) {
+        return res.status(400).json({ message: "saleValue and sides are required" });
       }
       const closing = await storage.createClosing({
         propertyAddress: propertyAddress ?? "",
@@ -1454,7 +1456,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         kasa: kasa ? String(kasa) : null,
         nakit: nakit ? String(nakit) : null,
         banka: banka ? String(banka) : null,
-        closingDate: new Date(closingDate),
+        closingDate: closingDate ? new Date(closingDate) : null,
         buyerName: buyerName ?? null,
         sellerName: sellerName ?? null,
         notes: notes ?? null,
@@ -1462,7 +1464,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         sides,
       });
       res.status(201).json(closing);
-    } catch {
+    } catch (err) {
+      console.error("[POST /api/closings]", err);
       res.status(500).json({ message: "Internal server error" });
     }
   });
@@ -1538,6 +1541,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       res.json(await storage.getAllEmployeesCapStatus());
     } catch {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Closing Stats (Financial Reports) ────────────────────────────────────────
+
+  app.get("/api/closings/stats", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const { startDate, endDate, office } = req.query as { startDate?: string; endDate?: string; office?: string };
+      const now = new Date();
+      const start = startDate ? new Date(startDate) : new Date(now.getFullYear(), now.getMonth(), 1);
+      const end = endDate ? new Date(endDate) : new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      res.json(await storage.getClosingStats(start, end, office));
+    } catch (err) {
+      console.error("[GET /api/closings/stats]", err);
       res.status(500).json({ message: "Internal server error" });
     }
   });

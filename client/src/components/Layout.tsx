@@ -22,8 +22,9 @@ const hiringManagerNavItems = [
 
 const adminNavItems = [
   ...hiringManagerNavItems,
-  { icon: DollarSign,      label: "İşlem Kapanış", href: "/closings" },
-  { icon: Shield, label: "Users", href: "/users" },
+  { icon: DollarSign,      label: "İşlem Kapanış",    href: "/closings" },
+  { icon: BarChart2,       label: "Finansal Rapor",   href: "/financial-reports" },
+  { icon: Shield,          label: "Users",             href: "/users" },
 ];
 
 const assistantNavItems = [

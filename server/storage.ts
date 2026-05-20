@@ -18,7 +18,7 @@ import {
   type CapSetting, type Closing, type ClosingSide, type ClosingAgent,
   type CapStatus, type ClosingWithDetails, type InterviewTarget,
 } from "@shared/schema";
-import { eq, desc, count, sql, gte, lte, and, or, isNull, inArray, notInArray } from "drizzle-orm";
+import { eq, desc, count, sql, gte, lte, and, or, isNull, isNotNull, inArray, notInArray } from "drizzle-orm";
 import { differenceInDays } from "date-fns";
 
 export type ApplicationWithRelations = Application & { candidate?: Candidate; job?: Job };
@@ -168,7 +168,8 @@ export interface IStorage {
     kasa?: string | null;
     nakit?: string | null;
     banka?: string | null;
-    closingDate: Date;
+    closingDate?: Date | null;
+    status?: string;
     buyerName?: string | null;
     sellerName?: string | null;
     notes?: string | null;
@@ -1483,7 +1484,7 @@ export class DatabaseStorage implements IStorage {
       capAmount = capRow ? parseFloat(capRow.amount) : null;
     }
 
-    // Sum marketCenterActual from closingAgents for this employee in current period
+    // Sum marketCenterActual from completed closingAgents for this employee in current period
     const agentRows = await db
       .select({ marketCenterActual: closingAgents.marketCenterActual })
       .from(closingAgents)
@@ -1492,6 +1493,8 @@ export class DatabaseStorage implements IStorage {
       .where(
         and(
           eq(closingAgents.employeeId, employeeId),
+          eq(closings.status, "completed"),
+          isNotNull(closings.closingDate),
           gte(closings.closingDate, periodStart)
         )
       );
@@ -1560,8 +1563,8 @@ export class DatabaseStorage implements IStorage {
   async updateClosing(id: number, data: Partial<{
     propertyAddress: string; il: string | null; ilce: string | null;
     dealCategory: string; dealType: string; saleValue: string;
-    commissionRate: string; closingDate: Date; buyerName: string | null;
-    sellerName: string | null; notes: string | null;
+    commissionRate: string; closingDate: Date | null; status: string;
+    buyerName: string | null; sellerName: string | null; notes: string | null;
   }>): Promise<void> {
     if (Object.keys(data).length === 0) return;
     await db.update(closings).set(data as any).where(eq(closings.id, id));
@@ -1595,11 +1598,13 @@ export class DatabaseStorage implements IStorage {
     kasa?: string | null;
     nakit?: string | null;
     banka?: string | null;
-    closingDate: Date;
+    closingDate?: Date | null;
+    status?: string;
     buyerName?: string | null;
     sellerName?: string | null;
     notes?: string | null;
     createdByUserId?: number | null;
+    disableCap?: boolean; // true during CSV import — skips cap restriction in fallback calculation
     sides: Array<{
       sideType: string;
       agents: Array<{
@@ -1659,7 +1664,8 @@ export class DatabaseStorage implements IStorage {
         kasa: data.kasa ?? "0",
         nakit: data.nakit ?? "0",
         banka: data.banka ?? "0",
-        closingDate: data.closingDate,
+        closingDate: data.closingDate ?? null,
+        status: data.status ?? (data.closingDate ? "completed" : "expected"),
         buyerName: data.buyerName ?? null,
         sellerName: data.sellerName ?? null,
         notes: data.notes ?? null,
@@ -1709,7 +1715,12 @@ export class DatabaseStorage implements IStorage {
             mainBranchShare = parseFloat(agentInput.mainBranchShare ?? "0");
             kwtrKdv = parseFloat(agentInput.kwtrKdv ?? "0");
             marketCenterDue = (bhbShare - mainBranchShare) * 0.30; // kept for reference
-            marketCenterActual = parseFloat(agentInput.marketCenterActual ?? "0");
+            // If marketCenterActual not provided (missing CSV column), derive it without cap
+            marketCenterActual = agentInput.marketCenterActual !== undefined
+              ? parseFloat(agentInput.marketCenterActual)
+              : (data.disableCap
+                ? marketCenterDue
+                : (capAmount === null ? marketCenterDue : Math.min(marketCenterDue, Math.max(0, capAmount - capUsedSoFar))));
             bmKdv = parseFloat(agentInput.bmKdv ?? "0");
             ukShare = parseFloat(agentInput.ukShare ?? "0");
             employeeNet = parseFloat(agentInput.employeeNet ?? "0");
@@ -1722,7 +1733,8 @@ export class DatabaseStorage implements IStorage {
             mainBranchShare = bhbShare * 0.10;
             kwtrKdv = mainBranchShare * 0.20;
             marketCenterDue = (bhbShare - mainBranchShare) * 0.30;
-            marketCenterActual = capAmount === null
+            // Skip cap restriction when importing historical data (disableCap = true)
+            marketCenterActual = (data.disableCap || capAmount === null)
               ? marketCenterDue
               : Math.min(marketCenterDue, Math.max(0, capAmount - capUsedSoFar));
             bmKdv = marketCenterDue > 0 ? marketCenterActual * (0.016 / 0.27) : 0;
@@ -1902,6 +1914,156 @@ export class DatabaseStorage implements IStorage {
         ));
     }
     return query;
+  }
+
+  async getClosingStats(startDate: Date, endDate: Date, office?: string) {
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999);
+
+    // ── Pre-compute office employee IDs (same pattern as getReportStats) ──
+    let officeEmpIds: number[] | null = null;
+    if (office) {
+      const rows = await db
+        .select({ id: employees.id })
+        .from(employees)
+        .innerJoin(candidates, eq(employees.candidateId, candidates.id))
+        .where(eq(candidates.office, office));
+      officeEmpIds = rows.map(r => r.id);
+    }
+    const hasOfficeFilter = officeEmpIds !== null;
+    const hasOfficeData   = hasOfficeFilter && officeEmpIds!.length > 0;
+
+    const completedAgentCond = hasOfficeFilter
+      ? (hasOfficeData ? inArray(closingAgents.employeeId, officeEmpIds!) : sql`1=0`)
+      : undefined;
+    const expectedAgentCond = completedAgentCond;
+
+    const completedRows = await db
+      .select({
+        closingId: closings.id,
+        saleValue: closings.saleValue,
+        dealCategory: closings.dealCategory,
+        dealType: closings.dealType,
+        il: closings.il,
+        ilce: closings.ilce,
+        closingDate: closings.closingDate,
+        bhbShare: closingAgents.bhbShare,
+        marketCenterActual: closingAgents.marketCenterActual,
+        employeeNet: closingAgents.employeeNet,
+        employeeId: closingAgents.employeeId,
+      })
+      .from(closings)
+      .leftJoin(closingSides, eq(closingSides.closingId, closings.id))
+      .leftJoin(closingAgents, eq(closingAgents.closingSideId, closingSides.id))
+      .where(and(
+        eq(closings.status, "completed"),
+        isNotNull(closings.closingDate),
+        gte(closings.closingDate, startDate),
+        lte(closings.closingDate, end),
+        ...(completedAgentCond ? [completedAgentCond] : []),
+      ));
+
+    const expectedRows = await db
+      .select({ closingId: closings.id, saleValue: closings.saleValue, bhbShare: closingAgents.bhbShare, employeeId: closingAgents.employeeId })
+      .from(closings)
+      .leftJoin(closingSides, eq(closingSides.closingId, closings.id))
+      .leftJoin(closingAgents, eq(closingAgents.closingSideId, closingSides.id))
+      .where(and(
+        eq(closings.status, "expected"),
+        ...(expectedAgentCond ? [expectedAgentCond] : []),
+      ));
+
+    const empRows = await db
+      .select({ id: employees.id, kwuid: employees.kwuid, name: candidates.name })
+      .from(employees)
+      .leftJoin(candidates, eq(employees.candidateId, candidates.id));
+    const empMap = new Map(empRows.map(e => [e.id, { name: e.name ?? `#${e.id}`, kwuid: e.kwuid ?? "" }]));
+
+    // ── Completed summary ──
+    const cIds = new Set<number>();
+    let completedVolume = 0, completedBHB = 0, completedBM = 0;
+    for (const r of completedRows) {
+      if (!cIds.has(r.closingId)) { completedVolume += parseFloat(r.saleValue ?? "0"); cIds.add(r.closingId); }
+      if (r.bhbShare) completedBHB += parseFloat(r.bhbShare);
+      if (r.marketCenterActual) completedBM += parseFloat(r.marketCenterActual);
+    }
+
+    // ── Expected summary ──
+    const eIds = new Set<number>();
+    let expectedVolume = 0, expectedBHB = 0;
+    for (const r of expectedRows) {
+      if (!eIds.has(r.closingId)) { expectedVolume += parseFloat(r.saleValue ?? "0"); eIds.add(r.closingId); }
+      if (r.bhbShare) expectedBHB += parseFloat(r.bhbShare);
+    }
+
+    // ── Monthly trend ──
+    const monthMap = new Map<string, { volume: number; bhb: number; bm: number; count: number; ids: Set<number> }>();
+    for (const r of completedRows) {
+      if (!r.closingDate) continue;
+      const d = new Date(r.closingDate);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      if (!monthMap.has(key)) monthMap.set(key, { volume: 0, bhb: 0, bm: 0, count: 0, ids: new Set() });
+      const m = monthMap.get(key)!;
+      if (!m.ids.has(r.closingId)) { m.volume += parseFloat(r.saleValue ?? "0"); m.count++; m.ids.add(r.closingId); }
+      if (r.bhbShare) m.bhb += parseFloat(r.bhbShare);
+      if (r.marketCenterActual) m.bm += parseFloat(r.marketCenterActual);
+    }
+    const monthlyTrend = Array.from(monthMap.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([month, v]) => ({ month, volume: v.volume, bhb: v.bhb, bm: v.bm, count: v.count }));
+
+    // ── By agent ──
+    const agentMap = new Map<number, { bhb: number; bm: number; net: number; ids: Set<number> }>();
+    for (const r of completedRows) {
+      if (!r.employeeId) continue;
+      if (!agentMap.has(r.employeeId)) agentMap.set(r.employeeId, { bhb: 0, bm: 0, net: 0, ids: new Set() });
+      const a = agentMap.get(r.employeeId)!;
+      a.ids.add(r.closingId);
+      if (r.bhbShare) a.bhb += parseFloat(r.bhbShare);
+      if (r.marketCenterActual) a.bm += parseFloat(r.marketCenterActual);
+      if (r.employeeNet) a.net += parseFloat(r.employeeNet);
+    }
+    const byAgent = Array.from(agentMap.entries())
+      .map(([id, v]) => ({ name: empMap.get(id)?.name ?? `#${id}`, kwuid: empMap.get(id)?.kwuid ?? "", bhb: v.bhb, bm: v.bm, net: v.net, count: v.ids.size }))
+      .sort((a, b) => b.bhb - a.bhb);
+
+    // ── By category ──
+    const catMap = new Map<string, { count: number; volume: number; bhb: number; ids: Set<number> }>();
+    for (const r of completedRows) {
+      const cat = r.dealCategory ?? "Satış";
+      if (!catMap.has(cat)) catMap.set(cat, { count: 0, volume: 0, bhb: 0, ids: new Set() });
+      const c = catMap.get(cat)!;
+      if (!c.ids.has(r.closingId)) { c.count++; c.volume += parseFloat(r.saleValue ?? "0"); c.ids.add(r.closingId); }
+      if (r.bhbShare) c.bhb += parseFloat(r.bhbShare);
+    }
+    const byCategory = Array.from(catMap.entries()).map(([category, v]) => ({ category, count: v.count, volume: v.volume, bhb: v.bhb }));
+
+    // ── By İl ──
+    const geoGroup = (field: string | null | undefined, map: Map<string, { count: number; volume: number; ids: Set<number> }>, r: typeof completedRows[0]) => {
+      const key = field || "Belirtilmemiş";
+      if (!map.has(key)) map.set(key, { count: 0, volume: 0, ids: new Set() });
+      const v = map.get(key)!;
+      if (!v.ids.has(r.closingId)) { v.count++; v.volume += parseFloat(r.saleValue ?? "0"); v.ids.add(r.closingId); }
+    };
+    const ilMap = new Map<string, { count: number; volume: number; ids: Set<number> }>();
+    const ilceMap = new Map<string, { count: number; volume: number; ids: Set<number> }>();
+    for (const r of completedRows) {
+      geoGroup(r.il, ilMap, r);
+      geoGroup(r.ilce, ilceMap, r);
+    }
+    const toGeoArr = (map: Map<string, { count: number; volume: number; ids: Set<number> }>, keyName: string) =>
+      Array.from(map.entries()).map(([k, v]) => ({ [keyName]: k, count: v.count, volume: v.volume }))
+        .sort((a: any, b: any) => b.volume - a.volume).slice(0, 10);
+
+    const byIl   = toGeoArr(ilMap,   "il");
+    const byIlce = toGeoArr(ilceMap, "ilce");
+
+    return {
+      completedCount: cIds.size, expectedCount: eIds.size,
+      completedVolume, expectedVolume,
+      completedBHB, expectedBHB, completedBM,
+      monthlyTrend, byAgent, byCategory, byIl, byIlce,
+    };
   }
 
   async upsertInterviewTarget(data: { jobId: number; year: number; month: number; category: string; target: number }): Promise<void> {
