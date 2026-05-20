@@ -1307,20 +1307,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return null;
       };
 
-      // Group rows into closings by date + transaction value + deal type.
-      // Using transaction value instead of address because the same deal's buyer/seller
-      // rows may have slightly different address strings in the CSV.
-      const groups = new Map<string, typeof rows>();
-      for (const row of rows) {
-        const tarih = row["İşlem Tarihi"] ?? row["Tarih"] ?? "";
-        const bedel = normNum(row["İşlem Değeri"] ?? row["Kapanış Rakamı"] ?? row["Satış Bedeli"] ?? "") ?? "";
-        const islem = row["İşlem"] ?? "";        // Kiralama | Satış
-        const tip   = row["İşlem Tipi"] ?? "";   // Konut | Ticari | …
-        const key = `${tarih}||${bedel}||${islem}||${tip}`;
-        if (!groups.has(key)) groups.set(key, []);
-        groups.get(key)!.push(row);
-      }
-
       let created = 0;
       const errors: string[] = [];
 
@@ -1330,83 +1316,65 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return isNaN(d.getTime()) ? null : d;
       };
 
-      for (const [, groupRows] of groups) {
+      for (const row of rows) {
         try {
-          const first = groupRows[0];
-          const dateStr = first["İşlem Tarihi"] ?? first["Tarih"] ?? "";
+          const dateStr = row["İşlem Tarihi"] ?? row["Tarih"] ?? "";
           const closingDate = safeDate(dateStr);
           const status = closingDate ? "completed" : "expected";
 
-          const openingPriceStr = first["Açılış Rakamı"] || null;
-          const contractStartDate = safeDate(first["Sözleşme Başlangıç Tarihi"] ?? "");
-          const contractEndDate = safeDate(first["Sözleşme Bitiş Tarihi"] ?? "");
+          const contractStartDate = safeDate(row["Sözleşme Başlangıç Tarihi"] ?? "");
+          const contractEndDate = safeDate(row["Sözleşme Bitiş Tarihi"] ?? "");
 
-          const sidesMap = new Map<string, typeof rows>();
-          for (const row of groupRows) {
-            const taraf = row["Taraf"] ?? "";
-            const sideKey = taraf === "Alıcı" ? "buyer" : taraf === "Yönlendirme" ? "referral" : "seller";
-            if (!sidesMap.has(sideKey)) sidesMap.set(sideKey, []);
-            sidesMap.get(sideKey)!.push(row);
-          }
+          const taraf = row["Taraf"] ?? "";
+          const sideType = taraf === "Alıcı" ? "buyer" : taraf === "Yönlendirme" ? "referral" : "seller";
 
-          const sides = [];
-          for (const [sideType, sideRows] of sidesMap) {
-            const agents = [];
-            for (const row of sideRows) {
-              const kwuid = row["KWUID"] ?? "";
-              const name = row["Danışman"] ?? row["Danışman Adı"] ?? "";
-              const empId = resolveEmployee(kwuid, name);
-              if (!empId) { errors.push(`Danışman bulunamadı: ${name || kwuid || "?"}`); continue; }
-              // "Danışman_1" = second "Danışman" column = agent net payment
-              // "ÜK_1" = second "ÜK" column = ÜK share amount
-              const bhbShare = normNum(row["BHB"]);
-              agents.push({
-                employeeId: empId,
-                splitPercentage: normNum(row["Pay (%)"]) || "100",
-                bhbShare: bhbShare ?? undefined,
-                mainBranchShare: normNum(row["KWTR"]) ?? undefined,
-                kwtrKdv: normNum(row["KWTR (+KDV)"]) ?? undefined,
-                marketCenterActual: normNum(row["PlatinKarma"] ?? row["BM (PlatinKarma)"]) ?? undefined,
-                bmKdv: normNum(row["PlatinKarma (KDV)"] ?? row["PlatinKarma (KDV)_1"]) ?? undefined,
-                ukShare: normNum(row["ÜK_1"] ?? row["ÜK Tutarı"]) ?? undefined,
-                employeeNet: normNum(row["Danışman_1"] ?? row["Danışman Net"]) ?? undefined,
-              });
-            }
-            if (agents.length > 0) sides.push({ sideType, agents });
-          }
+          const kwuid = row["KWUID"] ?? "";
+          const name = row["Danışman"] ?? row["Danışman Adı"] ?? "";
+          const empId = resolveEmployee(kwuid, name);
+          if (!empId) { errors.push(`Danışman bulunamadı: ${name || kwuid || "?"}`); continue; }
 
-          if (sides.length === 0) { errors.push(`Taraf bulunamadı: ${first["Adres"] ?? first["Mülk Adresi"] ?? ""}`); continue; }
+          const agent = {
+            employeeId: empId,
+            splitPercentage: normNum(row["Pay (%)"]) || "100",
+            bhbShare: normNum(row["BHB"]) ?? undefined,
+            mainBranchShare: normNum(row["KWTR"]) ?? undefined,
+            kwtrKdv: normNum(row["KWTR (+KDV)"]) ?? undefined,
+            marketCenterActual: normNum(row["PlatinKarma"] ?? row["BM (PlatinKarma)"]) ?? undefined,
+            bmKdv: normNum(row["PlatinKarma (KDV)"] ?? row["PlatinKarma (KDV)_1"]) ?? undefined,
+            ukShare: normNum(row["ÜK_1"] ?? row["ÜK Tutarı"]) ?? undefined,
+            employeeNet: normNum(row["Danışman_1"] ?? row["Danışman Net"]) ?? undefined,
+          };
 
-          const adres = first["Adres"] ?? first["Mülk Adresi"] ?? "";
-          // "İşlem" column = Kiralama/Satış (deal category); "İşlem Tipi" = property type (Konut etc.)
-          const islemCol = first["İşlem"] ?? "";
+          const adres = row["Adres"] ?? row["Mülk Adresi"] ?? "";
+          const islemCol = row["İşlem"] ?? "";
           const dealCategory = islemCol === "Kiralama" ? "Kiralık" : islemCol === "Kiralık" ? "Kiralık" : "Satış";
+
           await storage.createClosing({
             disableCap: true,
             propertyAddress: adres,
-            il: first["İl"] || null,
-            ilce: first["İlçe"] || null,
-            mahalle: first["Semt/Mahalle"] || null,
-            propertyDetails: first["Mülkle İlgili Detay Bilgiler"] || null,
+            il: row["İl"] || null,
+            ilce: row["İlçe"] || null,
+            mahalle: row["Semt/Mahalle"] || null,
+            propertyDetails: row["Mülkle İlgili Detay Bilgiler"] || null,
             dealCategory: dealCategory as any,
             dealType: "Çift Taraflı",
-            saleValue: normNum(first["İşlem Değeri"] ?? first["Kapanış Rakamı"] ?? first["Satış Bedeli"]) ?? "0",
-            commissionRate: normNum(first["BHB Oranı"] ?? first["Komisyon Oranı (%)"]) || "2",
-            openingPrice: normNum(openingPriceStr),
-            durationDays: first["Süre/Gün"] ? parseInt(first["Süre/Gün"]) : null,
-            customerSource: first["Müşteri nereden buldu?"] || null,
-            referralInfo: first["Yönlendirme Bilgisi"] || null,
+            saleValue: normNum(row["İşlem Değeri"] ?? row["Kapanış Rakamı"] ?? row["Satış Bedeli"]) ?? "0",
+            commissionRate: normNum(row["BHB Oranı"] ?? row["Komisyon Oranı (%)"]) || "2",
+            openingPrice: normNum(row["Açılış Rakamı"] || null),
+            durationDays: row["Süre/Gün"] ? parseInt(row["Süre/Gün"]) : null,
+            customerSource: row["Müşteri nereden buldu?"] || null,
+            referralInfo: row["Yönlendirme Bilgisi"] || null,
             contractStartDate,
             contractEndDate,
-            kasa: normNum(first["Kasa"]),
-            nakit: normNum(first["Nakit"]),
-            banka: normNum(first["Banka"]),
-            buyerName: first["Alıcı Adı"] || null,
-            sellerName: first["Satıcı Adı"] || null,
-            notes: first["Notlar"] || null,
+            kasa: normNum(row["Kasa"]),
+            nakit: normNum(row["Nakit"]),
+            banka: normNum(row["Banka"]),
+            buyerName: row["Alıcı Adı"] || null,
+            sellerName: row["Satıcı Adı"] || null,
+            notes: row["Notlar"] || null,
             closingDate: closingDate ?? null,
             status,
-            sides,
+            sides: [{ sideType, agents: [agent] }],
           });
           created++;
         } catch (e: any) {
