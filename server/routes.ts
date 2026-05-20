@@ -1278,17 +1278,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       // Normalize Turkish number format: "30.000,00" → "30000.00", "4,17%" → "4.17"
       const normNum = (v: string | undefined | null): string | null => {
-        if (!v) return null;
-        let s = v.trim().replace(/\s/g, "").replace(/%$/, "").replace(/[₺$€£]/g, "");
+        if (v == null) return null;
+        let s = v.trim().replace(/\s/g, "").replace(/%/g, "").replace(/[₺$€£]/gi, "").replace(/[a-zA-Z]+$/g, "");
         if (!s || s === "-") return null;
         if (s.includes(",")) {
-          // dot = thousands sep, comma = decimal
+          // Turkish format: dots are thousands separators, comma is decimal
           s = s.replace(/\./g, "").replace(",", ".");
         } else {
-          // dot might be thousands sep (e.g. "30.000")
-          s = s.replace(/\.(?=\d{3}(?:\.|$))/g, "");
+          // Remove thousands-separating dots (followed by groups of 3 digits)
+          s = s.replace(/\.(?=(\d{3})+(?:\.|$))/g, "");
         }
-        return isNaN(parseFloat(s)) ? null : s;
+        const n = parseFloat(s);
+        return isNaN(n) ? null : String(n);
       };
 
       // Look up all employees once for KWUID / name matching
