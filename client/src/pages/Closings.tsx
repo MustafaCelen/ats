@@ -1411,6 +1411,7 @@ export default function Closings() {
   const [search, setSearch] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<"all" | "completed" | "expected">("all");
+  const [yearFilter, setYearFilter] = useState(String(new Date().getFullYear()));
   const PAGE_SIZE = 50;
 
   const handleDialogClose = () => {
@@ -1430,9 +1431,26 @@ export default function Closings() {
   const { data: capStatuses = {} } = useCapStatuses();
   const deleteClosing = useDeleteClosing();
 
+  // Available years from all closings
+  const availableYears = useMemo(() => {
+    const years = new Set<string>();
+    for (const c of closings) {
+      if (c.closingDate) years.add(new Date(c.closingDate).getFullYear().toString());
+    }
+    return Array.from(years).sort((a, b) => b.localeCompare(a));
+  }, [closings]);
+
+  // Year-filtered closings for stats and table
+  const yearFilteredClosings = useMemo(() =>
+    yearFilter === "all" ? closings : closings.filter((c: any) => {
+      const d = (c as any).closingDate;
+      if (!d) return false;
+      return new Date(d).getFullYear().toString() === yearFilter;
+    }), [closings, yearFilter]);
+
   // Summary stats
-  const completedClosings = closings.filter((c) => (c as any).status !== "expected");
-  const expectedClosings = closings.filter((c) => (c as any).status === "expected");
+  const completedClosings = yearFilteredClosings.filter((c) => (c as any).status !== "expected");
+  const expectedClosings = yearFilteredClosings.filter((c) => (c as any).status === "expected");
 
   const sumSides = (list: typeof closings) => list.reduce((s, c) => s + c.sides.length, 0);
   const sumVolume = (list: typeof closings) => list.reduce((s, c) => s + parseFloat(c.saleValue ?? "0"), 0);
@@ -1529,9 +1547,10 @@ export default function Closings() {
     return rows;
   }, [closings]);
 
-  // Filter by status + search query
+  // Filter by status + year + search query
   const filteredRows = useMemo(() => {
     let rows = statusFilter === "all" ? flatRows : flatRows.filter(r => r.status === statusFilter);
+    if (yearFilter !== "all") rows = rows.filter(r => r.closingDate.startsWith(yearFilter));
     const q = search.trim().toLowerCase();
     if (!q) return rows;
     const matchingIds = new Set<number>();
@@ -1549,8 +1568,8 @@ export default function Closings() {
     return rows.filter((r) => matchingIds.has(r.closingId));
   }, [flatRows, search, statusFilter]);
 
-  // Reset to page 1 when search or status filter changes
-  useEffect(() => { setCurrentPage(1); }, [search, statusFilter]);
+  // Reset to page 1 when filters change
+  useEffect(() => { setCurrentPage(1); }, [search, statusFilter, yearFilter]);
 
   // Paginate by closing (keep agent rows of the same closing together)
   const { pagedRows, totalClosingsFiltered, totalPages } = useMemo(() => {
@@ -1825,8 +1844,23 @@ export default function Closings() {
           </CardContent>
         </Card>
 
-        {/* Status filter + Search bar */}
+        {/* Status filter + Year filter + Search bar */}
         <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1 border rounded-md p-0.5 bg-muted/30">
+            {(["all", ...availableYears] as string[]).map((y) => (
+              <button
+                key={y}
+                onClick={() => { setYearFilter(y); setCurrentPage(1); }}
+                className={`px-3 py-1 text-xs rounded font-medium transition-colors ${
+                  yearFilter === y
+                    ? "bg-white dark:bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {y === "all" ? "Tüm Yıllar" : y}
+              </button>
+            ))}
+          </div>
           <div className="flex items-center gap-1 border rounded-md p-0.5 bg-muted/30">
             {(["all", "completed", "expected"] as const).map((f) => (
               <button
