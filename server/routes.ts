@@ -1333,16 +1333,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           const empId = resolveEmployee(kwuid, name);
           if (!empId) { errors.push(`Danışman bulunamadı: ${name || kwuid || "?"}`); continue; }
 
+          // Default all numeric fields to "0" so the server never auto-calculates them.
+          // undefined triggers the fallback formula path; "0" keeps the CSV value as-is.
           const agent = {
             employeeId: empId,
             splitPercentage: normNum(row["Pay (%)"]) || "100",
-            bhbShare: normNum(row["BHB"]) ?? undefined,
-            mainBranchShare: normNum(row["KWTR"]) ?? undefined,
-            kwtrKdv: normNum(row["KWTR (+KDV)"]) ?? undefined,
-            marketCenterActual: normNum(row["PlatinKarma"] ?? row["BM (PlatinKarma)"]) ?? undefined,
-            bmKdv: normNum(row["PlatinKarma (KDV)"] ?? row["PlatinKarma (KDV)_1"]) ?? undefined,
-            ukShare: normNum(row["ÜK_1"] ?? row["ÜK Tutarı"]) ?? undefined,
-            employeeNet: normNum(row["Danışman_1"] ?? row["Danışman Net"]) ?? undefined,
+            bhbShare: normNum(row["BHB"]) ?? "0",
+            mainBranchShare: normNum(row["KWTR"]) ?? "0",
+            kwtrKdv: normNum(row["KWTR (+KDV)"]) ?? "0",
+            marketCenterActual: normNum(row["PlatinKarma"] ?? row["BM (PlatinKarma)"]) ?? "0",
+            bmKdv: normNum(row["PlatinKarma (KDV)"] ?? row["PlatinKarma (KDV)_1"]) ?? "0",
+            ukShare: normNum(row["ÜK_1"] ?? row["ÜK Tutarı"]) ?? "0",
+            employeeNet: normNum(row["Danışman_1"] ?? row["Danışman Net"]) ?? "0",
           };
 
           const adres = row["Adres"] ?? row["Mülk Adresi"] ?? "";
