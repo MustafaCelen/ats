@@ -1341,7 +1341,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             bhbShare: normNum(row["BHB"]) ?? "0",
             mainBranchShare: normNum(row["KWTR"]) ?? "0",
             kwtrKdv: normNum(row["KWTR (+KDV)"]) ?? "0",
-            marketCenterActual: normNum(row["PlatinKarma"] ?? row["BM (PlatinKarma)"]) ?? "0",
+            marketCenterActual: normNum(row["PlatinKarma"] ?? row["BM (PlatinKarma)"] ?? row["BM"]) ?? "0",
             bmKdv: normNum(row["PlatinKarma (KDV)"] ?? row["PlatinKarma (KDV)_1"]) ?? "0",
             ukShare: normNum(row["ÜK_1"] ?? row["ÜK Tutarı"]) ?? "0",
             employeeNet: normNum(row["Danışman_1"] ?? row["Danışman Net"]) ?? "0",
