@@ -1947,6 +1947,8 @@ export class DatabaseStorage implements IStorage {
         il: closings.il,
         ilce: closings.ilce,
         closingDate: closings.closingDate,
+        sideId: closingSides.id,
+        sideType: closingSides.sideType,
         bhbShare: closingAgents.bhbShare,
         marketCenterActual: closingAgents.marketCenterActual,
         employeeNet: closingAgents.employeeNet,
@@ -1987,6 +1989,20 @@ export class DatabaseStorage implements IStorage {
       if (r.bhbShare) completedBHB += parseFloat(r.bhbShare);
       if (r.marketCenterActual) completedBM += parseFloat(r.marketCenterActual);
     }
+
+    // ── Side type counts ──
+    const sideTypeSets: Record<string, Set<number>> = { buyer: new Set(), seller: new Set(), referral: new Set() };
+    for (const r of completedRows) {
+      if (r.sideId && r.sideType) {
+        if (!sideTypeSets[r.sideType]) sideTypeSets[r.sideType] = new Set();
+        sideTypeSets[r.sideType].add(r.sideId);
+      }
+    }
+    const bySideType = {
+      buyer: sideTypeSets.buyer.size,
+      seller: sideTypeSets.seller.size,
+      referral: sideTypeSets.referral.size,
+    };
 
     // ── Expected summary ──
     const eIds = new Set<number>();
@@ -2063,6 +2079,7 @@ export class DatabaseStorage implements IStorage {
       completedCount: cIds.size, expectedCount: eIds.size,
       completedVolume, expectedVolume,
       completedBHB, expectedBHB, completedBM, expectedBM,
+      bySideType,
       monthlyTrend, byAgent, byCategory, byIl, byIlce,
     };
   }

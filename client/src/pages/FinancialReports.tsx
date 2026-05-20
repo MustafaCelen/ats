@@ -212,6 +212,31 @@ export default function FinancialReports() {
           />
         </div>
 
+        {/* ── Side Type Breakdown ── */}
+        <div className="grid grid-cols-3 gap-4">
+          <div className="rounded-xl border border-border bg-card p-4 shadow-sm flex items-center gap-3">
+            <div className="rounded-lg p-2 bg-blue-50 text-blue-600 text-lg font-bold w-10 h-10 flex items-center justify-center">A</div>
+            <div>
+              <div className="text-xs text-muted-foreground">Alıcı Tarafı</div>
+              <div className="text-2xl font-bold">{stats?.bySideType?.buyer ?? 0}</div>
+            </div>
+          </div>
+          <div className="rounded-xl border border-border bg-card p-4 shadow-sm flex items-center gap-3">
+            <div className="rounded-lg p-2 bg-emerald-50 text-emerald-600 text-lg font-bold w-10 h-10 flex items-center justify-center">S</div>
+            <div>
+              <div className="text-xs text-muted-foreground">Satıcı Tarafı</div>
+              <div className="text-2xl font-bold">{stats?.bySideType?.seller ?? 0}</div>
+            </div>
+          </div>
+          <div className="rounded-xl border border-border bg-card p-4 shadow-sm flex items-center gap-3">
+            <div className="rounded-lg p-2 bg-amber-50 text-amber-600 text-lg font-bold w-10 h-10 flex items-center justify-center">Y</div>
+            <div>
+              <div className="text-xs text-muted-foreground">Yönlendirme</div>
+              <div className="text-2xl font-bold">{stats?.bySideType?.referral ?? 0}</div>
+            </div>
+          </div>
+        </div>
+
         {/* ── Monthly Trend ── */}
         <div className="grid lg:grid-cols-2 gap-6">
           <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
