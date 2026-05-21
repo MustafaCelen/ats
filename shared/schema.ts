@@ -342,7 +342,7 @@ export const capSettings = pgTable("cap_settings", {
 export type CapSetting = typeof capSettings.$inferSelect;
 
 // ── Closings ──────────────────────────────────────────────────────────────────
-export const DEAL_TYPES = ["Çift Taraflı", "Ofis İçi", "Ofis Dışı"] as const;
+export const DEAL_TYPES = ["Arsa", "Konut", "Ticari"] as const;
 export type DealType = (typeof DEAL_TYPES)[number];
 
 export const DEAL_CATEGORIES = ["Satış", "Kiralık"] as const;
@@ -356,7 +356,7 @@ export const closings = pgTable("closings", {
   mahalle: text("mahalle"),                                        // Semt/Mahalle
   propertyDetails: text("property_details"),                       // Mülkle İlgili Detay Bilgiler
   dealCategory: text("deal_category").notNull().default("Satış"), // Satış | Kiralık
-  dealType: text("deal_type").notNull().default("Çift Taraflı"),
+  dealType: text("deal_type").notNull().default("Konut"),
   saleValue: numeric("sale_value", { precision: 15, scale: 2 }).notNull(),
   commissionRate: numeric("commission_rate", { precision: 5, scale: 2 }).notNull().default("2.00"),
   openingPrice: numeric("opening_price", { precision: 15, scale: 2 }),  // Açılış Rakamı (listing price)

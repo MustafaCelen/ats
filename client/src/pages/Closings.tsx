@@ -867,7 +867,7 @@ function NewClosingDialog({
   const [mahalle, setMahalle] = useState("");
   const [propertyDetails, setPropertyDetails] = useState("");
   const [dealCategory, setDealCategory] = useState<DealCategory>("Satış");
-  const [dealType, setDealType] = useState<string>("Çift Taraflı");
+  const [dealType, setDealType] = useState<string>("Konut");
   const [saleValue, setSaleValue] = useState("");
   const [commissionRate, setCommissionRate] = useState("2");
   const [openingPrice, setOpeningPrice] = useState("");
@@ -1000,7 +1000,7 @@ function NewClosingDialog({
     setMahalle(e.mahalle ?? "");
     setPropertyDetails(e.propertyDetails ?? "");
     setDealCategory((e.dealCategory ?? "Satış") as DealCategory);
-    setDealType(e.dealType ?? "Çift Taraflı");
+    setDealType(e.dealType ?? "Konut");
     setSaleValue(e.saleValue ?? "");
     setCommissionRate(e.commissionRate ?? "2");
     setOpeningPrice(e.openingPrice ?? "");
