@@ -2063,6 +2063,19 @@ export class DatabaseStorage implements IStorage {
     }
     const byCategory = Array.from(catMap.entries()).map(([category, v]) => ({ category, count: v.count, volume: v.volume, bhb: v.bhb }));
 
+    // ── By deal type ──
+    const dealTypeMap = new Map<string, { count: number; volume: number; bhb: number; ids: Set<number> }>();
+    for (const r of completedRows) {
+      const dt = r.dealType ?? "Diğer";
+      if (!dealTypeMap.has(dt)) dealTypeMap.set(dt, { count: 0, volume: 0, bhb: 0, ids: new Set() });
+      const d = dealTypeMap.get(dt)!;
+      if (!d.ids.has(r.closingId)) { d.count++; d.volume += parseFloat(r.saleValue ?? "0"); d.ids.add(r.closingId); }
+      if (r.bhbShare) d.bhb += parseFloat(r.bhbShare);
+    }
+    const byDealType = Array.from(dealTypeMap.entries())
+      .map(([dealType, v]) => ({ dealType, count: v.count, volume: v.volume, bhb: v.bhb }))
+      .sort((a, b) => b.count - a.count);
+
     // ── By İl ──
     const geoGroup = (field: string | null | undefined, map: Map<string, { count: number; volume: number; ids: Set<number> }>, r: typeof completedRows[0]) => {
       const key = field || "Belirtilmemiş";
@@ -2113,7 +2126,7 @@ export class DatabaseStorage implements IStorage {
       completedVolume, expectedVolume,
       completedBHB, expectedBHB, completedBM, expectedBM,
       bySideType,
-      monthlyTrend, byAgent, byCategory, byIl, byIlce,
+      monthlyTrend, byAgent, byCategory, byDealType, byIl, byIlce,
       avgSaleDays, avgSaleDaysByIlce,
     };
   }

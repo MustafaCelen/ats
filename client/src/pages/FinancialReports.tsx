@@ -183,6 +183,7 @@ export default function FinancialReports() {
   );
   const topAgents        = (stats?.byAgent ?? []).slice(0, 12);
   const byCategory       = stats?.byCategory ?? [];
+  const byDealType       = (stats?.byDealType ?? []) as { dealType: string; count: number; volume: number; bhb: number }[];
   const byIl             = (stats?.byIl ?? []).slice(0, 8);
   const byIlce           = (stats?.byIlce ?? []).slice(0, 8);
   const avgSaleDays      = stats?.avgSaleDays ?? null;
@@ -395,8 +396,8 @@ export default function FinancialReports() {
           </div>
         </div>
 
-        {/* ── Category + İl + İlçe ── */}
-        <div className="grid lg:grid-cols-3 gap-6">
+        {/* ── Category + Deal Type + İl + İlçe ── */}
+        <div className="grid lg:grid-cols-4 gap-6">
           {/* Deal category */}
           <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
             <h2 className="text-base font-semibold mb-4">İşlem Kategorisi</h2>
@@ -411,6 +412,29 @@ export default function FinancialReports() {
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
+            )}
+          </div>
+
+          {/* Deal type */}
+          <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
+            <h2 className="text-base font-semibold mb-4">İşlem Tipi</h2>
+            {isLoading ? <Skeleton h="h-44" /> : byDealType.length === 0 ? <Empty /> : (
+              <div className="space-y-2.5 pt-1">
+                {byDealType.map((r, i) => {
+                  const max = Math.max(...byDealType.map(x => x.count), 1);
+                  return (
+                    <div key={r.dealType}>
+                      <div className="flex items-center justify-between text-xs mb-0.5">
+                        <span className="text-muted-foreground">{r.dealType}</span>
+                        <span className="font-semibold">{r.count} · {fmtShort(r.volume)}</span>
+                      </div>
+                      <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                        <div className="h-full rounded-full" style={{ width: `${(r.count / max) * 100}%`, backgroundColor: COLORS[i % COLORS.length] }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
 
