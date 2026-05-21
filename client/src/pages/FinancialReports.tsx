@@ -181,10 +181,12 @@ export default function FinancialReports() {
     () => (stats?.monthlyTrend ?? []).map((r: any) => ({ ...r, month: fmtMonthKey(r.month) })),
     [stats?.monthlyTrend]
   );
-  const topAgents  = (stats?.byAgent ?? []).slice(0, 12);
-  const byCategory = stats?.byCategory ?? [];
-  const byIl       = (stats?.byIl ?? []).slice(0, 8);
-  const byIlce     = (stats?.byIlce ?? []).slice(0, 8);
+  const topAgents        = (stats?.byAgent ?? []).slice(0, 12);
+  const byCategory       = stats?.byCategory ?? [];
+  const byIl             = (stats?.byIl ?? []).slice(0, 8);
+  const byIlce           = (stats?.byIlce ?? []).slice(0, 8);
+  const avgSaleDays      = stats?.avgSaleDays ?? null;
+  const avgSaleDaysByIlce = (stats?.avgSaleDaysByIlce ?? []) as { ilce: string; avg: number; count: number }[];
 
   // dynamic height for agent bar chart so no labels are skipped
   const agentChartHeight = Math.max(260, topAgents.length * 28);
@@ -457,6 +459,42 @@ export default function FinancialReports() {
               </div>
             )}
           </div>
+        </div>
+
+        {/* ── Average Sale Time ── */}
+        <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+          <div className="px-5 py-4 border-b border-border flex items-center gap-4">
+            <div>
+              <h2 className="text-base font-semibold">Ortalama Satış Süresi</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">Yalnızca süre bilgisi olan kapanışlar</p>
+            </div>
+            {avgSaleDays !== null && (
+              <div className="ml-auto text-right">
+                <div className="text-2xl font-bold">{avgSaleDays} <span className="text-sm font-normal text-muted-foreground">gün</span></div>
+                <div className="text-xs text-muted-foreground">{avgSaleDaysByIlce.reduce((s, r) => s + r.count, 0)} kapanış</div>
+              </div>
+            )}
+          </div>
+          {isLoading ? <Skeleton h="h-44" /> : avgSaleDaysByIlce.length === 0 ? (
+            <div className="p-8 text-center text-sm text-muted-foreground">Süre bilgisi olan kapanış yok</div>
+          ) : (
+            <div className="divide-y divide-border/50">
+              {avgSaleDaysByIlce.map((r, i) => {
+                const max = Math.max(...avgSaleDaysByIlce.map(x => x.avg), 1);
+                return (
+                  <div key={r.ilce} className="px-5 py-3">
+                    <div className="flex items-center justify-between text-xs mb-1">
+                      <span className="font-medium">{r.ilce}</span>
+                      <span className="text-muted-foreground">{r.count} kapanış · <span className="font-semibold text-foreground">{r.avg} gün</span></span>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                      <div className="h-full rounded-full" style={{ width: `${(r.avg / max) * 100}%`, backgroundColor: COLORS[i % COLORS.length] }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* ── Agent Productivity Table ── */}

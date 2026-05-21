@@ -135,7 +135,7 @@ export interface IStorage {
   upsertCapSetting(year: number, amount: string): Promise<CapSetting>;
   deleteCapSetting(id: number): Promise<void>;
   getEmployeeCapStatus(employeeId: number): Promise<CapStatus | null>;
-  getAllEmployeesCapStatus(): Promise<Record<number, CapStatus>>;
+  getAllEmployeesCapStatus(): Promise<Record<number, CapStatus & { name: string; kwuid: string }>>;
   getClosings(): Promise<ClosingWithDetails[]>;
   getClosing(id: number): Promise<ClosingWithDetails | null>;
   updateClosing(id: number, data: Partial<{
@@ -1954,6 +1954,7 @@ export class DatabaseStorage implements IStorage {
         il: closings.il,
         ilce: closings.ilce,
         closingDate: closings.closingDate,
+        durationDays: closings.durationDays,
         sideId: closingSides.id,
         sideType: closingSides.sideType,
         bhbShare: closingAgents.bhbShare,
@@ -2082,12 +2083,37 @@ export class DatabaseStorage implements IStorage {
     const byIl   = toGeoArr(ilMap,   "il");
     const byIlce = toGeoArr(ilceMap, "ilce");
 
+    // ── Average sale time (only closings with durationDays > 0) ──
+    const durationById = new Map<number, { days: number; ilce: string | null }>();
+    for (const r of completedRows) {
+      if (!durationById.has(r.closingId) && r.durationDays && r.durationDays > 0) {
+        durationById.set(r.closingId, { days: r.durationDays, ilce: r.ilce ?? null });
+      }
+    }
+    const allDurations = Array.from(durationById.values());
+    const avgSaleDays = allDurations.length > 0
+      ? Math.round(allDurations.reduce((s, d) => s + d.days, 0) / allDurations.length)
+      : null;
+
+    const ilceDurMap = new Map<string, { total: number; count: number }>();
+    for (const d of allDurations) {
+      const key = d.ilce || "Belirtilmemiş";
+      if (!ilceDurMap.has(key)) ilceDurMap.set(key, { total: 0, count: 0 });
+      const v = ilceDurMap.get(key)!;
+      v.total += d.days;
+      v.count++;
+    }
+    const avgSaleDaysByIlce = Array.from(ilceDurMap.entries())
+      .map(([ilce, v]) => ({ ilce, avg: Math.round(v.total / v.count), count: v.count }))
+      .sort((a, b) => a.avg - b.avg);
+
     return {
       completedCount: cIds.size, expectedCount: eIds.size,
       completedVolume, expectedVolume,
       completedBHB, expectedBHB, completedBM, expectedBM,
       bySideType,
       monthlyTrend, byAgent, byCategory, byIl, byIlce,
+      avgSaleDays, avgSaleDaysByIlce,
     };
   }
 
