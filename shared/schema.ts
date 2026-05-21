@@ -342,10 +342,10 @@ export const capSettings = pgTable("cap_settings", {
 export type CapSetting = typeof capSettings.$inferSelect;
 
 // ── Closings ──────────────────────────────────────────────────────────────────
-export const DEAL_TYPES = ["Arsa", "Konut", "Ticari"] as const;
+export const DEAL_TYPES = ["Arsa", "Konut", "Ticari", "Yönlendirme", "Kiralama"] as const;
 export type DealType = (typeof DEAL_TYPES)[number];
 
-export const DEAL_CATEGORIES = ["Satış", "Kiralık"] as const;
+export const DEAL_CATEGORIES = ["Satış", "Kiralık", "Yönlendirme"] as const;
 export type DealCategory = (typeof DEAL_CATEGORIES)[number];
 
 export const closings = pgTable("closings", {

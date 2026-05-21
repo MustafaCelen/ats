@@ -1375,7 +1375,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
           const adres = first["Adres"] ?? first["Mülk Adresi"] ?? "";
           const islemCol = first["İşlem"] ?? "";
-          const dealCategory = islemCol === "Kiralama" ? "Kiralık" : islemCol === "Kiralık" ? "Kiralık" : "Satış";
+          const dealCategory = islemCol === "Kiralama" ? "Kiralık" : islemCol === "Kiralık" ? "Kiralık" : islemCol === "Yönlendirme" ? "Yönlendirme" : "Satış";
 
           await storage.createClosing({
             disableCap: true,
