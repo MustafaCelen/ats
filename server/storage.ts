@@ -1923,7 +1923,7 @@ export class DatabaseStorage implements IStorage {
     return query;
   }
 
-  async getClosingStats(startDate: Date, endDate: Date, office?: string) {
+  async getClosingStats(startDate: Date, endDate: Date, office?: string, dealType?: string, dealCategory?: string) {
     const end = new Date(endDate);
     end.setHours(23, 59, 59, 999);
 
@@ -1971,6 +1971,8 @@ export class DatabaseStorage implements IStorage {
         gte(closings.closingDate, startDate),
         lte(closings.closingDate, end),
         ...(completedAgentCond ? [completedAgentCond] : []),
+        ...(dealCategory ? [eq(closings.dealCategory, dealCategory)] : []),
+        ...(dealType ? [eq(closings.dealType, dealType)] : []),
       ));
 
     const expectedRows = await db

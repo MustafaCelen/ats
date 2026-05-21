@@ -92,12 +92,14 @@ function useCapStatuses() {
   });
 }
 
-function useClosingStats(startDate: string, endDate: string, office?: string) {
+function useClosingStats(startDate: string, endDate: string, office?: string, dealCategory?: string, dealType?: string) {
   return useQuery<any>({
-    queryKey: ["/api/closings/stats", startDate, endDate, office ?? "all"],
+    queryKey: ["/api/closings/stats", startDate, endDate, office ?? "all", dealCategory ?? "all", dealType ?? "all"],
     queryFn: async () => {
       const params = new URLSearchParams({ startDate, endDate });
       if (office) params.set("office", office);
+      if (dealCategory) params.set("dealCategory", dealCategory);
+      if (dealType) params.set("dealType", dealType);
       const res = await fetch(`/api/closings/stats?${params.toString()}`, { credentials: "include" });
       if (!res.ok) throw new Error("Failed");
       return res.json();
@@ -112,6 +114,8 @@ export default function FinancialReports() {
   const [fromDate, setFromDate] = useState(() => formatYMD(new Date(new Date().getFullYear(), 0, 1)));
   const [toDate, setToDate] = useState(() => formatYMD(new Date()));
   const [officeFilter, setOfficeFilter] = useState<string | undefined>(undefined);
+  const [categoryFilter, setCategoryFilter] = useState<string | undefined>(undefined);
+  const [dealTypeFilter, setDealTypeFilter] = useState<string | undefined>(undefined);
 
   const vy = viewDate.getFullYear();
   const vm = viewDate.getMonth();
@@ -122,7 +126,7 @@ export default function FinancialReports() {
 
   const computedStart = useCustomRange ? fromDate : monthStart;
   const computedEnd   = useCustomRange ? toDate   : monthEnd;
-  const { data: stats, isLoading } = useClosingStats(computedStart, computedEnd, officeFilter);
+  const { data: stats, isLoading } = useClosingStats(computedStart, computedEnd, officeFilter, categoryFilter, dealTypeFilter);
   const { data: capStatuses = {} } = useCapStatuses();
 
   const capList = useMemo(() => {
@@ -219,6 +223,36 @@ export default function FinancialReports() {
                   onClick={() => setOfficeFilter(o)}
                 >
                   {o ?? "Tümü"}
+                </Button>
+              ))}
+            </div>
+
+            {/* İşlem (dealCategory) filter */}
+            <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-1">
+              {([undefined, "Satış", "Kiralık"] as const).map((c) => (
+                <Button
+                  key={String(c)}
+                  size="sm"
+                  variant={categoryFilter === c ? "default" : "ghost"}
+                  className="h-7 text-xs px-3"
+                  onClick={() => setCategoryFilter(c)}
+                >
+                  {c ?? "Tüm İşlem"}
+                </Button>
+              ))}
+            </div>
+
+            {/* İşlem Tipi filter */}
+            <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-1">
+              {([undefined, "Arsa", "Konut", "Ticari"] as const).map((t) => (
+                <Button
+                  key={String(t)}
+                  size="sm"
+                  variant={dealTypeFilter === t ? "default" : "ghost"}
+                  className="h-7 text-xs px-3"
+                  onClick={() => setDealTypeFilter(t)}
+                >
+                  {t ?? "Tüm Tip"}
                 </Button>
               ))}
             </div>

@@ -1548,11 +1548,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.get("/api/closings/stats", requireAuth, requireAdmin, async (req, res) => {
     try {
-      const { startDate, endDate, office } = req.query as { startDate?: string; endDate?: string; office?: string };
+      const { startDate, endDate, office, dealType, dealCategory } = req.query as { startDate?: string; endDate?: string; office?: string; dealType?: string; dealCategory?: string };
       const now = new Date();
       const start = startDate ? new Date(startDate) : new Date(now.getFullYear(), now.getMonth(), 1);
       const end = endDate ? new Date(endDate) : new Date(now.getFullYear(), now.getMonth() + 1, 0);
-      res.json(await storage.getClosingStats(start, end, office));
+      res.json(await storage.getClosingStats(start, end, office, dealType, dealCategory));
     } catch (err) {
       console.error("[GET /api/closings/stats]", err);
       res.status(500).json({ message: "Internal server error" });
