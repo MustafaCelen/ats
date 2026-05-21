@@ -2097,29 +2097,38 @@ export class DatabaseStorage implements IStorage {
     const byIlce = toGeoArr(ilceMap, "ilce");
 
     // ── Average sale time (only closings with durationDays > 0) ──
-    const durationById = new Map<number, { days: number; ilce: string | null }>();
+    const durationById = new Map<number, { days: number; ilce: string | null; category: string }>();
     for (const r of completedRows) {
       if (!durationById.has(r.closingId) && r.durationDays && r.durationDays > 0) {
-        durationById.set(r.closingId, { days: r.durationDays, ilce: r.ilce ?? null });
+        durationById.set(r.closingId, { days: r.durationDays, ilce: r.ilce ?? null, category: r.dealCategory ?? "Satış" });
       }
     }
     const allDurations = Array.from(durationById.values());
-    const avgSaleDays = allDurations.length > 0
-      ? Math.round(allDurations.reduce((s, d) => s + d.days, 0) / allDurations.length)
-      : null;
 
-    const ilceDurMap = new Map<string, { total: number; count: number }>();
-    for (const d of allDurations) {
-      const key = d.ilce || "Belirtilmemiş";
-      if (!ilceDurMap.has(key)) ilceDurMap.set(key, { total: 0, count: 0 });
-      const v = ilceDurMap.get(key)!;
-      v.total += d.days;
-      v.count++;
-    }
-    const avgSaleDaysByIlce = Array.from(ilceDurMap.entries())
-      .map(([ilce, v]) => ({ ilce, avg: Math.round(v.total / v.count), count: v.count }))
-      .filter(r => r.count >= 3)
-      .sort((a, b) => a.avg - b.avg);
+    const calcAvg = (items: typeof allDurations) =>
+      items.length > 0 ? Math.round(items.reduce((s, d) => s + d.days, 0) / items.length) : null;
+
+    const salesDurations  = allDurations.filter(d => d.category === "Satış");
+    const rentalDurations = allDurations.filter(d => d.category === "Kiralık");
+    const avgSaleDays   = calcAvg(salesDurations);
+    const avgRentalDays = calcAvg(rentalDurations);
+
+    const buildIlceMap = (items: typeof allDurations) => {
+      const map = new Map<string, { total: number; count: number }>();
+      for (const d of items) {
+        const key = d.ilce || "Belirtilmemiş";
+        if (!map.has(key)) map.set(key, { total: 0, count: 0 });
+        map.get(key)!.total += d.days;
+        map.get(key)!.count++;
+      }
+      return Array.from(map.entries())
+        .map(([ilce, v]) => ({ ilce, avg: Math.round(v.total / v.count), count: v.count }))
+        .filter(r => r.count >= 3)
+        .sort((a, b) => a.avg - b.avg);
+    };
+
+    const avgSaleDaysByIlce   = buildIlceMap(salesDurations);
+    const avgRentalDaysByIlce = buildIlceMap(rentalDurations);
 
     return {
       completedCount: cIds.size, expectedCount: eIds.size,
@@ -2127,7 +2136,7 @@ export class DatabaseStorage implements IStorage {
       completedBHB, expectedBHB, completedBM, expectedBM,
       bySideType,
       monthlyTrend, byAgent, byCategory, byDealType, byIl, byIlce,
-      avgSaleDays, avgSaleDaysByIlce,
+      avgSaleDays, avgSaleDaysByIlce, avgRentalDays, avgRentalDaysByIlce,
     };
   }
 
