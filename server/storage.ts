@@ -2105,6 +2105,7 @@ export class DatabaseStorage implements IStorage {
     }
     const avgSaleDaysByIlce = Array.from(ilceDurMap.entries())
       .map(([ilce, v]) => ({ ilce, avg: Math.round(v.total / v.count), count: v.count }))
+      .filter(r => r.count >= 3)
       .sort((a, b) => a.avg - b.avg);
 
     return {
