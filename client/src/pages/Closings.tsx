@@ -1443,7 +1443,9 @@ export default function Closings() {
   // Year-filtered closings for stats and table
   const yearFilteredClosings = useMemo(() =>
     yearFilter === "all" ? closings : closings.filter((c: any) => {
-      const d = (c as any).closingDate;
+      const d = (c as any).status === "expected"
+        ? ((c as any).closingDate ?? (c as any).createdAt)
+        : (c as any).closingDate;
       if (!d) return false;
       return new Date(d).getFullYear().toString() === yearFilter;
     }), [closings, yearFilter]);
@@ -1473,7 +1475,7 @@ export default function Closings() {
   // Flatten closings into one row per agent per side
   type FlatRow = {
     closingId: number; sideId: number; agentId: number;
-    status: string;
+    status: string; createdAt: string;
     closingDate: string; propertyAddress: string; il: string; ilce: string;
     mahalle: string; propertyDetails: string;
     dealCategory: string; dealType: string; saleValue: string; commissionRate: string;
@@ -1503,6 +1505,7 @@ export default function Closings() {
             sideId: side.id,
             agentId: agent.id,
             status: (c as any).status ?? "completed",
+            createdAt: (c as any).createdAt ? new Date((c as any).createdAt).toISOString().split("T")[0] : "",
             closingDate: c.closingDate ? new Date(c.closingDate).toISOString().split("T")[0] : "",
             propertyAddress: c.propertyAddress ?? "",
             il: (c as any).il ?? "",
@@ -1550,7 +1553,10 @@ export default function Closings() {
   // Filter by status + year + search query
   const filteredRows = useMemo(() => {
     let rows = statusFilter === "all" ? flatRows : flatRows.filter(r => r.status === statusFilter);
-    if (yearFilter !== "all") rows = rows.filter(r => r.closingDate.startsWith(yearFilter));
+    if (yearFilter !== "all") rows = rows.filter(r => {
+      const d = r.status === "expected" ? (r.closingDate || r.createdAt) : r.closingDate;
+      return d.startsWith(yearFilter);
+    });
     const q = search.trim().toLowerCase();
     if (!q) return rows;
     const matchingIds = new Set<number>();
