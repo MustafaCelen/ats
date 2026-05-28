@@ -358,7 +358,7 @@ export const closings = pgTable("closings", {
   dealCategory: text("deal_category").notNull().default("Satış"), // Satış | Kiralık
   dealType: text("deal_type").notNull().default("Konut"),
   saleValue: numeric("sale_value", { precision: 15, scale: 2 }).notNull(),
-  commissionRate: numeric("commission_rate", { precision: 5, scale: 2 }).notNull().default("2.00"),
+  commissionRate: numeric("commission_rate", { precision: 10, scale: 2 }).notNull().default("2.00"),
   openingPrice: numeric("opening_price", { precision: 15, scale: 2 }),  // Açılış Rakamı (listing price)
   durationDays: integer("duration_days"),                               // Süre/Gün
   customerSource: text("customer_source"),                              // Müşteri nereden buldu?
@@ -392,7 +392,7 @@ export const closingAgents = pgTable("closing_agents", {
   id: serial("id").primaryKey(),
   closingSideId: integer("closing_side_id").notNull(),
   employeeId: integer("employee_id").notNull(),
-  splitPercentage: numeric("split_percentage", { precision: 5, scale: 2 }).notNull(),
+  splitPercentage: numeric("split_percentage", { precision: 10, scale: 2 }).notNull(),
   bhbShare: numeric("bhb_share", { precision: 15, scale: 2 }).notNull(),
   mainBranchShare: numeric("main_branch_share", { precision: 15, scale: 2 }).notNull(),
   kwtrKdv: numeric("kwtr_kdv", { precision: 15, scale: 2 }).notNull().default("0"),
@@ -402,7 +402,7 @@ export const closingAgents = pgTable("closing_agents", {
   ukShare: numeric("uk_share", { precision: 15, scale: 2 }).notNull().default("0"),
   employeeNet: numeric("employee_net", { precision: 15, scale: 2 }).notNull(),
   contractTypeSnapshot: text("contract_type_snapshot"),
-  ukRateSnapshot: numeric("uk_rate_snapshot", { precision: 5, scale: 2 }).notNull().default("0"),
+  ukRateSnapshot: numeric("uk_rate_snapshot", { precision: 10, scale: 2 }).notNull().default("0"),
   capAmountApplied: numeric("cap_amount_applied", { precision: 15, scale: 2 }),
   capUsedBefore: numeric("cap_used_before", { precision: 15, scale: 2 }).notNull().default("0"),
   createdAt: timestamp("created_at").defaultNow(),
