@@ -2337,8 +2337,42 @@ export class DatabaseStorage implements IStorage {
         byDealType,
         byCategory,
         monthlyTrend,
+        lastClosingDate: null as string | null, // filled below
+        daysSinceLastClosing: null as number | null,
       };
     });
+
+    // Fetch last closing date per student globally (regardless of date filter)
+    const lastClosingRows = studentIds.length > 0
+      ? await db
+          .select({ employeeId: closingAgents.employeeId, closingDate: closings.closingDate })
+          .from(closingAgents)
+          .innerJoin(closingSides, eq(closingSides.id, closingAgents.closingSideId))
+          .innerJoin(closings, eq(closings.id, closingSides.closingId))
+          .where(and(
+            inArray(closingAgents.employeeId, studentIds),
+            eq(closings.status, "completed"),
+            isNotNull(closings.closingDate),
+          ))
+      : [];
+
+    const lastClosingMap = new Map<number, Date>();
+    for (const r of lastClosingRows) {
+      if (!r.employeeId || !r.closingDate) continue;
+      const d = new Date(r.closingDate);
+      const prev = lastClosingMap.get(r.employeeId);
+      if (!prev || d > prev) lastClosingMap.set(r.employeeId, d);
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    for (const s of studentStats) {
+      const last = lastClosingMap.get(s.employeeId);
+      if (last) {
+        s.lastClosingDate = last.toISOString().split("T")[0];
+        s.daysSinceLastClosing = Math.floor((today.getTime() - last.getTime()) / 86_400_000);
+      }
+    }
 
     const coachGroups = new Map<number | null, typeof studentStats>();
     for (const s of studentStats) {

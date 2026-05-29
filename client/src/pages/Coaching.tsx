@@ -109,6 +109,14 @@ function StudentCard({ student, rank }: { student: any; rank: number }) {
             <p className="text-xs text-muted-foreground">Net</p>
             <p className="text-sm font-bold">{fmtShort(student.totalNet)}</p>
           </div>
+          {student.daysSinceLastClosing != null && (
+            <div>
+              <p className="text-xs text-muted-foreground">Son Kap.</p>
+              <p className={`text-sm font-bold ${student.daysSinceLastClosing > 60 ? "text-red-500" : student.daysSinceLastClosing > 30 ? "text-amber-500" : "text-emerald-600"}`}>
+                {student.daysSinceLastClosing}g
+              </p>
+            </div>
+          )}
           {expanded ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
         </div>
       </button>
@@ -133,6 +141,15 @@ function StudentCard({ student, rank }: { student: any; rank: number }) {
               <p className="text-xs text-muted-foreground">Ort. Süre</p>
               <p className="font-bold">{student.avgSaleDays != null ? `${student.avgSaleDays} gün` : "—"}</p>
             </div>
+            {student.lastClosingDate && (
+              <div className="bg-card border border-border rounded-lg p-3">
+                <p className="text-xs text-muted-foreground">Son Kapanış</p>
+                <p className="font-bold">{student.lastClosingDate}</p>
+                <p className={`text-xs font-semibold mt-0.5 ${student.daysSinceLastClosing > 60 ? "text-red-500" : student.daysSinceLastClosing > 30 ? "text-amber-500" : "text-emerald-600"}`}>
+                  {student.daysSinceLastClosing} gün önce
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Side types + deal types */}
@@ -480,6 +497,40 @@ export default function Coaching() {
                 ))}
               </div>
             </div>
+
+            {/* Days since last closing ranking */}
+            {allStudents.some((s: any) => s.daysSinceLastClosing != null) && (() => {
+              const ranked = [...allStudents]
+                .filter((s: any) => s.daysSinceLastClosing != null)
+                .sort((a: any, b: any) => b.daysSinceLastClosing - a.daysSinceLastClosing);
+              return (
+                <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
+                  <h2 className="text-sm font-semibold mb-3 flex items-center gap-1.5">
+                    <Award className="h-4 w-4 text-rose-500" /> Son Kapanıştan Bu Yana
+                  </h2>
+                  <div className="space-y-2">
+                    {ranked.map((s: any) => {
+                      const days = s.daysSinceLastClosing as number;
+                      const barColor = days > 60 ? "bg-red-400" : days > 30 ? "bg-amber-400" : "bg-emerald-400";
+                      const maxDays = ranked[0].daysSinceLastClosing;
+                      const pct = maxDays > 0 ? Math.round((days / maxDays) * 100) : 100;
+                      return (
+                        <div key={s.employeeId} className="flex items-center gap-3">
+                          <span className="text-xs w-28 truncate font-medium">{s.name}</span>
+                          <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
+                            <div className={`h-full rounded-full ${barColor}`} style={{ width: `${pct}%` }} />
+                          </div>
+                          <span className={`text-xs font-semibold w-16 text-right ${days > 60 ? "text-red-500" : days > 30 ? "text-amber-500" : "text-emerald-600"}`}>
+                            {days} gün
+                          </span>
+                          <span className="text-xs text-muted-foreground w-24 text-right hidden sm:block">{s.lastClosingDate}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Coach sections */}
             <div className="space-y-4">
