@@ -9,33 +9,89 @@ import { useAuth, useLogout } from "@/hooks/use-auth";
 
 interface LayoutProps { children: React.ReactNode; }
 
-const hiringManagerNavItems = [
-  { icon: LayoutDashboard, label: "Dashboard",    href: "/dashboard" },
-  { icon: Briefcase,       label: "Üretim Bandı", href: "/jobs" },
+// ── Nav type system ───────────────────────────────────────────────────────────
+
+type NavLeaf  = { icon: React.ElementType; label: string; href: string };
+type NavGroup = { icon: React.ElementType; label: string; children: NavLeaf[] };
+type NavEntry = NavLeaf | NavGroup;
+
+function isGroup(item: NavEntry): item is NavGroup {
+  return "children" in item;
+}
+
+function isLeafActive(item: NavLeaf, location: string) {
+  return location === item.href || (item.href !== "/dashboard" && location.startsWith(item.href));
+}
+
+// ── Nav item definitions ──────────────────────────────────────────────────────
+
+const reportsGroupHM: NavGroup = {
+  icon: BarChart2,
+  label: "Raporlar",
+  children: [
+    { icon: BarChart2,     label: "Üretim Bandı Raporları", href: "/reports"   },
+    { icon: GraduationCap, label: "ÜK & DÜA Raporları",    href: "/coaching"  },
+  ],
+};
+
+const reportsGroupAdmin: NavGroup = {
+  icon: BarChart2,
+  label: "Raporlar",
+  children: [
+    { icon: DollarSign,    label: "Finansal Raporlar",      href: "/financial-reports" },
+    { icon: BarChart2,     label: "Üretim Bandı Raporları", href: "/reports"           },
+    { icon: GraduationCap, label: "ÜK & DÜA Raporları",    href: "/coaching"          },
+  ],
+};
+
+const hiringManagerNavItems: NavEntry[] = [
+  { icon: LayoutDashboard, label: "Dashboard",    href: "/dashboard"  },
+  { icon: Briefcase,       label: "Üretim Bandı", href: "/jobs"       },
   { icon: Users,           label: "Adaylar",      href: "/candidates" },
-  { icon: UserCheck,       label: "Danışmanlar",  href: "/employees" },
+  { icon: UserCheck,       label: "Danışmanlar",  href: "/employees"  },
   { icon: Calendar,        label: "Randevular",   href: "/interviews" },
   { icon: KanbanSquare,    label: "Onboarding",   href: "/onboarding" },
-  { icon: BarChart2,       label: "Raporlar",     href: "/reports" },
-  { icon: ClipboardList,   label: "Görevler",     href: "/tasks" },
-  { icon: GraduationCap,   label: "ÜK Koçluğu & DÜA",  href: "/coaching" },
+  { icon: ClipboardList,   label: "Görevler",     href: "/tasks"      },
+  reportsGroupHM,
 ];
 
-const adminNavItems = [
-  ...hiringManagerNavItems,
-  { icon: DollarSign,      label: "İşlem Kapanış",    href: "/closings" },
-  { icon: BarChart2,       label: "Finansal Rapor",   href: "/financial-reports" },
-  { icon: Shield,          label: "Users",             href: "/users" },
+const adminNavItems: NavEntry[] = [
+  { icon: LayoutDashboard, label: "Dashboard",      href: "/dashboard"  },
+  { icon: Briefcase,       label: "Üretim Bandı",   href: "/jobs"       },
+  { icon: Users,           label: "Adaylar",        href: "/candidates" },
+  { icon: UserCheck,       label: "Danışmanlar",    href: "/employees"  },
+  { icon: Calendar,        label: "Randevular",     href: "/interviews" },
+  { icon: KanbanSquare,    label: "Onboarding",     href: "/onboarding" },
+  { icon: ClipboardList,   label: "Görevler",       href: "/tasks"      },
+  { icon: DollarSign,      label: "İşlem Kapanış",  href: "/closings"   },
+  reportsGroupAdmin,
+  { icon: Shield,          label: "Users",          href: "/users"      },
 ];
 
-const assistantNavItems = [
-  { icon: Briefcase,     label: "Üretim Bandı", href: "/jobs" },
+const assistantNavItems: NavEntry[] = [
+  { icon: Briefcase,     label: "Üretim Bandı", href: "/jobs"       },
   { icon: Users,         label: "Adaylar",      href: "/candidates" },
-  { icon: UserCheck,     label: "Danışmanlar",  href: "/employees" },
+  { icon: UserCheck,     label: "Danışmanlar",  href: "/employees"  },
   { icon: Calendar,      label: "Randevular",   href: "/interviews" },
   { icon: KanbanSquare,  label: "Onboarding",   href: "/onboarding" },
-  { icon: ClipboardList, label: "Görevler",     href: "/tasks" },
+  { icon: ClipboardList, label: "Görevler",     href: "/tasks"      },
 ];
+
+// ── Helper: find the label for the current location ───────────────────────────
+
+function resolveCurrentLabel(items: NavEntry[], location: string): string {
+  for (const item of items) {
+    if (isGroup(item)) {
+      const child = item.children.find((c) => isLeafActive(c, location));
+      if (child) return child.label;
+    } else {
+      if (isLeafActive(item, location)) return item.label;
+    }
+  }
+  return "Page";
+}
+
+// ── Layout ────────────────────────────────────────────────────────────────────
 
 export function Layout({ children }: LayoutProps) {
   const [location] = useLocation();
@@ -43,26 +99,88 @@ export function Layout({ children }: LayoutProps) {
   const { data: user } = useAuth();
   const { mutate: logout } = useLogout();
 
-  const isAdmin = user?.role === "admin";
+  const isAdmin     = user?.role === "admin";
   const isAssistant = user?.role === "assistant";
-  const navItems = isAdmin ? adminNavItems : isAssistant ? assistantNavItems : hiringManagerNavItems;
+  const navItems    = isAdmin ? adminNavItems : isAssistant ? assistantNavItems : hiringManagerNavItems;
+
+  // Auto-open the reports group if we're on a report sub-route
+  const defaultOpen = navItems.find(
+    (item) => isGroup(item) && item.children.some((c) => isLeafActive(c, location))
+  );
+  const [openGroup, setOpenGroup] = useState<string | null>(defaultOpen?.label ?? null);
 
   const handleLogout = () => {
     logout(undefined, { onSuccess: () => { window.location.href = "/login"; } });
   };
 
   const NavList = () => (
-    <nav className="flex-1 space-y-0.5 p-3">
+    <nav className="flex-1 space-y-0.5 p-3 overflow-y-auto">
       {navItems.map((item) => {
-        const isActive = location === item.href || (item.href !== "/dashboard" && location.startsWith(item.href));
+        if (isGroup(item)) {
+          const isOpen    = openGroup === item.label;
+          const hasActive = item.children.some((c) => isLeafActive(c, location));
+
+          return (
+            <div key={item.label}>
+              {/* Group header button */}
+              <button
+                type="button"
+                onClick={() => setOpenGroup(isOpen ? null : item.label)}
+                className={clsx(
+                  "w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150",
+                  hasActive
+                    ? "text-primary bg-primary/8"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                )}
+              >
+                <item.icon className="h-4 w-4 shrink-0" />
+                <span className="flex-1 text-left">{item.label}</span>
+                <ChevronRight
+                  className={clsx(
+                    "h-3.5 w-3.5 shrink-0 transition-transform duration-200",
+                    isOpen && "rotate-90"
+                  )}
+                />
+              </button>
+
+              {/* Children */}
+              {isOpen && (
+                <div className="ml-3 mt-0.5 mb-0.5 pl-3 border-l border-border space-y-0.5">
+                  {item.children.map((child) => {
+                    const active = isLeafActive(child, location);
+                    return (
+                      <Link
+                        key={child.href}
+                        href={child.href}
+                        onClick={() => setMobileOpen(false)}
+                        className={clsx(
+                          "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-150",
+                          active
+                            ? "bg-primary text-primary-foreground shadow-sm"
+                            : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                        )}
+                      >
+                        <child.icon className="h-4 w-4 shrink-0" />
+                        {child.label}
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        }
+
+        // Regular leaf item
+        const active = isLeafActive(item, location);
         return (
           <Link
             key={item.href}
             href={item.href}
             onClick={() => setMobileOpen(false)}
             className={clsx(
-              "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150",
-              isActive
+              "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150",
+              active
                 ? "bg-primary text-primary-foreground shadow-sm"
                 : "text-muted-foreground hover:bg-muted hover:text-foreground"
             )}
@@ -75,11 +193,8 @@ export function Layout({ children }: LayoutProps) {
     </nav>
   );
 
-  const currentLabel = navItems.find(
-    (n) => location === n.href || (n.href !== "/dashboard" && location.startsWith(n.href))
-  )?.label ?? "Page";
-
-  const roleLabel = isAdmin ? "Admin" : isAssistant ? "Assistant" : "Hiring Manager";
+  const currentLabel = resolveCurrentLabel(navItems, location);
+  const roleLabel    = isAdmin ? "Admin" : isAssistant ? "Assistant" : "Hiring Manager";
 
   const UserPill = () => (
     <div className="border-t border-border p-3">
