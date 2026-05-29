@@ -6,7 +6,7 @@ import {
   CartesianGrid, AreaChart, Area,
 } from "recharts";
 import {
-  Users, TrendingUp, DollarSign, Handshake, ChevronDown, ChevronRight,
+  Users, DollarSign, Handshake, ChevronDown, ChevronRight,
   Award, Target, BarChart2, ChevronLeft,
 } from "lucide-react";
 import { format } from "date-fns";
@@ -479,22 +479,6 @@ export default function Coaching() {
                     <Bar dataKey="closings" name="Kapanış" fill="#3b82f6" radius={[0, 4, 4, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
-              </div>
-            </div>
-
-            {/* Cap % overview */}
-            <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-              <h2 className="text-sm font-semibold mb-3 flex items-center gap-1.5"><TrendingUp className="h-4 w-4 text-emerald-500" /> Cap Durumu</h2>
-              <div className="space-y-2">
-                {[...allStudents].sort((a, b) => b.capPct - a.capPct).map(s => (
-                  <div key={s.employeeId} className="flex items-center gap-3">
-                    <span className="text-xs w-28 truncate font-medium">{s.name}</span>
-                    <div className="flex-1"><CapBar pct={s.capPct} /></div>
-                    <span className="text-xs text-muted-foreground w-20 text-right">
-                      {fmtShort(s.capUsed)} / {fmtShort(s.capAmount)} ₺
-                    </span>
-                  </div>
-                ))}
               </div>
             </div>
 
