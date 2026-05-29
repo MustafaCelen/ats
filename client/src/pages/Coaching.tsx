@@ -226,6 +226,7 @@ function CoachSection({ coach, defaultExpanded = false }: { coach: any; defaultE
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function Coaching() {
   const [year, setYear] = useState(CURRENT_YEAR);
+  const [selectedCoachId, setSelectedCoachId] = useState<number | null | "all">("all");
   const years = Array.from({ length: 4 }, (_, i) => CURRENT_YEAR - i);
 
   const startDate = formatYMD(new Date(year, 0, 1));
@@ -238,9 +239,15 @@ export default function Coaching() {
         .then(r => r.json()),
   });
 
-  const coaches = data?.coaches ?? [];
+  const allCoaches = data?.coaches ?? [];
 
-  // Flatten all students for summary and rankings
+  // Filtered coaches based on selection
+  const coaches = useMemo(() => {
+    if (selectedCoachId === "all") return allCoaches;
+    return allCoaches.filter(c => c.coachId === selectedCoachId);
+  }, [allCoaches, selectedCoachId]);
+
+  // Flatten filtered students for summary and rankings
   const allStudents = useMemo(() => coaches.flatMap(c => c.students), [coaches]);
   const totalClosings = useMemo(() => allStudents.reduce((s, st) => s + st.totalClosings, 0), [allStudents]);
   const totalBHB = useMemo(() => allStudents.reduce((s, st) => s + st.totalBHB, 0), [allStudents]);
@@ -248,7 +255,7 @@ export default function Coaching() {
   const avgCapPct = useMemo(() => allStudents.length > 0
     ? Math.round(allStudents.reduce((s, st) => s + st.capPct, 0) / allStudents.length) : 0, [allStudents]);
 
-  // Aggregate monthly trend across all students
+  // Aggregate monthly trend across filtered students
   const aggregatedMonthly = useMemo(() => {
     const map = new Map<string, { count: number; bhb: number; volume: number }>();
     for (const st of allStudents) {
@@ -263,32 +270,62 @@ export default function Coaching() {
       .map(([month, v]) => ({ month, monthLabel: monthLabel(month), ...v }));
   }, [allStudents]);
 
-  // Top 5 by BHB for rankings bar
   const topByBHB = useMemo(() => [...allStudents].sort((a, b) => b.totalBHB - a.totalBHB).slice(0, 10), [allStudents]);
   const topByClosings = useMemo(() => [...allStudents].sort((a, b) => b.totalClosings - a.totalClosings).slice(0, 10), [allStudents]);
 
   const isSingleCoach = coaches.length === 1;
+  const showCoachFilter = allCoaches.length > 1;
 
   return (
     <Layout>
       <div className="space-y-6">
         {/* Header */}
-        <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-start justify-between flex-wrap gap-3">
           <div>
             <h1 className="text-2xl font-bold">Üretkenlik Koçluğu</h1>
             <p className="text-sm text-muted-foreground mt-0.5">ÜK danışmanlarının analitik raporu</p>
           </div>
-          <div className="flex items-center gap-1 bg-muted/60 rounded-xl p-1">
-            {years.map(y => (
-              <button
-                key={y}
-                onClick={() => setYear(y)}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors
-                  ${year === y ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-              >
-                {y}
-              </button>
-            ))}
+          <div className="flex flex-col items-end gap-2">
+            {/* Year selector */}
+            <div className="flex items-center gap-1 bg-muted/60 rounded-xl p-1">
+              {years.map(y => (
+                <button
+                  key={y}
+                  onClick={() => setYear(y)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors
+                    ${year === y ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  {y}
+                </button>
+              ))}
+            </div>
+            {/* Coach filter */}
+            {showCoachFilter && (
+              <div className="flex items-center gap-1 flex-wrap justify-end">
+                <button
+                  onClick={() => setSelectedCoachId("all")}
+                  className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors
+                    ${selectedCoachId === "all"
+                      ? "bg-violet-600 text-white border-violet-600"
+                      : "bg-card text-muted-foreground border-border hover:border-violet-400 hover:text-violet-600"}`}
+                >
+                  Tüm Koçlar
+                </button>
+                {allCoaches.map(c => (
+                  <button
+                    key={c.coachId ?? "none"}
+                    onClick={() => setSelectedCoachId(c.coachId)}
+                    className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors
+                      ${selectedCoachId === c.coachId
+                        ? "bg-violet-600 text-white border-violet-600"
+                        : "bg-card text-muted-foreground border-border hover:border-violet-400 hover:text-violet-600"}`}
+                  >
+                    {c.coachName}
+                    <span className="ml-1 opacity-60">({c.studentCount})</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
