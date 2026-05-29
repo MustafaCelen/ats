@@ -18,7 +18,7 @@ const hiringManagerNavItems = [
   { icon: KanbanSquare,    label: "Onboarding",   href: "/onboarding" },
   { icon: BarChart2,       label: "Raporlar",     href: "/reports" },
   { icon: ClipboardList,   label: "Görevler",     href: "/tasks" },
-  { icon: GraduationCap,   label: "ÜK Koçluğu",  href: "/coaching" },
+  { icon: GraduationCap,   label: "ÜK Koçluğu & DÜA",  href: "/coaching" },
 ];
 
 const adminNavItems = [
