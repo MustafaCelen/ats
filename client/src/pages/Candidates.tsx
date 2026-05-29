@@ -321,6 +321,7 @@ function CreateCandidateDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     if (!/^05\d{9}$/.test(form.phone)) {
       toast({ title: "Geçersiz telefon formatı", description: "05xxxxxxxxx formatında giriniz (11 haneli)", variant: "destructive" }); return;
     }
+    if (!form.office) { toast({ title: "KW Ofis seçimi zorunludur", variant: "destructive" }); return; }
 
     mutate({
       name: form.name.trim(),
@@ -451,14 +452,15 @@ function CreateCandidateDialog({ open, onOpenChange }: { open: boolean; onOpenCh
           <Section title="Konum (Türkiye)">
             <div className="grid grid-cols-2 gap-3">
               <div className="col-span-2">
-                <Field label="KW Ofis">
+                <Field label="KW Ofis *">
                   <Select value={form.office} onValueChange={(v) => f("office", v)}>
-                    <SelectTrigger><SelectValue placeholder="Ofis seçin..." /></SelectTrigger>
+                    <SelectTrigger className={!form.office ? "border-red-300" : ""}><SelectValue placeholder="Ofis seçin..." /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="Akatlar">Akatlar</SelectItem>
                       <SelectItem value="Zekeriyaköy">Zekeriyaköy</SelectItem>
                     </SelectContent>
                   </Select>
+                  {!form.office && <p className="text-xs text-red-500 mt-1">Ofis seçimi zorunludur</p>}
                 </Field>
               </div>
               <Field label="Şehir">
