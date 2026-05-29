@@ -7,8 +7,10 @@ import {
 } from "recharts";
 import {
   Users, TrendingUp, DollarSign, Handshake, ChevronDown, ChevronRight,
-  Award, Clock, Target, BarChart2,
+  Award, Clock, Target, BarChart2, ChevronLeft,
 } from "lucide-react";
+import { format } from "date-fns";
+import { tr } from "date-fns/locale";
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmtTRY(n: number) {
   return new Intl.NumberFormat("tr-TR", { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n) + " ₺";
@@ -228,18 +230,20 @@ function CoachSection({ coach, filteredStudents, defaultExpanded = false }: { co
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function Coaching() {
-  const [year, setYear] = useState(CURRENT_YEAR);
-  const [month, setMonth] = useState(0); // 0 = tüm yıl, 1-12 = ay
+  const [viewDate, setViewDate] = useState(() => new Date(CURRENT_YEAR, new Date().getMonth(), 1));
+  const [allYear, setAllYear] = useState(false);
   const [selectedCoachId, setSelectedCoachId] = useState<number | null | "all">("all");
   const [typeFilter, setTypeFilter] = useState<"all" | "uk" | "dua">("all");
-  const years = Array.from({ length: 4 }, (_, i) => CURRENT_YEAR - i);
 
-  const startDate = month === 0
-    ? formatYMD(new Date(year, 0, 1))
-    : formatYMD(new Date(year, month - 1, 1));
-  const endDate = month === 0
-    ? formatYMD(new Date(year, 11, 31))
-    : formatYMD(new Date(year, month, 0)); // son günü otomatik hesaplar
+  const prevMonth = () => setViewDate(d => new Date(d.getFullYear(), d.getMonth() - 1, 1));
+  const nextMonth = () => setViewDate(d => new Date(d.getFullYear(), d.getMonth() + 1, 1));
+
+  const startDate = allYear
+    ? formatYMD(new Date(viewDate.getFullYear(), 0, 1))
+    : formatYMD(new Date(viewDate.getFullYear(), viewDate.getMonth(), 1));
+  const endDate = allYear
+    ? formatYMD(new Date(viewDate.getFullYear(), 11, 31))
+    : formatYMD(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0));
 
   const { data, isLoading } = useQuery<{ coaches: any[] }>({
     queryKey: ["/api/coaching/stats", startDate, endDate],
@@ -300,38 +304,28 @@ export default function Coaching() {
             <p className="text-sm text-muted-foreground mt-0.5">ÜK danışmanlarının analitik raporu</p>
           </div>
           <div className="flex flex-col items-end gap-2">
-            {/* Year selector */}
-            <div className="flex items-center gap-1 bg-muted/60 rounded-xl p-1">
-              {years.map(y => (
-                <button
-                  key={y}
-                  onClick={() => { setYear(y); setMonth(0); }}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors
-                    ${year === y ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-                >
-                  {y}
-                </button>
-              ))}
-            </div>
-            {/* Month filter */}
-            <div className="flex items-center gap-1 flex-wrap justify-end max-w-sm">
+            {/* Month navigator */}
+            <div className="flex items-center gap-1">
               <button
-                onClick={() => setMonth(0)}
-                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors
-                  ${month === 0 ? "bg-card text-foreground shadow-sm ring-1 ring-border" : "text-muted-foreground hover:text-foreground"}`}
+                onClick={() => setAllYear(v => !v)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors
+                  ${allYear ? "bg-primary text-primary-foreground border-primary" : "bg-card text-muted-foreground border-border hover:text-foreground"}`}
               >
                 Tüm Yıl
               </button>
-              {MONTH_NAMES.map((name, i) => (
-                <button
-                  key={i}
-                  onClick={() => setMonth(i + 1)}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors
-                    ${month === i + 1 ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-                >
-                  {name}
+              <div className="flex items-center gap-1 bg-muted/60 rounded-xl p-1">
+                <button onClick={prevMonth} className="p-1 rounded hover:bg-muted transition-colors">
+                  <ChevronLeft className="h-4 w-4 text-muted-foreground" />
                 </button>
-              ))}
+                <span className="text-sm font-semibold w-32 text-center">
+                  {allYear
+                    ? viewDate.getFullYear()
+                    : format(viewDate, "MMMM yyyy", { locale: tr })}
+                </span>
+                <button onClick={nextMonth} className="p-1 rounded hover:bg-muted transition-colors">
+                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                </button>
+              </div>
             </div>
 
             {/* Type filter */}
