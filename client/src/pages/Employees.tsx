@@ -157,7 +157,11 @@ function EditEmployeeDialog({ emp, open, onOpenChange }: { emp: any; open: boole
     emp.startDate ? new Date(emp.startDate).toISOString().split("T")[0] : ""
   );
   const [contractType, setContractType] = useState<string>(emp.contractType ?? "");
-  const [uretkenlikKoclugu, setUretkenlikKoclugu] = useState<boolean>(emp.uretkenlikKoclugu ?? false);
+  const [coachingType, setCoachingType] = useState<"none" | "uk" | "dua">(() => {
+    if (emp.uretkenlikKoclugu) return "uk";
+    if (emp.uretkenlikKocluguManagerId) return "dua";
+    return "none";
+  });
   const [uretkenlikManagerId, setUretkenlikManagerId] = useState<string>(
     emp.uretkenlikKocluguManagerId ? String(emp.uretkenlikKocluguManagerId) : ""
   );
@@ -236,9 +240,9 @@ function EditEmployeeDialog({ emp, open, onOpenChange }: { emp: any; open: boole
               title: title || undefined,
               startDate: startDate || undefined,
               contractType: contractType || null,
-              uretkenlikKoclugu,
-              uretkenlikKocluguManagerId: uretkenlikKoclugu && uretkenlikManagerId ? Number(uretkenlikManagerId) : null,
-              uretkenlikKocluguOran: uretkenlikKoclugu && uretkenlikOran ? uretkenlikOran : null,
+              uretkenlikKoclugu: coachingType === "uk",
+              uretkenlikKocluguManagerId: coachingType !== "none" && uretkenlikManagerId ? Number(uretkenlikManagerId) : null,
+              uretkenlikKocluguOran: coachingType === "uk" && uretkenlikOran ? uretkenlikOran : null,
               capMonth: capMonth || undefined,
               capValue: capValue || undefined,
               billingName: billingName || undefined,
@@ -391,24 +395,42 @@ function EditEmployeeDialog({ emp, open, onOpenChange }: { emp: any; open: boole
 
           {/* Üretkenlik Koçluğu */}
           <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-3">
-            <div className="flex items-center gap-2">
-              <Checkbox id="uretkenlik-koclugu-emp" checked={uretkenlikKoclugu} onCheckedChange={(v) => setUretkenlikKoclugu(Boolean(v))} data-testid="checkbox-uretkenlik" />
-              <Label htmlFor="uretkenlik-koclugu-emp" className="text-sm font-medium cursor-pointer">Üretkenlik Koçluğu</Label>
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-medium">Koçluk</span>
+              <div className="flex items-center gap-1 bg-muted rounded-lg p-0.5">
+                {([["none", "Yok"], ["uk", "ÜK"], ["dua", "DÜA"]] as const).map(([val, label]) => (
+                  <button
+                    key={val}
+                    type="button"
+                    onClick={() => setCoachingType(val)}
+                    className={`px-3 py-1 rounded-md text-xs font-medium transition-colors
+                      ${coachingType === val
+                        ? val === "uk" ? "bg-emerald-600 text-white shadow-sm"
+                          : val === "dua" ? "bg-violet-600 text-white shadow-sm"
+                          : "bg-card text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
-            {uretkenlikKoclugu && (
-              <div className="grid grid-cols-2 gap-3 pl-6">
-                <EmpField label="Koç (Hiring Manager)">
+            {coachingType !== "none" && (
+              <div className={`grid gap-3 pl-2 ${coachingType === "uk" ? "grid-cols-2" : "grid-cols-1"}`}>
+                <EmpField label="Koç">
                   <Select value={uretkenlikManagerId} onValueChange={setUretkenlikManagerId}>
-                    <SelectTrigger data-testid="select-uretkenlik-manager"><SelectValue placeholder="Yönetici seçin..." /></SelectTrigger>
+                    <SelectTrigger data-testid="select-uretkenlik-manager"><SelectValue placeholder="Koç seçin..." /></SelectTrigger>
                     <SelectContent>{hiringManagers.map((hm) => <SelectItem key={hm.id} value={String(hm.id)}>{hm.name}</SelectItem>)}</SelectContent>
                   </Select>
                 </EmpField>
-                <EmpField label="Paylaşım Oranı">
-                  <Select value={uretkenlikOran} onValueChange={setUretkenlikOran}>
-                    <SelectTrigger data-testid="select-uretkenlik-oran"><SelectValue placeholder="Oran seçin..." /></SelectTrigger>
-                    <SelectContent>{URETKENLIK_ORANLAR.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent>
-                  </Select>
-                </EmpField>
+                {coachingType === "uk" && (
+                  <EmpField label="Paylaşım Oranı">
+                    <Select value={uretkenlikOran} onValueChange={setUretkenlikOran}>
+                      <SelectTrigger data-testid="select-uretkenlik-oran"><SelectValue placeholder="Oran seçin..." /></SelectTrigger>
+                      <SelectContent>{URETKENLIK_ORANLAR.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </EmpField>
+                )}
               </div>
             )}
           </div>
@@ -897,15 +919,15 @@ export default function Employees() {
                       <UserCheck className="h-3 w-3" /> Üretkenlik Koçluğu
                     </p>
                     {detailEmployee.uretkenlikKoclugu ? (
-                      <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200">
-                        Aktif
-                      </span>
+                      <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200">ÜK</span>
+                    ) : detailEmployee.uretkenlikKocluguManagerId ? (
+                      <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 ring-1 ring-violet-200">DÜA</span>
                     ) : (
                       <span className="text-sm text-muted-foreground">—</span>
                     )}
                   </div>
                 </div>
-                {detailEmployee.uretkenlikKoclugu && (
+                {(detailEmployee.uretkenlikKoclugu || detailEmployee.uretkenlikKocluguManagerId) && (
                   <div className="grid grid-cols-2 gap-3 pt-1 border-t border-primary/10">
                     <div>
                       <p className="text-xs text-muted-foreground font-medium mb-0.5">Koç</p>
@@ -913,10 +935,12 @@ export default function Employees() {
                         {hiringManagers.find((hm) => hm.id === detailEmployee.uretkenlikKocluguManagerId)?.name || "—"}
                       </p>
                     </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground font-medium mb-0.5">Paylaşım Oranı</p>
-                      <p className="text-sm font-semibold">{detailEmployee.uretkenlikKocluguOran || "—"}</p>
-                    </div>
+                    {detailEmployee.uretkenlikKoclugu && (
+                      <div>
+                        <p className="text-xs text-muted-foreground font-medium mb-0.5">Paylaşım Oranı</p>
+                        <p className="text-sm font-semibold">{detailEmployee.uretkenlikKocluguOran || "—"}</p>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
