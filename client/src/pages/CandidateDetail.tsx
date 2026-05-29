@@ -1064,7 +1064,14 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
       toast({ title: "Ad zorunludur", variant: "destructive" }); return;
     }
     if (form.phone && !/^05\d{9}$/.test(form.phone)) {
-      toast({ title: "Geçersiz telefon formatı", description: "05xxxxxxxxx formatında giriniz (11 haneli)", variant: "destructive" }); return;
+      toast({ title: "Geçersiz telefon", description: "05xxxxxxxxx formatında giriniz (11 haneli)", variant: "destructive" }); return;
+    }
+    if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
+      toast({ title: "Geçersiz e-posta adresi", variant: "destructive" }); return;
+    }
+    const expNum = parseInt(form.experience);
+    if (isNaN(expNum) || expNum < 0) {
+      toast({ title: "Deneyim geçerli bir sayı olmalıdır (0 veya üzeri)", variant: "destructive" }); return;
     }
     update({
       id: candidate.id,

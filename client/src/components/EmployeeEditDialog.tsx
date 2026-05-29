@@ -175,11 +175,32 @@ export function EmployeeEditDialog({ emp, open, onOpenChange }: Props) {
       return;
     }
     if (phone && !/^05\d{9}$/.test(phone)) {
-      toast({
-        title: "Geçersiz telefon formatı",
-        description: "05xxxxxxxxx formatında giriniz (11 haneli)",
-        variant: "destructive",
-      });
+      toast({ title: "Geçersiz telefon", description: "05xxxxxxxxx formatında giriniz (11 haneli)", variant: "destructive" });
+      return;
+    }
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      toast({ title: "Geçersiz e-posta adresi", variant: "destructive" });
+      return;
+    }
+    if (kwMail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(kwMail)) {
+      toast({ title: "Geçersiz KW e-posta adresi", variant: "destructive" });
+      return;
+    }
+    const expNum = parseInt(experience);
+    if (isNaN(expNum) || expNum < 0) {
+      toast({ title: "Deneyim geçerli bir sayı olmalıdır (0 veya üzeri)", variant: "destructive" });
+      return;
+    }
+    if (coachingType !== "none" && !coachId) {
+      toast({ title: "Koç seçilmedi", description: "ÜK veya DÜA koçluğu için bir koç seçmelisiniz", variant: "destructive" });
+      return;
+    }
+    if (coachingType === "uk" && !coachRate) {
+      toast({ title: "Paylaşım oranı seçilmedi", description: "ÜK koçluğu için oran belirtmelisiniz", variant: "destructive" });
+      return;
+    }
+    if (taxId && !/^\d{10,11}$/.test(taxId)) {
+      toast({ title: "Geçersiz Vergi/TC No", description: "10 haneli vergi numarası veya 11 haneli TC kimlik numarası giriniz", variant: "destructive" });
       return;
     }
 
