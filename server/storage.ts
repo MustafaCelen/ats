@@ -344,7 +344,7 @@ export class DatabaseStorage implements IStorage {
     return candidate;
   }
   async getCandidateByName(name: string): Promise<Candidate | undefined> {
-    const [candidate] = await db.select().from(candidates).where(eq(candidates.name, name));
+    const [candidate] = await db.select().from(candidates).where(sql`lower(${candidates.name}) = lower(${name})`);
     return candidate;
   }
   async getCandidateByPhone(phone: string): Promise<Candidate | undefined> {
