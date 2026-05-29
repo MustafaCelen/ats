@@ -229,12 +229,17 @@ function CoachSection({ coach, filteredStudents, defaultExpanded = false }: { co
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function Coaching() {
   const [year, setYear] = useState(CURRENT_YEAR);
+  const [month, setMonth] = useState(0); // 0 = tüm yıl, 1-12 = ay
   const [selectedCoachId, setSelectedCoachId] = useState<number | null | "all">("all");
   const [typeFilter, setTypeFilter] = useState<"all" | "uk" | "dua">("all");
   const years = Array.from({ length: 4 }, (_, i) => CURRENT_YEAR - i);
 
-  const startDate = formatYMD(new Date(year, 0, 1));
-  const endDate = formatYMD(new Date(year, 11, 31));
+  const startDate = month === 0
+    ? formatYMD(new Date(year, 0, 1))
+    : formatYMD(new Date(year, month - 1, 1));
+  const endDate = month === 0
+    ? formatYMD(new Date(year, 11, 31))
+    : formatYMD(new Date(year, month, 0)); // son günü otomatik hesaplar
 
   const { data, isLoading } = useQuery<{ coaches: any[] }>({
     queryKey: ["/api/coaching/stats", startDate, endDate],
@@ -300,7 +305,7 @@ export default function Coaching() {
               {years.map(y => (
                 <button
                   key={y}
-                  onClick={() => setYear(y)}
+                  onClick={() => { setYear(y); setMonth(0); }}
                   className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors
                     ${year === y ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
                 >
@@ -308,6 +313,27 @@ export default function Coaching() {
                 </button>
               ))}
             </div>
+            {/* Month filter */}
+            <div className="flex items-center gap-1 flex-wrap justify-end max-w-sm">
+              <button
+                onClick={() => setMonth(0)}
+                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors
+                  ${month === 0 ? "bg-card text-foreground shadow-sm ring-1 ring-border" : "text-muted-foreground hover:text-foreground"}`}
+              >
+                Tüm Yıl
+              </button>
+              {MONTH_NAMES.map((name, i) => (
+                <button
+                  key={i}
+                  onClick={() => setMonth(i + 1)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors
+                    ${month === i + 1 ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  {name}
+                </button>
+              ))}
+            </div>
+
             {/* Type filter */}
             <div className="flex items-center gap-1 bg-muted/60 rounded-xl p-1">
               {([["all", "Tümü"], ["uk", "Koçluk"], ["dua", "DÜA"]] as const).map(([val, label]) => (
