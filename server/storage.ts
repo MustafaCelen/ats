@@ -144,6 +144,7 @@ export interface IStorage {
   getEmployeeByKwuid(kwuid: string): Promise<EmployeeWithRelations | undefined>;
   createEmployee(data: InsertEmployee): Promise<Employee>;
   updateEmployee(id: number, data: Partial<InsertEmployee>): Promise<Employee | undefined>;
+  updateStageHistoryDate(id: number, enteredAt: Date): Promise<{ id: number; enteredAt: Date | null } | undefined>;
   deleteEmployee(id: number): Promise<void>;
   updateEmployeeCapAdjustment(id: number, amount: string): Promise<void>;
   getCapSettings(): Promise<CapSetting[]>;
@@ -1459,6 +1460,15 @@ export class DatabaseStorage implements IStorage {
     }
     const [emp] = await db.update(employees).set(update).where(eq(employees.id, id)).returning();
     return emp;
+  }
+
+  async updateStageHistoryDate(id: number, enteredAt: Date): Promise<{ id: number; enteredAt: Date | null } | undefined> {
+    const [row] = await db
+      .update(stageHistory)
+      .set({ enteredAt })
+      .where(eq(stageHistory.id, id))
+      .returning({ id: stageHistory.id, enteredAt: stageHistory.enteredAt });
+    return row;
   }
 
   async deleteEmployee(id: number): Promise<void> {

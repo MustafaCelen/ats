@@ -101,6 +101,15 @@ function useHistory(candidateId: number) {
   });
 }
 
+function useUpdateStageHistoryDate(candidateId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, enteredAt }: { id: number; enteredAt: string }) =>
+      apiRequest("PATCH", `/api/stage-history/${id}`, { enteredAt }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/candidates", candidateId, "history"] }),
+  });
+}
+
 
 // ── Note content renderer with @mention highlights ─────────────────────────────
 
@@ -221,7 +230,10 @@ export default function CandidateDetail() {
   const { data: user } = useAuth();
   const [, navigate] = useLocation();
   const { mutate: deleteCandidate, isPending: isDeleting } = useDeleteCandidate();
+  const { mutate: updateHistoryDate } = useUpdateStageHistoryDate(candidateId);
   const [noteText, setNoteText] = useState("");
+  const [editingHistoryId, setEditingHistoryId] = useState<number | null>(null);
+  const [editingHistoryDate, setEditingHistoryDate] = useState<string>("");
   const [activeTab, setActiveTab] = useState<"overview" | "applications" | "interviews" | "notes" | "history">("overview");
   const [editOpen, setEditOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -921,11 +933,50 @@ export default function CandidateDetail() {
                                 <span className="text-xs font-semibold text-foreground">{toLabel}</span>
                               </div>
                               {entry.enteredAt && (
-                                <p className="text-[11px] text-muted-foreground mt-0.5 flex items-center gap-1">
-                                  <Clock className="h-2.5 w-2.5" />
-                                  {format(new Date(entry.enteredAt), "dd MMM yyyy, HH:mm")}
-                                  <span className="ml-1 opacity-70">({formatDistanceToNow(new Date(entry.enteredAt), { addSuffix: true })})</span>
-                                </p>
+                                <div className="mt-0.5">
+                                  {editingHistoryId === entry.id ? (
+                                    <div className="flex items-center gap-1.5">
+                                      <Input
+                                        type="datetime-local"
+                                        className="h-6 text-[11px] px-1.5 py-0 w-44"
+                                        value={editingHistoryDate}
+                                        onChange={(e) => setEditingHistoryDate(e.target.value)}
+                                        autoFocus
+                                      />
+                                      <button
+                                        type="button"
+                                        className="text-[10px] font-medium text-primary hover:underline"
+                                        onClick={() => {
+                                          if (editingHistoryDate) {
+                                            updateHistoryDate({ id: entry.id, enteredAt: new Date(editingHistoryDate).toISOString() });
+                                          }
+                                          setEditingHistoryId(null);
+                                        }}
+                                      >Kaydet</button>
+                                      <button
+                                        type="button"
+                                        className="text-[10px] text-muted-foreground hover:underline"
+                                        onClick={() => setEditingHistoryId(null)}
+                                      >İptal</button>
+                                    </div>
+                                  ) : (
+                                    <p className="text-[11px] text-muted-foreground flex items-center gap-1 group/date">
+                                      <Clock className="h-2.5 w-2.5" />
+                                      {format(new Date(entry.enteredAt), "dd MMM yyyy, HH:mm")}
+                                      <span className="opacity-70">({formatDistanceToNow(new Date(entry.enteredAt), { addSuffix: true })})</span>
+                                      {(user?.role === "admin" || user?.role === "hiring_manager") && (
+                                        <button
+                                          type="button"
+                                          className="ml-1 opacity-0 group-hover/date:opacity-100 transition-opacity text-[10px] text-primary hover:underline"
+                                          onClick={() => {
+                                            setEditingHistoryId(entry.id);
+                                            setEditingHistoryDate(format(new Date(entry.enteredAt), "yyyy-MM-dd'T'HH:mm"));
+                                          }}
+                                        >düzenle</button>
+                                      )}
+                                    </p>
+                                  )}
+                                </div>
                               )}
                             </div>
                           </div>

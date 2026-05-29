@@ -902,6 +902,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // ── Stage history date override ──────────────────────────────────────────────
+  app.patch("/api/stage-history/:id", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const { enteredAt } = req.body;
+      if (!enteredAt) return res.status(400).json({ message: "enteredAt required" });
+      const updated = await storage.updateStageHistoryDate(id, new Date(enteredAt));
+      if (!updated) return res.status(404).json({ message: "Stage history entry not found" });
+      res.json(updated);
+    } catch {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   app.delete("/api/employees/:id", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
     try {
       const id = Number(req.params.id);
