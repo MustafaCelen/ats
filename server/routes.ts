@@ -1044,13 +1044,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             });
           } else {
             const candUpdate: any = {};
-            if (referredBy && !cand.referredBy) candUpdate.referredBy = referredBy;
+            if (name && name !== cand.name) candUpdate.name = name;
+            if (referredBy) candUpdate.referredBy = referredBy;
             if (office) candUpdate.office = office;
             if (importedPhone) candUpdate.phone = importedPhone;
             const importedEmail = col("E-posta", "E-mail Adresi", "email");
             if (importedEmail) candUpdate.email = importedEmail;
             const importedCity = col("Şehir", "city", "Fatura İli", "İl");
             if (importedCity) candUpdate.city = importedCity;
+            const importedCategory = col("Kategori", "category");
+            if (importedCategory) candUpdate.category = importedCategory;
             if (Object.keys(candUpdate).length) await storage.updateCandidate(cand.id, candUpdate);
           }
 
@@ -1106,14 +1109,17 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           if (notes) patch.notes = notes;
           if (parsedPassiveAt) patch.passiveAt = parsedPassiveAt;
 
+          // Parse startDate — used both for update patch and new employee creation
+          const startDateStr = col("Başlangıç Tarihi", "GİRİŞ TARİHİ", "startDate") ?? "";
+          const parsedStart = parseTRDate(startDateStr);
+          if (parsedStart) patch.startDate = parsedStart;
+
           // Check if already an employee (re-use existingEmployee found by KWUID above)
           if (!existingEmployee) existingEmployee = await storage.getEmployeeByCandidateId(cand.id);
           if (existingEmployee) {
             if (Object.keys(patch).length) await storage.updateEmployee(existingEmployee.id, patch);
             updated++;
           } else {
-            const startDateStr = col("Başlangıç Tarihi", "GİRİŞ TARİHİ", "startDate") ?? "";
-            const parsedStart = parseTRDate(startDateStr);
             await storage.createEmployee({
               candidateId: cand.id,
               jobId: null as any,
