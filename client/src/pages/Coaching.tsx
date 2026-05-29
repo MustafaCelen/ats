@@ -87,7 +87,10 @@ function StudentCard({ student, rank }: { student: any; rank: number }) {
           <div className="flex items-center gap-2">
             <span className="font-semibold text-sm truncate">{student.name}</span>
             {student.kwuid && <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">{student.kwuid}</span>}
-            {student.ukRate && <span className="text-[10px] bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded font-medium">ÜK {student.ukRate}</span>}
+            {student.isUK
+              ? <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded font-medium">ÜK{student.ukRate ? ` ${student.ukRate}` : ""}</span>
+              : <span className="text-[10px] bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded font-medium">DÜA</span>
+            }
           </div>
           <div className="mt-1"><CapBar pct={student.capPct} /></div>
         </div>

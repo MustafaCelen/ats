@@ -2210,7 +2210,10 @@ export class DatabaseStorage implements IStorage {
       .from(employees)
       .leftJoin(candidates, eq(employees.candidateId, candidates.id))
       .where(and(
-        eq(employees.uretkenlikKoclugu, true),
+        or(
+          eq(employees.uretkenlikKoclugu, true),
+          isNotNull(employees.uretkenlikKocluguManagerId),
+        ),
         ...(coachUserId !== undefined ? [eq(employees.uretkenlikKocluguManagerId, coachUserId)] : []),
       ));
 
@@ -2316,6 +2319,7 @@ export class DatabaseStorage implements IStorage {
         employeeId: empId,
         name: e.cand?.name ?? `#${empId}`,
         kwuid: e.emp.kwuid ?? "",
+        isUK: e.emp.uretkenlikKoclugu,
         ukRate: e.emp.uretkenlikKocluguOran ?? "",
         coachId: e.emp.uretkenlikKocluguManagerId ?? null,
         totalClosings: closingIds.size,
