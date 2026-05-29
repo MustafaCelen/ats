@@ -1557,8 +1557,51 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getClosings(): Promise<ClosingWithDetails[]> {
-    const all = await db.select().from(closings).orderBy(desc(closings.closingDate));
-    return Promise.all(all.map((c) => this.buildClosingWithDetails(c)));
+    const rows = await db
+      .select({
+        closing: closings,
+        side: closingSides,
+        agent: closingAgents,
+        candidate: candidates,
+        emp: employees,
+      })
+      .from(closings)
+      .leftJoin(closingSides, eq(closingSides.closingId, closings.id))
+      .leftJoin(closingAgents, eq(closingAgents.closingSideId, closingSides.id))
+      .leftJoin(employees, eq(employees.id, closingAgents.employeeId))
+      .leftJoin(candidates, eq(candidates.id, employees.candidateId))
+      .orderBy(desc(closings.closingDate));
+
+    const closingMap = new Map<number, ClosingWithDetails>();
+    const sideMap = new Map<number, any>();
+
+    for (const r of rows) {
+      if (!closingMap.has(r.closing.id)) {
+        closingMap.set(r.closing.id, { ...r.closing, sides: [], totalAgentNet: 0 });
+      }
+      if (!r.side) continue;
+      const c = closingMap.get(r.closing.id)!;
+      if (!sideMap.has(r.side.id)) {
+        const side = { ...r.side, agents: [] as any[] };
+        sideMap.set(r.side.id, side);
+        c.sides.push(side);
+      }
+      if (!r.agent) continue;
+      const side = sideMap.get(r.side.id)!;
+      side.agents.push({
+        ...r.agent,
+        employeeName: r.candidate?.name ?? undefined,
+        candidateName: r.candidate?.name ?? undefined,
+        kwuid: r.emp?.kwuid ?? undefined,
+      });
+    }
+
+    for (const c of closingMap.values()) {
+      c.totalAgentNet = c.sides.reduce((sum: number, s: any) =>
+        sum + s.agents.reduce((a: number, ag: any) => a + parseFloat(ag.employeeNet ?? "0"), 0), 0);
+    }
+
+    return Array.from(closingMap.values());
   }
 
   async getClosing(id: number): Promise<ClosingWithDetails | null> {

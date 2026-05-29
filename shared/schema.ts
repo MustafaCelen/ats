@@ -1,4 +1,4 @@
-import { pgTable, text, serial, timestamp, integer, boolean, numeric } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, timestamp, integer, boolean, numeric, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { relations } from "drizzle-orm";
@@ -375,7 +375,11 @@ export const closings = pgTable("closings", {
   notes: text("notes"),
   createdByUserId: integer("created_by_user_id"),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (t) => ({
+  closingDateIdx: index("closings_closing_date_idx").on(t.closingDate),
+  statusIdx: index("closings_status_idx").on(t.status),
+  createdAtIdx: index("closings_created_at_idx").on(t.createdAt),
+}));
 
 export type Closing = typeof closings.$inferSelect;
 
@@ -384,7 +388,9 @@ export const closingSides = pgTable("closing_sides", {
   closingId: integer("closing_id").notNull(),
   sideType: text("side_type").notNull(), // "buyer" | "seller"
   bhbTotal: numeric("bhb_total", { precision: 15, scale: 2 }).notNull(),
-});
+}, (t) => ({
+  closingIdIdx: index("closing_sides_closing_id_idx").on(t.closingId),
+}));
 
 export type ClosingSide = typeof closingSides.$inferSelect;
 
@@ -406,7 +412,10 @@ export const closingAgents = pgTable("closing_agents", {
   capAmountApplied: numeric("cap_amount_applied", { precision: 15, scale: 2 }),
   capUsedBefore: numeric("cap_used_before", { precision: 15, scale: 2 }).notNull().default("0"),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (t) => ({
+  sideIdIdx: index("closing_agents_side_id_idx").on(t.closingSideId),
+  employeeIdIdx: index("closing_agents_employee_id_idx").on(t.employeeId),
+}));
 
 export type ClosingAgent = typeof closingAgents.$inferSelect;
 
