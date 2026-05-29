@@ -185,8 +185,11 @@ function StudentCard({ student, rank }: { student: any; rank: number }) {
   );
 }
 
-function CoachSection({ coach, defaultExpanded = false }: { coach: any; defaultExpanded?: boolean }) {
+function CoachSection({ coach, filteredStudents, defaultExpanded = false }: { coach: any; filteredStudents: any[]; defaultExpanded?: boolean }) {
   const [open, setOpen] = useState(defaultExpanded);
+  if (filteredStudents.length === 0) return null;
+  const sectionBHB = filteredStudents.reduce((s: number, st: any) => s + st.totalBHB, 0);
+  const sectionVolume = filteredStudents.reduce((s: number, st: any) => s + st.totalVolume, 0);
   return (
     <div className="border border-border rounded-2xl bg-card shadow-sm overflow-hidden">
       <button
@@ -198,23 +201,23 @@ function CoachSection({ coach, defaultExpanded = false }: { coach: any; defaultE
         </div>
         <div className="flex-1 min-w-0">
           <p className="font-bold text-base">{coach.coachName}</p>
-          <p className="text-xs text-muted-foreground">{coach.studentCount} öğrenci · Ort. Cap %{coach.avgCapPct}</p>
+          <p className="text-xs text-muted-foreground">{filteredStudents.length} öğrenci</p>
         </div>
         <div className="flex items-center gap-6 shrink-0">
           <div className="text-right">
             <p className="text-xs text-muted-foreground">Toplam BHB</p>
-            <p className="font-bold">{fmtTRY(coach.totalBHB)}</p>
+            <p className="font-bold">{fmtTRY(sectionBHB)}</p>
           </div>
           <div className="text-right">
             <p className="text-xs text-muted-foreground">Toplam Hacim</p>
-            <p className="font-bold">{fmtShort(coach.totalVolume)} ₺</p>
+            <p className="font-bold">{fmtShort(sectionVolume)} ₺</p>
           </div>
           {open ? <ChevronDown className="h-5 w-5 text-muted-foreground" /> : <ChevronRight className="h-5 w-5 text-muted-foreground" />}
         </div>
       </button>
       {open && (
         <div className="border-t border-border px-5 py-4 space-y-3 bg-muted/5">
-          {coach.students.map((s: any, i: number) => (
+          {filteredStudents.map((s: any, i: number) => (
             <StudentCard key={s.employeeId} student={s} rank={i + 1} />
           ))}
         </div>
@@ -227,6 +230,7 @@ function CoachSection({ coach, defaultExpanded = false }: { coach: any; defaultE
 export default function Coaching() {
   const [year, setYear] = useState(CURRENT_YEAR);
   const [selectedCoachId, setSelectedCoachId] = useState<number | null | "all">("all");
+  const [typeFilter, setTypeFilter] = useState<"all" | "uk" | "dua">("all");
   const years = Array.from({ length: 4 }, (_, i) => CURRENT_YEAR - i);
 
   const startDate = formatYMD(new Date(year, 0, 1));
@@ -248,7 +252,12 @@ export default function Coaching() {
   }, [allCoaches, selectedCoachId]);
 
   // Flatten filtered students for summary and rankings
-  const allStudents = useMemo(() => coaches.flatMap(c => c.students), [coaches]);
+  const allStudents = useMemo(() => {
+    const flat = coaches.flatMap((c: any) => c.students);
+    if (typeFilter === "uk") return flat.filter((s: any) => s.isUK);
+    if (typeFilter === "dua") return flat.filter((s: any) => !s.isUK);
+    return flat;
+  }, [coaches, typeFilter]);
   const totalClosings = useMemo(() => allStudents.reduce((s, st) => s + st.totalClosings, 0), [allStudents]);
   const totalBHB = useMemo(() => allStudents.reduce((s, st) => s + st.totalBHB, 0), [allStudents]);
   const totalVolume = useMemo(() => allStudents.reduce((s, st) => s + st.totalVolume, 0), [allStudents]);
@@ -299,6 +308,20 @@ export default function Coaching() {
                 </button>
               ))}
             </div>
+            {/* Type filter */}
+            <div className="flex items-center gap-1 bg-muted/60 rounded-xl p-1">
+              {([["all", "Tümü"], ["uk", "Koçluk"], ["dua", "DÜA"]] as const).map(([val, label]) => (
+                <button
+                  key={val}
+                  onClick={() => setTypeFilter(val)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors
+                    ${typeFilter === val ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
             {/* Coach filter */}
             {showCoachFilter && (
               <div className="flex items-center gap-1 flex-wrap justify-end">
@@ -458,13 +481,21 @@ export default function Coaching() {
               <h2 className="text-base font-bold">
                 {isSingleCoach ? "Öğrenciler" : "Koçlar ve Öğrencileri"}
               </h2>
-              {coaches.map(coach => (
-                <CoachSection
-                  key={coach.coachId ?? "unassigned"}
-                  coach={coach}
-                  defaultExpanded={isSingleCoach || coaches.length <= 2}
-                />
-              ))}
+              {coaches.map((coach: any) => {
+                const filtered = coach.students.filter((s: any) => {
+                  if (typeFilter === "uk") return s.isUK;
+                  if (typeFilter === "dua") return !s.isUK;
+                  return true;
+                });
+                return (
+                  <CoachSection
+                    key={coach.coachId ?? "unassigned"}
+                    coach={coach}
+                    filteredStudents={filtered}
+                    defaultExpanded={isSingleCoach || coaches.length <= 2}
+                  />
+                );
+              })}
             </div>
           </>
         )}
