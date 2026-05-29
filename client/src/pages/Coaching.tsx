@@ -7,7 +7,7 @@ import {
 } from "recharts";
 import {
   Users, TrendingUp, DollarSign, Handshake, ChevronDown, ChevronRight,
-  Award, Clock, Target, BarChart2, ChevronLeft,
+  Award, Target, BarChart2, ChevronLeft,
 } from "lucide-react";
 import { format } from "date-fns";
 import { tr } from "date-fns/locale";
@@ -480,21 +480,6 @@ export default function Coaching() {
                 ))}
               </div>
             </div>
-
-            {/* Avg sale time */}
-            {allStudents.some(s => s.avgSaleDays != null) && (
-              <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-                <h2 className="text-sm font-semibold mb-3 flex items-center gap-1.5"><Clock className="h-4 w-4 text-sky-500" /> Ortalama Satış Süresi</h2>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  {[...allStudents].filter(s => s.avgSaleDays != null).sort((a, b) => a.avgSaleDays - b.avgSaleDays).map(s => (
-                    <div key={s.employeeId} className="bg-muted/40 rounded-lg p-3">
-                      <p className="text-xs text-muted-foreground truncate">{s.name}</p>
-                      <p className="text-lg font-bold">{s.avgSaleDays} <span className="text-xs font-normal">gün</span></p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
 
             {/* Coach sections */}
             <div className="space-y-4">
