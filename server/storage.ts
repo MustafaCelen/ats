@@ -18,7 +18,7 @@ import {
   type CapSetting, type Closing, type ClosingSide, type ClosingAgent,
   type CapStatus, type ClosingWithDetails, type InterviewTarget,
 } from "@shared/schema";
-import { eq, desc, count, sql, gte, lte, and, or, isNull, isNotNull, inArray, notInArray } from "drizzle-orm";
+import { eq, desc, asc, count, sql, gte, lte, and, or, isNull, isNotNull, inArray, notInArray } from "drizzle-orm";
 import { differenceInDays } from "date-fns";
 
 export type ApplicationWithRelations = Application & { candidate?: Candidate; job?: Job };
@@ -51,6 +51,11 @@ export interface PassiveEmployee {
   id: number; name: string; passiveAt: Date | null; title: string | null; jobTitle: string | null;
 }
 
+export interface NewEmployee {
+  id: number; name: string; startDate: Date | null; title: string | null;
+  kwuid: string | null; contractType: string | null; category: string | null; city: string | null;
+}
+
 export interface ReportStats {
   funnel: FunnelStage[]; stageTimes: StageTime[]; total: number; hired: number;
   rejected: number; conversionRate: number; avgTimeToContractSign: number; avgTimeToEmploy: number;
@@ -61,6 +66,8 @@ export interface ReportStats {
   rejectionDropoff: RejectionDropoff[];
   passiveEmployees: PassiveEmployee[];
   passiveEmployeeCount: number;
+  newEmployees: NewEmployee[];
+  newEmployeeCount: number;
 }
 
 function toPublicUser(u: User): PublicUser {
@@ -1197,6 +1204,43 @@ export class DatabaseStorage implements IStorage {
       jobTitle: r.jobTitle ?? null,
     }));
 
+    // ── New employees who started in the selected period ──
+    const newCondsArr: any[] = [
+      isNotNull(employees.startDate),
+      gte(employees.startDate, start),
+      lte(employees.startDate, end),
+    ];
+    if (hasOfficeCandidates) newCondsArr.push(inArray(employees.candidateId, officeCandidateIds!));
+
+    const newRaw = hasOfficeFilter && !hasOfficeCandidates
+      ? []
+      : await db
+          .select({
+            id: employees.id,
+            title: employees.title,
+            startDate: employees.startDate,
+            kwuid: employees.kwuid,
+            contractType: employees.contractType,
+            candidateName: candidates.name,
+            category: candidates.category,
+            city: candidates.city,
+          })
+          .from(employees)
+          .leftJoin(candidates, eq(employees.candidateId, candidates.id))
+          .where(and(...newCondsArr))
+          .orderBy(asc(employees.startDate));
+
+    const newEmployees: NewEmployee[] = newRaw.map((r) => ({
+      id: r.id,
+      name: r.candidateName ?? "—",
+      startDate: r.startDate,
+      title: r.title,
+      kwuid: r.kwuid ?? null,
+      contractType: r.contractType ?? null,
+      category: r.category ?? null,
+      city: r.city ?? null,
+    }));
+
     return {
       funnel, stageTimes, total, hired, rejected, conversionRate,
       avgTimeToContractSign, avgTimeToEmploy,
@@ -1208,6 +1252,8 @@ export class DatabaseStorage implements IStorage {
       rejectionDropoff,
       passiveEmployees,
       passiveEmployeeCount: passiveEmployees.length,
+      newEmployees,
+      newEmployeeCount: newEmployees.length,
     };
   }
 
