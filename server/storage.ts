@@ -2200,6 +2200,160 @@ export class DatabaseStorage implements IStorage {
       await db.insert(interviewTargets).values(data);
     }
   }
+
+  async getCoachingStats(startDate: Date, endDate: Date, coachUserId?: number) {
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999);
+
+    const ukEmps = await db
+      .select({ emp: employees, cand: candidates })
+      .from(employees)
+      .leftJoin(candidates, eq(employees.candidateId, candidates.id))
+      .where(and(
+        eq(employees.uretkenlikKoclugu, true),
+        ...(coachUserId !== undefined ? [eq(employees.uretkenlikKocluguManagerId, coachUserId)] : []),
+      ));
+
+    if (ukEmps.length === 0) return { coaches: [] };
+
+    const studentIds = ukEmps.map(e => e.emp.id);
+
+    const rows = await db
+      .select({
+        closingId: closings.id,
+        saleValue: closings.saleValue,
+        closingDate: closings.closingDate,
+        dealCategory: closings.dealCategory,
+        dealType: closings.dealType,
+        durationDays: closings.durationDays,
+        sideType: closingSides.sideType,
+        bhbShare: closingAgents.bhbShare,
+        marketCenterActual: closingAgents.marketCenterActual,
+        employeeNet: closingAgents.employeeNet,
+        employeeId: closingAgents.employeeId,
+      })
+      .from(closings)
+      .leftJoin(closingSides, eq(closingSides.closingId, closings.id))
+      .leftJoin(closingAgents, eq(closingAgents.closingSideId, closingSides.id))
+      .where(and(
+        eq(closings.status, "completed"),
+        isNotNull(closings.closingDate),
+        gte(closings.closingDate, startDate),
+        lte(closings.closingDate, end),
+        inArray(closingAgents.employeeId, studentIds),
+      ));
+
+    const capStatuses = await Promise.all(ukEmps.map(e => this.getEmployeeCapStatus(e.emp.id)));
+
+    const coachIds = [...new Set(ukEmps.map(e => e.emp.uretkenlikKocluguManagerId).filter(Boolean))] as number[];
+    const coachUsers = coachIds.length > 0
+      ? await db.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, coachIds))
+      : [];
+    const coachMap = new Map(coachUsers.map(u => [u.id, u.name]));
+
+    const studentStats = ukEmps.map((e, idx) => {
+      const empId = e.emp.id;
+      const empRows = rows.filter(r => r.employeeId === empId);
+      const closingIds = new Set(empRows.map(r => r.closingId));
+
+      const seenVol = new Set<number>();
+      let totalVolume = 0;
+      for (const r of empRows) {
+        if (!seenVol.has(r.closingId)) { totalVolume += parseFloat(r.saleValue ?? "0"); seenVol.add(r.closingId); }
+      }
+      let totalBHB = 0, totalBM = 0, totalNet = 0;
+      for (const r of empRows) {
+        if (r.bhbShare) totalBHB += parseFloat(r.bhbShare);
+        if (r.marketCenterActual) totalBM += parseFloat(r.marketCenterActual);
+        if (r.employeeNet) totalNet += parseFloat(r.employeeNet);
+      }
+
+      const bySideType = {
+        buyer:    new Set(empRows.filter(r => r.sideType === "buyer").map(r => r.closingId)).size,
+        seller:   new Set(empRows.filter(r => r.sideType === "seller").map(r => r.closingId)).size,
+        referral: new Set(empRows.filter(r => r.sideType === "referral").map(r => r.closingId)).size,
+      };
+
+      const monthMap = new Map<string, { count: number; bhb: number; volume: number; ids: Set<number> }>();
+      for (const r of empRows) {
+        if (!r.closingDate) continue;
+        const d = new Date(r.closingDate);
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+        if (!monthMap.has(key)) monthMap.set(key, { count: 0, bhb: 0, volume: 0, ids: new Set() });
+        const m = monthMap.get(key)!;
+        if (!m.ids.has(r.closingId)) { m.count++; m.volume += parseFloat(r.saleValue ?? "0"); m.ids.add(r.closingId); }
+        if (r.bhbShare) m.bhb += parseFloat(r.bhbShare);
+      }
+      const monthlyTrend = Array.from(monthMap.entries())
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([month, v]) => ({ month, count: v.count, bhb: v.bhb, volume: v.volume }));
+
+      const dealTypeMap = new Map<string, Set<number>>();
+      const catMap = new Map<string, Set<number>>();
+      for (const r of empRows) {
+        const dt = r.dealType ?? "Diğer";
+        if (!dealTypeMap.has(dt)) dealTypeMap.set(dt, new Set());
+        dealTypeMap.get(dt)!.add(r.closingId);
+        const cat = r.dealCategory ?? "Satış";
+        if (!catMap.has(cat)) catMap.set(cat, new Set());
+        catMap.get(cat)!.add(r.closingId);
+      }
+      const byDealType = Array.from(dealTypeMap.entries()).map(([dealType, s]) => ({ dealType, count: s.size })).sort((a, b) => b.count - a.count);
+      const byCategory = Array.from(catMap.entries()).map(([category, s]) => ({ category, count: s.size }));
+
+      const durMap = new Map<number, number>();
+      for (const r of empRows) {
+        if (!durMap.has(r.closingId) && r.durationDays && r.durationDays > 0)
+          durMap.set(r.closingId, r.durationDays);
+      }
+      const durations = Array.from(durMap.values());
+      const avgSaleDays = durations.length > 0 ? Math.round(durations.reduce((s, d) => s + d, 0) / durations.length) : null;
+
+      const cap = capStatuses[idx];
+      const capPct = cap && cap.capAmount > 0 ? Math.min(100, Math.round((cap.capUsed / cap.capAmount) * 100)) : 0;
+
+      return {
+        employeeId: empId,
+        name: e.cand?.name ?? `#${empId}`,
+        kwuid: e.emp.kwuid ?? "",
+        ukRate: e.emp.uretkenlikKocluguOran ?? "",
+        coachId: e.emp.uretkenlikKocluguManagerId ?? null,
+        totalClosings: closingIds.size,
+        totalVolume,
+        totalBHB,
+        totalBM,
+        totalNet,
+        avgDealValue: closingIds.size > 0 ? Math.round(totalVolume / closingIds.size) : 0,
+        avgSaleDays,
+        capPct,
+        capUsed: cap?.capUsed ?? 0,
+        capAmount: cap?.capAmount ?? 0,
+        bySideType,
+        byDealType,
+        byCategory,
+        monthlyTrend,
+      };
+    });
+
+    const coachGroups = new Map<number | null, typeof studentStats>();
+    for (const s of studentStats) {
+      const key = s.coachId;
+      if (!coachGroups.has(key)) coachGroups.set(key, []);
+      coachGroups.get(key)!.push(s);
+    }
+
+    const coaches = Array.from(coachGroups.entries()).map(([coachId, students]) => ({
+      coachId,
+      coachName: coachId ? (coachMap.get(coachId) ?? `#${coachId}`) : "Koçsuz",
+      studentCount: students.length,
+      totalBHB: students.reduce((s, st) => s + st.totalBHB, 0),
+      totalVolume: students.reduce((s, st) => s + st.totalVolume, 0),
+      avgCapPct: students.length > 0 ? Math.round(students.reduce((s, st) => s + st.capPct, 0) / students.length) : 0,
+      students: students.sort((a, b) => b.totalBHB - a.totalBHB),
+    })).sort((a, b) => b.totalBHB - a.totalBHB);
+
+    return { coaches };
+  }
 }
 
 export const storage = new DatabaseStorage();

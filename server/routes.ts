@@ -1,4 +1,4 @@
-import type { Express, Request } from "express";
+import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import bcrypt from "bcrypt";
 import { storage } from "./storage";
@@ -1540,6 +1540,24 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       res.json(await storage.getAllEmployeesCapStatus());
     } catch {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Coaching Stats ────────────────────────────────────────────────────────────
+
+  app.get("/api/coaching/stats", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const user = req.user!;
+      const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
+      const now = new Date();
+      const start = startDate ? new Date(startDate) : new Date(now.getFullYear(), 0, 1);
+      const end = endDate ? new Date(endDate) : new Date(now.getFullYear(), 11, 31);
+      // Admin sees all coaches; non-admin only sees students under their user id
+      const coachUserId = user.role === "admin" ? undefined : user.id;
+      res.json(await storage.getCoachingStats(start, end, coachUserId));
+    } catch (err) {
+      console.error("[GET /api/coaching/stats]", err);
       res.status(500).json({ message: "Internal server error" });
     }
   });

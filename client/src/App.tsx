@@ -19,6 +19,7 @@ import Employees from "@/pages/Employees";
 import OnboardingBoard from "@/pages/OnboardingBoard";
 import Closings from "@/pages/Closings";
 import FinancialReports from "@/pages/FinancialReports";
+import Coaching from "@/pages/Coaching";
 
 function ProtectedRoute({
   children,
@@ -62,6 +63,7 @@ function Router() {
       <Route path="/onboarding" component={() => <ProtectedRoute><OnboardingBoard /></ProtectedRoute>} />
       <Route path="/closings" component={() => <ProtectedRoute adminOnly><Closings /></ProtectedRoute>} />
       <Route path="/financial-reports" component={() => <ProtectedRoute adminOnly><FinancialReports /></ProtectedRoute>} />
+      <Route path="/coaching" component={() => <ProtectedRoute noAssistant><Coaching /></ProtectedRoute>} />
       <Route component={NotFound} />
     </Switch>
   );
