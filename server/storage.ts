@@ -375,20 +375,20 @@ export class DatabaseStorage implements IStorage {
     return candidate;
   }
   async deleteCandidate(id: number): Promise<void> {
-    // Collect application IDs first (needed for applicationDocuments)
-    const appRows = await db.select({ id: applications.id }).from(applications).where(eq(applications.candidateId, id));
-    const appIds = appRows.map((r) => r.id);
+    await db.transaction(async (tx) => {
+      const appRows = await tx.select({ id: applications.id }).from(applications).where(eq(applications.candidateId, id));
+      const appIds = appRows.map((r) => r.id);
 
-    // Delete child records in dependency order
-    await db.delete(stageHistory).where(eq(stageHistory.candidateId, id));
-    await db.delete(interviews).where(eq(interviews.candidateId, id));
-    await db.delete(offers).where(eq(offers.candidateId, id));
-    if (appIds.length) await db.delete(applicationDocuments).where(inArray(applicationDocuments.applicationId, appIds));
-    await db.delete(tasks).where(eq(tasks.candidateId, id));
-    await db.delete(candidateNotes).where(eq(candidateNotes.candidateId, id));
-    await db.delete(employees).where(eq(employees.candidateId, id));
-    await db.delete(applications).where(eq(applications.candidateId, id));
-    await db.delete(candidates).where(eq(candidates.id, id));
+      await tx.delete(stageHistory).where(eq(stageHistory.candidateId, id));
+      await tx.delete(interviews).where(eq(interviews.candidateId, id));
+      await tx.delete(offers).where(eq(offers.candidateId, id));
+      if (appIds.length) await tx.delete(applicationDocuments).where(inArray(applicationDocuments.applicationId, appIds));
+      await tx.delete(tasks).where(eq(tasks.candidateId, id));
+      await tx.delete(candidateNotes).where(eq(candidateNotes.candidateId, id));
+      await tx.delete(employees).where(eq(employees.candidateId, id));
+      await tx.delete(applications).where(eq(applications.candidateId, id));
+      await tx.delete(candidates).where(eq(candidates.id, id));
+    });
   }
   async getCandidateNotes(candidateId: number): Promise<CandidateNote[]> {
     return db.select().from(candidateNotes).where(eq(candidateNotes.candidateId, candidateId)).orderBy(desc(candidateNotes.createdAt));
@@ -1273,7 +1273,7 @@ export class DatabaseStorage implements IStorage {
             jobTitle: jobs.title,
           })
           .from(stageHistory)
-          .leftJoin(candidates, eq(stageHistory.candidateId, candidates.id))
+          .innerJoin(candidates, eq(stageHistory.candidateId, candidates.id))
           .leftJoin(jobs, eq(stageHistory.jobId, jobs.id))
           .where(and(...contractConds))
           .orderBy(asc(stageHistory.enteredAt));
