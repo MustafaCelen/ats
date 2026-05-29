@@ -1118,7 +1118,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
               candidateId: cand.id,
               jobId: null as any,
               applicationId: null as any,
-              startDate: parsedStart ?? new Date(),
+              startDate: parsedStart ?? null,
               status: (mappedStatus ?? "active") as any,
               title: patch.title ?? null,
               notes: patch.notes ?? null,
