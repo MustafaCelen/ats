@@ -2210,6 +2210,7 @@ export class DatabaseStorage implements IStorage {
       .from(employees)
       .leftJoin(candidates, eq(employees.candidateId, candidates.id))
       .where(and(
+        eq(employees.status, "active"),
         or(
           eq(employees.uretkenlikKoclugu, true),
           isNotNull(employees.uretkenlikKocluguManagerId),
