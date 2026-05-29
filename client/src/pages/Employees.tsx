@@ -497,6 +497,8 @@ export default function Employees() {
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
+  const [page, setPage] = useState(0);
+  const PAGE_SIZE = 50;
   const [detailEmployee, setDetailEmployee] = useState<any | null>(null);
   const [editEmployee, setEditEmployee] = useState<any | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -513,6 +515,9 @@ export default function Employees() {
     const matchesStatus = statusFilter === "all" || e.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
+
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+  const paginated = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   const activeCount = (employees ?? []).filter((e: any) => e.status === "active").length;
   const inactiveCount = (employees ?? []).filter((e: any) => e.status === "inactive").length;
@@ -604,13 +609,13 @@ export default function Employees() {
 
         {/* Filter pills */}
         <div className="flex gap-2 flex-wrap">
-          <Button size="sm" variant={statusFilter === "all" ? "default" : "outline"} onClick={() => setStatusFilter("all")} data-testid="filter-all">
+          <Button size="sm" variant={statusFilter === "all" ? "default" : "outline"} onClick={() => { setStatusFilter("all"); setPage(0); }} data-testid="filter-all">
             Tümü ({(employees ?? []).length})
           </Button>
           <Button
             size="sm"
             variant={statusFilter === "active" ? "default" : "outline"}
-            onClick={() => setStatusFilter("active")}
+            onClick={() => { setStatusFilter("active"); setPage(0); }}
             data-testid="filter-active"
             className={statusFilter !== "active" ? "border-emerald-200 text-emerald-700 hover:bg-emerald-50" : ""}
           >
@@ -619,7 +624,7 @@ export default function Employees() {
           <Button
             size="sm"
             variant={statusFilter === "inactive" ? "default" : "outline"}
-            onClick={() => setStatusFilter("inactive")}
+            onClick={() => { setStatusFilter("inactive"); setPage(0); }}
             data-testid="filter-inactive"
             className={statusFilter !== "inactive" ? "border-gray-200 text-gray-600 hover:bg-gray-50" : ""}
           >
@@ -632,7 +637,7 @@ export default function Employees() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
           <Input
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => { setSearch(e.target.value); setPage(0); }}
             placeholder="İsim, e-posta, şehir, KWUID veya KW e-posta ara..."
             className="pl-9"
             data-testid="input-search-employees"
@@ -690,7 +695,7 @@ export default function Employees() {
             <div className="grid grid-cols-[2fr_2fr_1.5fr_1fr_1fr_1fr_1fr_auto] gap-4 px-4 py-2.5 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               <div>Çalışan</div>
               <div>İletişim</div>
-              <div>Pozisyon</div>
+              <div>Üretim Bandı</div>
               <div>Kategori</div>
               <div>KWUID</div>
               <div>Başlangıç</div>
@@ -700,7 +705,7 @@ export default function Employees() {
 
             {/* Rows */}
             <div className="divide-y divide-border">
-              {filtered.map((emp: any) => {
+              {paginated.map((emp: any) => {
                 const cand = emp.candidate;
                 const job  = emp.job;
                 const initials = cand?.name?.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase() ?? "??";
@@ -840,10 +845,30 @@ export default function Employees() {
               })}
             </div>
 
-            {/* Footer count */}
-            <div className="px-4 py-2.5 border-t border-border bg-muted/20 text-xs text-muted-foreground">
-              {filtered.length} çalışan gösteriliyor
-              {filtered.length !== (employees ?? []).length && ` (toplam ${(employees ?? []).length})`}
+            {/* Footer / pagination */}
+            <div className="flex items-center justify-between px-4 py-2.5 border-t border-border bg-muted/20 text-xs text-muted-foreground">
+              <span>
+                {filtered.length} çalışandan {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, filtered.length)} gösteriliyor
+              </span>
+              {totalPages > 1 && (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setPage(p => p - 1)}
+                    disabled={page === 0}
+                    className="p-1 rounded hover:bg-muted disabled:opacity-30 transition-colors"
+                  >
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+                  </button>
+                  <span className="font-medium">{page + 1} / {totalPages}</span>
+                  <button
+                    onClick={() => setPage(p => p + 1)}
+                    disabled={page >= totalPages - 1}
+                    className="p-1 rounded hover:bg-muted disabled:opacity-30 transition-colors"
+                  >
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}

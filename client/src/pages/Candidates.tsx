@@ -65,7 +65,9 @@ export default function Candidates() {
   const { data: allApplications } = useApplications();
   const [search, setSearch] = useState("");
   const [filterCat, setFilterCat] = useState<string>("all");
+  const [page, setPage] = useState(0);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const PAGE_SIZE = 50;
 
   // Build a map: candidateId -> list of jobs they applied to
   const candidateJobsMap = new Map<number, { jobId: number; jobTitle: string; status: string }[]>();
@@ -90,6 +92,9 @@ export default function Candidates() {
     return matchSearch && matchCat;
   });
 
+  const totalPages = Math.ceil((filtered?.length ?? 0) / PAGE_SIZE);
+  const paginated = filtered?.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
   return (
     <Layout>
       <div className="space-y-5">
@@ -106,7 +111,7 @@ export default function Candidates() {
                 placeholder="İsim, şehir, marka..."
                 className="pl-8 w-52 h-9 text-sm bg-card"
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => { setSearch(e.target.value); setPage(0); }}
                 data-testid="input-candidate-search"
               />
             </div>
@@ -126,7 +131,7 @@ export default function Candidates() {
           ].map(({ key, label, count }) => (
             <button
               key={key}
-              onClick={() => setFilterCat(key)}
+              onClick={() => { setFilterCat(key); setPage(0); }}
               className={`px-3 py-1.5 text-xs font-medium rounded-full transition-colors ${
                 filterCat === key
                   ? "bg-primary text-primary-foreground"
@@ -145,7 +150,7 @@ export default function Candidates() {
             <div>Kat.</div>
             <div>Aday</div>
             <div>İletişim</div>
-            <div>Pozisyon</div>
+            <div>Üretim Bandı</div>
             <div>Konum</div>
             <div>Exp</div>
             <div className="text-right">Eylemler</div>
@@ -168,7 +173,7 @@ export default function Candidates() {
             </div>
           ) : (
             <div className="divide-y divide-border">
-              {filtered?.map((candidate, idx) => {
+              {paginated?.map((candidate, idx) => {
                 const cat = candidate.category as keyof typeof CATEGORY_META;
                 const catMeta = CATEGORY_META[cat] ?? CATEGORY_META.K0;
                 const candidateJobs = candidateJobsMap.get(candidate.id) ?? [];
@@ -260,6 +265,30 @@ export default function Candidates() {
                   </motion.div>
                 );
               })}
+            </div>
+          )}
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between px-5 py-3 border-t border-border bg-muted/20 text-xs text-muted-foreground">
+              <span>{(filtered?.length ?? 0)} adaydan {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, filtered?.length ?? 0)} gösteriliyor</span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setPage(p => p - 1)}
+                  disabled={page === 0}
+                  className="p-1 rounded hover:bg-muted disabled:opacity-30 transition-colors"
+                >
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+                </button>
+                <span className="font-medium">{page + 1} / {totalPages}</span>
+                <button
+                  onClick={() => setPage(p => p + 1)}
+                  disabled={page >= totalPages - 1}
+                  className="p-1 rounded hover:bg-muted disabled:opacity-30 transition-colors"
+                >
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                </button>
+              </div>
             </div>
           )}
         </div>
