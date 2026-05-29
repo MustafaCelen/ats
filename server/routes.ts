@@ -1030,6 +1030,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             if (existingEmployee) cand = existingEmployee.candidate;
           }
           if (!cand && email) cand = await storage.getCandidateByEmail(email);
+          if (!cand && name) cand = await storage.getCandidateByName(name);
+          if (!existingEmployee && cand) existingEmployee = await storage.getEmployeeByCandidateId(cand.id);
           const referredBy = col("SPONSORU", "referredBy");
           const office = col("Ofis", "OFİS", "office");
           if (!cand) {
