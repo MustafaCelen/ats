@@ -14,7 +14,7 @@ import {
 import {
   Users, Search, Phone, Mail, MapPin, Award, Building2,
   MoreHorizontal, ExternalLink, CheckCircle2, XCircle, Briefcase, CalendarDays,
-  Upload, Download, Pencil, Key, AtSign, AlertCircle, FileText, UserCheck,
+  Upload, Download, Pencil, Key, AtSign, AlertCircle, FileText, UserCheck, HandCoins,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { type PublicUser } from "@shared/schema";
@@ -132,7 +132,14 @@ export default function Employees() {
   const [page, setPage] = useState(0);
   const PAGE_SIZE = 50;
   const [detailEmployee, setDetailEmployee] = useState<any | null>(null);
+  const [detailTab, setDetailTab] = useState<"profil" | "islemler">("profil");
   const [editEmployee, setEditEmployee] = useState<any | null>(null);
+
+  const { data: employeeClosings = [], isFetching: closingsFetching } = useQuery<any[]>({
+    queryKey: ["/api/employees", detailEmployee?.id, "closings"],
+    queryFn: () => fetch(`/api/employees/${detailEmployee!.id}/closings`).then((r) => r.json()),
+    enabled: !!detailEmployee && detailTab === "islemler",
+  });
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const filtered = (employees ?? []).filter((e: any) => {
@@ -508,8 +515,8 @@ export default function Employees() {
 
       {/* Detail dialog */}
       {detailEmployee && (
-        <Dialog open={!!detailEmployee} onOpenChange={(v) => { if (!v) setDetailEmployee(null); }}>
-          <DialogContent className="max-w-md" aria-describedby="emp-detail-desc">
+        <Dialog open={!!detailEmployee} onOpenChange={(v) => { if (!v) { setDetailEmployee(null); setDetailTab("profil"); } }}>
+          <DialogContent className="max-w-2xl" aria-describedby="emp-detail-desc">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Briefcase className="h-4 w-4 text-primary" />
@@ -517,7 +524,25 @@ export default function Employees() {
               </DialogTitle>
               <p id="emp-detail-desc" className="text-sm text-muted-foreground">{detailEmployee.title ?? detailEmployee.job?.title ?? "Danışman"}</p>
             </DialogHeader>
-            <div className="space-y-3 text-sm pt-1">
+
+            {/* Tab bar */}
+            <div className="flex border-b border-border -mx-6 px-6 gap-4">
+              <button
+                onClick={() => setDetailTab("profil")}
+                className={`pb-2 text-sm font-medium transition-colors border-b-2 -mb-px ${detailTab === "profil" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+              >
+                Profil
+              </button>
+              <button
+                onClick={() => setDetailTab("islemler")}
+                className={`pb-2 text-sm font-medium transition-colors border-b-2 -mb-px flex items-center gap-1.5 ${detailTab === "islemler" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+              >
+                <HandCoins className="h-3.5 w-3.5" /> İşlemler
+              </button>
+            </div>
+
+            {detailTab === "profil" && (
+            <div className="space-y-3 text-sm pt-1 max-h-[70vh] overflow-y-auto pr-1">
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <p className="text-xs text-muted-foreground font-medium mb-0.5">Kategori</p>
@@ -702,6 +727,68 @@ export default function Employees() {
                 </Button>
               </div>
             </div>
+            )}
+
+            {detailTab === "islemler" && (
+              <div className="pt-2 max-h-[70vh] overflow-y-auto">
+                {closingsFetching ? (
+                  <p className="text-sm text-muted-foreground py-8 text-center">Yükleniyor…</p>
+                ) : employeeClosings.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-muted-foreground gap-2">
+                    <HandCoins className="h-8 w-8 opacity-30" />
+                    <p className="text-sm">Henüz işlem kaydı yok.</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto rounded-lg border border-border">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-muted/50 text-xs text-muted-foreground font-medium">
+                          <th className="text-left px-3 py-2">Mülk</th>
+                          <th className="text-left px-3 py-2">Tür</th>
+                          <th className="text-right px-3 py-2">Satış Bedeli</th>
+                          <th className="text-right px-3 py-2">Net Kazanç</th>
+                          <th className="text-left px-3 py-2">Taraf</th>
+                          <th className="text-left px-3 py-2">Tarih</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                        {employeeClosings.map((c: any) => (
+                          <tr key={`${c.closingId}-${c.sideType}`} className="hover:bg-muted/30 transition-colors">
+                            <td className="px-3 py-2 max-w-[140px] truncate" title={c.propertyAddress}>{c.propertyAddress || "—"}</td>
+                            <td className="px-3 py-2 whitespace-nowrap">
+                              <span className="text-xs">{c.dealCategory} · {c.dealType}</span>
+                            </td>
+                            <td className="px-3 py-2 text-right font-mono whitespace-nowrap">
+                              {parseFloat(c.saleValue).toLocaleString("tr-TR")} ₺
+                            </td>
+                            <td className="px-3 py-2 text-right font-mono whitespace-nowrap font-semibold text-emerald-700">
+                              {parseFloat(c.employeeNet).toLocaleString("tr-TR")} ₺
+                            </td>
+                            <td className="px-3 py-2">
+                              <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-full ${c.sideType === "buyer" ? "bg-blue-50 text-blue-700" : "bg-amber-50 text-amber-700"}`}>
+                                {c.sideType === "buyer" ? "Alıcı" : "Satıcı"}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">
+                              {c.closingDate ? format(new Date(c.closingDate), "dd MMM yyyy") : "—"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr className="bg-muted/40 font-semibold text-xs">
+                          <td colSpan={3} className="px-3 py-2 text-muted-foreground">{employeeClosings.length} işlem</td>
+                          <td className="px-3 py-2 text-right font-mono text-emerald-700">
+                            {employeeClosings.reduce((s: number, c: any) => s + parseFloat(c.employeeNet || "0"), 0).toLocaleString("tr-TR")} ₺
+                          </td>
+                          <td colSpan={2} />
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
           </DialogContent>
         </Dialog>
       )}

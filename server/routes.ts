@@ -926,6 +926,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  app.get("/api/employees/:id/closings", requireAuth, async (req: any, res: any) => {
+    try {
+      const id = Number(req.params.id);
+      const rows = await storage.getClosingsByEmployee(id);
+      res.json(rows);
+    } catch {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   // Export employees as CSV
   app.get("/api/employees/export", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
     try {

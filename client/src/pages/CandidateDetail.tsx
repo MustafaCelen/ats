@@ -25,7 +25,7 @@ import {
   Trash2, Send, User, Pencil, MapPin, Building2,
   FileCheck, Globe, Star, Award, Users, TrendingUp,
   ExternalLink, Calendar, FileText, CheckCircle2, Circle, AtSign, History, Clock,
-  Key, UserCheck, BadgeCheck, RefreshCcw, XCircle,
+  Key, UserCheck, BadgeCheck, RefreshCcw, XCircle, HandCoins, TrendingDown,
 } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import {
@@ -107,6 +107,14 @@ function useUpdateStageHistoryDate(candidateId: number) {
     mutationFn: ({ id, enteredAt }: { id: number; enteredAt: string }) =>
       apiRequest("PATCH", `/api/stage-history/${id}`, { enteredAt }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/candidates", candidateId, "history"] }),
+  });
+}
+
+function useEmployeeClosings(employeeId: number | undefined) {
+  return useQuery<any[]>({
+    queryKey: ["/api/employees", employeeId, "closings"],
+    queryFn: () => fetch(`/api/employees/${employeeId}/closings`).then((r) => r.json()),
+    enabled: !!employeeId,
   });
 }
 
@@ -221,6 +229,7 @@ export default function CandidateDetail() {
     queryFn: () => fetch(`/api/candidates/${candidateId}/employee`).then((r) => r.json()),
     enabled: !!candidateId,
   });
+  const { data: employeeClosings = [], isFetching: closingsFetching } = useEmployeeClosings(employeeRecord?.id);
 
   const { data: allInterviews } = useQuery<any[]>({
     queryKey: ["/api/interviews"],
@@ -234,7 +243,7 @@ export default function CandidateDetail() {
   const [noteText, setNoteText] = useState("");
   const [editingHistoryId, setEditingHistoryId] = useState<number | null>(null);
   const [editingHistoryDate, setEditingHistoryDate] = useState<string>("");
-  const [activeTab, setActiveTab] = useState<"overview" | "applications" | "interviews" | "notes" | "history">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "applications" | "interviews" | "notes" | "islemler" | "history">("overview");
   const [editOpen, setEditOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
@@ -379,17 +388,17 @@ export default function CandidateDetail() {
         </div>
 
         {/* ── Tabs ── */}
-        <div className="flex gap-1 border-b border-border">
-          {(["overview", "applications", "interviews", "notes", "history"] as const).map((tab) => (
+        <div className="flex gap-1 border-b border-border flex-wrap">
+          {(["overview", "applications", "interviews", "notes", ...(employeeRecord ? ["islemler"] : []), "history"] as const).map((tab) => (
             <button
               key={tab}
-              onClick={() => setActiveTab(tab)}
+              onClick={() => setActiveTab(tab as any)}
               className={`px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px ${
                 activeTab === tab ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
               data-testid={`tab-${tab}`}
             >
-              {tab === "overview" ? "Profil" : tab === "applications" ? "Başvurular" : tab === "interviews" ? "Randevular" : tab === "notes" ? "Notlar" : "Geçmiş"}
+              {tab === "overview" ? "Profil" : tab === "applications" ? "Başvurular" : tab === "interviews" ? "Randevular" : tab === "notes" ? "Notlar" : tab === "islemler" ? "İşlemler" : "Geçmiş"}
               {tab === "applications" && applications && (
                 <span className="ml-1.5 text-xs bg-muted px-1.5 py-0.5 rounded-full">{applications.length}</span>
               )}
@@ -398,6 +407,9 @@ export default function CandidateDetail() {
               )}
               {tab === "notes" && notes && notes.length > 0 && (
                 <span className="ml-1.5 text-xs bg-muted px-1.5 py-0.5 rounded-full">{notes.length}</span>
+              )}
+              {tab === "islemler" && employeeClosings.length > 0 && (
+                <span className="ml-1.5 text-xs bg-muted px-1.5 py-0.5 rounded-full">{employeeClosings.length}</span>
               )}
               {tab === "history" && history.length > 0 && (
                 <span className="ml-1.5 text-xs bg-muted px-1.5 py-0.5 rounded-full">{history.length}</span>
@@ -848,6 +860,119 @@ export default function CandidateDetail() {
                   </div>
                 ))}
               </div>
+            )}
+          </div>
+        )}
+
+        {/* ── İşlemler Tab ── */}
+        {activeTab === "islemler" && (
+          <div className="space-y-4">
+            {closingsFetching ? (
+              <div className="text-center py-12 text-muted-foreground text-sm">Yükleniyor…</div>
+            ) : employeeClosings.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-3">
+                <HandCoins className="h-10 w-10 opacity-20" />
+                <p className="text-sm">Henüz işlem kaydı yok.</p>
+              </div>
+            ) : (
+              <>
+                {/* Summary cards */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+                    <p className="text-xs text-muted-foreground font-medium mb-1">Toplam İşlem</p>
+                    <p className="text-2xl font-bold">{employeeClosings.length}</p>
+                  </div>
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
+                    <p className="text-xs text-emerald-700 font-medium mb-1">Toplam Net Kazanç</p>
+                    <p className="text-xl font-bold text-emerald-700">
+                      {employeeClosings.reduce((s: number, c: any) => s + parseFloat(c.employeeNet || "0"), 0).toLocaleString("tr-TR")} ₺
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 shadow-sm">
+                    <p className="text-xs text-blue-700 font-medium mb-1">Satış</p>
+                    <p className="text-2xl font-bold text-blue-700">
+                      {employeeClosings.filter((c: any) => c.dealCategory === "Satış").length}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 shadow-sm">
+                    <p className="text-xs text-amber-700 font-medium mb-1">Kiralık</p>
+                    <p className="text-2xl font-bold text-amber-700">
+                      {employeeClosings.filter((c: any) => c.dealCategory === "Kiralık").length}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Closings table */}
+                <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+                  <div className="flex items-center gap-2 px-4 py-3 border-b border-border bg-muted/30">
+                    <HandCoins className="h-4 w-4 text-primary" />
+                    <h2 className="text-sm font-semibold">İşlem Detayları</h2>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-muted/50 text-xs text-muted-foreground font-medium border-b border-border">
+                          <th className="text-left px-4 py-3">Mülk Adresi</th>
+                          <th className="text-left px-4 py-3">Kategori</th>
+                          <th className="text-left px-4 py-3">Tür</th>
+                          <th className="text-right px-4 py-3">Satış Bedeli</th>
+                          <th className="text-right px-4 py-3">Net Kazanç</th>
+                          <th className="text-left px-4 py-3">Taraf</th>
+                          <th className="text-left px-4 py-3">Durum</th>
+                          <th className="text-left px-4 py-3">Kapanış Tarihi</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                        {employeeClosings.map((c: any, i: number) => (
+                          <tr key={`${c.closingId}-${c.sideType}-${i}`} className="hover:bg-muted/20 transition-colors">
+                            <td className="px-4 py-3">
+                              <p className="font-medium max-w-[200px] truncate" title={c.propertyAddress}>{c.propertyAddress || "—"}</p>
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${c.dealCategory === "Satış" ? "bg-blue-50 text-blue-700" : "bg-amber-50 text-amber-700"}`}>
+                                {c.dealCategory}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-muted-foreground">{c.dealType}</td>
+                            <td className="px-4 py-3 text-right font-mono">
+                              {parseFloat(c.saleValue).toLocaleString("tr-TR")} ₺
+                            </td>
+                            <td className="px-4 py-3 text-right font-mono font-semibold text-emerald-700">
+                              {parseFloat(c.employeeNet).toLocaleString("tr-TR")} ₺
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full flex items-center gap-1 w-fit ${c.sideType === "buyer" ? "bg-violet-50 text-violet-700" : "bg-orange-50 text-orange-700"}`}>
+                                {c.sideType === "buyer" ? <TrendingDown className="h-3 w-3" /> : <TrendingUp className="h-3 w-3" />}
+                                {c.sideType === "buyer" ? "Alıcı Tarafı" : "Satıcı Tarafı"}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${c.status === "completed" ? "bg-emerald-50 text-emerald-700" : "bg-sky-50 text-sky-700"}`}>
+                                {c.status === "completed" ? "Tamamlandı" : "Bekleniyor"}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
+                              {c.closingDate ? format(new Date(c.closingDate), "d MMM yyyy") : "—"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr className="bg-muted/40 font-semibold text-xs border-t border-border">
+                          <td colSpan={3} className="px-4 py-3 text-muted-foreground">{employeeClosings.length} işlem</td>
+                          <td className="px-4 py-3 text-right font-mono">
+                            {employeeClosings.reduce((s: number, c: any) => s + parseFloat(c.saleValue || "0"), 0).toLocaleString("tr-TR")} ₺
+                          </td>
+                          <td className="px-4 py-3 text-right font-mono text-emerald-700">
+                            {employeeClosings.reduce((s: number, c: any) => s + parseFloat(c.employeeNet || "0"), 0).toLocaleString("tr-TR")} ₺
+                          </td>
+                          <td colSpan={3} />
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </div>
+              </>
             )}
           </div>
         )}

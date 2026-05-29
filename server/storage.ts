@@ -62,6 +62,18 @@ export interface NewContractSigner {
   category: string | null; city: string | null; signedAt: string | null;
 }
 
+export interface EmployeeClosingRow {
+  closingId: number;
+  propertyAddress: string;
+  dealCategory: string;
+  dealType: string;
+  saleValue: string;
+  employeeNet: string;
+  closingDate: Date | null;
+  sideType: string;
+  status: string;
+}
+
 export interface ReportStats {
   funnel: FunnelStage[]; stageTimes: StageTime[]; total: number; hired: number;
   rejected: number; conversionRate: number; avgTimeToContractSign: number; avgTimeToEmploy: number;
@@ -154,6 +166,7 @@ export interface IStorage {
   getAllEmployeesCapStatus(): Promise<Record<number, CapStatus & { name: string; kwuid: string }>>;
   getClosings(): Promise<ClosingWithDetails[]>;
   getClosing(id: number): Promise<ClosingWithDetails | null>;
+  getClosingsByEmployee(employeeId: number): Promise<EmployeeClosingRow[]>;
   updateClosing(id: number, data: Partial<{
     propertyAddress: string; il: string | null; ilce: string | null;
     dealCategory: string; dealType: string; saleValue: string;
@@ -1721,6 +1734,27 @@ export class DatabaseStorage implements IStorage {
     const [closing] = await db.select().from(closings).where(eq(closings.id, id));
     if (!closing) return null;
     return this.buildClosingWithDetails(closing);
+  }
+
+  async getClosingsByEmployee(employeeId: number): Promise<EmployeeClosingRow[]> {
+    const rows = await db
+      .select({
+        closingId: closings.id,
+        propertyAddress: closings.propertyAddress,
+        dealCategory: closings.dealCategory,
+        dealType: closings.dealType,
+        saleValue: closings.saleValue,
+        employeeNet: closingAgents.employeeNet,
+        closingDate: closings.closingDate,
+        sideType: closingSides.sideType,
+        status: closings.status,
+      })
+      .from(closingAgents)
+      .innerJoin(closingSides, eq(closingAgents.closingSideId, closingSides.id))
+      .innerJoin(closings, eq(closingSides.closingId, closings.id))
+      .where(eq(closingAgents.employeeId, employeeId))
+      .orderBy(desc(closings.closingDate));
+    return rows;
   }
 
   async updateClosing(id: number, data: Partial<{
