@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useRoute, Link } from "wouter";
 import { Layout } from "@/components/Layout";
 import { Button } from "@/components/ui/button";
@@ -9,8 +9,8 @@ import { Badge } from "@/components/ui/badge";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useCandidate, useUpdateCandidate, useDeleteCandidate } from "@/hooks/use-candidates";
-import { useUpdateEmployee } from "@/hooks/use-employees";
 import { useApplications } from "@/hooks/use-applications";
+import { EmployeeEditDialog } from "@/components/EmployeeEditDialog";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ScoreBadge, ScoreBar } from "@/components/ScoreBadge";
 import { MentionTextarea } from "@/components/MentionTextarea";
@@ -29,10 +29,9 @@ import {
 } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import {
-  CANDIDATE_CATEGORIES, LICENSE_STATUSES, TURKEY_CITIES, REAL_ESTATE_BRANDS,
-  REQUIRED_DOCUMENTS, STAGE_LABELS, CONTRACT_TYPES, URETKENLIK_ORANLAR,
+  CANDIDATE_CATEGORIES, TURKEY_CITIES, REAL_ESTATE_BRANDS,
+  REQUIRED_DOCUMENTS, STAGE_LABELS,
   type Candidate, type InsertCandidate, type CandidateNote,
-  type PublicUser,
 } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
@@ -941,8 +940,11 @@ export default function CandidateDetail() {
         )}
       </div>
 
-      {candidate && (
-        <EditCandidateDialog candidate={candidate} employeeRecord={employeeRecord ?? null} open={editOpen} onOpenChange={setEditOpen} />
+      {candidate && employeeRecord && (
+        <EmployeeEditDialog emp={employeeRecord} open={editOpen} onOpenChange={setEditOpen} />
+      )}
+      {candidate && !employeeRecord && (
+        <EditCandidateDialog candidate={candidate} employeeRecord={null} open={editOpen} onOpenChange={setEditOpen} />
       )}
 
       <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
@@ -1027,18 +1029,11 @@ function ChipToggle({ options, value, onChange }: { options: string[]; value: st
   );
 }
 
-// ─── Edit Dialog ─────────────────────────────────────────────────────────────
+// ─── Edit Dialog (candidate only — no employee record) ────────────────────────
 
-function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: { candidate: Candidate; employeeRecord: any | null; open: boolean; onOpenChange: (v: boolean) => void }) {
-  const { mutate: update, isPending: savingCand } = useUpdateCandidate();
-  const { mutate: updateEmployee, isPending: savingEmp } = useUpdateEmployee();
-  const isPending = savingCand || savingEmp;
+function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: { candidate: Candidate; employeeRecord: null; open: boolean; onOpenChange: (v: boolean) => void }) {
+  const { mutate: update, isPending } = useUpdateCandidate();
   const { toast } = useToast();
-  const { data: hiringManagers = [] } = useQuery<PublicUser[]>({
-    queryKey: ["/api/hiring-managers"],
-    queryFn: () => fetch("/api/hiring-managers").then((r) => r.json()),
-    enabled: !!employeeRecord,
-  });
 
   const [form, setForm] = useState({
     name: candidate.name ?? "",
@@ -1063,70 +1058,6 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
   const [specialization, setSpecialization] = useState<string[]>(candidate.specialization ?? []);
   const [languages, setLanguages] = useState<string[]>(candidate.languages ?? []);
   const f = (k: string, v: string) => setForm((p) => ({ ...p, [k]: v }));
-
-  // KW / employee fields (only used when candidate is an employee)
-  const [kwuid, setKwuid] = useState(employeeRecord?.kwuid ?? "");
-  const [kwMail, setKwMail] = useState(employeeRecord?.kwMail ?? "");
-  const [empTitle, setEmpTitle] = useState(employeeRecord?.title ?? "");
-  const [startDate, setStartDate] = useState(
-    employeeRecord?.startDate ? new Date(employeeRecord.startDate).toISOString().split("T")[0] : ""
-  );
-  const [contractType, setContractType] = useState(employeeRecord?.contractType ?? "");
-  const [uretkenlikKoclugu, setUretkenlikKoclugu] = useState<boolean>(employeeRecord?.uretkenlikKoclugu ?? false);
-  const [uretkenlikManagerId, setUretkenlikManagerId] = useState(
-    employeeRecord?.uretkenlikKocluguManagerId ? String(employeeRecord.uretkenlikKocluguManagerId) : ""
-  );
-  const [uretkenlikOran, setUretkenlikOran] = useState(employeeRecord?.uretkenlikKocluguOran ?? "");
-  const [capMonth, setCapMonth] = useState(() => {
-    if (employeeRecord?.capMonth) return employeeRecord.capMonth;
-    if (employeeRecord?.startDate) {
-      const d = new Date(employeeRecord.startDate);
-      d.setMonth(d.getMonth() + 1);
-      return MONTHS_TR[d.getMonth()];
-    }
-    return "";
-  });
-  const [capValue, setCapValue] = useState(employeeRecord?.capValue ?? "");
-  // Billing fields
-  const [billingName, setBillingName] = useState(employeeRecord?.billingName ?? "");
-  const [billingAddress, setBillingAddress] = useState(employeeRecord?.billingAddress ?? "");
-  const [billingDistrict, setBillingDistrict] = useState(employeeRecord?.billingDistrict ?? "");
-  const [billingCity, setBillingCity] = useState(employeeRecord?.billingCity ?? "");
-  const [billingCountry, setBillingCountry] = useState(employeeRecord?.billingCountry ?? "");
-  const [taxOffice, setTaxOffice] = useState(employeeRecord?.taxOffice ?? "");
-  const [taxId, setTaxId] = useState(employeeRecord?.taxId ?? "");
-  const [birthDate, setBirthDate] = useState(employeeRecord?.birthDate ?? "");
-
-  // Sync KW + billing state when employeeRecord loads (query resolves after component mounts)
-  useEffect(() => {
-    if (!employeeRecord) return;
-    setKwuid(employeeRecord.kwuid ?? "");
-    setKwMail(employeeRecord.kwMail ?? "");
-    setEmpTitle(employeeRecord.title ?? "");
-    setStartDate(employeeRecord.startDate ? new Date(employeeRecord.startDate).toISOString().split("T")[0] : "");
-    setContractType(employeeRecord.contractType ?? "");
-    setUretkenlikKoclugu(employeeRecord.uretkenlikKoclugu ?? false);
-    setUretkenlikManagerId(employeeRecord.uretkenlikKocluguManagerId ? String(employeeRecord.uretkenlikKocluguManagerId) : "");
-    setUretkenlikOran(employeeRecord.uretkenlikKocluguOran ?? "");
-    if (employeeRecord.capMonth) {
-      setCapMonth(employeeRecord.capMonth);
-    } else if (employeeRecord.startDate) {
-      const d = new Date(employeeRecord.startDate);
-      d.setMonth(d.getMonth() + 1);
-      setCapMonth(MONTHS_TR[d.getMonth()]);
-    } else {
-      setCapMonth("");
-    }
-    setCapValue(employeeRecord.capValue ?? "");
-    setBillingName(employeeRecord.billingName ?? "");
-    setBillingAddress(employeeRecord.billingAddress ?? "");
-    setBillingDistrict(employeeRecord.billingDistrict ?? "");
-    setBillingCity(employeeRecord.billingCity ?? "");
-    setBillingCountry(employeeRecord.billingCountry ?? "");
-    setTaxOffice(employeeRecord.taxOffice ?? "");
-    setTaxId(employeeRecord.taxId ?? "");
-    setBirthDate(employeeRecord.birthDate ?? "");
-  }, [employeeRecord]);
 
   const handleSave = () => {
     if (!form.name.trim()) {
@@ -1157,36 +1088,7 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
         expectedStartMonth: form.expectedStartMonth || undefined,
       } as Partial<InsertCandidate>,
     }, {
-      onSuccess: () => {
-        if (employeeRecord) {
-          updateEmployee({
-            id: employeeRecord.id,
-            kwuid: kwuid || undefined,
-            kwMail: kwMail || undefined,
-            title: empTitle || undefined,
-            startDate: startDate || undefined,
-            contractType: contractType || null,
-            uretkenlikKoclugu,
-            uretkenlikKocluguManagerId: uretkenlikKoclugu && uretkenlikManagerId ? Number(uretkenlikManagerId) : null,
-            uretkenlikKocluguOran: uretkenlikKoclugu && uretkenlikOran ? uretkenlikOran : null,
-            capMonth: capMonth || undefined,
-            capValue: capValue || undefined,
-            billingName: billingName || undefined,
-            billingAddress: billingAddress || undefined,
-            billingDistrict: billingDistrict || undefined,
-            billingCity: billingCity || undefined,
-            billingCountry: billingCountry || undefined,
-            taxOffice: taxOffice || undefined,
-            taxId: taxId || undefined,
-            birthDate: birthDate || undefined,
-          }, {
-            onSuccess: () => { toast({ title: "Profil güncellendi" }); onOpenChange(false); },
-          });
-        } else {
-          toast({ title: "Profil güncellendi" });
-          onOpenChange(false);
-        }
-      },
+      onSuccess: () => { toast({ title: "Profil güncellendi" }); onOpenChange(false); },
       onError: (err: any) => toast({ title: "Hata", description: err?.message, variant: "destructive" }),
     });
   };
@@ -1256,7 +1158,6 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
 
           {/* ── Gayrimenkul Profili ── */}
           <EditGroup icon="🏠" title="Gayrimenkul Profili">
-            {/* Category chips */}
             <div className="mb-3">
               <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Kategori</p>
               <div className="grid grid-cols-3 gap-2">
@@ -1300,7 +1201,6 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
                 <Input value={form.licenseNumber} onChange={(e) => f("licenseNumber", e.target.value)} placeholder="TKGM-..." />
               </Field>
             </div>
-            {/* Specialization + Languages side by side */}
             <div className="grid grid-cols-2 gap-x-6 gap-y-2 mt-3">
               <div>
                 <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Uzmanlık Alanları</p>
@@ -1316,11 +1216,9 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
           {/* ── Diğer ── */}
           <EditGroup icon="📋" title="Diğer">
             <div className="grid grid-cols-2 gap-3">
-              {!employeeRecord && (
-                <Field label="Beklenen Başlangıç Ayı">
-                  <Input type="month" value={form.expectedStartMonth} onChange={(e) => f("expectedStartMonth", e.target.value)} data-testid="input-edit-expected-start-month" />
-                </Field>
-              )}
+              <Field label="Beklenen Başlangıç Ayı">
+                <Input type="month" value={form.expectedStartMonth} onChange={(e) => f("expectedStartMonth", e.target.value)} data-testid="input-edit-expected-start-month" />
+              </Field>
               <Field label="Referans (kim tanıttı?)">
                 <Input value={form.referredBy} onChange={(e) => f("referredBy", e.target.value)} placeholder="Ad Soyad veya kaynak" />
               </Field>
@@ -1331,106 +1229,6 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
               </div>
             </div>
           </EditGroup>
-
-          {/* ── KW Çalışan Bilgileri (employee only) ── */}
-          {employeeRecord && (
-            <div className="rounded-xl border-2 border-[#CC0000]/30 overflow-hidden">
-              <div className="h-1 bg-gradient-to-r from-[#B40101] via-[#CC0000] to-[#8B0000]" />
-              <div className="px-4 py-3 bg-[#CC0000]/5 border-b border-[#CC0000]/20">
-                <p className="text-sm font-bold text-[#CC0000] uppercase tracking-wide">KW Çalışan Bilgileri</p>
-              </div>
-              <div className="p-4 space-y-4">
-
-                {/* KW Identity */}
-                <div>
-                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Kimlik & Erişim</p>
-                  <div className="grid grid-cols-2 gap-3">
-                    <Field label="KWUID"><Input value={kwuid} onChange={(e) => setKwuid(e.target.value)} placeholder="KWUID girin" /></Field>
-                    <Field label="KW E-posta"><Input type="email" value={kwMail} onChange={(e) => setKwMail(e.target.value)} placeholder="isim@kw.com.tr" /></Field>
-                  </div>
-                </div>
-
-                {/* Contract */}
-                <div>
-                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Sözleşme & Performans</p>
-                  <div className="grid grid-cols-2 gap-3">
-                    <Field label="Ünvan"><Input value={empTitle} onChange={(e) => setEmpTitle(e.target.value)} placeholder="Danışman" /></Field>
-                    <Field label="Başlangıç Tarihi"><Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} /></Field>
-                    <Field label="Sözleşme Türü">
-                      <Select value={contractType} onValueChange={setContractType}>
-                        <SelectTrigger><SelectValue placeholder="Seçiniz..." /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">— Seçilmedi —</SelectItem>
-                          {CONTRACT_TYPES.map((ct) => <SelectItem key={ct} value={ct}>{ct}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </Field>
-                    <Field label="Cap Ayı">
-                      <Select value={capMonth} onValueChange={setCapMonth}>
-                        <SelectTrigger><SelectValue placeholder="Ay seçin..." /></SelectTrigger>
-                        <SelectContent>{MONTHS_TR.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent>
-                      </Select>
-                    </Field>
-                    <Field label="Cap Değeri"><Input value={capValue} onChange={(e) => setCapValue(e.target.value)} placeholder="Cap miktarı" /></Field>
-                  </div>
-                </div>
-
-                {/* Uretkenlik */}
-                <div className="rounded-lg border border-[#CC0000]/20 bg-[#CC0000]/5 p-3 space-y-3">
-                  <div className="flex items-center gap-2">
-                    <input type="checkbox" id="uretkenlik-cd" checked={uretkenlikKoclugu} onChange={(e) => setUretkenlikKoclugu(e.target.checked)} className="rounded" />
-                    <Label htmlFor="uretkenlik-cd" className="text-sm font-medium cursor-pointer">Üretkenlik Koçluğu</Label>
-                  </div>
-                  {uretkenlikKoclugu && (
-                    <div className="grid grid-cols-2 gap-3 pl-6">
-                      <Field label="Koç (Hiring Manager)">
-                        <Select value={uretkenlikManagerId} onValueChange={setUretkenlikManagerId}>
-                          <SelectTrigger><SelectValue placeholder="Yönetici seçin..." /></SelectTrigger>
-                          <SelectContent>{hiringManagers.map((hm) => <SelectItem key={hm.id} value={String(hm.id)}>{hm.name}</SelectItem>)}</SelectContent>
-                        </Select>
-                      </Field>
-                      <Field label="Paylaşım Oranı">
-                        <Select value={uretkenlikOran} onValueChange={setUretkenlikOran}>
-                          <SelectTrigger><SelectValue placeholder="Oran seçin..." /></SelectTrigger>
-                          <SelectContent>{URETKENLIK_ORANLAR.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent>
-                        </Select>
-                      </Field>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ── Fatura & Vergi Bilgileri (employee only) ── */}
-          {employeeRecord && (
-            <div className="rounded-xl border-2 border-blue-200 overflow-hidden">
-              <div className="h-1 bg-gradient-to-r from-blue-400 via-blue-500 to-blue-600" />
-              <div className="px-4 py-3 bg-blue-50 border-b border-blue-200">
-                <p className="text-sm font-bold text-blue-700 uppercase tracking-wide">Fatura &amp; Vergi Bilgileri</p>
-              </div>
-              <div className="p-4 space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="col-span-2">
-                    <Field label="Şirket / Şahıs İsmi">
-                      <Input value={billingName} onChange={(e) => setBillingName(e.target.value)} placeholder="Fatura kesilecek isim veya şirket" />
-                    </Field>
-                  </div>
-                  <div className="col-span-2">
-                    <Field label="Fatura Adresi">
-                      <Input value={billingAddress} onChange={(e) => setBillingAddress(e.target.value)} placeholder="Cadde, bina no..." />
-                    </Field>
-                  </div>
-                  <Field label="İlçe"><Input value={billingDistrict} onChange={(e) => setBillingDistrict(e.target.value)} placeholder="İlçe" /></Field>
-                  <Field label="İl"><Input value={billingCity} onChange={(e) => setBillingCity(e.target.value)} placeholder="İl" /></Field>
-                  <Field label="Ülke"><Input value={billingCountry} onChange={(e) => setBillingCountry(e.target.value)} placeholder="Türkiye" /></Field>
-                  <Field label="Doğum Tarihi"><Input type="date" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} /></Field>
-                  <Field label="Vergi Dairesi"><Input value={taxOffice} onChange={(e) => setTaxOffice(e.target.value)} placeholder="Vergi dairesi adı" /></Field>
-                  <Field label="Vergi / TCK No"><Input value={taxId} onChange={(e) => setTaxId(e.target.value)} placeholder="Vergi veya TC kimlik no" /></Field>
-                </div>
-              </div>
-            </div>
-          )}
 
           <div className="flex gap-2 pt-2">
             <Button variant="outline" className="flex-1" onClick={() => onOpenChange(false)}>İptal</Button>
