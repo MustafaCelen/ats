@@ -54,6 +54,12 @@ export interface PassiveEmployee {
 export interface NewEmployee {
   id: number; name: string; startDate: Date | null; title: string | null;
   kwuid: string | null; contractType: string | null; category: string | null; city: string | null;
+  jobTitle: string | null;
+}
+
+export interface NewContractSigner {
+  applicationId: number; candidateName: string; jobTitle: string | null;
+  category: string | null; city: string | null; signedAt: string | null;
 }
 
 export interface ReportStats {
@@ -68,6 +74,8 @@ export interface ReportStats {
   passiveEmployeeCount: number;
   newEmployees: NewEmployee[];
   newEmployeeCount: number;
+  newContractSigners: NewContractSigner[];
+  newContractSignerCount: number;
 }
 
 function toPublicUser(u: User): PublicUser {
@@ -1224,9 +1232,11 @@ export class DatabaseStorage implements IStorage {
             candidateName: candidates.name,
             category: candidates.category,
             city: candidates.city,
+            jobTitle: jobs.title,
           })
           .from(employees)
           .leftJoin(candidates, eq(employees.candidateId, candidates.id))
+          .leftJoin(jobs, eq(employees.jobId, jobs.id))
           .where(and(...newCondsArr))
           .orderBy(asc(employees.startDate));
 
@@ -1239,6 +1249,51 @@ export class DatabaseStorage implements IStorage {
       contractType: r.contractType ?? null,
       category: r.category ?? null,
       city: r.city ?? null,
+      jobTitle: r.jobTitle ?? null,
+    }));
+
+    // ── New contract signers: first time reaching 'hired' stage in the period ──
+    const contractConds: any[] = [
+      eq(stageHistory.toStatus, "hired"),
+      gte(stageHistory.enteredAt, start),
+      lte(stageHistory.enteredAt, end),
+    ];
+    if (hasJobScope) contractConds.push(inArray(stageHistory.jobId, jobIds!));
+    if (hasOfficeCandidates) contractConds.push(inArray(stageHistory.candidateId, officeCandidateIds!));
+
+    const contractRaw = (scoped && !hasJobScope) || (hasOfficeFilter && !hasOfficeCandidates)
+      ? []
+      : await db
+          .select({
+            applicationId: stageHistory.applicationId,
+            signedAt: stageHistory.enteredAt,
+            candidateName: candidates.name,
+            category: candidates.category,
+            city: candidates.city,
+            jobTitle: jobs.title,
+          })
+          .from(stageHistory)
+          .leftJoin(candidates, eq(stageHistory.candidateId, candidates.id))
+          .leftJoin(jobs, eq(stageHistory.jobId, jobs.id))
+          .where(and(...contractConds))
+          .orderBy(asc(stageHistory.enteredAt));
+
+    // Deduplicate by applicationId — keep earliest entry
+    const contractMap = new Map<number, typeof contractRaw[number]>();
+    for (const row of contractRaw) {
+      const existing = contractMap.get(row.applicationId);
+      if (!existing || (row.signedAt && existing.signedAt && row.signedAt < existing.signedAt)) {
+        contractMap.set(row.applicationId, row);
+      }
+    }
+
+    const newContractSigners: NewContractSigner[] = Array.from(contractMap.values()).map((r) => ({
+      applicationId: r.applicationId,
+      candidateName: r.candidateName ?? "—",
+      jobTitle: r.jobTitle ?? null,
+      category: r.category ?? null,
+      city: r.city ?? null,
+      signedAt: r.signedAt,
     }));
 
     return {
@@ -1254,6 +1309,8 @@ export class DatabaseStorage implements IStorage {
       passiveEmployeeCount: passiveEmployees.length,
       newEmployees,
       newEmployeeCount: newEmployees.length,
+      newContractSigners,
+      newContractSignerCount: newContractSigners.length,
     };
   }
 
