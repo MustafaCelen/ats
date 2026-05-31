@@ -1353,8 +1353,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         const bedel = normNum(row["İşlem Değeri"] ?? row["Kapanış Rakamı"] ?? row["Satış Bedeli"] ?? "") ?? "";
         const islem = row["İşlem"] ?? "";
         const tip   = row["İşlem Tipi"] ?? "";
-        const adres = (row["Adres"] ?? row["Mülk Adresi"] ?? "").trim().toLowerCase();
-        const key = `${tarih}||${bedel}||${islem}||${tip}||${adres}`;
+        const adres  = (row["Adres"] ?? row["Mülk Adresi"] ?? "").trim().toLowerCase();
+        const detay  = (row["Mülk Detayları"] ?? row["Mülkle İlgili Detay Bilgiler"] ?? row["propertyDetails"] ?? "").trim().toLowerCase();
+        const key = `${tarih}||${bedel}||${islem}||${tip}||${adres}||${detay}`;
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key)!.push(row);
       }
