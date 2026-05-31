@@ -1948,16 +1948,19 @@ export class DatabaseStorage implements IStorage {
     // Pre-calculate cap statuses for all involved employees
     const allEmployeeIds = Array.from(new Set(data.sides.flatMap((s) => s.agents.map((a) => a.employeeId))));
     const capStatusMap: Record<number, CapStatus | null> = {};
-    for (const empId of allEmployeeIds) {
-      capStatusMap[empId] = await this.getEmployeeCapStatus(empId);
+    // Skip cap lookups during import — disableCap means cap values are never used
+    if (!data.disableCap) {
+      await Promise.all(allEmployeeIds.map(async (empId) => {
+        capStatusMap[empId] = await this.getEmployeeCapStatus(empId);
+      }));
     }
 
-    // Fetch all employee records
+    // Fetch all employee records in parallel
     const empMap: Record<number, EmployeeWithRelations> = {};
-    for (const empId of allEmployeeIds) {
+    await Promise.all(allEmployeeIds.map(async (empId) => {
       const emp = await this.getEmployee(empId);
       if (emp) empMap[empId] = emp;
-    }
+    }));
 
     // runningCap tracks how much cap has been used within this closing (buyer processed before seller)
     const runningCapUsed: Record<number, number> = {};

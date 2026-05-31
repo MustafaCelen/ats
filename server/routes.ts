@@ -1369,7 +1369,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return isNaN(d.getTime()) ? null : d;
       };
 
-      for (const [, groupRows] of groups) {
+      // Process in parallel batches of 10
+      const groupEntries = Array.from(groups.values());
+      const BATCH = 10;
+      for (let i = 0; i < groupEntries.length; i += BATCH) {
+        await Promise.allSettled(groupEntries.slice(i, i + BATCH).map(async (groupRows) => {
         try {
           const first = groupRows[0];
           const dateStr = first["İşlem Tarihi"] ?? first["Tarih"] ?? "";
@@ -1411,7 +1415,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             if (agents.length > 0) sides.push({ sideType, agents });
           }
 
-          if (sides.length === 0) { errors.push(`Taraf bulunamadı: ${first["Adres"] ?? first["Mülk Adresi"] ?? ""}`); continue; }
+          if (sides.length === 0) { errors.push(`Taraf bulunamadı: ${first["Adres"] ?? first["Mülk Adresi"] ?? ""}`); return; }
 
           const adres = first["Adres"] ?? first["Mülk Adresi"] ?? "";
           const islemCol = first["İşlem"] ?? "";
@@ -1448,7 +1452,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         } catch (e: any) {
           errors.push(e?.message ?? "Bilinmeyen hata");
         }
-      }
+        })); // end map + Promise.allSettled
+      } // end batch for
 
       res.json({ created, errors });
     } catch {
