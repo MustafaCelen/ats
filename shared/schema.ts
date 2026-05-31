@@ -386,8 +386,11 @@ export type Closing = typeof closings.$inferSelect;
 export const closingSides = pgTable("closing_sides", {
   id: serial("id").primaryKey(),
   closingId: integer("closing_id").notNull(),
-  sideType: text("side_type").notNull(), // "buyer" | "seller"
+  sideType: text("side_type").notNull(), // "buyer" | "seller" | "referral"
   bhbTotal: numeric("bhb_total", { precision: 15, scale: 2 }).notNull(),
+  kasa: numeric("kasa", { precision: 15, scale: 2 }).default("0"),
+  nakit: numeric("nakit", { precision: 15, scale: 2 }).default("0"),
+  banka: numeric("banka", { precision: 15, scale: 2 }).default("0"),
 }, (t) => ({
   closingIdIdx: index("closing_sides_closing_id_idx").on(t.closingId),
 }));
@@ -407,6 +410,9 @@ export const closingAgents = pgTable("closing_agents", {
   bmKdv: numeric("bm_kdv", { precision: 15, scale: 2 }).notNull().default("0"),
   ukShare: numeric("uk_share", { precision: 15, scale: 2 }).notNull().default("0"),
   employeeNet: numeric("employee_net", { precision: 15, scale: 2 }).notNull(),
+  kasa: numeric("kasa", { precision: 15, scale: 2 }).default("0"),
+  nakit: numeric("nakit", { precision: 15, scale: 2 }).default("0"),
+  banka: numeric("banka", { precision: 15, scale: 2 }).default("0"),
   contractTypeSnapshot: text("contract_type_snapshot"),
   ukRateSnapshot: numeric("uk_rate_snapshot", { precision: 10, scale: 2 }).notNull().default("0"),
   capAmountApplied: numeric("cap_amount_applied", { precision: 15, scale: 2 }),

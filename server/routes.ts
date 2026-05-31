@@ -1265,9 +1265,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
               (agent as any).bmKdv ?? "0",
               agent.ukShare ?? "0",
               agent.employeeNet ?? "0",
-              cv.kasa ?? "0",
-              cv.nakit ?? "0",
-              cv.banka ?? "0",
+              (agent as any).kasa ?? "0",
+              (agent as any).nakit ?? "0",
+              (agent as any).banka ?? "0",
               c.commissionRate ?? "2",
               c.saleValue,
               String(sidesCount),
@@ -1406,6 +1406,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
                 bmKdv: normNum(row["PlatinKarma (KDV)"] ?? row["PlatinKarma (KDV)_1"]) ?? "0",
                 ukShare: normNum(row["ÜK_1"] ?? row["ÜK Tutarı"]) ?? "0",
                 employeeNet: normNum(row["Danışman_1"] ?? row["Danışman Net"]) ?? "0",
+                kasa: normNum(row["Kasa"]) ?? "0",
+                nakit: normNum(row["Nakit"]) ?? "0",
+                banka: normNum(row["Banka"]) ?? "0",
               });
             }
             if (agents.length > 0) sides.push({ sideType, agents });
@@ -1434,9 +1437,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             referralInfo: first["Yönlendirme Bilgisi"] || null,
             contractStartDate,
             contractEndDate,
-            kasa: normNum(first["Kasa"]),
-            nakit: normNum(first["Nakit"]),
-            banka: normNum(first["Banka"]),
             buyerName: first["Alıcı Adı"] || null,
             sellerName: first["Satıcı Adı"] || null,
             notes: first["Notlar"] || null,
@@ -1471,7 +1471,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         propertyAddress, il, ilce, mahalle, propertyDetails,
         dealCategory, dealType, saleValue, commissionRate, openingPrice,
         durationDays, customerSource, referralInfo, contractStartDate, contractEndDate,
-        kasa, nakit, banka,
         closingDate, buyerName, sellerName, notes, sides,
       } = req.body;
       if (!saleValue || !sides) {
@@ -1493,9 +1492,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         referralInfo: referralInfo ?? null,
         contractStartDate: contractStartDate ? new Date(contractStartDate) : null,
         contractEndDate: contractEndDate ? new Date(contractEndDate) : null,
-        kasa: kasa ? String(kasa) : null,
-        nakit: nakit ? String(nakit) : null,
-        banka: banka ? String(banka) : null,
         closingDate: closingDate ? new Date(closingDate) : null,
         buyerName: buyerName ?? null,
         sellerName: sellerName ?? null,
@@ -1539,6 +1535,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.patch("/api/closing-agents/:id", requireAuth, requireAdmin, async (req, res) => {
     try {
       await storage.updateClosingAgent(Number(req.params.id), req.body);
+      res.status(204).send();
+    } catch {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.patch("/api/closing-sides/:id", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      await storage.updateClosingSide(Number(req.params.id), req.body);
       res.status(204).send();
     } catch {
       res.status(500).json({ message: "Internal server error" });

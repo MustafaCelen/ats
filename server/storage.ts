@@ -192,8 +192,9 @@ export interface IStorage {
   updateClosingAgent(id: number, data: Partial<{
     splitPercentage: string; bhbShare: string; mainBranchShare: string;
     kwtrKdv: string; marketCenterActual: string; bmKdv: string;
-    ukShare: string; employeeNet: string;
+    ukShare: string; employeeNet: string; kasa: string; nakit: string; banka: string;
   }>): Promise<void>;
+  updateClosingSide(id: number, data: Partial<{ kasa: string; nakit: string; banka: string }>): Promise<void>;
   createClosing(data: {
     propertyAddress: string;
     il?: string | null;
@@ -1911,10 +1912,15 @@ export class DatabaseStorage implements IStorage {
   async updateClosingAgent(id: number, data: Partial<{
     splitPercentage: string; bhbShare: string; mainBranchShare: string;
     kwtrKdv: string; marketCenterActual: string; bmKdv: string;
-    ukShare: string; employeeNet: string;
+    ukShare: string; employeeNet: string; kasa: string; nakit: string; banka: string;
   }>): Promise<void> {
     if (Object.keys(data).length === 0) return;
     await db.update(closingAgents).set(data as any).where(eq(closingAgents.id, id));
+  }
+
+  async updateClosingSide(id: number, data: Partial<{ kasa: string; nakit: string; banka: string }>): Promise<void> {
+    if (Object.keys(data).length === 0) return;
+    await db.update(closingSides).set(data as any).where(eq(closingSides.id, id));
   }
 
   async createClosing(data: {
@@ -1933,9 +1939,6 @@ export class DatabaseStorage implements IStorage {
     referralInfo?: string | null;
     contractStartDate?: Date | null;
     contractEndDate?: Date | null;
-    kasa?: string | null;
-    nakit?: string | null;
-    banka?: string | null;
     closingDate?: Date | null;
     status?: string;
     buyerName?: string | null;
@@ -1948,7 +1951,6 @@ export class DatabaseStorage implements IStorage {
       agents: Array<{
         employeeId: number;
         splitPercentage: string;
-        // Pre-calculated values from frontend (used as-is if provided)
         bhbShare?: string;
         mainBranchShare?: string;
         kwtrKdv?: string;
@@ -1956,6 +1958,9 @@ export class DatabaseStorage implements IStorage {
         bmKdv?: string;
         ukShare?: string;
         employeeNet?: string;
+        kasa?: string;
+        nakit?: string;
+        banka?: string;
       }>;
     }>;
   }): Promise<Closing> {
@@ -2002,9 +2007,6 @@ export class DatabaseStorage implements IStorage {
         referralInfo: data.referralInfo ?? null,
         contractStartDate: data.contractStartDate ?? null,
         contractEndDate: data.contractEndDate ?? null,
-        kasa: data.kasa ?? "0",
-        nakit: data.nakit ?? "0",
-        banka: data.banka ?? "0",
         closingDate: data.closingDate ?? null,
         status: data.status ?? (data.closingDate ? "completed" : "expected"),
         buyerName: data.buyerName ?? null,
@@ -2050,12 +2052,16 @@ export class DatabaseStorage implements IStorage {
           let ukRateSnapshot = 0;
           let employeeNet: number;
 
+          const bmRate = contractType === "50/50" ? null : 0.30; // null = use 50/50 formula
+
           if (agentInput.bhbShare !== undefined) {
             // Use frontend pre-calculated (possibly manually edited) values
             bhbShare = parseFloat(agentInput.bhbShare);
             mainBranchShare = parseFloat(agentInput.mainBranchShare ?? "0");
             kwtrKdv = parseFloat(agentInput.kwtrKdv ?? "0");
-            marketCenterDue = (bhbShare - mainBranchShare) * 0.30; // kept for reference
+            marketCenterDue = bmRate === null
+              ? (bhbShare * 0.5 - mainBranchShare) - (bhbShare * 0.1)
+              : (bhbShare - mainBranchShare) * bmRate;
             // If marketCenterActual not provided (missing CSV column), derive it without cap
             marketCenterActual = agentInput.marketCenterActual !== undefined
               ? parseFloat(agentInput.marketCenterActual)
@@ -2073,7 +2079,9 @@ export class DatabaseStorage implements IStorage {
             bhbShare = sideBHB * (splitPct / 100);
             mainBranchShare = bhbShare * 0.10;
             kwtrKdv = mainBranchShare * 1.20;  // KWTR + %20 KDV toplamı
-            marketCenterDue = (bhbShare - mainBranchShare) * 0.30;
+            marketCenterDue = bmRate === null
+              ? (bhbShare * 0.5 - mainBranchShare) - (bhbShare * 0.1)
+              : (bhbShare - mainBranchShare) * bmRate;
             // Skip cap restriction when importing historical data (disableCap = true)
             marketCenterActual = (data.disableCap || capAmount === null)
               ? marketCenterDue
@@ -2102,6 +2110,9 @@ export class DatabaseStorage implements IStorage {
             bmKdv: String(bmKdv),
             ukShare: String(ukShare),
             employeeNet: String(employeeNet),
+            kasa: agentInput.kasa ?? "0",
+            nakit: agentInput.nakit ?? "0",
+            banka: agentInput.banka ?? "0",
             contractTypeSnapshot: contractType,
             ukRateSnapshot: String(ukRateSnapshot),
             capAmountApplied: capAmount !== null ? String(capAmount) : null,
@@ -2135,6 +2146,9 @@ export class DatabaseStorage implements IStorage {
       bmKdv?: string;
       ukShare?: string;
       employeeNet?: string;
+      kasa?: string;
+      nakit?: string;
+      banka?: string;
     }>;
   }>): Promise<void> {
     const saleValueNum = parseFloat(saleValue);
@@ -2190,11 +2204,15 @@ export class DatabaseStorage implements IStorage {
           let marketCenterDue: number, marketCenterActual: number, bmKdv: number;
           let ukShare: number, ukRateSnapshot = 0, employeeNet: number;
 
+          const bmRate2 = contractType === "50/50" ? null : 0.30;
+
           if (agentInput.bhbShare !== undefined) {
             bhbShare = parseFloat(agentInput.bhbShare);
             mainBranchShare = parseFloat(agentInput.mainBranchShare ?? "0");
             kwtrKdv = parseFloat(agentInput.kwtrKdv ?? "0");
-            marketCenterDue = (bhbShare - mainBranchShare) * 0.30;
+            marketCenterDue = bmRate2 === null
+              ? (bhbShare * 0.5 - mainBranchShare) - (bhbShare * 0.1)
+              : (bhbShare - mainBranchShare) * bmRate2;
             marketCenterActual = parseFloat(agentInput.marketCenterActual ?? "0");
             bmKdv = parseFloat(agentInput.bmKdv ?? "0");
             ukShare = parseFloat(agentInput.ukShare ?? "0");
@@ -2205,8 +2223,10 @@ export class DatabaseStorage implements IStorage {
           } else {
             bhbShare = sideBHB * (splitPct / 100);
             mainBranchShare = bhbShare * 0.10;
-            kwtrKdv = mainBranchShare * 0.20;
-            marketCenterDue = (bhbShare - mainBranchShare) * 0.30;
+            kwtrKdv = mainBranchShare * 1.20;
+            marketCenterDue = bmRate2 === null
+              ? (bhbShare * 0.5 - mainBranchShare) - (bhbShare * 0.1)
+              : (bhbShare - mainBranchShare) * bmRate2;
             marketCenterActual = capAmount === null
               ? marketCenterDue
               : Math.min(marketCenterDue, Math.max(0, capAmount - capUsedSoFar));
@@ -2216,7 +2236,7 @@ export class DatabaseStorage implements IStorage {
               ukRateSnapshot = emp.uretkenlikKocluguOran === "10%" ? 10 : 5;
               ukShare = bhbShare * (ukRateSnapshot / 100);
             }
-            employeeNet = bhbShare - mainBranchShare - kwtrKdv - marketCenterActual - bmKdv - ukShare;
+            employeeNet = bhbShare - kwtrKdv - marketCenterActual - bmKdv - ukShare;
           }
 
           runningCapUsed[agentInput.employeeId] = capUsedSoFar + marketCenterActual;
@@ -2233,6 +2253,9 @@ export class DatabaseStorage implements IStorage {
             bmKdv: String(bmKdv),
             ukShare: String(ukShare),
             employeeNet: String(employeeNet),
+            kasa: agentInput.kasa ?? "0",
+            nakit: agentInput.nakit ?? "0",
+            banka: agentInput.banka ?? "0",
             contractTypeSnapshot: contractType,
             ukRateSnapshot: String(ukRateSnapshot),
             capAmountApplied: capAmount !== null ? String(capAmount) : null,

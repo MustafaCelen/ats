@@ -103,8 +103,10 @@ function calcAgentBreakdown(
   const mainBranchShare = bhbShare * 0.10;         // KWTR = 10% of agent BHB
   const kwtrKdv = mainBranchShare * 1.20;          // KWTR + %20 KDV toplamı
 
-  // BM = 30% of (BHB - KWTR) = 27% effective
-  const marketCenterDue = (bhbShare - mainBranchShare) * 0.30;
+  const contractType = employee?.contractType ?? "70/30";
+  const marketCenterDue = contractType === "50/50"
+    ? (bhbShare * 0.5 - mainBranchShare) - (bhbShare * 0.1)  // BHB×%30
+    : (bhbShare - mainBranchShare) * 0.30;                    // BHB×%27
 
   // null capAmount = unlimited — full marketCenterDue is paid, no cap reduction
   const marketCenterActual = capAmount === null
@@ -244,6 +246,9 @@ interface AgentInputRow {
   id: string;
   employeeId: number | null;
   splitPercentage: string;
+  kasa: string;
+  nakit: string;
+  banka: string;
   // Breakdown values — auto-filled from calcAgentBreakdown, user can override any field
   bhbShare: string;
   mainBranchShare: string;
@@ -265,6 +270,9 @@ function newAgent(): AgentInputRow {
     id: Math.random().toString(36).slice(2),
     employeeId: null,
     splitPercentage: "100",
+    kasa: "",
+    nakit: "",
+    banka: "",
     bhbShare: "",
     mainBranchShare: "",
     kwtrKdv: "",
@@ -277,6 +285,9 @@ function newAgent(): AgentInputRow {
 }
 
 function applyBreakdown(agent: AgentInputRow, bd: AgentBreakdown): AgentInputRow {
+  const kasa = bd.kwtrKdv + bd.marketCenterActual + bd.bmKdv + bd.ukShare;
+  const nakit = bd.marketCenterActual > 0 ? bd.marketCenterActual + bd.ukShare - bd.bhbShare * 0.02 : 0;
+  const banka = kasa - nakit;
   return {
     ...agent,
     bhbShare: bd.bhbShare.toFixed(2),
@@ -286,8 +297,23 @@ function applyBreakdown(agent: AgentInputRow, bd: AgentBreakdown): AgentInputRow
     bmKdv: bd.bmKdv.toFixed(2),
     ukShare: bd.ukShare.toFixed(2),
     employeeNet: bd.employeeNet.toFixed(2),
+    kasa: kasa.toFixed(2),
+    nakit: nakit.toFixed(2),
+    banka: banka.toFixed(2),
     isManuallyEdited: false,
   };
+}
+
+function deriveKasaNakitBanka(a: AgentInputRow): { kasa: string; nakit: string; banka: string } {
+  const kwtrKdv = parseFloat(a.kwtrKdv || "0");
+  const bm = parseFloat(a.marketCenterActual || "0");
+  const bmKdv = parseFloat(a.bmKdv || "0");
+  const uk = parseFloat(a.ukShare || "0");
+  const bhb = parseFloat(a.bhbShare || "0");
+  const kasa = kwtrKdv + bm + bmKdv + uk;
+  const nakit = bm > 0 ? bm + uk - bhb * 0.02 : 0;
+  const banka = kasa - nakit;
+  return { kasa: kasa.toFixed(2), nakit: nakit.toFixed(2), banka: banka.toFixed(2) };
 }
 
 /** Recompute employeeNet from the stored deduction fields */
@@ -458,9 +484,14 @@ function SideSection({
 
             const updateField = (field: keyof AgentInputRow, val: string) => {
               const updated = { ...agent, [field]: val, isManuallyEdited: true };
-              // Auto-derive net whenever a deduction field changes (except net itself)
               if (field !== "employeeNet") {
                 updated.employeeNet = deriveNet({ ...updated, [field]: val });
+              }
+              if (!["kasa", "nakit", "banka", "employeeNet"].includes(field)) {
+                const dk = deriveKasaNakitBanka({ ...updated, [field]: val });
+                updated.kasa = dk.kasa;
+                updated.nakit = dk.nakit;
+                updated.banka = dk.banka;
               }
               updateAgent(agent.id, updated);
             };
@@ -537,6 +568,9 @@ function SideSection({
                     <BreakdownField label="BM (27%)" prefix="−" value={agent.marketCenterActual} onChange={(v) => updateField("marketCenterActual", v)} />
                     <BreakdownField label="BM KDV (%2×%20)" prefix="−" value={agent.bmKdv} onChange={(v) => updateField("bmKdv", v)} />
                     <BreakdownField label="Üretkenlik Koçluğu" prefix="−" value={agent.ukShare} onChange={(v) => updateField("ukShare", v)} />
+                    <BreakdownField label="Kasa" value={agent.kasa} onChange={(v) => updateField("kasa", v)} />
+                    <BreakdownField label="Nakit" value={agent.nakit} onChange={(v) => updateField("nakit", v)} />
+                    <BreakdownField label="Banka" value={agent.banka} onChange={(v) => updateField("banka", v)} />
                     <div className="border-t border-border mt-1 pt-1.5">
                       <BreakdownField label="Danışman Net" value={agent.employeeNet} onChange={(v) => updateField("employeeNet", v)} highlight />
                     </div>
@@ -545,6 +579,7 @@ function SideSection({
               </div>
             );
           })}
+
 
           <div className="flex items-center justify-between">
             <Button type="button" variant="outline" size="sm" onClick={addAgent} className="h-7 text-xs gap-1">
@@ -873,9 +908,6 @@ function NewClosingDialog({
   const [referralInfo, setReferralInfo] = useState("");
   const [contractStartDate, setContractStartDate] = useState("");
   const [contractEndDate, setContractEndDate] = useState("");
-  const [kasa, setKasa] = useState("");
-  const [nakit, setNakit] = useState("");
-  const [banka, setBanka] = useState("");
   const [closingDate, setClosingDate] = useState(new Date().toISOString().split("T")[0]);
   const [isExpected, setIsExpected] = useState(false);
   const [buyerName, setBuyerName] = useState("");
@@ -973,28 +1005,11 @@ function NewClosingDialog({
     return rows;
   }, [buyerSide, sellerSide, referralSide, employees]);
 
-  // Auto-calculate kasa and nakit from agent breakdowns
-  useEffect(() => {
-    const kasaTotal = summaryRows.reduce(
-      (sum: number, r: SummaryRow) => sum + r.kwtrKdv + r.mcActual + r.bmKdv + r.uk,
-      0
-    );
-    if (kasaTotal > 0) setKasa(kasaTotal.toFixed(2));
-
-    const totalBm = summaryRows.reduce((sum: number, r: SummaryRow) => sum + r.mcActual, 0);
-    const totalUk = summaryRows.reduce((sum: number, r: SummaryRow) => sum + r.uk, 0);
-    const totalBhb = summaryRows.reduce((sum: number, r: SummaryRow) => sum + r.bhbShare, 0);
-    const nakitTotal = totalBm > 0 ? totalBm + totalUk - totalBhb * 0.02 : 0;
-    setNakit(nakitTotal.toFixed(2));
-    setBanka((kasaTotal - nakitTotal).toFixed(2));
-  }, [summaryRows]);
-
   const resetForm = () => {
     setPropertyAddress(""); setIl(""); setIlce(""); setMahalle(""); setPropertyDetails("");
     setDealCategory("Satış"); setDealType("Çift Taraflı");
     setSaleValue(""); setCommissionRate("2"); setOpeningPrice(""); setDurationDays("");
     setCustomerSource(""); setReferralInfo(""); setContractStartDate(""); setContractEndDate("");
-    setKasa(""); setNakit(""); setBanka("");
     setClosingDate(new Date().toISOString().split("T")[0]);
     setIsExpected(false);
     setBuyerName(""); setSellerName(""); setNotes("");
@@ -1022,9 +1037,6 @@ function NewClosingDialog({
     setReferralInfo(e.referralInfo ?? "");
     setContractStartDate(e.contractStartDate ? new Date(e.contractStartDate).toISOString().split("T")[0] : "");
     setContractEndDate(e.contractEndDate ? new Date(e.contractEndDate).toISOString().split("T")[0] : "");
-    setKasa(e.kasa ?? "");
-    setNakit(e.nakit ?? "");
-    setBanka(e.banka ?? "");
     setClosingDate(e.closingDate ? new Date(e.closingDate).toISOString().split("T")[0] : "");
     setIsExpected(e.status === "expected");
     setBuyerName(e.buyerName ?? "");
@@ -1034,12 +1046,16 @@ function NewClosingDialog({
     const makeSideState = (sideType: string): SideState => {
       const matching = (e.sides ?? []).filter((s: any) => s.sideType === sideType);
       if (!matching.length) return { enabled: false, agents: [newAgent()] };
+      const s = matching[0];
       return {
         enabled: true,
-        agents: matching[0].agents.map((a: any) => ({
+        agents: s.agents.map((a: any) => ({
           id: Math.random().toString(36).slice(2),
           employeeId: a.employeeId,
           splitPercentage: a.splitPercentage ?? "100",
+          kasa: a.kasa ?? "",
+          nakit: a.nakit ?? "",
+          banka: a.banka ?? "",
           bhbShare: a.bhbShare ?? "",
           mainBranchShare: a.mainBranchShare ?? "",
           kwtrKdv: a.kwtrKdv ?? "",
@@ -1098,6 +1114,9 @@ function NewClosingDialog({
         bmKdv: a.bmKdv || "0",
         ukShare: a.ukShare || "0",
         employeeNet: a.employeeNet || "0",
+        kasa: a.kasa || "0",
+        nakit: a.nakit || "0",
+        banka: a.banka || "0",
       }));
 
     const sides = [];
@@ -1121,9 +1140,6 @@ function NewClosingDialog({
       referralInfo: referralInfo.trim() || null,
       contractStartDate: contractStartDate ? new Date(contractStartDate).toISOString() : null,
       contractEndDate: contractEndDate ? new Date(contractEndDate).toISOString() : null,
-      kasa: kasa || null,
-      nakit: nakit || null,
-      banka: banka || null,
       closingDate: (!isExpected && closingDate) ? new Date(closingDate).toISOString() : null,
       status: isExpected ? "expected" : "completed",
       buyerName: buyerName.trim() || null,
@@ -1301,18 +1317,6 @@ function NewClosingDialog({
               <div>
                 <Label className="text-xs">Yönlendirme Bilgisi</Label>
                 <Input className="mt-1 h-8 text-sm" placeholder="Kim yönlendirdi..." value={referralInfo} onChange={(e) => setReferralInfo(e.target.value)} />
-              </div>
-              <div>
-                <Label className="text-xs">Kasa (₺)</Label>
-                <Input type="number" min="0" className="mt-1 h-8 text-sm" placeholder="0" value={kasa} onChange={(e) => setKasa(e.target.value)} />
-              </div>
-              <div>
-                <Label className="text-xs">Nakit (₺)</Label>
-                <Input type="number" min="0" className="mt-1 h-8 text-sm" placeholder="0" value={nakit} onChange={(e) => setNakit(e.target.value)} />
-              </div>
-              <div>
-                <Label className="text-xs">Banka (₺)</Label>
-                <Input type="number" min="0" className="mt-1 h-8 text-sm" placeholder="0" value={banka} onChange={(e) => setBanka(e.target.value)} />
               </div>
               <div>
                 <Label className="text-xs">Alıcı Adı</Label>
@@ -1535,9 +1539,9 @@ export default function Closings() {
             referralInfo: (c as any).referralInfo ?? "",
             contractStartDate: (c as any).contractStartDate ? new Date((c as any).contractStartDate).toISOString().split("T")[0] : "",
             contractEndDate: (c as any).contractEndDate ? new Date((c as any).contractEndDate).toISOString().split("T")[0] : "",
-            kasa: (c as any).kasa ?? "",
-            nakit: (c as any).nakit ?? "",
-            banka: (c as any).banka ?? "",
+            kasa: (agent as any).kasa ?? "",
+            nakit: (agent as any).nakit ?? "",
+            banka: (agent as any).banka ?? "",
             buyerName: c.buyerName ?? "",
             sellerName: c.sellerName ?? "",
             notes: c.notes ?? "",
@@ -1633,6 +1637,7 @@ export default function Closings() {
       queryClient.invalidateQueries({ queryKey: ["/api/closings"] });
     } catch { /* silent */ }
   }, [queryClient]);
+
 
   const handleDelete = async (id: number) => {
     if (!window.confirm("Bu kapanışı silmek istediğinize emin misiniz?")) return;
@@ -1969,9 +1974,9 @@ export default function Closings() {
                         </td>
                         <td className="px-2 py-1 min-w-[70px] text-amber-600"><InlineCell value={row.bmKdv} type="number" onSave={sa("bmKdv")} /></td>
                         <td className="px-2 py-1 min-w-[80px] font-semibold text-emerald-700"><InlineCell value={row.employeeNet} type="number" onSave={sa("employeeNet")} /></td>
-                        <td className="px-2 py-1 min-w-[80px]"><InlineCell value={row.kasa} type="number" onSave={sc("kasa")} /></td>
-                        <td className="px-2 py-1 min-w-[80px]"><InlineCell value={row.nakit} type="number" onSave={sc("nakit")} /></td>
-                        <td className="px-2 py-1 min-w-[80px]"><InlineCell value={row.banka} type="number" onSave={sc("banka")} /></td>
+                        <td className="px-2 py-1 min-w-[80px]"><InlineCell value={row.kasa} type="number" onSave={sa("kasa")} /></td>
+                        <td className="px-2 py-1 min-w-[80px]"><InlineCell value={row.nakit} type="number" onSave={sa("nakit")} /></td>
+                        <td className="px-2 py-1 min-w-[80px]"><InlineCell value={row.banka} type="number" onSave={sa("banka")} /></td>
                         <td className="px-2 py-1 min-w-[50px]"><InlineCell value={row.commissionRate} type="number" onSave={sc("commissionRate")} /></td>
                         <td className="px-2 py-1 min-w-[80px]"><InlineCell value={row.il} onSave={sc("il")} /></td>
                         <td className="px-2 py-1 min-w-[80px]"><InlineCell value={row.ilce} onSave={sc("ilce")} /></td>

@@ -385,25 +385,6 @@ export default function FinancialReports() {
           </div>
         </div>
 
-        {/* ── Top Agents ── */}
-        <div className="grid lg:grid-cols-1 gap-6">
-          <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-            <h2 className="text-base font-semibold mb-4">Danışman BHB Performansı (Top 12)</h2>
-            {isLoading ? <Skeleton /> : topAgents.length === 0 ? <Empty /> : (
-              <ResponsiveContainer width="100%" height={agentChartHeight}>
-                <BarChart data={topAgents} layout="vertical" margin={{ top: 0, right: 8, bottom: 0, left: 8 }}>
-                  <XAxis type="number" tickFormatter={fmtShort} tick={{ fontSize: 10 }} />
-                  <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={130} interval={0} />
-                  <Tooltip content={<TRYTooltip />} />
-                  <Bar dataKey="bhb" name="BHB" radius={[0, 4, 4, 0]} barSize={14}>
-                    {topAgents.map((_: any, i: number) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-        </div>
-
         {/* ── BM Trend + Closing Count ── */}
         <div className="grid lg:grid-cols-2 gap-6">
           <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
@@ -436,6 +417,74 @@ export default function FinancialReports() {
             )}
           </div>
         </div>
+
+        {/* ── BM/BHB Oranı + Danışman BHB ── */}
+        {(() => {
+          const ratioData = monthlyData.map((r: any) => ({
+            month: r.month,
+            oran: r.bhb > 0 ? parseFloat(((r.bm / r.bhb) * 100).toFixed(1)) : 0,
+            bhb: r.bhb,
+            bm: r.bm,
+          }));
+          const totalBHB = ratioData.reduce((s: number, r: any) => s + r.bhb, 0);
+          const totalBM  = ratioData.reduce((s: number, r: any) => s + r.bm, 0);
+          const overallRatio = totalBHB > 0 ? ((totalBM / totalBHB) * 100).toFixed(1) : "—";
+          const top8 = topAgents.slice(0, 8);
+          return (
+            <div className="grid lg:grid-cols-2 gap-6">
+              <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-base font-semibold">Aylık BM/BHB Oranı</h2>
+                  {ratioData.length > 0 && (
+                    <span className="text-xs text-muted-foreground">
+                      Ort: <span className="font-semibold text-purple-600">%{overallRatio}</span>
+                    </span>
+                  )}
+                </div>
+                {isLoading ? <Skeleton h="h-56" /> : ratioData.length === 0 ? <Empty /> : (
+                  <ResponsiveContainer width="100%" height={220}>
+                    <BarChart data={ratioData} margin={{ top: 4, right: 8, bottom: 0, left: 4 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                      <XAxis dataKey="month" tick={{ fontSize: 10 }} />
+                      <YAxis tickFormatter={(v) => `%${v}`} tick={{ fontSize: 10 }} width={40} domain={[0, "auto"]} />
+                      <Tooltip
+                        content={({ active, payload, label }: any) => {
+                          if (!active || !payload?.length) return null;
+                          const d = payload[0].payload;
+                          return (
+                            <div className="bg-card border border-border rounded-lg shadow-lg p-3 text-xs space-y-0.5">
+                              <p className="font-semibold mb-1">{label}</p>
+                              <p className="text-purple-600">BM/BHB: %{d.oran}</p>
+                              <p className="text-muted-foreground">BHB: {fmtTRY(d.bhb)}</p>
+                              <p className="text-muted-foreground">BM: {fmtTRY(d.bm)}</p>
+                            </div>
+                          );
+                        }}
+                      />
+                      <Bar dataKey="oran" name="BM/BHB %" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+
+              <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
+                <h2 className="text-base font-semibold mb-4">Danışman BHB Performansı (Top 8)</h2>
+                {isLoading ? <Skeleton h="h-56" /> : top8.length === 0 ? <Empty /> : (
+                  <ResponsiveContainer width="100%" height={220}>
+                    <BarChart data={top8} layout="vertical" margin={{ top: 0, right: 8, bottom: 0, left: 4 }}>
+                      <XAxis type="number" tickFormatter={fmtShort} tick={{ fontSize: 10 }} />
+                      <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={120} interval={0} />
+                      <Tooltip content={<TRYTooltip />} />
+                      <Bar dataKey="bhb" name="BHB" radius={[0, 4, 4, 0]} barSize={12}>
+                        {top8.map((_: any, i: number) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* ── Category + Deal Type + İl + İlçe ── */}
         <div className="grid lg:grid-cols-4 gap-6">
