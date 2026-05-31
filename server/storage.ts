@@ -2055,7 +2055,7 @@ export class DatabaseStorage implements IStorage {
             // Fallback: calculate on the server (legacy path)
             bhbShare = sideBHB * (splitPct / 100);
             mainBranchShare = bhbShare * 0.10;
-            kwtrKdv = mainBranchShare * 0.20;
+            kwtrKdv = mainBranchShare * 1.20;  // KWTR + %20 KDV toplamı
             marketCenterDue = (bhbShare - mainBranchShare) * 0.30;
             // Skip cap restriction when importing historical data (disableCap = true)
             marketCenterActual = (data.disableCap || capAmount === null)
@@ -2067,7 +2067,7 @@ export class DatabaseStorage implements IStorage {
               ukRateSnapshot = emp.uretkenlikKocluguOran === "10%" ? 10 : 5;
               ukShare = bhbShare * (ukRateSnapshot / 100);
             }
-            employeeNet = bhbShare - mainBranchShare - kwtrKdv - marketCenterActual - bmKdv - ukShare;
+            employeeNet = bhbShare - kwtrKdv - marketCenterActual - bmKdv - ukShare;
           }
 
           // Update running cap regardless of which path was taken

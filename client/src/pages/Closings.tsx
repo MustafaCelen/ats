@@ -101,7 +101,7 @@ function calcAgentBreakdown(
   const sideBHB = saleValue * (commissionRatePct / 100);
   const bhbShare = sideBHB * (splitPct / 100);
   const mainBranchShare = bhbShare * 0.10;         // KWTR = 10% of agent BHB
-  const kwtrKdv = mainBranchShare * 0.20;          // 20% KDV on KWTR
+  const kwtrKdv = mainBranchShare * 1.20;          // KWTR + %20 KDV toplamı
 
   // BM = 30% of (BHB - KWTR) = 27% effective
   const marketCenterDue = (bhbShare - mainBranchShare) * 0.30;
@@ -123,7 +123,7 @@ function calcAgentBreakdown(
     ukShare = bhbShare * ukRate;
   }
 
-  const employeeNet = bhbShare - mainBranchShare - kwtrKdv - marketCenterActual - bmKdv - ukShare;
+  const employeeNet = bhbShare - kwtrKdv - marketCenterActual - bmKdv - ukShare;
 
   return {
     bhbShare,
@@ -295,12 +295,11 @@ function applyBreakdown(agent: AgentInputRow, bd: AgentBreakdown): AgentInputRow
 /** Recompute employeeNet from the stored deduction fields */
 function deriveNet(a: AgentInputRow): string {
   const bhb = parseFloat(a.bhbShare || "0");
-  const kwtr = parseFloat(a.mainBranchShare || "0");
   const kwtrKdv = parseFloat(a.kwtrKdv || "0");
   const bm = parseFloat(a.marketCenterActual || "0");
   const bmKdv = parseFloat(a.bmKdv || "0");
   const uk = parseFloat(a.ukShare || "0");
-  return (bhb - kwtr - kwtrKdv - bm - bmKdv - uk).toFixed(2);
+  return (bhb - kwtrKdv - bm - bmKdv - uk).toFixed(2);
 }
 
 // ── Cap badge ─────────────────────────────────────────────────────────────────
