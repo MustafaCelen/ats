@@ -112,10 +112,8 @@ function calcAgentBreakdown(
     : Math.min(marketCenterDue, Math.max(0, capAmount - capUsedSoFar));
   const capUsedAfter = capUsedSoFar + marketCenterActual;
 
-  // BM KDV proportional to actual BM paid (= bhbShare × 1.6% when not capped)
-  const bmKdv = marketCenterDue > 0
-    ? marketCenterActual * (0.016 / 0.27)
-    : 0;
+  // BM KDV = BHB × %2 × %20
+  const bmKdv = bhbShare * 0.004;
 
   let ukShare = 0;
   if (employee?.uretkenlikKoclugu && employee?.uretkenlikKocluguOran) {
@@ -411,7 +409,7 @@ function SideSection({
   };
 
   const splitTotal = side.agents.reduce((s, a) => s + parseFloat(a.splitPercentage || "0"), 0);
-  const splitOk = Math.abs(splitTotal - 100) < 0.01;
+  const splitOk = splitTotal <= 100.01;
 
   return (
     <div className={`border rounded-lg p-4 transition-colors ${side.enabled ? "border-primary/30 bg-primary/5" : "border-border bg-muted/30"}`}>
@@ -537,7 +535,7 @@ function SideSection({
                     <BreakdownField label="KWTR (10%)" prefix=" " value={agent.mainBranchShare} onChange={(v) => updateField("mainBranchShare", v)} />
                     <BreakdownField label="KWTR + KDV (toplam)" prefix="−" value={agent.kwtrKdv} onChange={(v) => updateField("kwtrKdv", v)} />
                     <BreakdownField label="BM (27%)" prefix="−" value={agent.marketCenterActual} onChange={(v) => updateField("marketCenterActual", v)} />
-                    <BreakdownField label="BM KDV (1.6%)" prefix="−" value={agent.bmKdv} onChange={(v) => updateField("bmKdv", v)} />
+                    <BreakdownField label="BM KDV (%2×%20)" prefix="−" value={agent.bmKdv} onChange={(v) => updateField("bmKdv", v)} />
                     <BreakdownField label="Üretkenlik Koçluğu" prefix="−" value={agent.ukShare} onChange={(v) => updateField("ukShare", v)} />
                     <div className="border-t border-border mt-1 pt-1.5">
                       <BreakdownField label="Danışman Net" value={agent.employeeNet} onChange={(v) => updateField("employeeNet", v)} highlight />
@@ -555,11 +553,11 @@ function SideSection({
             </Button>
             {!splitOk && side.agents.length > 0 && (
               <span className="text-xs text-destructive">
-                Pay toplamı %100 olmalı (şu an: %{splitTotal.toFixed(2)})
+                Pay toplamı %100'ü geçemez (şu an: %{splitTotal.toFixed(2)})
               </span>
             )}
-            {splitOk && (
-              <span className="text-xs text-emerald-600">Pay: %100 ✓</span>
+            {splitOk && side.agents.length > 0 && (
+              <span className="text-xs text-emerald-600">Pay: %{splitTotal.toFixed(2)} ✓</span>
             )}
           </div>
         </div>
@@ -975,6 +973,22 @@ function NewClosingDialog({
     return rows;
   }, [buyerSide, sellerSide, referralSide, employees]);
 
+  // Auto-calculate kasa and nakit from agent breakdowns
+  useEffect(() => {
+    const kasaTotal = summaryRows.reduce(
+      (sum: number, r: SummaryRow) => sum + r.kwtrKdv + r.mcActual + r.bmKdv + r.uk,
+      0
+    );
+    if (kasaTotal > 0) setKasa(kasaTotal.toFixed(2));
+
+    const totalBm = summaryRows.reduce((sum: number, r: SummaryRow) => sum + r.mcActual, 0);
+    const totalUk = summaryRows.reduce((sum: number, r: SummaryRow) => sum + r.uk, 0);
+    const totalBhb = summaryRows.reduce((sum: number, r: SummaryRow) => sum + r.bhbShare, 0);
+    const nakitTotal = totalBm > 0 ? totalBm + totalUk - totalBhb * 0.02 : 0;
+    setNakit(nakitTotal.toFixed(2));
+    setBanka((kasaTotal - nakitTotal).toFixed(2));
+  }, [summaryRows]);
+
   const resetForm = () => {
     setPropertyAddress(""); setIl(""); setIlce(""); setMahalle(""); setPropertyDetails("");
     setDealCategory("Satış"); setDealType("Çift Taraflı");
@@ -1049,19 +1063,19 @@ function NewClosingDialog({
       if (buyerSide.agents.length === 0) return "Alıcı tarafında en az bir danışman olmalıdır.";
       if (buyerSide.agents.some((a) => !a.employeeId)) return "Alıcı tarafındaki tüm danışmanları seçin.";
       const total = buyerSide.agents.reduce((s, a) => s + parseFloat(a.splitPercentage || "0"), 0);
-      if (Math.abs(total - 100) > 0.01) return `Alıcı tarafı pay toplamı %100 olmalı (şu an: %${total.toFixed(2)}).`;
+      if (total > 100.01) return `Alıcı tarafı pay toplamı %100'ü geçemez (şu an: %${total.toFixed(2)}).`;
     }
     if (sellerSide.enabled) {
       if (sellerSide.agents.length === 0) return "Satıcı tarafında en az bir danışman olmalıdır.";
       if (sellerSide.agents.some((a) => !a.employeeId)) return "Satıcı tarafındaki tüm danışmanları seçin.";
       const total = sellerSide.agents.reduce((s, a) => s + parseFloat(a.splitPercentage || "0"), 0);
-      if (Math.abs(total - 100) > 0.01) return `Satıcı tarafı pay toplamı %100 olmalı (şu an: %${total.toFixed(2)}).`;
+      if (total > 100.01) return `Satıcı tarafı pay toplamı %100'ü geçemez (şu an: %${total.toFixed(2)}).`;
     }
     if (referralSide.enabled) {
       if (referralSide.agents.length === 0) return "Yönlendirme tarafında en az bir danışman olmalıdır.";
       if (referralSide.agents.some((a) => !a.employeeId)) return "Yönlendirme tarafındaki tüm danışmanları seçin.";
       const total = referralSide.agents.reduce((s, a) => s + parseFloat(a.splitPercentage || "0"), 0);
-      if (Math.abs(total - 100) > 0.01) return `Yönlendirme tarafı pay toplamı %100 olmalı (şu an: %${total.toFixed(2)}).`;
+      if (total > 100.01) return `Yönlendirme tarafı pay toplamı %100'ü geçemez (şu an: %${total.toFixed(2)}).`;
     }
     return null;
   };

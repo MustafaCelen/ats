@@ -2078,7 +2078,7 @@ export class DatabaseStorage implements IStorage {
             marketCenterActual = (data.disableCap || capAmount === null)
               ? marketCenterDue
               : Math.min(marketCenterDue, Math.max(0, capAmount - capUsedSoFar));
-            bmKdv = marketCenterDue > 0 ? marketCenterActual * (0.016 / 0.27) : 0;
+            bmKdv = bhbShare * 0.004; // BHB × %2 × %20
             ukShare = 0;
             if (emp.uretkenlikKoclugu && emp.uretkenlikKocluguOran) {
               ukRateSnapshot = emp.uretkenlikKocluguOran === "10%" ? 10 : 5;
@@ -2210,7 +2210,7 @@ export class DatabaseStorage implements IStorage {
             marketCenterActual = capAmount === null
               ? marketCenterDue
               : Math.min(marketCenterDue, Math.max(0, capAmount - capUsedSoFar));
-            bmKdv = marketCenterDue > 0 ? marketCenterActual * (0.016 / 0.27) : 0;
+            bmKdv = bhbShare * 0.004; // BHB × %2 × %20
             ukShare = 0;
             if (emp.uretkenlikKoclugu && emp.uretkenlikKocluguOran) {
               ukRateSnapshot = emp.uretkenlikKocluguOran === "10%" ? 10 : 5;
