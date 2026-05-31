@@ -18,7 +18,7 @@ import {
   type CapSetting, type Closing, type ClosingSide, type ClosingAgent,
   type CapStatus, type ClosingWithDetails, type InterviewTarget,
 } from "@shared/schema";
-import { eq, desc, asc, count, sql, gte, lte, and, or, isNull, isNotNull, inArray, notInArray } from "drizzle-orm";
+import { eq, desc, asc, count, sql, gte, lte, lt, and, or, isNull, isNotNull, inArray, notInArray } from "drizzle-orm";
 import { differenceInDays } from "date-fns";
 
 export type ApplicationWithRelations = Application & { candidate?: Candidate; job?: Job };
@@ -1644,10 +1644,27 @@ export class DatabaseStorage implements IStorage {
     const capUsedFromClosings = agentRows.reduce((sum, r) => sum + parseFloat(r.marketCenterActual ?? "0"), 0);
     const manualAdj = parseFloat((emp as any).capManualAdjustment ?? "0");
     const capUsed = capUsedFromClosings + manualAdj;
-    // null = unlimited (no cap configured for the year)
     const capRemaining: number | null = capAmount === null ? null : Math.max(0, capAmount - capUsed);
 
-    return { employeeId, capAmount, capUsed, capRemaining, periodStart, capYear };
+    // Previous 12-month period (needed to evaluate current-month resets)
+    const prevPeriodStart = new Date(capYear - 1, capMonthNum - 1, 1);
+    const prevRows = await db
+      .select({ marketCenterActual: closingAgents.marketCenterActual })
+      .from(closingAgents)
+      .innerJoin(closingSides, eq(closingAgents.closingSideId, closingSides.id))
+      .innerJoin(closings, eq(closingSides.closingId, closings.id))
+      .where(
+        and(
+          eq(closingAgents.employeeId, employeeId),
+          eq(closings.status, "completed"),
+          isNotNull(closings.closingDate),
+          gte(closings.closingDate, prevPeriodStart),
+          lt(closings.closingDate, periodStart)
+        )
+      );
+    const prevCapUsed = prevRows.reduce((sum, r) => sum + parseFloat(r.marketCenterActual ?? "0"), 0);
+
+    return { employeeId, capAmount, capUsed, capRemaining, periodStart, capYear, prevCapUsed };
   }
 
   async getAllEmployeesCapStatus(): Promise<Record<number, CapStatus & { name: string; kwuid: string }>> {

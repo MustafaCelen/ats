@@ -428,6 +428,8 @@ export interface CapStatus {
   capRemaining: number | null;
   periodStart: Date;
   capYear: number;
+  /** BM paid in the previous 12-month cap period (for current-month reset employees) */
+  prevCapUsed: number;
 }
 
 export interface ClosingAgentWithEmployee extends ClosingAgent {

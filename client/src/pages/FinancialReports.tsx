@@ -167,11 +167,16 @@ export default function FinancialReports() {
   const resetByMonth = useMemo(() => {
     const map: Record<number, any[]> = {};
     for (let i = 0; i < 12; i++) map[i] = [];
+    const currentMonthIdx = new Date().getMonth();
     const productiveSet = new Set([...cappers, ...almostCappers, ...probableCappers].map((s: any) => s.employeeId));
-    for (const s of capList.filter((s: any) => productiveSet.has(s.employeeId))) {
+    for (const s of capList) {
       if (!s.periodStart) continue;
       const resetMonth = new Date(s.periodStart).getMonth();
-      map[resetMonth].push(s);
+      const isCurrentMonthReset = resetMonth === currentMonthIdx;
+      const prevPct = s.capAmount > 0 ? (s.prevCapUsed ?? 0) / s.capAmount * 100 : 0;
+      if (productiveSet.has(s.employeeId) || (isCurrentMonthReset && prevPct >= 75)) {
+        map[resetMonth].push(s);
+      }
     }
     return map;
   }, [capList, cappers, almostCappers, probableCappers]);

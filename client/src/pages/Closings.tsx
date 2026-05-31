@@ -534,8 +534,8 @@ function SideSection({
                       </div>
                     </div>
                     <BreakdownField label="BHB Payı" value={agent.bhbShare} onChange={(v) => updateField("bhbShare", v)} />
-                    <BreakdownField label="KWTR (10%)" prefix="−" value={agent.mainBranchShare} onChange={(v) => updateField("mainBranchShare", v)} />
-                    <BreakdownField label="KWTR KDV (20%)" prefix="−" value={agent.kwtrKdv} onChange={(v) => updateField("kwtrKdv", v)} />
+                    <BreakdownField label="KWTR (10%)" prefix=" " value={agent.mainBranchShare} onChange={(v) => updateField("mainBranchShare", v)} />
+                    <BreakdownField label="KWTR + KDV (toplam)" prefix="−" value={agent.kwtrKdv} onChange={(v) => updateField("kwtrKdv", v)} />
                     <BreakdownField label="BM (27%)" prefix="−" value={agent.marketCenterActual} onChange={(v) => updateField("marketCenterActual", v)} />
                     <BreakdownField label="BM KDV (1.6%)" prefix="−" value={agent.bmKdv} onChange={(v) => updateField("bmKdv", v)} />
                     <BreakdownField label="Üretkenlik Koçluğu" prefix="−" value={agent.ukShare} onChange={(v) => updateField("ukShare", v)} />
@@ -585,7 +585,7 @@ interface SummaryRow {
 function SummaryTable({ rows }: { rows: SummaryRow[] }) {
   if (rows.length === 0) return null;
   const totalNet = rows.reduce((s, r) => s + r.net, 0);
-  const totalKdv = rows.reduce((s, r) => s + r.kwtrKdv + r.bmKdv, 0);
+  const totalKdv = rows.reduce((s, r) => s + r.bmKdv, 0);
   return (
     <div className="rounded-lg border overflow-hidden">
       <Table>
@@ -595,9 +595,9 @@ function SummaryTable({ rows }: { rows: SummaryRow[] }) {
             <TableHead className="text-xs">Taraf</TableHead>
             <TableHead className="text-xs text-right">Pay %</TableHead>
             <TableHead className="text-xs text-right">BHB</TableHead>
-            <TableHead className="text-xs text-right">KWTR</TableHead>
+            <TableHead className="text-xs text-right">KWTR+KDV</TableHead>
             <TableHead className="text-xs text-right">BM</TableHead>
-            <TableHead className="text-xs text-right text-amber-600">KDV</TableHead>
+            <TableHead className="text-xs text-right text-amber-600">BM KDV</TableHead>
             <TableHead className="text-xs text-right">UK</TableHead>
             <TableHead className="text-xs text-right font-semibold">Net</TableHead>
           </TableRow>
@@ -613,9 +613,9 @@ function SummaryTable({ rows }: { rows: SummaryRow[] }) {
               </TableCell>
               <TableCell className="text-xs text-right">%{r.splitPct.toFixed(2)}</TableCell>
               <TableCell className="text-xs text-right">{fmtTRY(r.bhbShare)}</TableCell>
-              <TableCell className="text-xs text-right text-muted-foreground">{fmtTRY(r.mainBranch)}</TableCell>
+              <TableCell className="text-xs text-right text-muted-foreground">{fmtTRY(r.kwtrKdv)}</TableCell>
               <TableCell className="text-xs text-right text-muted-foreground">{fmtTRY(r.mcActual)}</TableCell>
-              <TableCell className="text-xs text-right text-amber-600">{fmtTRY(r.kwtrKdv + r.bmKdv)}</TableCell>
+              <TableCell className="text-xs text-right text-amber-600">{fmtTRY(r.bmKdv)}</TableCell>
               <TableCell className="text-xs text-right text-muted-foreground">{fmtTRY(r.uk)}</TableCell>
               <TableCell className="text-xs text-right font-semibold text-emerald-700">{fmtTRY(r.net)}</TableCell>
             </TableRow>

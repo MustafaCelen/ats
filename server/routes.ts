@@ -1246,10 +1246,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         const sidesCount = c.sides.length;
         for (const side of c.sides) {
           for (const agent of side.agents) {
-            const kwtr = parseFloat(agent.mainBranchShare ?? "0");
-            const kwtrKdv = parseFloat((agent as any).kwtrKdv ?? "0");
-            const bm = parseFloat(agent.marketCenterActual ?? "0");
-            const bmKdv = parseFloat((agent as any).bmKdv ?? "0");
             const capAmt = parseFloat(agent.capAmountApplied ?? "0");
             rows.push([
               agent.candidateName ?? agent.employeeName ?? "",
@@ -1259,14 +1255,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
               cv.dealType ?? "Konut",
               (side as any).sideType === "buyer" ? "Alıcı" : (side as any).sideType === "referral" ? "Yönlendirme" : "Satıcı",
               capAmt > 0 ? String(capAmt) : "",
-              "",  // ÜK boolean — not stored per-agent in export
+              "",
               fmtDate(c.closingDate),
               c.saleValue,
               agent.bhbShare ?? "0",
-              String(kwtr),
-              String((kwtr + kwtrKdv).toFixed(2)),
-              String(bm),
-              String((bm + bmKdv).toFixed(2)),
+              agent.mainBranchShare ?? "0",
+              (agent as any).kwtrKdv ?? "0",
+              agent.marketCenterActual ?? "0",
+              (agent as any).bmKdv ?? "0",
               agent.ukShare ?? "0",
               agent.employeeNet ?? "0",
               cv.kasa ?? "0",
