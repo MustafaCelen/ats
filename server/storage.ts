@@ -74,6 +74,21 @@ export interface EmployeeClosingRow {
   status: string;
 }
 
+export interface ChurnRow {
+  employeeId: number;
+  name: string;
+  kwuid: string | null;
+  category: string | null;
+  tenureMonths: number;
+  lastClosingDate: string | null;
+  daysSinceLast: number | null;
+  closings3m: number;
+  closingsPrev3m: number;
+  trend: "up" | "flat" | "down";
+  score: number;
+  risk: "high" | "medium" | "low";
+}
+
 export interface ReportStats {
   funnel: FunnelStage[]; stageTimes: StageTime[]; total: number; hired: number;
   rejected: number; conversionRate: number; avgTimeToContractSign: number; avgTimeToEmploy: number;
@@ -167,6 +182,7 @@ export interface IStorage {
   getClosings(): Promise<ClosingWithDetails[]>;
   getClosing(id: number): Promise<ClosingWithDetails | null>;
   getClosingsByEmployee(employeeId: number): Promise<EmployeeClosingRow[]>;
+  getChurnReport(): Promise<ChurnRow[]>;
   updateClosing(id: number, data: Partial<{
     propertyAddress: string; il: string | null; ilce: string | null;
     dealCategory: string; dealType: string; saleValue: string;
@@ -1755,6 +1771,114 @@ export class DatabaseStorage implements IStorage {
       .where(eq(closingAgents.employeeId, employeeId))
       .orderBy(desc(closings.closingDate));
     return rows;
+  }
+
+  async getChurnReport(): Promise<ChurnRow[]> {
+    const now = new Date();
+    const cut3m = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+    const cut6m = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000);
+
+    // Fetch all active employees + all their completed closings in one query
+    const rows = await db
+      .select({
+        empId: employees.id,
+        name: candidates.name,
+        kwuid: employees.kwuid,
+        category: candidates.category,
+        startDate: employees.startDate,
+        closingDate: closings.closingDate,
+      })
+      .from(employees)
+      .leftJoin(candidates, eq(employees.candidateId, candidates.id))
+      .leftJoin(closingAgents, eq(closingAgents.employeeId, employees.id))
+      .leftJoin(closingSides, eq(closingAgents.closingSideId, closingSides.id))
+      .leftJoin(closings, and(
+        eq(closingSides.closingId, closings.id),
+        eq(closings.status, "completed"),
+      ))
+      .where(eq(employees.status, "active"))
+      .orderBy(asc(employees.id));
+
+    // Group by employee
+    const empMap = new Map<number, {
+      name: string; kwuid: string | null; category: string | null;
+      startDate: Date | null; closingDates: Date[];
+    }>();
+
+    for (const r of rows) {
+      if (!empMap.has(r.empId)) {
+        empMap.set(r.empId, {
+          name: r.name ?? "—", kwuid: r.kwuid ?? null,
+          category: r.category ?? null, startDate: r.startDate,
+          closingDates: [],
+        });
+      }
+      if (r.closingDate) empMap.get(r.empId)!.closingDates.push(new Date(r.closingDate));
+    }
+
+    const result: ChurnRow[] = [];
+
+    for (const [empId, emp] of empMap) {
+      const tenureMs = emp.startDate ? now.getTime() - new Date(emp.startDate).getTime() : 0;
+      const tenureMonths = Math.floor(tenureMs / (1000 * 60 * 60 * 24 * 30));
+
+      const sorted = emp.closingDates.sort((a, b) => b.getTime() - a.getTime());
+      const lastClosingDate = sorted[0] ?? null;
+      const daysSinceLast = lastClosingDate ? differenceInDays(now, lastClosingDate) : null;
+
+      const closings3m = sorted.filter(d => d >= cut3m).length;
+      const closingsPrev3m = sorted.filter(d => d >= cut6m && d < cut3m).length;
+
+      const trend: "up" | "flat" | "down" =
+        closings3m > closingsPrev3m ? "up" :
+        closings3m < closingsPrev3m ? "down" : "flat";
+
+      // Scoring
+      let score = 0;
+
+      // Days since last closing
+      const effectiveDays = daysSinceLast ?? (tenureMonths * 30);
+      if (effectiveDays > 180) score += 40;
+      else if (effectiveDays > 90) score += 25;
+      else if (effectiveDays > 60) score += 10;
+
+      // Recent production
+      if (closings3m === 0) score += 30;
+      else if (closings3m === 1) score += 10;
+
+      // Trend
+      if (trend === "down") score += 15;
+      else if (trend === "up") score -= 10;
+
+      // Tenure — new agents are expected to have low production
+      if (tenureMonths < 6) score += 5;
+      else if (tenureMonths >= 6 && closings3m === 0) score += 5; // no excuse for established agents
+
+      // Category
+      if (emp.category === "K0") score += 10;
+
+      score = Math.max(0, score);
+
+      const risk: "high" | "medium" | "low" =
+        score >= 60 ? "high" : score >= 30 ? "medium" : "low";
+
+      result.push({
+        employeeId: empId,
+        name: emp.name,
+        kwuid: emp.kwuid,
+        category: emp.category,
+        tenureMonths,
+        lastClosingDate: lastClosingDate ? lastClosingDate.toISOString() : null,
+        daysSinceLast,
+        closings3m,
+        closingsPrev3m,
+        trend,
+        score,
+        risk,
+      });
+    }
+
+    return result.sort((a, b) => b.score - a.score);
   }
 
   async updateClosing(id: number, data: Partial<{

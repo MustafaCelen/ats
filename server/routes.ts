@@ -712,6 +712,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json(await storage.getReportStats(startDate, endDate, jobFilter(req), office));
   });
 
+  app.get("/api/reports/churn", requireAuth, requireHiringManagerOrAdmin, async (_req: any, res: any) => {
+    try {
+      res.json(await storage.getChurnReport());
+    } catch {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   // ── Assistants list (for task assignment) ──────────────────────────────────
 
   app.get("/api/assistants", requireAuth, async (_req, res) => {
@@ -1338,14 +1346,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return null;
       };
 
-      // Group rows into closings by date + transaction value + deal type.
+      // Group rows into closings by date + transaction value + deal type + address.
       const groups = new Map<string, typeof rows>();
       for (const row of rows) {
         const tarih = row["İşlem Tarihi"] ?? row["Tarih"] ?? "";
         const bedel = normNum(row["İşlem Değeri"] ?? row["Kapanış Rakamı"] ?? row["Satış Bedeli"] ?? "") ?? "";
         const islem = row["İşlem"] ?? "";
         const tip   = row["İşlem Tipi"] ?? "";
-        const key = `${tarih}||${bedel}||${islem}||${tip}`;
+        const adres = (row["Adres"] ?? row["Mülk Adresi"] ?? "").trim().toLowerCase();
+        const key = `${tarih}||${bedel}||${islem}||${tip}||${adres}`;
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key)!.push(row);
       }

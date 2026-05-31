@@ -53,64 +53,66 @@ function CategoryBadge({ category }: { category?: string }) {
   );
 }
 
-// Simple CSV parser (handles quoted fields)
+// CSV parser \u2014 single-pass stateful, correctly handles quoted fields with embedded newlines
 function parseCsv(text: string): Record<string, string>[] {
-  const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  // Replace newlines inside quoted fields with "/" so multi-line headers don't break parsing
-  let processed = "";
+  // Normalize line endings and strip BOM
+  const input = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/^\uFEFF/, "");
+
+  // Detect delimiter from the first unquoted line (the header)
+  let headerEnd = input.length;
   let inQ = false;
-  for (let i = 0; i < normalized.length; i++) {
-    const ch = normalized[i];
-    if (ch === '"') {
-      if (inQ && normalized[i + 1] === '"') { processed += '""'; i++; }
-      else { inQ = !inQ; processed += ch; }
-    } else if (ch === "\n" && inQ) {
-      processed += "/";
-    } else {
-      processed += ch;
-    }
+  for (let i = 0; i < input.length; i++) {
+    if (input[i] === '"') inQ = !inQ;
+    if (input[i] === "\n" && !inQ) { headerEnd = i; break; }
   }
-  const lines = processed.split("\n").filter((l) => l.trim());
-  if (lines.length < 2) return [];
+  const headerLine = input.slice(0, headerEnd);
+  const tabCount = (headerLine.match(/\t/g) ?? []).length;
+  const commaCount = (headerLine.match(/,/g) ?? []).length;
+  const delim = tabCount > 0 && tabCount >= commaCount ? "\t" : ",";
 
-  // Strip BOM if present
-  const rawHeader = lines[0].startsWith("\uFEFF") ? lines[0].slice(1) : lines[0];
+  // Single-pass parse
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  inQ = false;
 
-  // Auto-detect delimiter: use tabs only if tabs are as frequent as commas (true TSV)
-  const tabCount = (rawHeader.match(/\t/g) ?? []).length;
-  const commaCount = (rawHeader.match(/,/g) ?? []).length;
-  const delimiter = tabCount > 0 && tabCount >= commaCount ? "\t" : ",";
-
-  const parseRow = (line: string): string[] => {
-    if (delimiter === "\t") return line.split("\t");
-    const fields: string[] = [];
-    let i = 0;
-    while (i < line.length) {
-      if (line[i] === '"') {
-        let val = "";
-        i++;
-        while (i < line.length) {
-          if (line[i] === '"' && line[i + 1] === '"') { val += '"'; i += 2; }
-          else if (line[i] === '"') { i++; break; }
-          else { val += line[i++]; }
-        }
-        fields.push(val);
-        if (line[i] === ",") i++;
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i];
+    if (inQ) {
+      if (ch === '"') {
+        if (input[i + 1] === '"') { field += '"'; i++; } // escaped quote
+        else inQ = false;                                  // end of quoted field
+      } else if (ch === "\n") {
+        field += " "; // flatten embedded newlines to a space
       } else {
-        const end = line.indexOf(",", i);
-        if (end === -1) { fields.push(line.slice(i)); break; }
-        fields.push(line.slice(i, end));
-        i = end + 1;
+        field += ch;
+      }
+    } else {
+      if (ch === '"') {
+        inQ = true;
+      } else if (ch === delim) {
+        row.push(field.trim());
+        field = "";
+      } else if (ch === "\n") {
+        row.push(field.trim());
+        field = "";
+        if (row.some((f) => f)) rows.push(row);
+        row = [];
+      } else {
+        field += ch;
       }
     }
-    return fields;
-  };
+  }
+  // Flush last field/row
+  row.push(field.trim());
+  if (row.some((f) => f)) rows.push(row);
 
-  const headers = parseRow(rawHeader);
-  return lines.slice(1).map((line) => {
-    const vals = parseRow(line);
+  if (rows.length < 2) return [];
+
+  const headers = rows[0];
+  return rows.slice(1).map((vals) => {
     const obj: Record<string, string> = {};
-    headers.forEach((h, i) => { obj[h.trim()] = (vals[i] ?? "").trim(); });
+    headers.forEach((h, idx) => { obj[h.trim()] = vals[idx] ?? ""; });
     return obj;
   }).filter((row) => Object.values(row).some((v) => v));
 }
