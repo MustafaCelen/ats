@@ -166,6 +166,7 @@ function useCapStatuses() {
 function useClosings() {
   return useQuery<ClosingWithDetails[]>({
     queryKey: ["/api/closings"],
+    staleTime: 0,
     queryFn: async () => {
       const res = await fetch("/api/closings", { credentials: "include" });
       if (!res.ok) throw new Error("Failed to load closings");
@@ -1428,7 +1429,7 @@ export default function Closings() {
   const [search, setSearch] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<"all" | "completed" | "expected">("all");
-  const [yearFilter, setYearFilter] = useState(String(new Date().getFullYear()));
+  const [yearFilter, setYearFilter] = useState("all");
   const PAGE_SIZE = 50;
 
   const handleDialogClose = () => {
@@ -1448,11 +1449,12 @@ export default function Closings() {
   const { data: capStatuses = {} } = useCapStatuses();
   const deleteClosing = useDeleteClosing();
 
-  // Available years from all closings
+  // Available years from all closings (use closingDate or createdAt as fallback)
   const availableYears = useMemo(() => {
     const years = new Set<string>();
     for (const c of closings) {
-      if (c.closingDate) years.add(new Date(c.closingDate).getFullYear().toString());
+      const d = (c as any).closingDate ?? (c as any).createdAt;
+      if (d) years.add(new Date(d).getFullYear().toString());
     }
     return Array.from(years).sort((a, b) => b.localeCompare(a));
   }, [closings]);
