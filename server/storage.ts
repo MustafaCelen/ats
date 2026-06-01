@@ -2077,7 +2077,7 @@ export class DatabaseStorage implements IStorage {
             ukShare = parseFloat(agentInput.ukShare ?? "0");
             employeeNet = parseFloat(agentInput.employeeNet ?? "0");
             if (emp.uretkenlikKoclugu && emp.uretkenlikKocluguOran) {
-              ukRateSnapshot = emp.uretkenlikKocluguOran === "10%" ? 10 : 5;
+              ukRateSnapshot = parseInt(emp.uretkenlikKocluguOran.replace(/[^0-9]/g, "")) || 5;
             }
           } else {
             // Fallback: calculate on the server (legacy path)
@@ -2094,7 +2094,7 @@ export class DatabaseStorage implements IStorage {
             bmKdv = bhbShare * 0.004; // BHB × %2 × %20
             ukShare = 0;
             if (emp.uretkenlikKoclugu && emp.uretkenlikKocluguOran) {
-              ukRateSnapshot = emp.uretkenlikKocluguOran === "10%" ? 10 : 5;
+              ukRateSnapshot = parseInt(emp.uretkenlikKocluguOran.replace(/[^0-9]/g, "")) || 5;
               ukShare = bhbShare * (ukRateSnapshot / 100);
             }
             employeeNet = bhbShare - kwtrKdv - marketCenterActual - bmKdv - ukShare;
@@ -2223,7 +2223,7 @@ export class DatabaseStorage implements IStorage {
             ukShare = parseFloat(agentInput.ukShare ?? "0");
             employeeNet = parseFloat(agentInput.employeeNet ?? "0");
             if (emp.uretkenlikKoclugu && emp.uretkenlikKocluguOran) {
-              ukRateSnapshot = emp.uretkenlikKocluguOran === "10%" ? 10 : 5;
+              ukRateSnapshot = parseInt(emp.uretkenlikKocluguOran.replace(/[^0-9]/g, "")) || 5;
             }
           } else {
             bhbShare = sideBHB * (splitPct / 100);
@@ -2238,7 +2238,7 @@ export class DatabaseStorage implements IStorage {
             bmKdv = bhbShare * 0.004; // BHB × %2 × %20
             ukShare = 0;
             if (emp.uretkenlikKoclugu && emp.uretkenlikKocluguOran) {
-              ukRateSnapshot = emp.uretkenlikKocluguOran === "10%" ? 10 : 5;
+              ukRateSnapshot = parseInt(emp.uretkenlikKocluguOran.replace(/[^0-9]/g, "")) || 5;
               ukShare = bhbShare * (ukRateSnapshot / 100);
             }
             employeeNet = bhbShare - kwtrKdv - marketCenterActual - bmKdv - ukShare;
