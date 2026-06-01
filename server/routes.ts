@@ -880,7 +880,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.patch("/api/employees/:id", requireAuth, async (req, res) => {
     try {
       const id = Number(req.params.id);
-      const { status, title, notes, startDate, kwuid, kwMail, contractType, uretkenlikKoclugu, uretkenlikKocluguManagerId, uretkenlikKocluguOran, capMonth, capValue, billingName, billingAddress, billingDistrict, billingCity, billingCountry, taxOffice, taxId, birthDate } = req.body;
+      const { status, title, notes, startDate, kwuid, kwMail, contractType, uretkenlikKoclugu, uretkenlikKocluguManagerId, uretkenlikKocluguOran, dua, duaManagerId, ukStartDate, ukEndDate, capMonth, capValue, billingName, billingAddress, billingDistrict, billingCity, billingCountry, taxOffice, taxId, birthDate } = req.body;
       const update: any = {};
       if (status !== undefined) update.status = status;
       if (title !== undefined) update.title = title;
@@ -892,7 +892,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (uretkenlikKoclugu !== undefined) update.uretkenlikKoclugu = uretkenlikKoclugu;
       if (uretkenlikKocluguManagerId !== undefined) update.uretkenlikKocluguManagerId = uretkenlikKocluguManagerId || null;
       if (uretkenlikKocluguOran !== undefined) update.uretkenlikKocluguOran = uretkenlikKocluguOran || null;
+      if (dua !== undefined) update.dua = dua;
+      if (duaManagerId !== undefined) update.duaManagerId = duaManagerId || null;
+      if (ukStartDate !== undefined) update.ukStartDate = ukStartDate || null;
+      if (ukEndDate !== undefined) update.ukEndDate = ukEndDate || null;
       if (capMonth !== undefined) update.capMonth = capMonth || null;
+
       if (capValue !== undefined) update.capValue = capValue || null;
       if (billingName !== undefined) update.billingName = billingName || null;
       if (billingAddress !== undefined) update.billingAddress = billingAddress || null;
@@ -1015,8 +1020,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       // Map Turkish status words to internal values
       const mapStatus = (s: string | null) => {
         if (!s) return "active";
-        const l = s.toLowerCase();
-        if (l === "aktif") return "active";
+        const l = s.toLowerCase().trim();
+        if (l === "aktif" || l === "active") return "active";
         if (l === "pasif" || l === "inactive") return "inactive";
         if (l === "ayrıldı" || l === "left") return "left";
         return s;
@@ -1091,13 +1096,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
           const kwMail  = col("KW E-posta", "kwmail", "kwMail");
           const title   = col("Ünvan", "title");
-          const status  = col("Durum", "AKTİF/PASİF", "status");
+          const status  = col("Durum", "AKTİF PASİF", "AKTİF\nPASİF", "AKTİF/PASİF", "status");
           const birthDate     = col("Doğum Tarihi", "DOĞUM TARİHİ", "birthDate");
           const contractType  = col("SÖZLEŞME TİPİ", "Sözleşme Tipi", "Sözleşme", "contractType");
-          const uretkenlik    = boolCol("ÜK", "Üretkenlik Koçluğu", "uretkenlikKoclugu");
+          const ukRaw         = col("ÜK", "Üretkenlik Koçluğu", "uretkenlikKoclugu");
           const koçlukOran    = col("ÜK Oranı", "Koçluk Oranı", "uretkenlikKocluguOran");
           const koçAdı        = col("ÜK Koçu", "uretkenlikKocluguManagerName");
           const koçId         = koçAdı ? (userByName.get(koçAdı.trim().toLowerCase()) ?? null) : null;
+          // ÜK/ÜHB değerleri → uretkenlikKoclugu true; yoksa normal boolCol
+          const ukFilled      = !!ukRaw && ["ük", "ühb"].includes(ukRaw.trim().toLowerCase());
+          const uretkenlik    = ukFilled ? true : boolCol("ÜK", "Üretkenlik Koçluğu", "uretkenlikKoclugu");
+          // ÜK kolonu boş + koç varsa → DUA programı
+          const isDua         = !uretkenlik && !!koçId;
           const capMonth      = col("KEP AYI", "Cap Ayı", "capMonth");
           const capValueRaw   = col("KEP TUTARI", "Cap Miktarı", "capValue");
           // Normalize Turkish number format: "540.000" → "540000", "540.000,50" → "540000.50"
@@ -1126,9 +1136,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           if (mappedStatus) patch.status = mappedStatus;
           if (parsedBirth) patch.birthDate = parsedBirth.toISOString().split("T")[0];
           if (contractType) patch.contractType = contractType;
-          if (uretkenlik !== undefined) patch.uretkenlikKoclugu = uretkenlik;
-          if (koçlukOran) patch.uretkenlikKocluguOran = koçlukOran;
-          if (koçId) patch.uretkenlikKocluguManagerId = koçId;
+          patch.uretkenlikKoclugu = !!uretkenlik && !isDua;
+          patch.dua = isDua;
+          if (isDua) {
+            patch.duaManagerId = koçId;
+            patch.uretkenlikKocluguManagerId = null;
+          } else {
+            patch.duaManagerId = null;
+            patch.uretkenlikKocluguManagerId = koçId ?? null;
+            if (koçlukOran) patch.uretkenlikKocluguOran = koçlukOran;
+          }
           if (capMonth) patch.capMonth = capMonth;
           if (capValue) patch.capValue = capValue;
           if (billingName) patch.billingName = billingName;

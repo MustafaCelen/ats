@@ -292,6 +292,9 @@ export class DatabaseStorage implements IStorage {
     await db.update(employees)
       .set({ uretkenlikKocluguManagerId: null })
       .where(eq(employees.uretkenlikKocluguManagerId, id));
+    await db.update(employees)
+      .set({ duaManagerId: null } as any)
+      .where(eq((employees as any).duaManagerId, id));
     // Null out createdByUserId on candidates (nullable column)
     await db.update(candidates)
       .set({ createdByUserId: null })
@@ -2529,14 +2532,26 @@ export class DatabaseStorage implements IStorage {
         eq(employees.status, "active"),
         or(
           eq(employees.uretkenlikKoclugu, true),
-          isNotNull(employees.uretkenlikKocluguManagerId),
+          eq(employees.dua, true),
         ),
-        ...(coachUserId !== undefined ? [eq(employees.uretkenlikKocluguManagerId, coachUserId)] : []),
+        ...(coachUserId !== undefined ? [or(
+          eq(employees.uretkenlikKocluguManagerId, coachUserId),
+          eq(employees.duaManagerId, coachUserId),
+        )] : []),
       ));
 
     if (ukEmps.length === 0) return { coaches: [] };
 
-    const studentIds = ukEmps.map(e => e.emp.id);
+    // Exclude ÜK employees whose exit date is before the report period starts
+    const reportStartStr = startDate.toISOString().split("T")[0];
+    const activeUkEmps = ukEmps.filter(e => {
+      const ukEnd = (e.emp as any).ukEndDate as string | null | undefined;
+      if (!ukEnd || !(e.emp as any).uretkenlikKoclugu) return true;
+      return ukEnd >= reportStartStr;
+    });
+    if (activeUkEmps.length === 0) return { coaches: [] };
+
+    const studentIds = activeUkEmps.map(e => e.emp.id);
 
     // ── All queries run in parallel ──────────────────────────────────────────
 
@@ -2554,7 +2569,7 @@ export class DatabaseStorage implements IStorage {
       periodStart: Date; prevPeriodStart: Date; empCapValue: number | null;
     }>();
     const capYearSet = new Set<number>();
-    for (const { emp } of ukEmps) {
+    for (const { emp } of activeUkEmps) {
       if (!emp.capMonth) continue;
       const trimmed = emp.capMonth.trim();
       let capMonthNum = TR_MONTHS[trimmed];
@@ -2639,9 +2654,12 @@ export class DatabaseStorage implements IStorage {
       ))
       .groupBy(closingAgents.employeeId),
 
-      // Coach user names
+      // Coach user names (both ÜK and DUA coaches)
       (() => {
-        const ids = [...new Set(ukEmps.map(e => e.emp.uretkenlikKocluguManagerId).filter(Boolean))] as number[];
+        const ids = [...new Set([
+          ...activeUkEmps.map(e => e.emp.uretkenlikKocluguManagerId),
+          ...activeUkEmps.map(e => (e.emp as any).duaManagerId),
+        ].filter(Boolean))] as number[];
         return ids.length > 0
           ? db.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, ids))
           : Promise.resolve([] as { id: number; name: string }[]);
@@ -2681,9 +2699,16 @@ export class DatabaseStorage implements IStorage {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const studentStats = ukEmps.map(e => {
+    const studentStats = activeUkEmps.map(e => {
       const empId = e.emp.id;
-      const empRows = rows.filter(r => r.employeeId === empId);
+      const ukEndDateStr = (e.emp as any).ukEndDate as string | null | undefined;
+      const empRows = rows.filter(r => {
+        if (r.employeeId !== empId) return false;
+        if (ukEndDateStr && e.emp.uretkenlikKoclugu && r.closingDate) {
+          return new Date(r.closingDate) <= new Date(ukEndDateStr);
+        }
+        return true;
+      });
       const closingIds = new Set(empRows.map(r => r.closingId));
 
       const seenVol = new Set<number>();
@@ -2768,8 +2793,11 @@ export class DatabaseStorage implements IStorage {
         name: e.cand?.name ?? `#${empId}`,
         kwuid: e.emp.kwuid ?? "",
         isUK: e.emp.uretkenlikKoclugu,
+        isDua: (e.emp as any).dua ?? false,
         ukRate: e.emp.uretkenlikKocluguOran ?? "",
-        coachId: e.emp.uretkenlikKocluguManagerId ?? null,
+        coachId: e.emp.uretkenlikKoclugu
+          ? (e.emp.uretkenlikKocluguManagerId ?? null)
+          : ((e.emp as any).duaManagerId ?? null),
         totalClosings: closingIds.size,
         totalVolume,
         totalBHB,

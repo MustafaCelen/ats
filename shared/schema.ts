@@ -237,6 +237,10 @@ export const employees = pgTable("employees", {
   uretkenlikKoclugu: boolean("uretkenlik_koclugu").notNull().default(false),
   uretkenlikKocluguManagerId: integer("uretkenlik_koclugu_manager_id"),
   uretkenlikKocluguOran: text("uretkenlik_koclugu_oran"), // 5% | 10%
+  dua: boolean("dua").notNull().default(false),
+  duaManagerId: integer("dua_manager_id"),
+  ukStartDate: text("uk_start_date"),
+  ukEndDate: text("uk_end_date"),
   capMonth: text("cap_month"),  // e.g. "2025-03"
   capValue: text("cap_value"),  // cap amount/target
   capManualAdjustment: numeric("cap_manual_adjustment", { precision: 15, scale: 2 }).default("0"),

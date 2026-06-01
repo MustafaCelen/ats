@@ -147,13 +147,27 @@ export function EmployeeEditDialog({ emp, open, onOpenChange }: Props) {
   // ── 6. Koçluk ──
   const [coachingType, setCoachingType] = useState<"none" | "uk" | "dua">(() => {
     if (emp.uretkenlikKoclugu) return "uk";
-    if (emp.uretkenlikKocluguManagerId) return "dua";
+    if ((emp as any).dua) return "dua";
     return "none";
   });
-  const [coachId, setCoachId] = useState<string>(
-    emp.uretkenlikKocluguManagerId ? String(emp.uretkenlikKocluguManagerId) : ""
-  );
-  const [coachRate, setCoachRate] = useState<string>(emp.uretkenlikKocluguOran ?? "");
+  const [coachId, setCoachId] = useState<string>(() => {
+    if (!emp.uretkenlikKoclugu) return "";
+    return emp.uretkenlikKocluguManagerId ? String(emp.uretkenlikKocluguManagerId) : "";
+  });
+  const [duaCoachId, setDuaCoachId] = useState<string>(() => {
+    if (!(emp as any).dua) return "";
+    return (emp as any).duaManagerId ? String((emp as any).duaManagerId) : "";
+  });
+  const [coachRate, setCoachRate] = useState<string>(() => {
+    const raw = emp.uretkenlikKocluguOran ?? "";
+    if (!raw) return "";
+    if ((URETKENLIK_ORANLAR as readonly string[]).includes(raw)) return raw;
+    const digits = raw.replace(/[^0-9]/g, "");
+    const candidate = `${digits}%`;
+    if ((URETKENLIK_ORANLAR as readonly string[]).includes(candidate)) return candidate;
+    return raw;
+  });
+  const [ukEndDate, setUkEndDate] = useState<string>((emp as any).ukEndDate ?? "");
 
   // ── 7. Fatura & Vergi ──
   const [billingName, setBillingName] = useState<string>(emp.billingName ?? "");
@@ -191,8 +205,12 @@ export function EmployeeEditDialog({ emp, open, onOpenChange }: Props) {
       toast({ title: "Deneyim geçerli bir sayı olmalıdır (0 veya üzeri)", variant: "destructive" });
       return;
     }
-    if (coachingType !== "none" && !coachId) {
-      toast({ title: "Koç seçilmedi", description: "ÜK veya DÜA koçluğu için bir koç seçmelisiniz", variant: "destructive" });
+    if (coachingType === "uk" && !coachId) {
+      toast({ title: "Koç seçilmedi", description: "ÜK koçluğu için bir koç seçmelisiniz", variant: "destructive" });
+      return;
+    }
+    if (coachingType === "dua" && !duaCoachId) {
+      toast({ title: "Koç seçilmedi", description: "DUA koçluğu için bir koç seçmelisiniz", variant: "destructive" });
       return;
     }
     if (coachingType === "uk" && !coachRate) {
@@ -241,10 +259,11 @@ export function EmployeeEditDialog({ emp, open, onOpenChange }: Props) {
               capMonth: capMonth || undefined,
               capValue: capValue || undefined,
               uretkenlikKoclugu: coachingType === "uk",
-              uretkenlikKocluguManagerId:
-                coachingType !== "none" && coachId ? Number(coachId) : null,
-              uretkenlikKocluguOran:
-                coachingType === "uk" && coachRate ? coachRate : null,
+              uretkenlikKocluguManagerId: coachingType === "uk" && coachId ? Number(coachId) : null,
+              uretkenlikKocluguOran: coachingType === "uk" && coachRate ? coachRate : null,
+              ukEndDate: coachingType === "uk" && ukEndDate ? ukEndDate : null,
+              dua: coachingType === "dua",
+              duaManagerId: coachingType === "dua" && duaCoachId ? Number(duaCoachId) : null,
               billingName: billingName || undefined,
               billingAddress: billingAddress || undefined,
               billingDistrict: billingDistrict || undefined,
@@ -460,9 +479,9 @@ export function EmployeeEditDialog({ emp, open, onOpenChange }: Props) {
                   </button>
                 ))}
               </div>
-              {coachingType !== "none" && (
-                <div className={`grid gap-3 ${coachingType === "uk" ? "grid-cols-2" : "grid-cols-1"}`}>
-                  <Field label="Koç">
+              {coachingType === "uk" && (
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="ÜK Koçu">
                     <Select value={coachId} onValueChange={setCoachId}>
                       <SelectTrigger data-testid="select-uretkenlik-manager">
                         <SelectValue placeholder="Koç seçin..." />
@@ -474,18 +493,35 @@ export function EmployeeEditDialog({ emp, open, onOpenChange }: Props) {
                       </SelectContent>
                     </Select>
                   </Field>
-                  {coachingType === "uk" && (
-                    <Field label="Paylaşım Oranı">
-                      <Select value={coachRate} onValueChange={setCoachRate}>
-                        <SelectTrigger data-testid="select-uretkenlik-oran">
-                          <SelectValue placeholder="Oran seçin..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {URETKENLIK_ORANLAR.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </Field>
-                  )}
+                  <Field label="Paylaşım Oranı">
+                    <Select value={coachRate} onValueChange={setCoachRate}>
+                      <SelectTrigger data-testid="select-uretkenlik-oran">
+                        <SelectValue placeholder="Oran seçin..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {URETKENLIK_ORANLAR.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field label="ÜK Çıkış Tarihi">
+                    <Input type="date" value={ukEndDate} onChange={(e) => setUkEndDate(e.target.value)} placeholder="Mezuniyet / çıkış tarihi" />
+                  </Field>
+                </div>
+              )}
+              {coachingType === "dua" && (
+                <div className="grid grid-cols-1 gap-3">
+                  <Field label="DUA Koçu">
+                    <Select value={duaCoachId} onValueChange={setDuaCoachId}>
+                      <SelectTrigger data-testid="select-dua-manager">
+                        <SelectValue placeholder="Koç seçin..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {hiringManagers.map((hm) => (
+                          <SelectItem key={hm.id} value={String(hm.id)}>{hm.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
                 </div>
               )}
             </div>
