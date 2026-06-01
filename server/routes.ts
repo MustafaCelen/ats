@@ -1519,8 +1519,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       });
       res.status(201).json(closing);
 
-      // Fire-and-forget WhatsApp notifications to each agent
-      (async () => {
+      // Fire-and-forget WhatsApp notifications — only for completed closings
+      if (closing.status === "completed") (async () => {
         try {
           const details = await storage.getClosing(closing.id) as any;
           if (!details) return;
@@ -1540,9 +1540,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
               const name = emp.candidate.name ?? "Danışman";
 
               const paymentLines: string[] = [];
-              if (Number(agent.banka) > 0)  paymentLines.push(`🏦 Banka: ₺${fmt(agent.banka)}`);
-              if (Number(agent.nakit) > 0)  paymentLines.push(`💵 Nakit: ₺${fmt(agent.nakit)}`);
-              if (Number(agent.kasa)  > 0)  paymentLines.push(`🗄️ Kasa: ₺${fmt(agent.kasa)}`);
+              if (Number(agent.banka) > 0) paymentLines.push(`🏦 Banka: ₺${fmt(agent.banka)}`);
+              if (Number(agent.nakit) > 0) paymentLines.push(`💵 Nakit: ₺${fmt(agent.nakit)}`);
+              if (Number(agent.kasa)  > 0) paymentLines.push(`🗄️ Kasa: ₺${fmt(agent.kasa)}`);
 
               const message = [
                 `Merhaba ${name} 👋`,
@@ -1555,7 +1555,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
                 `🤝 Taraf: ${sideLabel[side.sideType] ?? side.sideType}`,
                 "",
                 `BHB Payınız: ₺${fmt(agent.bhbShare)}`,
-                `BM Kesintisi: ₺${fmt(agent.marketCenterActual)}`,
+                `Ana Merkez Payı: ₺${fmt(agent.mainBranchShare)}`,
+                `KWTR KDV: ₺${fmt(agent.kwtrKdv)}`,
+                `BM Payı (Hesaplanan): ₺${fmt(agent.marketCenterDue)}`,
+                `BM Payı (Uygulanan): ₺${fmt(agent.marketCenterActual)}`,
+                `BM KDV: ₺${fmt(agent.bmKdv)}`,
+                ...(Number(agent.ukShare) > 0 ? [`ÜK Payı: ₺${fmt(agent.ukShare)}`] : []),
                 `Net Geliriniz: ₺${fmt(agent.employeeNet)}`,
                 ...(paymentLines.length > 0 ? ["", "Ödeme Detayı:", ...paymentLines] : []),
               ].join("\n");
