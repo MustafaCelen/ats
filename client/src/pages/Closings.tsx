@@ -119,7 +119,7 @@ function calcAgentBreakdown(
 
   let ukShare = 0;
   if (employee?.uretkenlikKoclugu && employee?.uretkenlikKocluguOran) {
-    const ukRate = employee.uretkenlikKocluguOran === "10%" ? 0.10 : 0.05;
+    const ukRate = (parseInt(employee.uretkenlikKocluguOran.replace(/[^0-9]/g, "")) || 5) / 100;
     ukShare = bhbShare * ukRate;
   }
 
