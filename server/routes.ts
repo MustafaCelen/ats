@@ -7,6 +7,7 @@ import { api } from "@shared/routes";
 import { z } from "zod";
 import { insertInterviewSchema, insertOfferSchema, type InsertTask, TASK_STATUSES } from "@shared/schema";
 import { getAuthUrl, createOAuth2Client, createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from "./google";
+import { sendWhatsApp } from "./whatsapp";
 
 // Scoping helper:
 //   admin      → undefined (all jobs)
@@ -1517,6 +1518,55 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         sides,
       });
       res.status(201).json(closing);
+
+      // Fire-and-forget WhatsApp notifications to each agent
+      (async () => {
+        try {
+          const details = await storage.getClosing(closing.id) as any;
+          if (!details) return;
+
+          const sideLabel: Record<string, string> = { buyer: "Alıcı", seller: "Satıcı", referral: "Referans" };
+          const fmt = (n: string | null | undefined) =>
+            n ? Number(n).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—";
+          const dateStr = details.closingDate
+            ? new Date(details.closingDate).toLocaleDateString("tr-TR")
+            : "—";
+
+          for (const side of details.sides) {
+            for (const agent of side.agents) {
+              const emp = await storage.getEmployee(agent.employeeId);
+              if (!emp?.candidate?.phone) continue;
+
+              const name = emp.candidate.name ?? "Danışman";
+
+              const paymentLines: string[] = [];
+              if (Number(agent.banka) > 0)  paymentLines.push(`🏦 Banka: ₺${fmt(agent.banka)}`);
+              if (Number(agent.nakit) > 0)  paymentLines.push(`💵 Nakit: ₺${fmt(agent.nakit)}`);
+              if (Number(agent.kasa)  > 0)  paymentLines.push(`🗄️ Kasa: ₺${fmt(agent.kasa)}`);
+
+              const message = [
+                `Merhaba ${name} 👋`,
+                "",
+                `Yeni bir kapanış kaydedildi:`,
+                "",
+                `📍 ${details.propertyAddress || "—"}`,
+                `📅 Tarih: ${dateStr}`,
+                `💰 Satış Değeri: ₺${fmt(details.saleValue)}`,
+                `🤝 Taraf: ${sideLabel[side.sideType] ?? side.sideType}`,
+                "",
+                `BHB Payınız: ₺${fmt(agent.bhbShare)}`,
+                `BM Kesintisi: ₺${fmt(agent.marketCenterActual)}`,
+                `Net Geliriniz: ₺${fmt(agent.employeeNet)}`,
+                ...(paymentLines.length > 0 ? ["", "Ödeme Detayı:", ...paymentLines] : []),
+              ].join("\n");
+
+              await sendWhatsApp(emp.candidate.phone, message);
+            }
+          }
+        } catch (err) {
+          console.warn("[WhatsApp notify]", err);
+        }
+      })();
     } catch (err) {
       console.error("[POST /api/closings]", err);
       res.status(500).json({ message: "Internal server error" });
