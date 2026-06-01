@@ -1608,6 +1608,63 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // ── Office Expenses ────────────────────────────────────────────────────────
+
+  app.get("/api/office-expenses/monthly-pl", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const year = req.query.year ? parseInt(req.query.year as string) : new Date().getFullYear();
+      res.json(await storage.getMonthlyPL(year));
+    } catch (err) {
+      console.error("[GET /api/office-expenses/monthly-pl]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.get("/api/office-expenses", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const { type, year, month } = req.query as { type?: string; year?: string; month?: string };
+      const rows = await storage.getOfficeExpenses({
+        type,
+        year: year ? parseInt(year) : undefined,
+        month: month ? parseInt(month) : undefined,
+      });
+      res.json(rows);
+    } catch (err) {
+      console.error("[GET /api/office-expenses]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.post("/api/office-expenses", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const row = await storage.createOfficeExpense({ ...req.body, createdByUserId: req.user!.id });
+      res.status(201).json(row);
+    } catch (err) {
+      console.error("[POST /api/office-expenses]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.patch("/api/office-expenses/:id", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const row = await storage.updateOfficeExpense(Number(req.params.id), req.body);
+      res.json(row);
+    } catch (err) {
+      console.error("[PATCH /api/office-expenses/:id]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.delete("/api/office-expenses/:id", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      await storage.deleteOfficeExpense(Number(req.params.id));
+      res.status(204).send();
+    } catch (err) {
+      console.error("[DELETE /api/office-expenses/:id]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   // ── Closing Stats (Financial Reports) ────────────────────────────────────────
 
   app.get("/api/closings/stats", requireAuth, requireAdmin, async (req, res) => {

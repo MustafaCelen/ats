@@ -20,6 +20,8 @@ import OnboardingBoard from "@/pages/OnboardingBoard";
 import Closings from "@/pages/Closings";
 import FinancialReports from "@/pages/FinancialReports";
 import Coaching from "@/pages/Coaching";
+import Expenses from "@/pages/Expenses";
+import PLReport from "@/pages/PLReport";
 
 function ProtectedRoute({
   children,
@@ -64,6 +66,8 @@ function Router() {
       <Route path="/closings" component={() => <ProtectedRoute adminOnly><Closings /></ProtectedRoute>} />
       <Route path="/financial-reports" component={() => <ProtectedRoute adminOnly><FinancialReports /></ProtectedRoute>} />
       <Route path="/coaching" component={() => <ProtectedRoute noAssistant><Coaching /></ProtectedRoute>} />
+      <Route path="/expenses" component={() => <ProtectedRoute adminOnly><Expenses /></ProtectedRoute>} />
+      <Route path="/pl-report" component={() => <ProtectedRoute adminOnly><PLReport /></ProtectedRoute>} />
       <Route component={NotFound} />
     </Switch>
   );

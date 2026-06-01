@@ -2,6 +2,7 @@ import { Link, useLocation } from "wouter";
 import {
   LayoutDashboard, Users, Briefcase, BarChart2, ChevronRight, Menu, X,
   Calendar, Shield, LogOut, ClipboardList, UserCheck, KanbanSquare, DollarSign, GraduationCap,
+  Receipt, TrendingUp,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { useState } from "react";
@@ -39,6 +40,7 @@ const reportsGroupAdmin: NavGroup = {
   label: "Raporlar",
   children: [
     { icon: DollarSign,    label: "Finansal Raporlar",      href: "/financial-reports" },
+    { icon: TrendingUp,    label: "Kâr / Zarar",            href: "/pl-report"         },
     { icon: BarChart2,     label: "Üretim Bandı Raporları", href: "/reports"           },
     { icon: GraduationCap, label: "ÜK & DÜA Raporları",    href: "/coaching"          },
   ],
@@ -64,6 +66,7 @@ const adminNavItems: NavEntry[] = [
   { icon: KanbanSquare,    label: "Onboarding",     href: "/onboarding" },
   { icon: ClipboardList,   label: "Görevler",       href: "/tasks"      },
   { icon: DollarSign,      label: "İşlem Kapanış",  href: "/closings"   },
+  { icon: Receipt,         label: "Masraflar",       href: "/expenses"   },
   reportsGroupAdmin,
   { icon: Shield,          label: "Users",          href: "/users"      },
 ];

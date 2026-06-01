@@ -72,6 +72,48 @@ function SideTypePips({ buyer, seller, referral }: { buyer: number; seller: numb
   );
 }
 
+function CategoryPips({ byCategory }: { byCategory: { category: string; count: number }[] }) {
+  if (!byCategory?.length) return <span className="text-xs text-muted-foreground">—</span>;
+  const cfg: Record<string, { short: string; cls: string }> = {
+    "Satış":        { short: "Satılık",    cls: "bg-blue-100 text-blue-700 border-blue-200" },
+    "Kiralık":      { short: "Kiralık",    cls: "bg-amber-100 text-amber-700 border-amber-200" },
+    "Yönlendirme":  { short: "Yönlendirme",cls: "bg-purple-100 text-purple-700 border-purple-200" },
+  };
+  return (
+    <div className="flex flex-wrap gap-1.5 text-xs">
+      {byCategory.map((c) => {
+        const { short, cls } = cfg[c.category] ?? { short: c.category, cls: "bg-muted text-muted-foreground border-border" };
+        return (
+          <span key={c.category} className={`px-2 py-0.5 rounded-full border font-semibold ${cls}`}>
+            {short}: {c.count}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function CategoryMiniPips({ byCategory }: { byCategory: { category: string; count: number }[] }) {
+  if (!byCategory?.length) return null;
+  const cfg: Record<string, { short: string; cls: string }> = {
+    "Satış":       { short: "S", cls: "bg-blue-100 text-blue-700" },
+    "Kiralık":     { short: "K", cls: "bg-amber-100 text-amber-700" },
+    "Yönlendirme": { short: "Y", cls: "bg-purple-100 text-purple-700" },
+  };
+  return (
+    <div className="flex gap-1 mt-0.5">
+      {byCategory.map((c) => {
+        const { short, cls } = cfg[c.category] ?? { short: c.category[0], cls: "bg-muted text-muted-foreground" };
+        return (
+          <span key={c.category} className={`text-[10px] px-1 py-0.5 rounded font-bold ${cls}`}>
+            {short}:{c.count}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 function StudentCard({ student, rank }: { student: any; rank: number }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -100,6 +142,7 @@ function StudentCard({ student, rank }: { student: any; rank: number }) {
           <div>
             <p className="text-xs text-muted-foreground">Kapanış</p>
             <p className="text-sm font-bold">{student.totalClosings}</p>
+            <CategoryMiniPips byCategory={student.byCategory ?? []} />
           </div>
           <div>
             <p className="text-xs text-muted-foreground">BHB</p>
@@ -152,8 +195,8 @@ function StudentCard({ student, rank }: { student: any; rank: number }) {
             )}
           </div>
 
-          {/* Side types + deal types */}
-          <div className="grid grid-cols-2 gap-4">
+          {/* Side types + deal types + category */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
             <div>
               <p className="text-xs font-semibold text-muted-foreground mb-1.5">Taraf Tipi</p>
               <SideTypePips buyer={student.bySideType?.buyer ?? 0} seller={student.bySideType?.seller ?? 0} referral={student.bySideType?.referral ?? 0} />
@@ -168,6 +211,10 @@ function StudentCard({ student, rank }: { student: any; rank: number }) {
                 ))}
                 {student.byDealType?.length === 0 && <span className="text-xs text-muted-foreground">—</span>}
               </div>
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground mb-1.5">İşlem Kategorisi</p>
+              <CategoryPips byCategory={student.byCategory ?? []} />
             </div>
           </div>
 
@@ -262,11 +309,13 @@ export default function Coaching() {
     ? formatYMD(new Date(viewDate.getFullYear(), 11, 31))
     : formatYMD(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0));
 
-  const { data, isLoading } = useQuery<{ coaches: any[] }>({
+  const { data, isLoading, isFetching } = useQuery<{ coaches: any[] }>({
     queryKey: ["/api/coaching/stats", startDate, endDate],
     queryFn: () =>
       fetch(`/api/coaching/stats?startDate=${startDate}&endDate=${endDate}`)
         .then(r => r.json()),
+    staleTime: 5 * 60 * 1000,
+    placeholderData: (prev) => prev,
   });
 
   const allCoaches = data?.coaches ?? [];
@@ -389,17 +438,24 @@ export default function Coaching() {
           </div>
         </div>
 
-        {isLoading && (
+        {isLoading && !data && (
           <div className="flex justify-center py-20">
             <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
           </div>
         )}
 
-        {!isLoading && allStudents.length === 0 && (
+        {!isLoading && !isFetching && allStudents.length === 0 && (
           <div className="text-center py-20 text-muted-foreground">
             <Users className="h-10 w-10 mx-auto mb-3 opacity-40" />
             <p className="font-medium">Bu dönem için koçluk verisi bulunamadı.</p>
             <p className="text-sm mt-1">ÜK aktif danışman kaydı bulunmuyor ya da bu dönemde kapanış yapılmamış olabilir.</p>
+          </div>
+        )}
+
+        {isFetching && data && (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <div className="h-3.5 w-3.5 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+            Güncelleniyor…
           </div>
         )}
 

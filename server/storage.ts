@@ -3,6 +3,7 @@ import {
   jobs, candidates, applications, stageHistory, interviews, offers, candidateNotes,
   users, jobAssignments, applicationDocuments, tasks, employees,
   capSettings, closings, closingSides, closingAgents, interviewTargets,
+  officeExpenses,
   APPLICATION_STAGES,
   type Job, type InsertJob,
   type Candidate, type InsertCandidate,
@@ -17,6 +18,7 @@ import {
   type Employee, type InsertEmployee, type EmployeeWithRelations,
   type CapSetting, type Closing, type ClosingSide, type ClosingAgent,
   type CapStatus, type ClosingWithDetails, type InterviewTarget,
+  type OfficeExpense, type InsertOfficeExpense,
 } from "@shared/schema";
 import { eq, desc, asc, count, sql, gte, lte, lt, and, or, isNull, isNotNull, inArray, notInArray } from "drizzle-orm";
 import { differenceInDays } from "date-fns";
@@ -2536,8 +2538,51 @@ export class DatabaseStorage implements IStorage {
 
     const studentIds = ukEmps.map(e => e.emp.id);
 
-    const rows = await db
-      .select({
+    // ── All queries run in parallel ──────────────────────────────────────────
+
+    const TR_MONTHS: Record<string, number> = {
+      "Ocak": 1, "Şubat": 2, "Mart": 3, "Nisan": 4, "Mayıs": 5, "Haziran": 6,
+      "Temmuz": 7, "Ağustos": 8, "Eylül": 9, "Ekim": 10, "Kasım": 11, "Aralık": 12,
+    };
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1;
+
+    // Parse cap info per employee (no DB needed — data is already in emp)
+    const capInfoMap = new Map<number, {
+      capYear: number; capMonthNum: number;
+      periodStart: Date; prevPeriodStart: Date; empCapValue: number | null;
+    }>();
+    const capYearSet = new Set<number>();
+    for (const { emp } of ukEmps) {
+      if (!emp.capMonth) continue;
+      const trimmed = emp.capMonth.trim();
+      let capMonthNum = TR_MONTHS[trimmed];
+      if (!capMonthNum) {
+        const parts = trimmed.split("-");
+        capMonthNum = parseInt(parts[1] ?? parts[0], 10);
+      }
+      if (isNaN(capMonthNum) || capMonthNum < 1 || capMonthNum > 12) continue;
+      const capYear = currentMonth >= capMonthNum ? currentYear : currentYear - 1;
+      capYearSet.add(capYear);
+      capInfoMap.set(emp.id, {
+        capYear,
+        capMonthNum,
+        periodStart: new Date(capYear, capMonthNum - 1, 1),
+        prevPeriodStart: new Date(capYear - 1, capMonthNum - 1, 1),
+        empCapValue: emp.capValue ? parseFloat(emp.capValue) : null,
+      });
+    }
+
+    // Earliest prev period start across all employees
+    let minPrevStart: Date | null = null;
+    for (const info of capInfoMap.values()) {
+      if (!minPrevStart || info.prevPeriodStart < minPrevStart) minPrevStart = info.prevPeriodStart;
+    }
+
+    const [rows, capRows, lastClosingRows, coachUsers, capSettingRows] = await Promise.all([
+      // Closings in the selected date range
+      db.select({
         closingId: closings.id,
         saleValue: closings.saleValue,
         closingDate: closings.closingDate,
@@ -2559,17 +2604,84 @@ export class DatabaseStorage implements IStorage {
         gte(closings.closingDate, startDate),
         lte(closings.closingDate, end),
         inArray(closingAgents.employeeId, studentIds),
-      ));
+      )),
 
-    const capStatuses = await Promise.all(ukEmps.map(e => this.getEmployeeCapStatus(e.emp.id)));
+      // Cap period closings in batch (from earliest prev period start)
+      minPrevStart
+        ? db.select({
+            employeeId: closingAgents.employeeId,
+            marketCenterActual: closingAgents.marketCenterActual,
+            closingDate: closings.closingDate,
+          })
+          .from(closingAgents)
+          .innerJoin(closingSides, eq(closingAgents.closingSideId, closingSides.id))
+          .innerJoin(closings, eq(closingSides.closingId, closings.id))
+          .where(and(
+            inArray(closingAgents.employeeId, studentIds),
+            eq(closings.status, "completed"),
+            isNotNull(closings.closingDate),
+            gte(closings.closingDate, minPrevStart),
+          ))
+        : Promise.resolve([] as { employeeId: number | null; marketCenterActual: string | null; closingDate: Date | null }[]),
 
-    const coachIds = [...new Set(ukEmps.map(e => e.emp.uretkenlikKocluguManagerId).filter(Boolean))] as number[];
-    const coachUsers = coachIds.length > 0
-      ? await db.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, coachIds))
-      : [];
-    const coachMap = new Map(coachUsers.map(u => [u.id, u.name]));
+      // Last closing date per student via GROUP BY MAX (avoids fetching all rows)
+      db.select({
+        employeeId: closingAgents.employeeId,
+        lastDate: sql<string>`MAX(${closings.closingDate})`,
+      })
+      .from(closingAgents)
+      .innerJoin(closingSides, eq(closingSides.id, closingAgents.closingSideId))
+      .innerJoin(closings, eq(closings.id, closingSides.closingId))
+      .where(and(
+        inArray(closingAgents.employeeId, studentIds),
+        eq(closings.status, "completed"),
+        isNotNull(closings.closingDate),
+      ))
+      .groupBy(closingAgents.employeeId),
 
-    const studentStats = ukEmps.map((e, idx) => {
+      // Coach user names
+      (() => {
+        const ids = [...new Set(ukEmps.map(e => e.emp.uretkenlikKocluguManagerId).filter(Boolean))] as number[];
+        return ids.length > 0
+          ? db.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, ids))
+          : Promise.resolve([] as { id: number; name: string }[]);
+      })(),
+
+      // Cap settings for relevant years
+      capYearSet.size > 0
+        ? db.select().from(capSettings).where(inArray(capSettings.year, [...capYearSet]))
+        : Promise.resolve([] as typeof capSettings.$inferSelect[]),
+    ]);
+
+    // ── Build cap used maps ──────────────────────────────────────────────────
+    const capUsedMap = new Map<number, number>();
+    const prevCapUsedMap = new Map<number, number>();
+    for (const r of capRows) {
+      if (!r.employeeId || !r.closingDate || !r.marketCenterActual) continue;
+      const info = capInfoMap.get(r.employeeId);
+      if (!info) continue;
+      const d = new Date(r.closingDate);
+      const amount = parseFloat(r.marketCenterActual);
+      if (d >= info.periodStart) {
+        capUsedMap.set(r.employeeId, (capUsedMap.get(r.employeeId) ?? 0) + amount);
+      } else if (d >= info.prevPeriodStart) {
+        prevCapUsedMap.set(r.employeeId, (prevCapUsedMap.get(r.employeeId) ?? 0) + amount);
+      }
+    }
+    const capSettingByYear = new Map(capSettingRows.map(r => [r.year, parseFloat(r.amount)]));
+    const coachMap = new Map((coachUsers as { id: number; name: string }[]).map(u => [u.id, u.name]));
+
+    // ── Last closing map ─────────────────────────────────────────────────────
+    const lastClosingMap = new Map<number, string>();
+    for (const r of lastClosingRows) {
+      if (r.employeeId && r.lastDate) lastClosingMap.set(r.employeeId, String(r.lastDate));
+    }
+
+    // ── Build per-student stats ──────────────────────────────────────────────
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const studentStats = ukEmps.map(e => {
       const empId = e.emp.id;
       const empRows = rows.filter(r => r.employeeId === empId);
       const closingIds = new Set(empRows.map(r => r.closingId));
@@ -2627,8 +2739,29 @@ export class DatabaseStorage implements IStorage {
       const durations = Array.from(durMap.values());
       const avgSaleDays = durations.length > 0 ? Math.round(durations.reduce((s, d) => s + d, 0) / durations.length) : null;
 
-      const cap = capStatuses[idx];
-      const capPct = cap && cap.capAmount > 0 ? Math.min(100, Math.round((cap.capUsed / cap.capAmount) * 100)) : 0;
+      // Cap status from batched data
+      const info = capInfoMap.get(empId);
+      let capPct = 0, capUsed = 0, capAmount = 0;
+      if (info) {
+        const rawCapUsed = (capUsedMap.get(empId) ?? 0) + parseFloat((e.emp as any).capManualAdjustment ?? "0");
+        const rawCapAmount = info.empCapValue && info.empCapValue > 0
+          ? info.empCapValue
+          : (capSettingByYear.get(info.capYear) ?? 0);
+        capUsed = rawCapUsed;
+        capAmount = rawCapAmount;
+        capPct = rawCapAmount > 0 ? Math.min(100, Math.round((rawCapUsed / rawCapAmount) * 100)) : 0;
+      }
+
+      // Last closing date
+      let lastClosingDate: string | null = null;
+      let daysSinceLastClosing: number | null = null;
+      const lastDateStr = lastClosingMap.get(empId);
+      if (lastDateStr) {
+        const last = new Date(lastDateStr);
+        last.setHours(0, 0, 0, 0);
+        lastClosingDate = lastDateStr.split("T")[0];
+        daysSinceLastClosing = Math.floor((today.getTime() - last.getTime()) / 86_400_000);
+      }
 
       return {
         employeeId: empId,
@@ -2645,48 +2778,16 @@ export class DatabaseStorage implements IStorage {
         avgDealValue: closingIds.size > 0 ? Math.round(totalVolume / closingIds.size) : 0,
         avgSaleDays,
         capPct,
-        capUsed: cap?.capUsed ?? 0,
-        capAmount: cap?.capAmount ?? 0,
+        capUsed,
+        capAmount,
         bySideType,
         byDealType,
         byCategory,
         monthlyTrend,
-        lastClosingDate: null as string | null, // filled below
-        daysSinceLastClosing: null as number | null,
+        lastClosingDate,
+        daysSinceLastClosing,
       };
     });
-
-    // Fetch last closing date per student globally (regardless of date filter)
-    const lastClosingRows = studentIds.length > 0
-      ? await db
-          .select({ employeeId: closingAgents.employeeId, closingDate: closings.closingDate })
-          .from(closingAgents)
-          .innerJoin(closingSides, eq(closingSides.id, closingAgents.closingSideId))
-          .innerJoin(closings, eq(closings.id, closingSides.closingId))
-          .where(and(
-            inArray(closingAgents.employeeId, studentIds),
-            eq(closings.status, "completed"),
-            isNotNull(closings.closingDate),
-          ))
-      : [];
-
-    const lastClosingMap = new Map<number, Date>();
-    for (const r of lastClosingRows) {
-      if (!r.employeeId || !r.closingDate) continue;
-      const d = new Date(r.closingDate);
-      const prev = lastClosingMap.get(r.employeeId);
-      if (!prev || d > prev) lastClosingMap.set(r.employeeId, d);
-    }
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    for (const s of studentStats) {
-      const last = lastClosingMap.get(s.employeeId);
-      if (last) {
-        s.lastClosingDate = last.toISOString().split("T")[0];
-        s.daysSinceLastClosing = Math.floor((today.getTime() - last.getTime()) / 86_400_000);
-      }
-    }
 
     const coachGroups = new Map<number | null, typeof studentStats>();
     for (const s of studentStats) {
@@ -2706,6 +2807,124 @@ export class DatabaseStorage implements IStorage {
     })).sort((a, b) => b.totalBHB - a.totalBHB);
 
     return { coaches };
+  }
+
+  // ── Office Expenses ────────────────────────────────────────────────────────
+
+  async createOfficeExpense(data: InsertOfficeExpense): Promise<OfficeExpense> {
+    const [row] = await db.insert(officeExpenses).values(data).returning();
+    return row;
+  }
+
+  async getOfficeExpenses(filters?: {
+    type?: string;
+    year?: number;
+    month?: number;
+    startDate?: string;
+    endDate?: string;
+  }): Promise<OfficeExpense[]> {
+    const conditions = [];
+    if (filters?.type) conditions.push(eq(officeExpenses.type, filters.type));
+    if (filters?.year && filters?.month) {
+      const y = filters.year;
+      const m = String(filters.month).padStart(2, "0");
+      const lastDay = new Date(y, filters.month, 0).getDate();
+      conditions.push(gte(officeExpenses.date, `${y}-${m}-01`));
+      conditions.push(lte(officeExpenses.date, `${y}-${m}-${lastDay}`));
+    } else if (filters?.year) {
+      conditions.push(gte(officeExpenses.date, `${filters.year}-01-01`));
+      conditions.push(lte(officeExpenses.date, `${filters.year}-12-31`));
+    }
+    if (filters?.startDate) conditions.push(gte(officeExpenses.date, filters.startDate));
+    if (filters?.endDate) conditions.push(lte(officeExpenses.date, filters.endDate));
+
+    return db
+      .select()
+      .from(officeExpenses)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(desc(officeExpenses.date), desc(officeExpenses.createdAt));
+  }
+
+  async updateOfficeExpense(id: number, data: Partial<InsertOfficeExpense>): Promise<OfficeExpense> {
+    const [row] = await db.update(officeExpenses).set(data).where(eq(officeExpenses.id, id)).returning();
+    return row;
+  }
+
+  async deleteOfficeExpense(id: number): Promise<void> {
+    await db.delete(officeExpenses).where(eq(officeExpenses.id, id));
+  }
+
+  async getMonthlyPL(year: number): Promise<{
+    month: number;
+    incomeByCategory: Record<string, number>;
+    expenseByCategory: Record<string, number>;
+    totalIncome: number;
+    totalExpenses: number;
+    net: number;
+  }[]> {
+    const yearStart = new Date(year, 0, 1);
+    const yearEnd   = new Date(year, 11, 31, 23, 59, 59, 999);
+
+    // Manual income/expense entries
+    const rows = await db
+      .select()
+      .from(officeExpenses)
+      .where(and(
+        gte(officeExpenses.date, `${year}-01-01`),
+        lte(officeExpenses.date, `${year}-12-31`),
+      ));
+
+    // BM revenues: sum of marketCenterActual from closings per month
+    const bmRows = await db
+      .select({
+        closingDate: closings.closingDate,
+        marketCenterActual: closingAgents.marketCenterActual,
+      })
+      .from(closingAgents)
+      .innerJoin(closingSides, eq(closingSides.id, closingAgents.closingSideId))
+      .innerJoin(closings, eq(closings.id, closingSides.closingId))
+      .where(and(
+        isNotNull(closings.closingDate),
+        gte(closings.closingDate, yearStart),
+        lte(closings.closingDate, yearEnd),
+      ));
+
+    const months = Array.from({ length: 12 }, (_, i) => ({
+      month: i + 1,
+      incomeByCategory: {} as Record<string, number>,
+      expenseByCategory: {} as Record<string, number>,
+      totalIncome: 0,
+      totalExpenses: 0,
+      net: 0,
+    }));
+
+    // Aggregate manual entries
+    for (const row of rows) {
+      const m = parseInt(row.date.slice(5, 7)) - 1;
+      if (m < 0 || m > 11) continue;
+      const amount = parseFloat(row.amount as string);
+      if (row.type === "income") {
+        months[m].incomeByCategory[row.category] = (months[m].incomeByCategory[row.category] ?? 0) + amount;
+        months[m].totalIncome += amount;
+      } else {
+        months[m].expenseByCategory[row.category] = (months[m].expenseByCategory[row.category] ?? 0) + amount;
+        months[m].totalExpenses += amount;
+      }
+    }
+
+    // Aggregate BM revenues per month
+    for (const row of bmRows) {
+      if (!row.closingDate) continue;
+      const m = new Date(row.closingDate).getMonth(); // 0-based
+      const amount = parseFloat(row.marketCenterActual as string ?? "0");
+      if (amount <= 0) continue;
+      months[m].incomeByCategory["BM Gelirleri"] = (months[m].incomeByCategory["BM Gelirleri"] ?? 0) + amount;
+      months[m].totalIncome += amount;
+    }
+
+    for (const m of months) m.net = m.totalIncome - m.totalExpenses;
+
+    return months;
   }
 }
 

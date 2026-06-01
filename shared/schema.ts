@@ -466,6 +466,68 @@ export const interviewTargets = pgTable("interview_targets", {
 
 export type InterviewTarget = typeof interviewTargets.$inferSelect;
 
+// ── Office Expenses (Income / Expense Module) ─────────────────────────────────
+
+export const INCOME_CATEGORIES = [
+  "Aidat & Yer Tahsis",
+  "Oda Kira",
+  "Sahibinden",
+  "ÜK Geliri",
+  "Giriş Bedeli",
+  "Faiz Gelirleri",
+  "Printer Geliri",
+  "Kitap, Yer Gösterme, DISC vb. Gelir",
+  "Transfer Geliri",
+  "Proje Ek Geliri",
+  "Diğer Gelirler (Kep Ödemesi vb)",
+  "Royalty Fee (%1,5)",
+] as const;
+
+export const EXPENSE_CATEGORY_GROUPS: { group: string; items: string[] }[] = [
+  { group: "KW & Teknoloji",        items: ["KW Türkiye (eğitim+idari+rdn)", "Fonzip", "Zoom", "Logo Muhasebe", "DISC"] },
+  { group: "Personel",              items: ["Personel Ücretleri", "Personel Sağlık Sigorta", "SGK", "EE Bağkur", "EYT Kredisi/İş Bankası"] },
+  { group: "Ulaşım",                items: ["Araç Benzin", "HGS/OGS", "Taksi"] },
+  {
+    group: "Ofis & Genel Giderler",
+    items: [
+      "Kira", "Aidat, Elektrik, Güvenlik vs", "Temizlik, Hijyen", "Kırtasiye Masrafı",
+      "Mutfak", "Sigorta (İşyeri)", "Kitap", "Kargo & Noter Giderleri", "Printer",
+      "Ofis Tamir Bakımı", "Demirbaş + Tadilat", "Sabit Telefon, Cep Telefonu", "İnternet",
+    ],
+  },
+  { group: "KW Etkinlik & Eğitim",  items: ["FR_USA", "FR & Megacamp", "Eğitim & Etkinlik Bütçesi"] },
+  {
+    group: "Pazarlama & Reklam",
+    items: ["Sosyal Medya Reklam", "Aidat Kampanyası", "Görsel & Afiş & İkram", "Toplanamayan Aidat", "Ödül & Etkinlik"],
+  },
+  { group: "Portaller",             items: ["Sahibinden", "Hürriyet Emlak"] },
+  { group: "Danışmanlık",           items: ["Mali Müşavir", "Hukuk"] },
+  {
+    group: "Vergi & Yasal",
+    items: [
+      "Gelir Vergisi Stopajı (Muhtasar)", "Damga Vergisi", "Kurumlar + Geçici Vergi",
+      "İlan, Reklam ve Harçlar", "İTO Ücreti", "Çevre ve Temizlik Vergisi", "MTV",
+    ],
+  },
+];
+
+export const EXPENSE_CATEGORIES = EXPENSE_CATEGORY_GROUPS.flatMap((g) => g.items);
+
+export const officeExpenses = pgTable("office_expenses", {
+  id: serial("id").primaryKey(),
+  type: text("type").notNull(),                // "income" | "expense"
+  category: text("category").notNull(),
+  amount: numeric("amount", { precision: 15, scale: 2 }).notNull(),
+  date: text("date").notNull(),                // YYYY-MM-DD
+  notes: text("notes"),
+  createdByUserId: integer("created_by_user_id"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertOfficeExpenseSchema = createInsertSchema(officeExpenses).omit({ id: true, createdAt: true });
+export type InsertOfficeExpense = z.infer<typeof insertOfficeExpenseSchema>;
+export type OfficeExpense = typeof officeExpenses.$inferSelect;
+
 // Insert schemas
 export const insertJobSchema = createInsertSchema(jobs).omit({ id: true, createdAt: true });
 export const insertCandidateSchema = createInsertSchema(candidates).omit({ id: true, createdAt: true, createdByUserId: true });

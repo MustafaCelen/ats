@@ -94,6 +94,17 @@ app.use((req, res, next) => {
       "expire" timestamp(6) NOT NULL
     );
     CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON "user_sessions" ("expire");
+
+    CREATE TABLE IF NOT EXISTS "office_expenses" (
+      "id" serial PRIMARY KEY NOT NULL,
+      "type" text NOT NULL,
+      "category" text NOT NULL,
+      "amount" numeric(15, 2) NOT NULL,
+      "date" text NOT NULL,
+      "notes" text,
+      "created_by_user_id" integer,
+      "created_at" timestamp DEFAULT now()
+    );
   `);
 
   await registerRoutes(httpServer, app);
