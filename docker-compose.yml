@@ -22,8 +22,8 @@ services:
     environment:
       DATABASE_URL: postgresql://hireflow:hireflow_password@postgres:5432/hireflow
       SESSION_SECRET: local-dev-session-secret-change-in-production
-      GREEN_API_INSTANCE_ID: ""
-      GREEN_API_TOKEN: ""
+      GREEN_API_INSTANCE_ID: ${GREEN_API_INSTANCE_ID:-}
+      GREEN_API_TOKEN: ${GREEN_API_TOKEN:-}
     depends_on:
       postgres:
         condition: service_healthy
