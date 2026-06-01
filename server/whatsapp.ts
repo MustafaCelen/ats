@@ -1,4 +1,10 @@
-const GREEN_API_BASE = "https://api.green-api.com";
+// Newer Green API instances use a subdomain derived from the first 4 digits of the instance ID
+// e.g. instance 7107639535 → https://7107.api.greenapi.com
+function getBaseUrl(instanceId: string): string {
+  const prefix = instanceId.slice(0, 4);
+  if (/^\d{4}$/.test(prefix)) return `https://${prefix}.api.greenapi.com`;
+  return "https://api.green-api.com";
+}
 
 function toWhatsAppId(phone: string): string | null {
   const digits = phone.replace(/\D/g, "");
@@ -27,8 +33,9 @@ export async function sendWhatsApp(phone: string, message: string): Promise<void
   }
 
   try {
+    const baseUrl = getBaseUrl(instanceId);
     const res = await fetch(
-      `${GREEN_API_BASE}/waInstance${instanceId}/sendMessage/${token}`,
+      `${baseUrl}/waInstance${instanceId}/sendMessage/${token}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
