@@ -23,6 +23,7 @@ interface Listing {
   advisorName: string | null;
   employeeId: number | null;
   employeeName?: string;
+  employeePhone?: string;
   office: string | null;
   store: string | null;
   status: "active" | "passive";
@@ -327,6 +328,7 @@ export default function Listings() {
                 <tr className="border-b border-border bg-muted/40 text-left text-xs text-muted-foreground">
                   <th className="px-3 py-2.5 font-medium">İlan No</th>
                   <th className="px-3 py-2.5 font-medium">Danışman</th>
+                  <th className="px-3 py-2.5 font-medium">Telefon</th>
                   <th className="px-3 py-2.5 font-medium">Fiyat</th>
                   <th className="px-3 py-2.5 font-medium">Yayın</th>
                   <th className="px-3 py-2.5 font-medium">Durum</th>
@@ -337,15 +339,22 @@ export default function Listings() {
               </thead>
               <tbody>
                 {isLoading ? (
-                  <tr><td colSpan={8} className="px-3 py-10 text-center text-muted-foreground">Yükleniyor…</td></tr>
+                  <tr><td colSpan={9} className="px-3 py-10 text-center text-muted-foreground">Yükleniyor…</td></tr>
                 ) : rows.length === 0 ? (
-                  <tr><td colSpan={8} className="px-3 py-10 text-center text-muted-foreground">Kayıt yok. Bir CSV içe aktarın.</td></tr>
+                  <tr><td colSpan={9} className="px-3 py-10 text-center text-muted-foreground">Kayıt yok. Bir CSV içe aktarın.</td></tr>
                 ) : pageRows.map((l) => (
                   <tr key={l.id} className="border-b border-border last:border-0 hover:bg-muted/30">
                     <td className="px-3 py-2.5 font-mono text-xs">{l.listingNumber}</td>
                     <td className="px-3 py-2.5">
                       <div className="font-medium">{l.employeeName ?? l.advisorName ?? "—"}</div>
                       {l.office && <div className="text-[11px] text-muted-foreground truncate max-w-[160px]">{l.office}</div>}
+                    </td>
+                    <td className="px-3 py-2.5 whitespace-nowrap text-xs">
+                      {l.employeePhone ? (
+                        <a href={`tel:${l.employeePhone}`} className="text-primary hover:underline">{l.employeePhone}</a>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
                     </td>
                     <td className="px-3 py-2.5 whitespace-nowrap">{fmtPrice(l.price)}</td>
                     <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap">{l.publishedDate ?? "—"}</td>
