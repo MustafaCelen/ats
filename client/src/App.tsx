@@ -22,6 +22,8 @@ import FinancialReports from "@/pages/FinancialReports";
 import Coaching from "@/pages/Coaching";
 import Expenses from "@/pages/Expenses";
 import PLReport from "@/pages/PLReport";
+import Listings from "@/pages/Listings";
+import PublicListing from "@/pages/PublicListing";
 
 function ProtectedRoute({
   children,
@@ -51,6 +53,7 @@ function Router() {
   return (
     <Switch>
       <Route path="/login" component={Login} />
+      <Route path="/l/:token" component={PublicListing} />
       <Route path="/" component={() => <Redirect to="/dashboard" />} />
       <Route path="/dashboard" component={() => <ProtectedRoute noAssistant><Dashboard /></ProtectedRoute>} />
       <Route path="/jobs" component={() => <ProtectedRoute><Jobs /></ProtectedRoute>} />
@@ -64,6 +67,7 @@ function Router() {
       <Route path="/employees" component={() => <ProtectedRoute><Employees /></ProtectedRoute>} />
       <Route path="/onboarding" component={() => <ProtectedRoute><OnboardingBoard /></ProtectedRoute>} />
       <Route path="/closings" component={() => <ProtectedRoute adminOnly><Closings /></ProtectedRoute>} />
+      <Route path="/listings" component={() => <ProtectedRoute adminOnly><Listings /></ProtectedRoute>} />
       <Route path="/financial-reports" component={() => <ProtectedRoute adminOnly><FinancialReports /></ProtectedRoute>} />
       <Route path="/coaching" component={() => <ProtectedRoute noAssistant><Coaching /></ProtectedRoute>} />
       <Route path="/expenses" component={() => <ProtectedRoute adminOnly><Expenses /></ProtectedRoute>} />

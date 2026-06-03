@@ -2,7 +2,7 @@ import { Link, useLocation } from "wouter";
 import {
   LayoutDashboard, Users, Briefcase, BarChart2, ChevronRight, Menu, X,
   Calendar, Shield, LogOut, ClipboardList, UserCheck, KanbanSquare, DollarSign, GraduationCap,
-  Receipt, TrendingUp,
+  Receipt, TrendingUp, Building2,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { useState } from "react";
@@ -66,6 +66,7 @@ const adminNavItems: NavEntry[] = [
   { icon: KanbanSquare,    label: "Onboarding",     href: "/onboarding" },
   { icon: ClipboardList,   label: "Görevler",       href: "/tasks"      },
   { icon: DollarSign,      label: "İşlem Kapanış",  href: "/closings"   },
+  { icon: Building2,       label: "Portal İlanları", href: "/listings"   },
   { icon: Receipt,         label: "Masraflar",       href: "/expenses"   },
   reportsGroupAdmin,
   { icon: Shield,          label: "Users",          href: "/users"      },

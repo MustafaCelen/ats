@@ -24,6 +24,7 @@ services:
       SESSION_SECRET: local-dev-session-secret-change-in-production
       GREEN_API_INSTANCE_ID: ${GREEN_API_INSTANCE_ID:-}
       GREEN_API_TOKEN: ${GREEN_API_TOKEN:-}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:5000}
     depends_on:
       postgres:
         condition: service_healthy

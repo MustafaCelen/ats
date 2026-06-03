@@ -532,6 +532,66 @@ export const insertOfficeExpenseSchema = createInsertSchema(officeExpenses).omit
 export type InsertOfficeExpense = z.infer<typeof insertOfficeExpenseSchema>;
 export type OfficeExpense = typeof officeExpenses.$inferSelect;
 
+// ── Listings (Portal İlanları — KW Platin & Karma) ────────────────────────────
+
+export const LISTING_STATUSES = ["active", "passive"] as const;
+export type ListingStatus = (typeof LISTING_STATUSES)[number];
+
+// Reasons a listing left publication (advisor self-reports via public link)
+export const LISTING_CLOSE_REASONS = [
+  "Satıldı",
+  "Kiralandı",
+  "Sözleşme Süresi Doldu",
+  "Mal Sahibi İptal Etti",
+  "Fiyat Anlaşmazlığı",
+  "Başka Ofisten Satıldı",
+  "Diğer",
+] as const;
+export type ListingCloseReason = (typeof LISTING_CLOSE_REASONS)[number];
+
+export const listings = pgTable("listings", {
+  id: serial("id").primaryKey(),
+  listingNumber: text("listing_number").notNull().unique(),     // İlan Numarası
+  price: numeric("price", { precision: 15, scale: 2 }),         // Fiyat
+  publishedDate: text("published_date"),                        // Yayınlanma (raw)
+  removedDate: text("removed_date"),                            // Yayından Kaldırılma (raw)
+  durationDays: integer("duration_days"),                       // Süre (gün)
+  advisorName: text("advisor_name"),                            // Danışman (ham isim)
+  employeeId: integer("employee_id"),                           // eşleşen danışman
+  office: text("office"),                                       // Ofis
+  store: text("store"),                                         // Mağaza / portal
+  status: text("status").notNull().default("active"),           // active | passive
+
+  // Yetki sözleşmesi (advisor uploads via public link)
+  agreementRequestedAt: timestamp("agreement_requested_at"),
+  agreementUploadedAt: timestamp("agreement_uploaded_at"),
+  agreementFileName: text("agreement_file_name"),
+  agreementFileMime: text("agreement_file_mime"),
+  agreementFileData: text("agreement_file_data"),               // base64
+
+  // Yayından kalkış sebebi (advisor submits via public link)
+  closeReasonRequestedAt: timestamp("close_reason_requested_at"),
+  closeReason: text("close_reason"),
+  closeReasonNote: text("close_reason_note"),
+  closeReasonSubmittedAt: timestamp("close_reason_submitted_at"),
+
+  publicToken: text("public_token").notNull().unique(),         // danışman self-servis linki
+
+  notifiedNewAt: timestamp("notified_new_at"),                  // yeni ilan WA gönderildi
+  notifiedPassiveAt: timestamp("notified_passive_at"),          // kalkış WA gönderildi
+
+  firstSeenAt: timestamp("first_seen_at").defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (t) => ({
+  statusIdx: index("listings_status_idx").on(t.status),
+  employeeIdx: index("listings_employee_idx").on(t.employeeId),
+  tokenIdx: index("listings_token_idx").on(t.publicToken),
+}));
+
+export type Listing = typeof listings.$inferSelect;
+export type ListingWithEmployee = Listing & { employeeName?: string; employeePhone?: string };
+
 // Insert schemas
 export const insertJobSchema = createInsertSchema(jobs).omit({ id: true, createdAt: true });
 export const insertCandidateSchema = createInsertSchema(candidates).omit({ id: true, createdAt: true, createdByUserId: true });

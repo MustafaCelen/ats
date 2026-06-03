@@ -3,7 +3,7 @@ import {
   jobs, candidates, applications, stageHistory, interviews, offers, candidateNotes,
   users, jobAssignments, applicationDocuments, tasks, employees,
   capSettings, closings, closingSides, closingAgents, interviewTargets,
-  officeExpenses,
+  officeExpenses, listings,
   APPLICATION_STAGES,
   type Job, type InsertJob,
   type Candidate, type InsertCandidate,
@@ -19,9 +19,11 @@ import {
   type CapSetting, type Closing, type ClosingSide, type ClosingAgent,
   type CapStatus, type ClosingWithDetails, type InterviewTarget,
   type OfficeExpense, type InsertOfficeExpense,
+  type Listing, type ListingWithEmployee,
 } from "@shared/schema";
 import { eq, desc, asc, count, sql, gte, lte, lt, and, or, isNull, isNotNull, inArray, notInArray } from "drizzle-orm";
 import { differenceInDays } from "date-fns";
+import { randomBytes } from "crypto";
 
 export type ApplicationWithRelations = Application & { candidate?: Candidate; job?: Job };
 export type InterviewWithRelations = Interview & { candidate?: Candidate; job?: Job; application?: Application };
@@ -2953,6 +2955,264 @@ export class DatabaseStorage implements IStorage {
     for (const m of months) m.net = m.totalIncome - m.totalExpenses;
 
     return months;
+  }
+
+  // ── Listings (Portal İlanları) ─────────────────────────────────────────────
+
+  private normListingName(s: string): string {
+    return (s ?? "").normalize("NFC").toLocaleLowerCase("tr-TR").replace(/\s+/g, " ").trim();
+  }
+
+  /** Map of normalized candidate name → { employeeId, phone } for active employees. */
+  private async buildEmployeeNameMap(): Promise<Map<string, { id: number; phone: string | null }>> {
+    const rows = await db
+      .select({ id: employees.id, name: candidates.name, phone: candidates.phone })
+      .from(employees)
+      .leftJoin(candidates, eq(employees.candidateId, candidates.id));
+    const map = new Map<string, { id: number; phone: string | null }>();
+    for (const r of rows) {
+      if (!r.name) continue;
+      const key = this.normListingName(r.name);
+      if (!map.has(key)) map.set(key, { id: r.id, phone: r.phone ?? null });
+    }
+    return map;
+  }
+
+  async getListings(filters?: {
+    status?: string;
+    employeeId?: number;
+    needsAgreement?: boolean;
+    needsReason?: boolean;
+    onlyMatched?: boolean;
+    search?: string;
+  }): Promise<ListingWithEmployee[]> {
+    const conds = [];
+    if (filters?.status) conds.push(eq(listings.status, filters.status));
+    if (filters?.employeeId !== undefined) conds.push(eq(listings.employeeId, filters.employeeId));
+    if (filters?.onlyMatched) conds.push(isNotNull(listings.employeeId));
+    if (filters?.needsAgreement) conds.push(and(eq(listings.status, "active"), isNull(listings.agreementUploadedAt)));
+    if (filters?.needsReason) conds.push(and(eq(listings.status, "passive"), isNull(listings.closeReasonSubmittedAt)));
+    if (filters?.search) conds.push(or(
+      sql`${listings.listingNumber} ILIKE ${"%" + filters.search + "%"}`,
+      sql`${listings.advisorName} ILIKE ${"%" + filters.search + "%"}`,
+    ));
+
+    const rows = await db
+      .select({ l: listings, empName: candidates.name, empPhone: candidates.phone })
+      .from(listings)
+      .leftJoin(employees, eq(listings.employeeId, employees.id))
+      .leftJoin(candidates, eq(employees.candidateId, candidates.id))
+      .where(conds.length ? and(...conds) : undefined)
+      .orderBy(desc(listings.updatedAt))
+      .limit(2000);
+
+    return rows.map((r) => ({
+      ...r.l,
+      employeeName: r.empName ?? undefined,
+      employeePhone: r.empPhone ?? undefined,
+      agreementFileData: undefined as any, // never ship base64 blobs in list payloads
+    }));
+  }
+
+  async getListingsSummary(): Promise<{
+    totalActive: number; totalPassive: number;
+    matchedActive: number; needsAgreement: number; needsReason: number; soldPassive: number;
+  }> {
+    const [row] = await db.select({
+      totalActive:   sql<number>`count(*) filter (where ${listings.status} = 'active')`,
+      totalPassive:  sql<number>`count(*) filter (where ${listings.status} = 'passive')`,
+      matchedActive: sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.employeeId} is not null)`,
+      needsAgreement: sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.employeeId} is not null and ${listings.agreementUploadedAt} is null)`,
+      needsReason:   sql<number>`count(*) filter (where ${listings.status} = 'passive' and ${listings.employeeId} is not null and ${listings.closeReasonSubmittedAt} is null)`,
+      soldPassive:   sql<number>`count(*) filter (where ${listings.closeReason} in ('Satıldı','Kiralandı'))`,
+    }).from(listings);
+    return {
+      totalActive: Number(row?.totalActive ?? 0),
+      totalPassive: Number(row?.totalPassive ?? 0),
+      matchedActive: Number(row?.matchedActive ?? 0),
+      needsAgreement: Number(row?.needsAgreement ?? 0),
+      needsReason: Number(row?.needsReason ?? 0),
+      soldPassive: Number(row?.soldPassive ?? 0),
+    };
+  }
+
+  async getListing(id: number): Promise<Listing | null> {
+    const [row] = await db.select().from(listings).where(eq(listings.id, id));
+    return row ?? null;
+  }
+
+  async getListingByToken(token: string): Promise<ListingWithEmployee | null> {
+    const [row] = await db
+      .select({ l: listings, empName: candidates.name })
+      .from(listings)
+      .leftJoin(employees, eq(listings.employeeId, employees.id))
+      .leftJoin(candidates, eq(employees.candidateId, candidates.id))
+      .where(eq(listings.publicToken, token));
+    if (!row) return null;
+    return { ...row.l, employeeName: row.empName ?? undefined, agreementFileData: undefined as any };
+  }
+
+  async getListingAgreementFile(id: number): Promise<{ data: string; mime: string; name: string } | null> {
+    const [row] = await db
+      .select({ data: listings.agreementFileData, mime: listings.agreementFileMime, name: listings.agreementFileName })
+      .from(listings).where(eq(listings.id, id));
+    if (!row?.data) return null;
+    return { data: row.data, mime: row.mime ?? "application/octet-stream", name: row.name ?? "yetki-sozlesmesi" };
+  }
+
+  async updateListing(id: number, patch: Partial<Listing>): Promise<Listing> {
+    const [row] = await db.update(listings)
+      .set({ ...patch, updatedAt: new Date() } as any)
+      .where(eq(listings.id, id)).returning();
+    return row;
+  }
+
+  async setListingAgreement(token: string, file: { name: string; mime: string; data: string }): Promise<Listing | null> {
+    const [row] = await db.update(listings).set({
+      agreementFileName: file.name,
+      agreementFileMime: file.mime,
+      agreementFileData: file.data,
+      agreementUploadedAt: new Date(),
+      updatedAt: new Date(),
+    }).where(eq(listings.publicToken, token)).returning();
+    return row ?? null;
+  }
+
+  async setListingCloseReason(token: string, reason: string, note: string | null): Promise<Listing | null> {
+    const [row] = await db.update(listings).set({
+      closeReason: reason,
+      closeReasonNote: note,
+      closeReasonSubmittedAt: new Date(),
+      updatedAt: new Date(),
+    }).where(eq(listings.publicToken, token)).returning();
+    return row ?? null;
+  }
+
+  async markListingNotified(id: number, kind: "new" | "passive"): Promise<void> {
+    const now = new Date();
+    await db.update(listings).set(
+      kind === "new"
+        ? { notifiedNewAt: now, agreementRequestedAt: now, updatedAt: now }
+        : { notifiedPassiveAt: now, closeReasonRequestedAt: now, updatedAt: now }
+    ).where(eq(listings.id, id));
+  }
+
+  async clearListings(): Promise<void> {
+    await db.delete(listings);
+  }
+
+  /**
+   * Import a batch of listing rows from a portal report (active or passive sheet).
+   * Pure DB diff — returns listings that newly need an agreement (active) or a
+   * close reason (passive). The caller decides whether to send WhatsApp.
+   */
+  async importListings(
+    type: "active" | "passive",
+    rows: Array<{
+      listingNumber: string;
+      price?: string | null;
+      publishedDate?: string | null;
+      removedDate?: string | null;
+      durationDays?: number | null;
+      advisorName?: string | null;
+      office?: string | null;
+      store?: string | null;
+    }>,
+  ): Promise<{ created: number; updated: number; newActive: Listing[]; newlyPassive: Listing[] }> {
+    const nameMap = await this.buildEmployeeNameMap();
+    const numbers = Array.from(new Set(rows.map((r) => String(r.listingNumber).trim()).filter(Boolean)));
+    let created = 0, updated = 0;
+    const newActive: Listing[] = [];
+    const newlyPassive: Listing[] = [];
+    if (numbers.length === 0) return { created, updated, newActive, newlyPassive };
+
+    // Existing listings for these numbers
+    const existingRows = await db.select().from(listings).where(inArray(listings.listingNumber, numbers));
+    const existing = new Map(existingRows.map((r) => [r.listingNumber, r]));
+
+    // De-dupe input by listingNumber (keep last occurrence)
+    const byNumber = new Map<string, typeof rows[number]>();
+    for (const r of rows) {
+      const num = String(r.listingNumber).trim();
+      if (num) byNumber.set(num, r);
+    }
+
+    for (const [num, r] of byNumber) {
+      const advisor = (r.advisorName ?? "").trim();
+      const empId = advisor ? (nameMap.get(this.normListingName(advisor))?.id ?? null) : null;
+      const prev = existing.get(num);
+
+      if (type === "active") {
+        if (!prev) {
+          const [row] = await db.insert(listings).values({
+            listingNumber: num,
+            price: r.price ?? null,
+            publishedDate: r.publishedDate ?? null,
+            advisorName: advisor || null,
+            employeeId: empId,
+            office: r.office ?? null,
+            store: r.store ?? null,
+            status: "active",
+            publicToken: randomBytes(16).toString("hex"),
+          }).returning();
+          created++;
+          if (empId) newActive.push(row); // only our own advisors get pinged
+        } else {
+          await db.update(listings).set({
+            price: r.price ?? prev.price,
+            publishedDate: r.publishedDate ?? prev.publishedDate,
+            advisorName: advisor || prev.advisorName,
+            employeeId: empId ?? prev.employeeId,
+            office: r.office ?? prev.office,
+            store: r.store ?? prev.store,
+            status: "active",          // revived if it had gone passive
+            updatedAt: new Date(),
+          }).where(eq(listings.id, prev.id));
+          updated++;
+        }
+      } else {
+        // passive sheet
+        if (!prev) {
+          // Historical passive listing we never saw active → record silently
+          await db.insert(listings).values({
+            listingNumber: num,
+            price: r.price ?? null,
+            publishedDate: r.publishedDate ?? null,
+            removedDate: r.removedDate ?? null,
+            durationDays: r.durationDays ?? null,
+            advisorName: advisor || null,
+            employeeId: empId,
+            office: r.office ?? null,
+            store: r.store ?? null,
+            status: "passive",
+            publicToken: randomBytes(16).toString("hex"),
+          });
+          created++;
+        } else {
+          const wasActive = prev.status === "active";
+          await db.update(listings).set({
+            price: r.price ?? prev.price,
+            removedDate: r.removedDate ?? prev.removedDate,
+            durationDays: r.durationDays ?? prev.durationDays,
+            advisorName: advisor || prev.advisorName,
+            employeeId: empId ?? prev.employeeId,
+            office: r.office ?? prev.office,
+            store: r.store ?? prev.store,
+            status: "passive",
+            updatedAt: new Date(),
+          }).where(eq(listings.id, prev.id));
+          updated++;
+          // Newly removed from publication → ask for a reason (if it's our advisor & not already asked)
+          const targetEmp = empId ?? prev.employeeId;
+          if (wasActive && targetEmp && !prev.closeReasonSubmittedAt) {
+            const [fresh] = await db.select().from(listings).where(eq(listings.id, prev.id));
+            if (fresh) newlyPassive.push(fresh);
+          }
+        }
+      }
+    }
+
+    return { created, updated, newActive, newlyPassive };
   }
 }
 

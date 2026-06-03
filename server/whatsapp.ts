@@ -21,6 +21,11 @@ function toWhatsAppId(phone: string): string | null {
   return normalized + "@c.us";
 }
 
+/** Public base URL advisors use to open self-service links (agreement upload / close reason). */
+export function publicBaseUrl(): string {
+  return (process.env.PUBLIC_BASE_URL || "").replace(/\/+$/, "");
+}
+
 export async function sendWhatsApp(phone: string, message: string): Promise<void> {
   const instanceId = process.env.GREEN_API_INSTANCE_ID;
   const token = process.env.GREEN_API_TOKEN;
