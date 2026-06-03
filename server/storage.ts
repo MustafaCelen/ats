@@ -2959,23 +2959,94 @@ export class DatabaseStorage implements IStorage {
 
   // ── Listings (Portal İlanları) ─────────────────────────────────────────────
 
-  private normListingName(s: string): string {
-    return (s ?? "").normalize("NFC").toLocaleLowerCase("tr-TR").replace(/\s+/g, " ").trim();
+  /** Normalize a name for matching: deaccent Turkish chars, lowercase, strip dots, collapse spaces. */
+  private normForMatch(s: string): string {
+    return (s ?? "")
+      .normalize("NFC")
+      .replace(/[İIı]/g, "i").replace(/[Şş]/g, "s").replace(/[Ğğ]/g, "g")
+      .replace(/[Üü]/g, "u").replace(/[Öö]/g, "o").replace(/[Çç]/g, "c")
+      .toLowerCase()
+      .replace(/\./g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
   }
 
-  /** Map of normalized candidate name → { employeeId, phone } for active employees. */
-  private async buildEmployeeNameMap(): Promise<Map<string, { id: number; phone: string | null }>> {
+  private nameTokens(s: string): string[] {
+    return this.normForMatch(s).split(" ").filter(Boolean);
+  }
+
+  /**
+   * Build a fuzzy lookup index over employees so listing advisor names can be
+   * matched even with middle-name / abbreviated-surname differences.
+   */
+  private async buildEmployeeIndex(): Promise<{
+    exact: Map<string, number>;                                  // full deaccented name → id
+    firstLast: Map<string, Set<number>>;                        // "first|last" → ids
+    firstLastInitial: Map<string, Set<number>>;                 // "first|lastInitial" → ids
+    bySurname: Map<string, { id: number; tokens: Set<string> }[]>; // last token → candidates
+  }> {
     const rows = await db
-      .select({ id: employees.id, name: candidates.name, phone: candidates.phone })
+      .select({ id: employees.id, name: candidates.name })
       .from(employees)
       .leftJoin(candidates, eq(employees.candidateId, candidates.id));
-    const map = new Map<string, { id: number; phone: string | null }>();
+
+    const exact = new Map<string, number>();
+    const firstLast = new Map<string, Set<number>>();
+    const firstLastInitial = new Map<string, Set<number>>();
+    const bySurname = new Map<string, { id: number; tokens: Set<string> }[]>();
+    const add = (m: Map<string, Set<number>>, k: string, id: number) => {
+      if (!m.has(k)) m.set(k, new Set());
+      m.get(k)!.add(id);
+    };
+
     for (const r of rows) {
       if (!r.name) continue;
-      const key = this.normListingName(r.name);
-      if (!map.has(key)) map.set(key, { id: r.id, phone: r.phone ?? null });
+      const toks = this.nameTokens(r.name);
+      if (toks.length === 0) continue;
+      const full = toks.join(" ");
+      if (!exact.has(full)) exact.set(full, r.id);
+      const first = toks[0], last = toks[toks.length - 1];
+      if (toks.length >= 2) {
+        add(firstLast, `${first}|${last}`, r.id);
+        add(firstLastInitial, `${first}|${last[0]}`, r.id);
+      }
+      if (!bySurname.has(last)) bySurname.set(last, []);
+      bySurname.get(last)!.push({ id: r.id, tokens: new Set(toks) });
     }
-    return map;
+    return { exact, firstLast, firstLastInitial, bySurname };
+  }
+
+  /** Resolve a listing advisor name to a single employee id, or null if no confident unique match. */
+  private resolveEmployeeId(index: Awaited<ReturnType<DatabaseStorage["buildEmployeeIndex"]>>, advisorName: string): number | null {
+    const toks = this.nameTokens(advisorName);
+    if (toks.length === 0) return null;
+    const full = toks.join(" ");
+
+    // 1. Exact (deaccented) full-name match
+    const ex = index.exact.get(full);
+    if (ex !== undefined) return ex;
+
+    if (toks.length < 2) return null; // single token → too ambiguous
+    const first = toks[0], last = toks[toks.length - 1];
+    const uniq = (set?: Set<number>) => (set && set.size === 1 ? [...set][0] : null);
+
+    // 2. First + full surname (handles extra/missing middle names where surname matches)
+    const fl = uniq(index.firstLast.get(`${first}|${last}`));
+    if (fl !== null) return fl;
+
+    // 3. Abbreviated surname e.g. "Serpil K." → unique "Serpil K*"
+    if (last.length === 1) {
+      const fi = uniq(index.firstLastInitial.get(`${first}|${last}`));
+      if (fi !== null) return fi;
+    }
+
+    // 4. Token subset sharing surname, e.g. "Kaan Atakol" ⊆ "Ahmet Kaan Atakol"
+    const sameSurname = index.bySurname.get(last) ?? [];
+    const csvSet = toks.filter((t) => t.length > 1);
+    const subsetMatches = sameSurname.filter((e) => csvSet.every((t) => e.tokens.has(t)));
+    if (subsetMatches.length === 1) return subsetMatches[0].id;
+
+    return null;
   }
 
   async getListings(filters?: {
@@ -3119,7 +3190,7 @@ export class DatabaseStorage implements IStorage {
       store?: string | null;
     }>,
   ): Promise<{ created: number; updated: number; newActive: Listing[]; newlyPassive: Listing[] }> {
-    const nameMap = await this.buildEmployeeNameMap();
+    const empIndex = await this.buildEmployeeIndex();
     const numbers = Array.from(new Set(rows.map((r) => String(r.listingNumber).trim()).filter(Boolean)));
     let created = 0, updated = 0;
     const newActive: Listing[] = [];
@@ -3139,7 +3210,7 @@ export class DatabaseStorage implements IStorage {
 
     for (const [num, r] of byNumber) {
       const advisor = (r.advisorName ?? "").trim();
-      const empId = advisor ? (nameMap.get(this.normListingName(advisor))?.id ?? null) : null;
+      const empId = advisor ? this.resolveEmployeeId(empIndex, advisor) : null;
       const prev = existing.get(num);
 
       if (type === "active") {
