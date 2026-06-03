@@ -1,13 +1,14 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Layout } from "@/components/Layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import {
   Building2, Upload, Search, FileCheck2, FileWarning, HelpCircle,
-  CheckCircle2, Clock, Send, Trash2, ExternalLink,
+  CheckCircle2, Clock, Send, Trash2, ExternalLink, ChevronLeft, ChevronRight, Download,
 } from "lucide-react";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -27,6 +28,8 @@ interface Listing {
   status: "active" | "passive";
   agreementUploadedAt: string | null;
   agreementRequestedAt: string | null;
+  agreementFileMime?: string | null;
+  agreementFileName?: string | null;
   closeReason: string | null;
   closeReasonNote: string | null;
   closeReasonSubmittedAt: string | null;
@@ -149,6 +152,9 @@ export default function Listings() {
   const [search, setSearch] = useState("");
   const [notify, setNotify] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [viewer, setViewer] = useState<Listing | null>(null);
+  const [page, setPage] = useState(0);
+  const PAGE_SIZE = 50;
 
   const { data: summary } = useQuery<Summary>({
     queryKey: ["/api/listings/summary"],
@@ -169,6 +175,12 @@ export default function Listings() {
     queryKey: ["/api/listings", listQuery],
     queryFn: () => fetch(`/api/listings?${listQuery}`, { credentials: "include" }).then((r) => r.json()),
   });
+
+  // Reset to first page whenever the filter/search changes
+  useEffect(() => { setPage(0); }, [tab, search]);
+
+  const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const pageRows = rows.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ["/api/listings"] });
@@ -328,7 +340,7 @@ export default function Listings() {
                   <tr><td colSpan={8} className="px-3 py-10 text-center text-muted-foreground">Yükleniyor…</td></tr>
                 ) : rows.length === 0 ? (
                   <tr><td colSpan={8} className="px-3 py-10 text-center text-muted-foreground">Kayıt yok. Bir CSV içe aktarın.</td></tr>
-                ) : rows.map((l) => (
+                ) : pageRows.map((l) => (
                   <tr key={l.id} className="border-b border-border last:border-0 hover:bg-muted/30">
                     <td className="px-3 py-2.5 font-mono text-xs">{l.listingNumber}</td>
                     <td className="px-3 py-2.5">
@@ -346,14 +358,12 @@ export default function Listings() {
                     </td>
                     <td className="px-3 py-2.5">
                       {l.agreementUploadedAt ? (
-                        <a
-                          href={`/api/listings/${l.id}/agreement`}
-                          target="_blank"
-                          rel="noreferrer"
+                        <button
+                          onClick={() => setViewer(l)}
                           className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
                         >
-                          <FileCheck2 className="h-3 w-3" /> Yüklendi
-                        </a>
+                          <FileCheck2 className="h-3 w-3" /> Görüntüle
+                        </button>
                       ) : l.agreementRequestedAt ? (
                         <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
                           <Clock className="h-3 w-3" /> İstendi
@@ -406,8 +416,76 @@ export default function Listings() {
               </tbody>
             </table>
           </div>
+          {/* Pager */}
+          {rows.length > PAGE_SIZE && (
+            <div className="flex items-center justify-between px-3 py-2.5 border-t border-border text-xs text-muted-foreground">
+              <span>
+                {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, rows.length)} / {rows.length}
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  disabled={page === 0}
+                  onClick={() => setPage((p) => Math.max(0, p - 1))}
+                  className="p-1.5 rounded-md hover:bg-muted disabled:opacity-40"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                <span className="px-2">{page + 1} / {pageCount}</span>
+                <button
+                  disabled={page >= pageCount - 1}
+                  onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
+                  className="p-1.5 rounded-md hover:bg-muted disabled:opacity-40"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* Agreement viewer */}
+      <Dialog open={!!viewer} onOpenChange={(o) => !o && setViewer(null)}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <FileCheck2 className="h-4 w-4 text-emerald-600" />
+              Yetki Sözleşmesi — {viewer?.listingNumber}
+            </DialogTitle>
+          </DialogHeader>
+          {viewer && (
+            <div className="space-y-3">
+              <div className="rounded-lg border border-border bg-muted/30 overflow-hidden">
+                {(viewer.agreementFileMime ?? "").startsWith("image/") ? (
+                  <img
+                    src={`/api/listings/${viewer.id}/agreement`}
+                    alt="Yetki Sözleşmesi"
+                    className="max-h-[70vh] w-full object-contain bg-black/5"
+                  />
+                ) : (
+                  <iframe
+                    src={`/api/listings/${viewer.id}/agreement`}
+                    title="Yetki Sözleşmesi"
+                    className="w-full h-[70vh]"
+                  />
+                )}
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground truncate max-w-[60%]">
+                  {viewer.agreementFileName ?? "yetki-sozlesmesi"}
+                </span>
+                <a
+                  href={`/api/listings/${viewer.id}/agreement`}
+                  download={viewer.agreementFileName ?? "yetki-sozlesmesi"}
+                  className="inline-flex items-center gap-1.5 text-xs h-8 px-3 rounded-md border border-input bg-background hover:bg-muted font-medium"
+                >
+                  <Download className="h-3.5 w-3.5" /> İndir
+                </a>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </Layout>
   );
 }
