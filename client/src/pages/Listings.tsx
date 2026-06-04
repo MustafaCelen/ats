@@ -3,12 +3,15 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Layout } from "@/components/Layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import {
   Building2, Upload, Search, FileCheck2, FileWarning, HelpCircle,
-  CheckCircle2, Clock, Send, Trash2, ExternalLink, ChevronLeft, ChevronRight, Download,
+  CheckCircle2, Clock, Send, ExternalLink, ChevronLeft, ChevronRight, Download, Plus,
+  RefreshCw,
 } from "lucide-react";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -35,6 +38,10 @@ interface Listing {
   closeReasonNote: string | null;
   closeReasonSubmittedAt: string | null;
   publicToken: string;
+  notifiedNewAt: string | null;
+  notifiedPassiveAt: string | null;
+  notifyMsgIdNew: string | null;
+  notifyMsgIdPassive: string | null;
 }
 
 interface Summary {
@@ -146,6 +153,195 @@ function fmtPrice(p: string | null): string {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
+// ── WhatsApp notify status cell ───────────────────────────────────────────────
+
+const STATUS_LABEL: Record<string, { label: string; cls: string }> = {
+  pending:   { label: "Kuyrukta",  cls: "bg-yellow-100 text-yellow-700" },
+  sent:      { label: "Gönderildi", cls: "bg-blue-100 text-blue-700" },
+  delivered: { label: "İletildi",  cls: "bg-emerald-100 text-emerald-700" },
+  read:      { label: "Okundu",    cls: "bg-emerald-200 text-emerald-800" },
+  played:    { label: "Oynatıldı", cls: "bg-emerald-200 text-emerald-800" },
+  failed:    { label: "Başarısız", cls: "bg-red-100 text-red-700" },
+};
+
+function NotifyStatusCell({ listing, kind }: { listing: Listing; kind: "new" | "passive" }) {
+  const { toast } = useToast();
+  const notifiedAt  = kind === "new" ? listing.notifiedNewAt    : listing.notifiedPassiveAt;
+  const msgId       = kind === "new" ? listing.notifyMsgIdNew   : listing.notifyMsgIdPassive;
+  const [status, setStatus] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
+
+  if (!notifiedAt) return <span className="text-[11px] text-muted-foreground">—</span>;
+
+  const checkStatus = async () => {
+    setChecking(true);
+    try {
+      const res = await fetch(`/api/listings/${listing.id}/notify-status?kind=${kind}`, { credentials: "include" });
+      const data = await res.json();
+      setStatus(data.status ?? "unknown");
+      if (data.note) toast({ title: data.note });
+    } catch {
+      toast({ title: "Durum sorgulanamadı", variant: "destructive" });
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const meta = status ? (STATUS_LABEL[status] ?? { label: status, cls: "bg-muted text-muted-foreground" }) : null;
+
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap">
+      {meta ? (
+        <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${meta.cls}`}>{meta.label}</span>
+      ) : (
+        <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+          {msgId ? "Gönderildi" : "WA Gönderildi"}
+        </span>
+      )}
+      {msgId && (
+        <button
+          onClick={checkStatus}
+          disabled={checking}
+          title="Teslimat durumunu sorgula"
+          className="p-0.5 rounded text-muted-foreground hover:text-foreground disabled:opacity-40"
+        >
+          <RefreshCw className={`h-3 w-3 ${checking ? "animate-spin" : ""}`} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ── Manual add dialog ─────────────────────────────────────────────────────────
+
+function AddListingDialog({ open, onOpenChange, onSaved }: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  onSaved: () => void;
+}) {
+  const { toast } = useToast();
+  const [saving, setSaving] = useState(false);
+  const [listingNumber, setListingNumber] = useState("");
+  const [price, setPrice] = useState("");
+  const [publishedDate, setPublishedDate] = useState("");
+  const [employeeId, setEmployeeId] = useState("");
+  const [office, setOffice] = useState("");
+  const [status, setStatus] = useState<"active" | "passive">("active");
+
+  const { data: emps = [] } = useQuery<any[]>({
+    queryKey: ["/api/employees"],
+    queryFn: () => fetch("/api/employees", { credentials: "include" }).then(r => r.json()),
+    enabled: open,
+  });
+
+  const reset = () => {
+    setListingNumber(""); setPrice(""); setPublishedDate("");
+    setEmployeeId(""); setOffice(""); setStatus("active");
+  };
+
+  const handleSave = async () => {
+    if (!listingNumber.trim()) {
+      toast({ title: "İlan numarası zorunludur", variant: "destructive" });
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch("/api/listings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          listingNumber: listingNumber.trim(),
+          price: price || null,
+          publishedDate: publishedDate || null,
+          employeeId: employeeId ? Number(employeeId) : null,
+          office: office || null,
+          status,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) { toast({ title: "Hata", description: data.message, variant: "destructive" }); return; }
+      toast({ title: "İlan eklendi" });
+      reset();
+      onOpenChange(false);
+      onSaved();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) reset(); onOpenChange(v); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <Plus className="h-4 w-4 text-primary" /> Manuel İlan Ekle
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3 pt-1">
+          <div className="space-y-1">
+            <Label className="text-xs">İlan Numarası *</Label>
+            <Input value={listingNumber} onChange={e => setListingNumber(e.target.value)} placeholder="örn. 1234567" className="h-8 text-sm" />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Danışman</Label>
+            <Select value={employeeId} onValueChange={setEmployeeId}>
+              <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Danışman seçin…" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">— Seçilmedi —</SelectItem>
+                {emps.filter((e: any) => e.status === "active").map((e: any) => (
+                  <SelectItem key={e.id} value={String(e.id)}>{e.candidate?.name ?? `#${e.id}`}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label className="text-xs">Fiyat (₺)</Label>
+              <Input value={price} onChange={e => setPrice(e.target.value)} placeholder="5000000" className="h-8 text-sm" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Yayın Tarihi</Label>
+              <Input type="date" value={publishedDate} onChange={e => setPublishedDate(e.target.value)} className="h-8 text-sm" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label className="text-xs">Ofis</Label>
+              <Select value={office} onValueChange={setOffice}>
+                <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Seçin…" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">— Seçilmedi —</SelectItem>
+                  <SelectItem value="Akatlar">Akatlar</SelectItem>
+                  <SelectItem value="Zekeriyaköy">Zekeriyaköy</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Durum</Label>
+              <Select value={status} onValueChange={(v) => setStatus(v as any)}>
+                <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="active">Aktif</SelectItem>
+                  <SelectItem value="passive">Pasif</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="flex gap-2 pt-1">
+            <Button variant="outline" size="sm" className="flex-1" onClick={() => { reset(); onOpenChange(false); }}>İptal</Button>
+            <Button size="sm" className="flex-1" onClick={handleSave} disabled={saving}>
+              {saving ? "Kaydediliyor…" : "Kaydet"}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── Page ──────────────────────────────────────────────────────────────────────
+
 export default function Listings() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -154,6 +350,7 @@ export default function Listings() {
   const [notify, setNotify] = useState(false);
   const [importing, setImporting] = useState(false);
   const [viewer, setViewer] = useState<Listing | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
   const [page, setPage] = useState(0);
   const PAGE_SIZE = 50;
 
@@ -221,26 +418,22 @@ export default function Listings() {
     }
   };
 
+  const [sendingIds, setSendingIds] = useState<Set<number>>(new Set());
+
   const sendNotify = async (id: number) => {
+    if (sendingIds.has(id)) return;
+    setSendingIds(prev => new Set(prev).add(id));
     try {
       await apiRequest("POST", `/api/listings/${id}/notify`, {});
       toast({ title: "Bildirim gönderildi" });
       refresh();
     } catch (err: any) {
       toast({ title: "Gönderilemedi", description: err?.message, variant: "destructive" });
+    } finally {
+      setSendingIds(prev => { const s = new Set(prev); s.delete(id); return s; });
     }
   };
 
-  const clearAll = async () => {
-    if (!confirm("Tüm ilan kayıtları silinecek. Emin misiniz?")) return;
-    try {
-      await apiRequest("DELETE", "/api/listings");
-      toast({ title: "Tüm ilanlar silindi" });
-      refresh();
-    } catch {
-      toast({ title: "Silinemedi", variant: "destructive" });
-    }
-  };
 
   const tabs: { key: FilterTab; label: string; count?: number }[] = [
     { key: "needsAgreement", label: "Yetki Sözleşmesi Bekleyen", count: summary?.needsAgreement },
@@ -264,6 +457,9 @@ export default function Listings() {
             </p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
+            <Button size="sm" className="h-8 text-xs gap-1.5" onClick={() => setAddOpen(true)}>
+              <Plus className="h-3.5 w-3.5" /> Manuel Ekle
+            </Button>
             <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground mr-1 select-none cursor-pointer">
               <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} className="accent-primary" />
               Danışmanlara WhatsApp gönder
@@ -280,9 +476,6 @@ export default function Listings() {
                 <Upload className="h-3.5 w-3.5" /> Pasif İlanlar
               </span>
             </label>
-            <Button variant="ghost" size="sm" className="text-xs h-8 text-destructive hover:text-destructive" onClick={clearAll}>
-              <Trash2 className="h-3.5 w-3.5 mr-1" /> Sıfırla
-            </Button>
           </div>
         </div>
 
@@ -334,6 +527,7 @@ export default function Listings() {
                   <th className="px-3 py-2.5 font-medium">Durum</th>
                   <th className="px-3 py-2.5 font-medium">Yetki Sözleşmesi</th>
                   <th className="px-3 py-2.5 font-medium">Kalkış Sebebi</th>
+                  <th className="px-3 py-2.5 font-medium">WA Bildirim</th>
                   <th className="px-3 py-2.5 font-medium text-right">İşlem</th>
                 </tr>
               </thead>
@@ -399,6 +593,9 @@ export default function Listings() {
                       )}
                     </td>
                     <td className="px-3 py-2.5">
+                      <NotifyStatusCell listing={l} kind={l.status === "active" ? "new" : "passive"} />
+                    </td>
+                    <td className="px-3 py-2.5">
                       <div className="flex items-center justify-end gap-1">
                         <a
                           href={`/l/${l.publicToken}`}
@@ -412,10 +609,14 @@ export default function Listings() {
                         {l.employeeId && (
                           <button
                             onClick={() => sendNotify(l.id)}
+                            disabled={sendingIds.has(l.id)}
                             title="WhatsApp bildirimi gönder"
-                            className="p-1.5 rounded-md text-muted-foreground hover:bg-muted hover:text-primary"
+                            className="p-1.5 rounded-md text-muted-foreground hover:bg-muted hover:text-primary disabled:opacity-40"
                           >
-                            <Send className="h-3.5 w-3.5" />
+                            {sendingIds.has(l.id)
+                              ? <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                              : <Send className="h-3.5 w-3.5" />
+                            }
                           </button>
                         )}
                       </div>
@@ -452,6 +653,8 @@ export default function Listings() {
           )}
         </div>
       </div>
+
+      <AddListingDialog open={addOpen} onOpenChange={setAddOpen} onSaved={refresh} />
 
       {/* Agreement viewer */}
       <Dialog open={!!viewer} onOpenChange={(o) => !o && setViewer(null)}>

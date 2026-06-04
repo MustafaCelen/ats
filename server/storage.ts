@@ -3107,6 +3107,34 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
+  async createListing(data: {
+    listingNumber: string;
+    price?: string | null;
+    publishedDate?: string | null;
+    durationDays?: number | null;
+    advisorName?: string | null;
+    employeeId?: number | null;
+    office?: string | null;
+    store?: string | null;
+    status?: string;
+  }): Promise<Listing> {
+    const { randomUUID } = await import("crypto");
+    const token = randomUUID().replace(/-/g, "").slice(0, 16);
+    const [row] = await db.insert(listings).values({
+      listingNumber: data.listingNumber,
+      price: data.price ?? null,
+      publishedDate: data.publishedDate ?? null,
+      durationDays: data.durationDays ?? null,
+      advisorName: data.advisorName ?? null,
+      employeeId: data.employeeId ?? null,
+      office: data.office ?? null,
+      store: data.store ?? null,
+      status: (data.status ?? "active") as any,
+      publicToken: token,
+    }).returning();
+    return row;
+  }
+
   async getListing(id: number): Promise<Listing | null> {
     const [row] = await db.select().from(listings).where(eq(listings.id, id));
     return row ?? null;
@@ -3159,12 +3187,12 @@ export class DatabaseStorage implements IStorage {
     return row ?? null;
   }
 
-  async markListingNotified(id: number, kind: "new" | "passive"): Promise<void> {
+  async markListingNotified(id: number, kind: "new" | "passive", msgId?: string | null): Promise<void> {
     const now = new Date();
     await db.update(listings).set(
       kind === "new"
-        ? { notifiedNewAt: now, agreementRequestedAt: now, updatedAt: now }
-        : { notifiedPassiveAt: now, closeReasonRequestedAt: now, updatedAt: now }
+        ? { notifiedNewAt: now, agreementRequestedAt: now, updatedAt: now, ...(msgId ? { notifyMsgIdNew: msgId } : {}) }
+        : { notifiedPassiveAt: now, closeReasonRequestedAt: now, updatedAt: now, ...(msgId ? { notifyMsgIdPassive: msgId } : {}) }
     ).where(eq(listings.id, id));
   }
 

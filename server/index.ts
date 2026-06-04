@@ -95,6 +95,9 @@ app.use((req, res, next) => {
     );
     CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON "user_sessions" ("expire");
 
+    ALTER TABLE "listings" ADD COLUMN IF NOT EXISTS "notify_msg_id_new" text;
+    ALTER TABLE "listings" ADD COLUMN IF NOT EXISTS "notify_msg_id_passive" text;
+
     CREATE TABLE IF NOT EXISTS "office_expenses" (
       "id" serial PRIMARY KEY NOT NULL,
       "type" text NOT NULL,

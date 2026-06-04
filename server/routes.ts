@@ -7,7 +7,7 @@ import { api } from "@shared/routes";
 import { z } from "zod";
 import { insertInterviewSchema, insertOfferSchema, type InsertTask, TASK_STATUSES } from "@shared/schema";
 import { getAuthUrl, createOAuth2Client, createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from "./google";
-import { sendWhatsApp, publicBaseUrl } from "./whatsapp";
+import { sendWhatsApp, checkWhatsAppStatus, publicBaseUrl } from "./whatsapp";
 
 // Scoping helper:
 //   admin      → undefined (all jobs)
@@ -54,6 +54,29 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // ── Listings (Portal İlanları) ──────────────────────────────────────────────
 
+  app.post("/api/listings", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const { listingNumber, price, publishedDate, durationDays, advisorName, employeeId, office, store, status } = req.body;
+      if (!listingNumber?.trim()) return res.status(400).json({ message: "İlan numarası zorunludur" });
+      const listing = await storage.createListing({
+        listingNumber: listingNumber.trim(),
+        price: price ? String(price).replace(/[^0-9.]/g, "") || null : null,
+        publishedDate: publishedDate || null,
+        durationDays: durationDays ? Number(durationDays) : null,
+        advisorName: advisorName || null,
+        employeeId: employeeId ? Number(employeeId) : null,
+        office: office || null,
+        store: store || null,
+        status: status ?? "active",
+      });
+      res.status(201).json(listing);
+    } catch (err: any) {
+      if (err?.code === "23505") return res.status(409).json({ message: "Bu ilan numarası zaten mevcut" });
+      console.error("[POST /api/listings]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   app.get("/api/listings/summary", requireAuth, requireAdmin, async (_req, res) => {
     try { res.json(await storage.getListingsSummary()); }
     catch { res.status(500).json({ message: "Internal server error" }); }
@@ -93,7 +116,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (notify) (async () => {
         const base = publicBaseUrl();
         const targets = type === "active" ? result.newActive : result.newlyPassive;
-        for (const l of targets) {
+        const kind = type === "active" ? "new" : "passive";
+        for (let i = 0; i < targets.length; i++) {
+          const l = targets[i];
           try {
             if (!l.employeeId) continue;
             const emp = await storage.getEmployee(l.employeeId);
@@ -109,13 +134,40 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
               : [`Merhaba ${name} 👋`, "", `${l.listingNumber} numaralı ilanınız yayından kaldırılmış görünüyor.`, "",
                  `Lütfen yayından kalkış sebebini girin:`, link, "",
                  `İlan satıldıysa kapanış işlemleri için sizinle iletişime geçeceğiz.`].join("\n");
-            await sendWhatsApp(phone, msg);
-            await storage.markListingNotified(l.id, type === "active" ? "new" : "passive");
+            const msgId = await sendWhatsApp(phone, msg);
+            await storage.markListingNotified(l.id, kind, msgId);
+            console.log(`[listings notify] ${l.listingNumber} → ${phone} msgId=${msgId ?? "n/a"}`);
           } catch (e) { console.warn("[listings notify]", e); }
+          // 60-second gap between sends to avoid Green API rate-limit bans
+          if (i < targets.length - 1) await new Promise(r => setTimeout(r, 60_000));
         }
       })();
     } catch (err) {
       console.error("[POST /api/listings/import]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Check Green API delivery status for a sent notification
+  app.get("/api/listings/:id/notify-status", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const kind = (req.query.kind as string) === "passive" ? "passive" : "new";
+      const listing = await storage.getListing(id);
+      if (!listing) return res.status(404).json({ message: "Not found" });
+
+      const msgId = kind === "new" ? (listing as any).notifyMsgIdNew : (listing as any).notifyMsgIdPassive;
+      if (!msgId) return res.json({ status: null, msgId: null, note: "Mesaj ID kaydedilmemiş" });
+
+      if (!listing.employeeId) return res.json({ status: null, msgId, note: "Danışman eşleşmesi yok" });
+      const emp = await storage.getEmployee(listing.employeeId);
+      const phone = emp?.candidate?.phone;
+      if (!phone) return res.json({ status: null, msgId, note: "Telefon numarası yok" });
+
+      const status = await checkWhatsAppStatus(phone, msgId);
+      res.json({ status, msgId });
+    } catch (err) {
+      console.error("[GET /api/listings/:id/notify-status]", err);
       res.status(500).json({ message: "Internal server error" });
     }
   });
@@ -136,17 +188,26 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const l = await storage.getListing(Number(req.params.id));
       if (!l) return res.status(404).json({ message: "İlan bulunamadı" });
       if (!l.employeeId) return res.status(400).json({ message: "İlan bir danışmanla eşleşmemiş" });
+
+      // Cooldown: aynı ilana 5 dakika içinde tekrar gönderilemez
+      const COOLDOWN_MS = 5 * 60 * 1000;
+      const kind: "new" | "passive" = l.status === "active" ? "new" : "passive";
+      const lastSent = kind === "new" ? (l as any).notifiedNewAt : (l as any).notifiedPassiveAt;
+      if (lastSent && Date.now() - new Date(lastSent).getTime() < COOLDOWN_MS) {
+        const remaining = Math.ceil((COOLDOWN_MS - (Date.now() - new Date(lastSent).getTime())) / 1000);
+        return res.status(429).json({ message: `Son bildirimden ${remaining} saniye sonra tekrar gönderilebilir` });
+      }
+
       const emp = await storage.getEmployee(l.employeeId);
       const phone = emp?.candidate?.phone;
       if (!phone) return res.status(400).json({ message: "Danışmanın telefonu kayıtlı değil" });
       const name = emp?.candidate?.name ?? "Danışman";
       const link = `${publicBaseUrl()}/l/${l.publicToken}`;
-      const kind: "new" | "passive" = l.status === "active" ? "new" : "passive";
       const msg = kind === "new"
         ? [`Merhaba ${name} 👋`, "", `${l.listingNumber} numaralı ilanınız için *yetki sözleşmesi* bekleniyor:`, link].join("\n")
         : [`Merhaba ${name} 👋`, "", `${l.listingNumber} numaralı ilanınız yayından kalkmış. Lütfen sebebini girin:`, link].join("\n");
-      await sendWhatsApp(phone, msg);
-      await storage.markListingNotified(l.id, kind);
+      const msgId = await sendWhatsApp(phone, msg);
+      await storage.markListingNotified(l.id, kind, msgId);
       res.json({ ok: true });
     } catch { res.status(500).json({ message: "Internal server error" }); }
   });
