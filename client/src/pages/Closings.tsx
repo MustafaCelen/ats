@@ -1651,27 +1651,46 @@ export default function Closings() {
     }
   };
 
-  const handleConfirm = async (closingId: number) => {
-    const date = window.prompt("Kapanış tarihini girin (YYYY-MM-DD):", new Date().toISOString().split("T")[0]);
+  // Accepts YYYY-MM-DD, DD.MM.YYYY, DD/MM/YYYY (and single-digit day/month). Returns Date or null.
+  const parseUserDate = (input: string): Date | null => {
+    const s = input.trim();
+    let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (m) { const d = new Date(+m[1], +m[2] - 1, +m[3]); return isNaN(d.getTime()) ? null : d; }
+    m = s.match(/^(\d{1,2})[.\/](\d{1,2})[.\/](\d{4})$/);
+    if (m) { const d = new Date(+m[3], +m[2] - 1, +m[1]); return isNaN(d.getTime()) ? null : d; }
+    const d = new Date(s);
+    return isNaN(d.getTime()) ? null : d;
+  };
+
+  const handleConfirm = async (closingId: number, currentDate?: string | null) => {
+    const def = currentDate && currentDate.length >= 10
+      ? currentDate.slice(0, 10)
+      : new Date().toISOString().split("T")[0];
+    const date = window.prompt("Kapanış tarihini girin (GG.AA.YYYY veya YYYY-AA-GG):", def);
     if (!date) return;
-    const parsed = new Date(date);
-    if (isNaN(parsed.getTime())) {
-      toast({ title: "Hata", description: "Geçersiz tarih formatı.", variant: "destructive" });
+    const parsed = parseUserDate(date);
+    if (!parsed) {
+      toast({ title: "Hata", description: "Geçersiz tarih. Örnek: 07.06.2026", variant: "destructive" });
       return;
     }
     try {
-      await fetch(`/api/closings/${closingId}`, {
+      const res = await fetch(`/api/closings/${closingId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({ closingDate: parsed.toISOString(), status: "completed" }),
       });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        toast({ title: "Onaylanamadı", description: err.message || `Sunucu hatası (${res.status})`, variant: "destructive" });
+        return;
+      }
       queryClient.invalidateQueries({ queryKey: ["/api/closings"] });
       queryClient.invalidateQueries({ queryKey: ["/api/employees/cap-statuses"] });
       setStatusFilter("all");
       toast({ title: "Onaylandı", description: "Kapanış tamamlandı olarak işaretlendi." });
     } catch {
-      toast({ title: "Hata", description: "Güncelleme başarısız.", variant: "destructive" });
+      toast({ title: "Hata", description: "Güncelleme başarısız (ağ hatası).", variant: "destructive" });
     }
   };
 
@@ -1936,8 +1955,8 @@ export default function Closings() {
               <table className="w-full text-xs border-collapse min-w-[2800px]">
                 <thead>
                   <tr className="border-b border-border bg-muted/40">
-                    {["Danışman","İşlem","İşlem Tipi","Taraf","İşlem Tarihi","İşlem Değeri","BHB","KWTR","KWTR (+KDV)","PlatinKarma","PlatinKarma (KDV)","Danışman Net","Kasa","Nakit","Banka","BHB Oranı","İl","İlçe","Semt/Mahalle","Adres","Mülkle İlgili Detay","Açılış Rakamı","İndirim Oranı","Pay%","Süre/Gün","Söz. Başlangıç","Söz. Bitiş","Müşteri Kaynağı","Yönlendirme",""].map((h) => (
-                      <th key={h} className="text-left font-medium py-2 px-2 text-muted-foreground whitespace-nowrap text-[11px]">{h}</th>
+                    {["Onay","Danışman","İşlem","İşlem Tipi","Taraf","İşlem Tarihi","İşlem Değeri","BHB","KWTR","KWTR (+KDV)","PlatinKarma","PlatinKarma (KDV)","Danışman Net","Kasa","Nakit","Banka","BHB Oranı","İl","İlçe","Semt/Mahalle","Adres","Mülkle İlgili Detay","Açılış Rakamı","İndirim Oranı","Pay%","Süre/Gün","Söz. Başlangıç","Söz. Bitiş","Müşteri Kaynağı","Yönlendirme",""].map((h, i) => (
+                      <th key={`${h}-${i}`} className="text-left font-medium py-2 px-2 text-muted-foreground whitespace-nowrap text-[11px]">{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -1948,6 +1967,17 @@ export default function Closings() {
                     const isCapped = parseFloat(row.marketCenterDue) > parseFloat(row.marketCenterActual);
                     return (
                       <tr key={row.agentId} className={`border-b border-border/50 hover:bg-muted/30 ${row.isFirstOfClosing ? "border-t-2 border-t-border" : ""}`}>
+                        <td className="px-2 py-1 whitespace-nowrap">
+                          {row.isFirstOfClosing && row.status === "expected" && (
+                            <button
+                              onClick={() => handleConfirm(row.closingId, row.closingDate)}
+                              className="inline-flex items-center gap-1 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1 text-[11px] font-semibold transition-colors"
+                              title="Kapanışı onayla"
+                            >
+                              <CheckCircle2 className="h-3 w-3" /> Onayla
+                            </button>
+                          )}
+                        </td>
                         <td className="px-2 py-1 whitespace-nowrap font-medium text-xs">
                           <div className="flex items-center gap-1">
                             {row.employeeName}
@@ -2000,15 +2030,6 @@ export default function Closings() {
                         <td className="px-2 py-1 text-center">
                           {row.isFirstOfClosing && (
                             <div className="flex items-center gap-0.5">
-                              {row.status === "expected" && (
-                                <button
-                                  onClick={() => handleConfirm(row.closingId)}
-                                  className="text-amber-600 hover:text-amber-800 transition-colors p-1 rounded text-[10px] font-medium whitespace-nowrap"
-                                  title="Kapanışı onayla"
-                                >
-                                  Onayla
-                                </button>
-                              )}
                               <button onClick={() => handleEdit(row.closingId)} className="text-muted-foreground hover:text-primary transition-colors p-1 rounded" title="Kapanışı düzenle">
                                 <Pencil className="h-3.5 w-3.5" />
                               </button>
