@@ -20,7 +20,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Handshake, Plus, Trash2, TrendingUp, DollarSign, Users,
   AlertCircle, CheckCircle2, Settings, Pencil,
-  Download, Upload,
+  Download, Upload, MessageCircle,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { DEAL_TYPES, DEAL_CATEGORIES, type DealCategory, type CapStatus, type ClosingWithDetails } from "@shared/schema";
@@ -56,6 +56,11 @@ interface AgentBreakdown {
 }
 
 // ── Inline editable cell components ──────────────────────────────────────────
+const MONTHS_TR = [
+  "Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran",
+  "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık",
+];
+
 // Read-only display cells. List editing is disabled — use the edit dialog (Pencil) instead.
 function InlineCell({ value, className = "" }: {
   value: string; onSave?: (v: string) => void; type?: string; className?: string;
@@ -1417,6 +1422,7 @@ export default function Closings() {
   const [currentPage, setCurrentPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<"all" | "completed" | "expected">("all");
   const [yearFilter, setYearFilter] = useState("all");
+  const [monthFilter, setMonthFilter] = useState("all");
   const PAGE_SIZE = 50;
 
   const handleDialogClose = () => {
@@ -1446,15 +1452,18 @@ export default function Closings() {
     return Array.from(years).sort((a, b) => b.localeCompare(a));
   }, [closings]);
 
-  // Year-filtered closings for stats and table
+  // Year + month filtered closings for stats and table
   const yearFilteredClosings = useMemo(() =>
-    yearFilter === "all" ? closings : closings.filter((c: any) => {
+    (yearFilter === "all" && monthFilter === "all") ? closings : closings.filter((c: any) => {
       const d = (c as any).status === "expected"
         ? ((c as any).closingDate ?? (c as any).createdAt)
         : (c as any).closingDate;
       if (!d) return false;
-      return new Date(d).getFullYear().toString() === yearFilter;
-    }), [closings, yearFilter]);
+      const ds = String(d);
+      const matchYear = yearFilter === "all" || ds.slice(0, 4) === yearFilter;
+      const matchMonth = monthFilter === "all" || ds.slice(5, 7) === monthFilter;
+      return matchYear && matchMonth;
+    }), [closings, yearFilter, monthFilter]);
 
   // Summary stats
   const completedClosings = yearFilteredClosings.filter((c) => (c as any).status !== "expected");
@@ -1559,9 +1568,11 @@ export default function Closings() {
   // Filter by status + year + search query
   const filteredRows = useMemo(() => {
     let rows = statusFilter === "all" ? flatRows : flatRows.filter(r => r.status === statusFilter);
-    if (yearFilter !== "all") rows = rows.filter(r => {
-      const d = r.status === "expected" ? (r.closingDate || r.createdAt) : r.closingDate;
-      return d.startsWith(yearFilter);
+    if (yearFilter !== "all" || monthFilter !== "all") rows = rows.filter(r => {
+      const d = String(r.status === "expected" ? (r.closingDate || r.createdAt) : r.closingDate);
+      const matchYear = yearFilter === "all" || d.slice(0, 4) === yearFilter;
+      const matchMonth = monthFilter === "all" || d.slice(5, 7) === monthFilter;
+      return matchYear && matchMonth;
     });
     const q = search.trim().toLowerCase();
     if (!q) return rows;
@@ -1578,10 +1589,10 @@ export default function Closings() {
       ) matchingIds.add(row.closingId);
     }
     return rows.filter((r) => matchingIds.has(r.closingId));
-  }, [flatRows, search, statusFilter]);
+  }, [flatRows, search, statusFilter, yearFilter, monthFilter]);
 
   // Reset to page 1 when filters change
-  useEffect(() => { setCurrentPage(1); }, [search, statusFilter, yearFilter]);
+  useEffect(() => { setCurrentPage(1); }, [search, statusFilter, yearFilter, monthFilter]);
 
   // Paginate by closing (keep agent rows of the same closing together)
   const { pagedRows, totalClosingsFiltered, totalPages } = useMemo(() => {
@@ -1678,6 +1689,25 @@ export default function Closings() {
       toast({ title: "Onaylandı", description: "Kapanış tamamlandı olarak işaretlendi." });
     } catch {
       toast({ title: "Hata", description: "Güncelleme başarısız (ağ hatası).", variant: "destructive" });
+    }
+  };
+
+  const handleNotify = async (closingId: number) => {
+    if (!window.confirm("Bu kapanışın danışman(lar)ına WhatsApp bildirimi gönderilsin mi?")) return;
+    try {
+      const res = await fetch(`/api/closings/${closingId}/notify`, { method: "POST", credentials: "include" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast({ title: "Gönderilemedi", description: data.message || `Sunucu hatası (${res.status})`, variant: "destructive" });
+        return;
+      }
+      if (data.sent > 0) {
+        toast({ title: "Gönderildi", description: `${data.sent} danışmana WhatsApp gönderildi${data.skipped ? `, ${data.skipped} atlandı (telefon/erişim yok)` : ""}.` });
+      } else {
+        toast({ title: "Gönderilemedi", description: "Telefonu kayıtlı danışman bulunamadı veya WhatsApp yapılandırılmamış.", variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "Hata", description: "Bildirim gönderilemedi (ağ hatası).", variant: "destructive" });
     }
   };
 
@@ -1893,6 +1923,16 @@ export default function Closings() {
               </button>
             ))}
           </div>
+          <select
+            value={monthFilter}
+            onChange={(e) => { setMonthFilter(e.target.value); setCurrentPage(1); }}
+            className="h-8 text-xs rounded-md border bg-muted/30 px-2 font-medium"
+          >
+            <option value="all">Tüm Aylar</option>
+            {MONTHS_TR.map((m, i) => (
+              <option key={m} value={String(i + 1).padStart(2, "0")}>{m}</option>
+            ))}
+          </select>
           <div className="flex items-center gap-1 border rounded-md p-0.5 bg-muted/30">
             {(["all", "completed", "expected"] as const).map((f) => (
               <button
@@ -2017,6 +2057,9 @@ export default function Closings() {
                         <td className="px-2 py-1 text-center">
                           {row.isFirstOfClosing && (
                             <div className="flex items-center gap-0.5">
+                              <button onClick={() => handleNotify(row.closingId)} className="text-muted-foreground hover:text-emerald-600 transition-colors p-1 rounded" title="WhatsApp bildirimi gönder">
+                                <MessageCircle className="h-3.5 w-3.5" />
+                              </button>
                               <button onClick={() => handleEdit(row.closingId)} className="text-muted-foreground hover:text-primary transition-colors p-1 rounded" title="Kapanışı düzenle">
                                 <Pencil className="h-3.5 w-3.5" />
                               </button>
