@@ -56,37 +56,24 @@ interface AgentBreakdown {
 }
 
 // ── Inline editable cell components ──────────────────────────────────────────
-function InlineCell({ value, onSave, type = "text", className = "" }: {
-  value: string; onSave: (v: string) => void; type?: string; className?: string;
+// Read-only display cells. List editing is disabled — use the edit dialog (Pencil) instead.
+function InlineCell({ value, className = "" }: {
+  value: string; onSave?: (v: string) => void; type?: string; className?: string;
 }) {
-  const [local, setLocal] = useState(value);
-  useEffect(() => { setLocal(value); }, [value]);
   return (
-    <input
-      type={type}
-      value={local}
-      onChange={(e) => setLocal(e.target.value)}
-      onBlur={() => { if (local !== value) onSave(local); }}
-      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-      className={`bg-transparent border-0 outline-none w-full min-w-[60px] px-1 py-0 text-xs hover:bg-muted/60 focus:bg-white dark:focus:bg-muted focus:ring-1 focus:ring-primary/50 focus:rounded ${className}`}
-    />
+    <span className={`block w-full min-w-[60px] px-1 py-0 text-xs whitespace-nowrap ${className}`}>
+      {value !== "" && value != null ? value : <span className="text-muted-foreground">—</span>}
+    </span>
   );
 }
 
-function InlineSelect({ value, options, onSave, className = "" }: {
-  value: string; options: readonly string[]; onSave: (v: string) => void; className?: string;
+function InlineSelect({ value, className = "" }: {
+  value: string; options?: readonly string[]; onSave?: (v: string) => void; className?: string;
 }) {
-  const [local, setLocal] = useState(value);
-  useEffect(() => { setLocal(value); }, [value]);
   return (
-    <select
-      value={local}
-      onChange={(e) => setLocal(e.target.value)}
-      onBlur={() => { if (local !== value) onSave(local); }}
-      className={`bg-transparent border-0 outline-none text-xs w-full min-w-[70px] px-1 py-0 hover:bg-muted/60 focus:bg-white dark:focus:bg-muted focus:ring-1 focus:ring-primary/50 focus:rounded ${className}`}
-    >
-      {options.map((o) => <option key={o} value={o}>{o}</option>)}
-    </select>
+    <span className={`block w-full min-w-[70px] px-1 py-0 text-xs ${className}`}>
+      {value ? value : <span className="text-muted-foreground">—</span>}
+    </span>
   );
 }
 
