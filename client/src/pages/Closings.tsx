@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { Layout } from "@/components/Layout";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -1425,6 +1425,33 @@ export default function Closings() {
   const [monthFilter, setMonthFilter] = useState("all");
   const PAGE_SIZE = 50;
 
+  const topScrollRef = useRef<HTMLDivElement>(null);
+  const tableScrollRef = useRef<HTMLDivElement>(null);
+  const [phantomWidth, setPhantomWidth] = useState(2800);
+
+  useEffect(() => {
+    const updateWidth = () => {
+      if (tableScrollRef.current) {
+        setPhantomWidth(tableScrollRef.current.scrollWidth);
+      }
+    };
+    updateWidth();
+    window.addEventListener("resize", updateWidth);
+    return () => window.removeEventListener("resize", updateWidth);
+  });
+
+  const syncFromTop = useCallback(() => {
+    if (tableScrollRef.current && topScrollRef.current) {
+      tableScrollRef.current.scrollLeft = topScrollRef.current.scrollLeft;
+    }
+  }, []);
+
+  const syncFromTable = useCallback(() => {
+    if (topScrollRef.current && tableScrollRef.current) {
+      topScrollRef.current.scrollLeft = tableScrollRef.current.scrollLeft;
+    }
+  }, []);
+
   const handleDialogClose = () => {
     setDialogOpen(false);
     setEditingClosing(null);
@@ -1576,19 +1603,22 @@ export default function Closings() {
     });
     const q = search.trim().toLowerCase();
     if (!q) return rows;
-    const matchingIds = new Set<number>();
-    for (const row of rows) {
-      if (
-        row.propertyAddress.toLowerCase().includes(q) ||
-        row.employeeName.toLowerCase().includes(q) ||
-        row.buyerName.toLowerCase().includes(q) ||
-        row.sellerName.toLowerCase().includes(q) ||
-        row.il.toLowerCase().includes(q) ||
-        row.ilce.toLowerCase().includes(q) ||
-        row.closingDate.includes(q)
-      ) matchingIds.add(row.closingId);
-    }
-    return rows.filter((r) => matchingIds.has(r.closingId));
+    const filtered = rows.filter((row) =>
+      row.propertyAddress.toLowerCase().includes(q) ||
+      row.employeeName.toLowerCase().includes(q) ||
+      row.buyerName.toLowerCase().includes(q) ||
+      row.sellerName.toLowerCase().includes(q) ||
+      row.il.toLowerCase().includes(q) ||
+      row.ilce.toLowerCase().includes(q) ||
+      row.closingDate.includes(q)
+    );
+    // Recalculate isFirstOfClosing within the filtered result set
+    const seenClosings = new Set<number>();
+    return filtered.map((row) => {
+      const first = !seenClosings.has(row.closingId);
+      if (first) seenClosings.add(row.closingId);
+      return first === row.isFirstOfClosing ? row : { ...row, isFirstOfClosing: first };
+    });
   }, [flatRows, search, statusFilter, yearFilter, monthFilter]);
 
   // Reset to page 1 when filters change
@@ -1712,7 +1742,72 @@ export default function Closings() {
   };
 
   const handleExport = () => {
-    window.open("/api/closings/export", "_blank");
+    const fmtMonth = (d: string) => {
+      if (!d) return "";
+      const [y, m] = d.split("-");
+      return m && y ? `${m}/${y}` : d;
+    };
+    const sideLabel = (t: string) => t === "buyer" ? "Alıcı" : t === "referral" ? "Yönlendirme" : "Satıcı";
+    const discountRate = (opening: string, sale: string) => {
+      const o = parseFloat(opening), s = parseFloat(sale);
+      return o > 0 ? ((o - s) / o * 100).toFixed(2) : "";
+    };
+    const headers = [
+      "Danışman", "İlgili Ay", "İşlem", "İşlem Tipi", "Taraf",
+      "İşlem Tarihi", "İşlem Değeri", "BHB", "KWTR", "KWTR (+KDV)", "PlatinKarma", "PlatinKarma (KDV)",
+      "ÜK Tutarı", "Danışman Net", "Kasa", "Nakit", "Banka",
+      "BHB Oranı", "İşlem Hacmi",
+      "İl", "İlçe", "Semt/Mahalle", "Adres", "Mülkle İlgili Detay",
+      "Açılış Rakamı", "Kapanış Rakamı", "İndirim Oranı",
+      "Süre/Gün", "Müşteri Kaynağı", "Yönlendirme",
+      "Söz. Başlangıç", "Söz. Bitiş", "Alıcı", "Satıcı", "Pay (%)", "Notlar",
+    ];
+    const rowsData = filteredRows.map((r) => [
+      r.employeeName,
+      fmtMonth(r.closingDate),
+      r.dealCategory,
+      r.dealType,
+      sideLabel(r.sideType),
+      r.closingDate,
+      r.saleValue,
+      r.bhbShare,
+      r.mainBranchShare,
+      r.kwtrKdv,
+      r.marketCenterActual,
+      r.bmKdv,
+      r.ukShare,
+      r.employeeNet,
+      r.kasa,
+      r.nakit,
+      r.banka,
+      r.commissionRate,
+      r.saleValue,
+      r.il, r.ilce, r.mahalle,
+      r.propertyAddress,
+      r.propertyDetails,
+      r.openingPrice,
+      r.saleValue,
+      discountRate(r.openingPrice, r.saleValue),
+      r.durationDays,
+      r.customerSource,
+      r.referralInfo,
+      r.contractStartDate,
+      r.contractEndDate,
+      r.buyerName,
+      r.sellerName,
+      r.splitPercentage,
+      r.notes,
+    ]);
+    const csv = [headers, ...rowsData]
+      .map((row) => row.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `kapanislar_${new Date().toISOString().split("T")[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1965,9 +2060,23 @@ export default function Closings() {
           </span>
         </div>
 
+        {/* Top phantom scrollbar — synced with table */}
+        <div
+          ref={topScrollRef}
+          className="overflow-x-auto"
+          onScroll={syncFromTop}
+          style={{ height: 12 }}
+        >
+          <div style={{ width: phantomWidth, height: 1 }} />
+        </div>
+
         {/* Flat inline-editable table */}
         <Card>
-          <CardContent className="p-0 overflow-x-auto">
+          <CardContent
+            ref={tableScrollRef}
+            className="p-0 overflow-x-auto"
+            onScroll={syncFromTable}
+          >
             {closingsLoading ? (
               <div className="flex items-center justify-center py-16">
                 <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
