@@ -67,7 +67,7 @@ const adminNavItems: NavEntry[] = [
   { icon: ClipboardList,   label: "Görevler",       href: "/tasks"      },
   { icon: DollarSign,      label: "İşlem Kapanış",  href: "/closings"   },
   { icon: Building2,       label: "Portal İlanları", href: "/listings"   },
-  { icon: Receipt,         label: "Masraflar",       href: "/expenses"   },
+  { icon: Receipt,         label: "Masraflar & Ek Gelirler", href: "/expenses"   },
   reportsGroupAdmin,
   { icon: Shield,          label: "Users",          href: "/users"      },
 ];

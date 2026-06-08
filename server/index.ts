@@ -98,6 +98,8 @@ app.use((req, res, next) => {
     ALTER TABLE "listings" ADD COLUMN IF NOT EXISTS "notify_msg_id_new" text;
     ALTER TABLE "listings" ADD COLUMN IF NOT EXISTS "notify_msg_id_passive" text;
 
+    ALTER TABLE "office_expenses" ADD COLUMN IF NOT EXISTS "employee_id" integer;
+
     CREATE TABLE IF NOT EXISTS "office_expenses" (
       "id" serial PRIMARY KEY NOT NULL,
       "type" text NOT NULL,

@@ -472,6 +472,8 @@ export type InterviewTarget = typeof interviewTargets.$inferSelect;
 
 // ── Office Expenses (Income / Expense Module) ─────────────────────────────────
 
+export const BM_PREPAYMENT_CATEGORY = "Danışman BM Payı Ön Ödemesi" as const;
+
 export const INCOME_CATEGORIES = [
   "Aidat & Yer Tahsis",
   "Oda Kira",
@@ -485,6 +487,7 @@ export const INCOME_CATEGORIES = [
   "Proje Ek Geliri",
   "Diğer Gelirler (Kep Ödemesi vb)",
   "Royalty Fee (%1,5)",
+  BM_PREPAYMENT_CATEGORY,
 ] as const;
 
 export const EXPENSE_CATEGORY_GROUPS: { group: string; items: string[] }[] = [
@@ -524,6 +527,7 @@ export const officeExpenses = pgTable("office_expenses", {
   amount: numeric("amount", { precision: 15, scale: 2 }).notNull(),
   date: text("date").notNull(),                // YYYY-MM-DD
   notes: text("notes"),
+  employeeId: integer("employee_id"),          // Optional — required for BM_PREPAYMENT_CATEGORY
   createdByUserId: integer("created_by_user_id"),
   createdAt: timestamp("created_at").defaultNow(),
 });

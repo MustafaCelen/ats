@@ -4,7 +4,7 @@ import {
   users, jobAssignments, applicationDocuments, tasks, employees,
   capSettings, closings, closingSides, closingAgents, interviewTargets,
   officeExpenses, listings,
-  APPLICATION_STAGES,
+  APPLICATION_STAGES, BM_PREPAYMENT_CATEGORY,
   type Job, type InsertJob,
   type Candidate, type InsertCandidate,
   type Application, type InsertApplication,
@@ -1651,7 +1651,23 @@ export class DatabaseStorage implements IStorage {
 
     const capUsedFromClosings = agentRows.reduce((sum, r) => sum + parseFloat(r.marketCenterActual ?? "0"), 0);
     const manualAdj = parseFloat((emp as any).capManualAdjustment ?? "0");
-    const capUsed = capUsedFromClosings + manualAdj;
+
+    // BM Payı Ön Ödemesi (logged as office income) — counts toward cap by payment date
+    const periodStartYMD = `${periodStart.getFullYear()}-${String(periodStart.getMonth() + 1).padStart(2, "0")}-01`;
+    const prepayRows = await db
+      .select({ amount: officeExpenses.amount })
+      .from(officeExpenses)
+      .where(
+        and(
+          eq(officeExpenses.type, "income"),
+          eq(officeExpenses.category, BM_PREPAYMENT_CATEGORY),
+          eq(officeExpenses.employeeId, employeeId),
+          gte(officeExpenses.date, periodStartYMD),
+        )
+      );
+    const prepayments = prepayRows.reduce((sum, r) => sum + parseFloat(r.amount ?? "0"), 0);
+
+    const capUsed = capUsedFromClosings + manualAdj + prepayments;
     const capRemaining: number | null = capAmount === null ? null : Math.max(0, capAmount - capUsed);
 
     // Previous 12-month period (needed to evaluate current-month resets)
@@ -2313,10 +2329,12 @@ export class DatabaseStorage implements IStorage {
       .select({
         closingId: closings.id,
         saleValue: closings.saleValue,
+        commissionRate: closings.commissionRate,
         dealCategory: closings.dealCategory,
         dealType: closings.dealType,
         il: closings.il,
         ilce: closings.ilce,
+        mahalle: closings.mahalle,
         closingDate: closings.closingDate,
         durationDays: closings.durationDays,
         sideId: closingSides.id,
@@ -2340,7 +2358,7 @@ export class DatabaseStorage implements IStorage {
       ));
 
     const expectedRows = await db
-      .select({ closingId: closings.id, saleValue: closings.saleValue, bhbShare: closingAgents.bhbShare, marketCenterActual: closingAgents.marketCenterActual, employeeId: closingAgents.employeeId })
+      .select({ closingId: closings.id, saleValue: closings.saleValue, commissionRate: closings.commissionRate, dealCategory: closings.dealCategory, bhbShare: closingAgents.bhbShare, marketCenterActual: closingAgents.marketCenterActual, employeeId: closingAgents.employeeId })
       .from(closings)
       .leftJoin(closingSides, eq(closingSides.closingId, closings.id))
       .leftJoin(closingAgents, eq(closingAgents.closingSideId, closingSides.id))
@@ -2355,36 +2373,44 @@ export class DatabaseStorage implements IStorage {
       .leftJoin(candidates, eq(employees.candidateId, candidates.id));
     const empMap = new Map(empRows.map(e => [e.id, { name: e.name ?? `#${e.id}`, kwuid: e.kwuid ?? "" }]));
 
+    // İşlem adedi (taraf başı): bhbShare / perSideBhb
+    // Kiralık: perSideBhb = saleValue / 2 · Diğer: perSideBhb = saleValue × commissionRate / 100
+    const islemOrani = (r: { saleValue: string | null; commissionRate?: string | null; dealCategory?: string | null; bhbShare: string | null }) => {
+      const sale = parseFloat(r.saleValue ?? "0");
+      const rate = parseFloat(r.commissionRate ?? "0");
+      const perSide = r.dealCategory === "Kiralık" ? sale / 2 : sale * rate / 100;
+      if (perSide <= 0) return 0;
+      return parseFloat(r.bhbShare ?? "0") / perSide;
+    };
+
     // ── Completed summary ──
     const cIds = new Set<number>();
-    let completedVolume = 0, completedBHB = 0, completedBM = 0;
+    let completedVolume = 0, completedBHB = 0, completedBM = 0, completedIslem = 0;
     for (const r of completedRows) {
       if (!cIds.has(r.closingId)) { completedVolume += parseFloat(r.saleValue ?? "0"); cIds.add(r.closingId); }
       if (r.bhbShare) completedBHB += parseFloat(r.bhbShare);
       if (r.marketCenterActual) completedBM += parseFloat(r.marketCenterActual);
+      completedIslem += islemOrani(r);
     }
 
-    // ── Side type counts ──
-    const sideTypeSets: Record<string, Set<number>> = { buyer: new Set(), seller: new Set(), referral: new Set() };
+    // ── Side type counts (işlem adedi) ──
+    const bySideType = { buyer: 0, seller: 0, referral: 0 } as Record<string, number>;
     for (const r of completedRows) {
-      if (r.sideId && r.sideType) {
-        if (!sideTypeSets[r.sideType]) sideTypeSets[r.sideType] = new Set();
-        sideTypeSets[r.sideType].add(r.sideId);
-      }
+      const k = r.sideType === "buyer" ? "buyer" : r.sideType === "referral" ? "referral" : "seller";
+      bySideType[k] = (bySideType[k] ?? 0) + islemOrani(r);
     }
-    const bySideType = {
-      buyer: sideTypeSets.buyer.size,
-      seller: sideTypeSets.seller.size,
-      referral: sideTypeSets.referral.size,
-    };
+    bySideType.buyer = Math.round(bySideType.buyer);
+    bySideType.seller = Math.round(bySideType.seller);
+    bySideType.referral = Math.round(bySideType.referral);
 
     // ── Expected summary ──
     const eIds = new Set<number>();
-    let expectedVolume = 0, expectedBHB = 0, expectedBM = 0;
+    let expectedVolume = 0, expectedBHB = 0, expectedBM = 0, expectedIslem = 0;
     for (const r of expectedRows) {
       if (!eIds.has(r.closingId)) { expectedVolume += parseFloat(r.saleValue ?? "0"); eIds.add(r.closingId); }
       if (r.bhbShare) expectedBHB += parseFloat(r.bhbShare);
       if (r.marketCenterActual) expectedBM += parseFloat(r.marketCenterActual);
+      expectedIslem += islemOrani(r);
     }
 
     // ── Monthly trend ──
@@ -2395,27 +2421,28 @@ export class DatabaseStorage implements IStorage {
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
       if (!monthMap.has(key)) monthMap.set(key, { volume: 0, bhb: 0, bm: 0, count: 0, ids: new Set() });
       const m = monthMap.get(key)!;
-      if (!m.ids.has(r.closingId)) { m.volume += parseFloat(r.saleValue ?? "0"); m.count++; m.ids.add(r.closingId); }
+      if (!m.ids.has(r.closingId)) { m.volume += parseFloat(r.saleValue ?? "0"); m.ids.add(r.closingId); }
+      m.count += islemOrani(r);
       if (r.bhbShare) m.bhb += parseFloat(r.bhbShare);
       if (r.marketCenterActual) m.bm += parseFloat(r.marketCenterActual);
     }
     const monthlyTrend = Array.from(monthMap.entries())
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([month, v]) => ({ month, volume: v.volume, bhb: v.bhb, bm: v.bm, count: v.count }));
+      .map(([month, v]) => ({ month, volume: v.volume, bhb: v.bhb, bm: v.bm, count: Math.round(v.count) }));
 
     // ── By agent ──
-    const agentMap = new Map<number, { bhb: number; bm: number; net: number; ids: Set<number> }>();
+    const agentMap = new Map<number, { bhb: number; bm: number; net: number; count: number }>();
     for (const r of completedRows) {
       if (!r.employeeId) continue;
-      if (!agentMap.has(r.employeeId)) agentMap.set(r.employeeId, { bhb: 0, bm: 0, net: 0, ids: new Set() });
+      if (!agentMap.has(r.employeeId)) agentMap.set(r.employeeId, { bhb: 0, bm: 0, net: 0, count: 0 });
       const a = agentMap.get(r.employeeId)!;
-      a.ids.add(r.closingId);
+      a.count += islemOrani(r);
       if (r.bhbShare) a.bhb += parseFloat(r.bhbShare);
       if (r.marketCenterActual) a.bm += parseFloat(r.marketCenterActual);
       if (r.employeeNet) a.net += parseFloat(r.employeeNet);
     }
     const byAgent = Array.from(agentMap.entries())
-      .map(([id, v]) => ({ name: empMap.get(id)?.name ?? `#${id}`, kwuid: empMap.get(id)?.kwuid ?? "", bhb: v.bhb, bm: v.bm, net: v.net, count: v.ids.size }))
+      .map(([id, v]) => ({ name: empMap.get(id)?.name ?? `#${id}`, kwuid: empMap.get(id)?.kwuid ?? "", bhb: v.bhb, bm: v.bm, net: v.net, count: Math.round(v.count) }))
       .sort((a, b) => b.bhb - a.bhb);
 
     // ── By category ──
@@ -2424,10 +2451,11 @@ export class DatabaseStorage implements IStorage {
       const cat = r.dealCategory ?? "Satış";
       if (!catMap.has(cat)) catMap.set(cat, { count: 0, volume: 0, bhb: 0, ids: new Set() });
       const c = catMap.get(cat)!;
-      if (!c.ids.has(r.closingId)) { c.count++; c.volume += parseFloat(r.saleValue ?? "0"); c.ids.add(r.closingId); }
+      if (!c.ids.has(r.closingId)) { c.volume += parseFloat(r.saleValue ?? "0"); c.ids.add(r.closingId); }
+      c.count += islemOrani(r);
       if (r.bhbShare) c.bhb += parseFloat(r.bhbShare);
     }
-    const byCategory = Array.from(catMap.entries()).map(([category, v]) => ({ category, count: v.count, volume: v.volume, bhb: v.bhb }));
+    const byCategory = Array.from(catMap.entries()).map(([category, v]) => ({ category, count: Math.round(v.count), volume: v.volume, bhb: v.bhb }));
 
     // ── By deal type ──
     const dealTypeMap = new Map<string, { count: number; volume: number; bhb: number; ids: Set<number> }>();
@@ -2435,38 +2463,55 @@ export class DatabaseStorage implements IStorage {
       const dt = r.dealType ?? "Diğer";
       if (!dealTypeMap.has(dt)) dealTypeMap.set(dt, { count: 0, volume: 0, bhb: 0, ids: new Set() });
       const d = dealTypeMap.get(dt)!;
-      if (!d.ids.has(r.closingId)) { d.count++; d.volume += parseFloat(r.saleValue ?? "0"); d.ids.add(r.closingId); }
+      if (!d.ids.has(r.closingId)) { d.volume += parseFloat(r.saleValue ?? "0"); d.ids.add(r.closingId); }
+      d.count += islemOrani(r);
       if (r.bhbShare) d.bhb += parseFloat(r.bhbShare);
     }
     const byDealType = Array.from(dealTypeMap.entries())
-      .map(([dealType, v]) => ({ dealType, count: v.count, volume: v.volume, bhb: v.bhb }))
+      .map(([dealType, v]) => ({ dealType, count: Math.round(v.count), volume: v.volume, bhb: v.bhb }))
       .sort((a, b) => b.count - a.count);
 
-    // ── By İl ──
+    // ── By İl / İlçe / Mahalle ──
     const geoGroup = (field: string | null | undefined, map: Map<string, { count: number; volume: number; ids: Set<number> }>, r: typeof completedRows[0]) => {
       const key = field || "Belirtilmemiş";
       if (!map.has(key)) map.set(key, { count: 0, volume: 0, ids: new Set() });
       const v = map.get(key)!;
-      if (!v.ids.has(r.closingId)) { v.count++; v.volume += parseFloat(r.saleValue ?? "0"); v.ids.add(r.closingId); }
+      if (!v.ids.has(r.closingId)) { v.volume += parseFloat(r.saleValue ?? "0"); v.ids.add(r.closingId); }
+      v.count += islemOrani(r);
     };
     const ilMap = new Map<string, { count: number; volume: number; ids: Set<number> }>();
     const ilceMap = new Map<string, { count: number; volume: number; ids: Set<number> }>();
+    const mahalleMap = new Map<string, { count: number; volume: number; ids: Set<number> }>();
     for (const r of completedRows) {
       geoGroup(r.il, ilMap, r);
       geoGroup(r.ilce, ilceMap, r);
+      geoGroup(r.mahalle, mahalleMap, r);
     }
     const toGeoArr = (map: Map<string, { count: number; volume: number; ids: Set<number> }>, keyName: string) =>
-      Array.from(map.entries()).map(([k, v]) => ({ [keyName]: k, count: v.count, volume: v.volume }))
+      Array.from(map.entries()).map(([k, v]) => ({ [keyName]: k, count: Math.round(v.count), volume: v.volume }))
         .sort((a: any, b: any) => b.volume - a.volume).slice(0, 10);
 
-    const byIl   = toGeoArr(ilMap,   "il");
-    const byIlce = toGeoArr(ilceMap, "ilce");
+    const byIl      = toGeoArr(ilMap,      "il");
+    const byIlce    = toGeoArr(ilceMap,    "ilce");
+    const byMahalle = toGeoArr(mahalleMap, "mahalle");
 
-    // ── Average sale time (only closings with durationDays > 0) ──
-    const durationById = new Map<number, { days: number; ilce: string | null; category: string }>();
+    // ── Average sale time (only closings with sane durationDays: 1 day to 10 years) ──
+    const MAX_REASONABLE_DAYS = 3650;
+    const durationById = new Map<number, { days: number; il: string | null; ilce: string | null; mahalle: string | null; category: string }>();
     for (const r of completedRows) {
-      if (!durationById.has(r.closingId) && r.durationDays && r.durationDays > 0) {
-        durationById.set(r.closingId, { days: r.durationDays, ilce: r.ilce ?? null, category: r.dealCategory ?? "Satış" });
+      if (
+        !durationById.has(r.closingId) &&
+        r.durationDays &&
+        r.durationDays > 0 &&
+        r.durationDays <= MAX_REASONABLE_DAYS
+      ) {
+        durationById.set(r.closingId, {
+          days: r.durationDays,
+          il: r.il ?? null,
+          ilce: r.ilce ?? null,
+          mahalle: r.mahalle ?? null,
+          category: r.dealCategory ?? "Satış",
+        });
       }
     }
     const allDurations = Array.from(durationById.values());
@@ -2479,30 +2524,37 @@ export class DatabaseStorage implements IStorage {
     const avgSaleDays   = calcAvg(salesDurations);
     const avgRentalDays = calcAvg(rentalDurations);
 
-    const buildIlceMap = (items: typeof allDurations) => {
+    const buildGeoMap = (items: typeof allDurations, field: "il" | "ilce" | "mahalle", outKey: string) => {
       const map = new Map<string, { total: number; count: number }>();
       for (const d of items) {
-        const key = d.ilce || "Belirtilmemiş";
+        const key = d[field] || "Belirtilmemiş";
         if (!map.has(key)) map.set(key, { total: 0, count: 0 });
         map.get(key)!.total += d.days;
         map.get(key)!.count++;
       }
       return Array.from(map.entries())
-        .map(([ilce, v]) => ({ ilce, avg: Math.round(v.total / v.count), count: v.count }))
-        .filter(r => r.count >= 3)
-        .sort((a, b) => a.avg - b.avg);
+        .map(([k, v]) => ({ [outKey]: k, avg: Math.round(v.total / v.count), count: v.count }))
+        .filter((r: any) => r.count >= 3)
+        .sort((a: any, b: any) => a.avg - b.avg);
     };
 
-    const avgSaleDaysByIlce   = buildIlceMap(salesDurations);
-    const avgRentalDaysByIlce = buildIlceMap(rentalDurations);
+    const avgSaleDaysByIl       = buildGeoMap(salesDurations,  "il",      "il");
+    const avgSaleDaysByIlce     = buildGeoMap(salesDurations,  "ilce",    "ilce");
+    const avgSaleDaysByMahalle  = buildGeoMap(salesDurations,  "mahalle", "mahalle");
+    const avgRentalDaysByIl     = buildGeoMap(rentalDurations, "il",      "il");
+    const avgRentalDaysByIlce   = buildGeoMap(rentalDurations, "ilce",    "ilce");
+    const avgRentalDaysByMahalle= buildGeoMap(rentalDurations, "mahalle", "mahalle");
 
     return {
-      completedCount: cIds.size, expectedCount: eIds.size,
+      completedCount: Math.round(completedIslem),
+      expectedCount: Math.round(expectedIslem),
       completedVolume, expectedVolume,
       completedBHB, expectedBHB, completedBM, expectedBM,
       bySideType,
-      monthlyTrend, byAgent, byCategory, byDealType, byIl, byIlce,
-      avgSaleDays, avgSaleDaysByIlce, avgRentalDays, avgRentalDaysByIlce,
+      monthlyTrend, byAgent, byCategory, byDealType,
+      byIl, byIlce, byMahalle,
+      avgSaleDays, avgSaleDaysByIl, avgSaleDaysByIlce, avgSaleDaysByMahalle,
+      avgRentalDays, avgRentalDaysByIl, avgRentalDaysByIlce, avgRentalDaysByMahalle,
     };
   }
 
@@ -2597,11 +2649,16 @@ export class DatabaseStorage implements IStorage {
       if (!minPrevStart || info.prevPeriodStart < minPrevStart) minPrevStart = info.prevPeriodStart;
     }
 
-    const [rows, capRows, lastClosingRows, coachUsers, capSettingRows] = await Promise.all([
+    const minPrevStartYMD = minPrevStart
+      ? `${minPrevStart.getFullYear()}-${String(minPrevStart.getMonth() + 1).padStart(2, "0")}-01`
+      : null;
+
+    const [rows, capRows, lastClosingRows, coachUsers, capSettingRows, prepayRows] = await Promise.all([
       // Closings in the selected date range
       db.select({
         closingId: closings.id,
         saleValue: closings.saleValue,
+        commissionRate: closings.commissionRate,
         closingDate: closings.closingDate,
         dealCategory: closings.dealCategory,
         dealType: closings.dealType,
@@ -2671,6 +2728,22 @@ export class DatabaseStorage implements IStorage {
       capYearSet.size > 0
         ? db.select().from(capSettings).where(inArray(capSettings.year, [...capYearSet]))
         : Promise.resolve([] as typeof capSettings.$inferSelect[]),
+
+      // BM Payı Ön Ödemesi entries (income) for relevant students, from earliest prev period
+      minPrevStartYMD
+        ? db.select({
+            employeeId: officeExpenses.employeeId,
+            amount: officeExpenses.amount,
+            date: officeExpenses.date,
+          })
+          .from(officeExpenses)
+          .where(and(
+            eq(officeExpenses.type, "income"),
+            eq(officeExpenses.category, BM_PREPAYMENT_CATEGORY),
+            inArray(officeExpenses.employeeId, studentIds),
+            gte(officeExpenses.date, minPrevStartYMD),
+          ))
+        : Promise.resolve([] as { employeeId: number | null; amount: string | null; date: string | null }[]),
     ]);
 
     // ── Build cap used maps ──────────────────────────────────────────────────
@@ -2682,6 +2755,19 @@ export class DatabaseStorage implements IStorage {
       if (!info) continue;
       const d = new Date(r.closingDate);
       const amount = parseFloat(r.marketCenterActual);
+      if (d >= info.periodStart) {
+        capUsedMap.set(r.employeeId, (capUsedMap.get(r.employeeId) ?? 0) + amount);
+      } else if (d >= info.prevPeriodStart) {
+        prevCapUsedMap.set(r.employeeId, (prevCapUsedMap.get(r.employeeId) ?? 0) + amount);
+      }
+    }
+    // Merge BM ön ödemesi entries into cap used by payment date
+    for (const r of prepayRows) {
+      if (!r.employeeId || !r.date || !r.amount) continue;
+      const info = capInfoMap.get(r.employeeId);
+      if (!info) continue;
+      const d = new Date(r.date + "T00:00:00");
+      const amount = parseFloat(r.amount);
       if (d >= info.periodStart) {
         capUsedMap.set(r.employeeId, (capUsedMap.get(r.employeeId) ?? 0) + amount);
       } else if (d >= info.prevPeriodStart) {
@@ -2713,23 +2799,38 @@ export class DatabaseStorage implements IStorage {
       });
       const closingIds = new Set(empRows.map(r => r.closingId));
 
+      // İşlem adedi oranı (taraf başı).
+      // Kiralık: per-side BHB = saleValue / 2 (her taraftan kira bedelinin yarısı)
+      // Satış/Yönlendirme: per-side BHB = saleValue × commissionRate / 100
+      const islemOrani = (r: typeof empRows[number]): number => {
+        const sale = parseFloat(r.saleValue ?? "0");
+        const rate = parseFloat((r as any).commissionRate ?? "0");
+        const perSide = r.dealCategory === "Kiralık" ? sale / 2 : sale * rate / 100;
+        if (perSide <= 0) return 0;
+        return parseFloat(r.bhbShare ?? "0") / perSide;
+      };
+
       const seenVol = new Set<number>();
       let totalVolume = 0;
       for (const r of empRows) {
         if (!seenVol.has(r.closingId)) { totalVolume += parseFloat(r.saleValue ?? "0"); seenVol.add(r.closingId); }
       }
-      let totalBHB = 0, totalBM = 0, totalNet = 0;
+      let totalBHB = 0, totalBM = 0, totalNet = 0, totalIslem = 0;
       for (const r of empRows) {
         if (r.bhbShare) totalBHB += parseFloat(r.bhbShare);
         if (r.marketCenterActual) totalBM += parseFloat(r.marketCenterActual);
         if (r.employeeNet) totalNet += parseFloat(r.employeeNet);
+        totalIslem += islemOrani(r);
       }
 
-      const bySideType = {
-        buyer:    new Set(empRows.filter(r => r.sideType === "buyer").map(r => r.closingId)).size,
-        seller:   new Set(empRows.filter(r => r.sideType === "seller").map(r => r.closingId)).size,
-        referral: new Set(empRows.filter(r => r.sideType === "referral").map(r => r.closingId)).size,
-      };
+      const bySideType = empRows.reduce((acc, r) => {
+        const k = r.sideType === "buyer" ? "buyer" : r.sideType === "referral" ? "referral" : "seller";
+        acc[k] += islemOrani(r);
+        return acc;
+      }, { buyer: 0, seller: 0, referral: 0 });
+      bySideType.buyer = Math.round(bySideType.buyer);
+      bySideType.seller = Math.round(bySideType.seller);
+      bySideType.referral = Math.round(bySideType.referral);
 
       const monthMap = new Map<string, { count: number; bhb: number; volume: number; ids: Set<number> }>();
       for (const r of empRows) {
@@ -2738,25 +2839,25 @@ export class DatabaseStorage implements IStorage {
         const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
         if (!monthMap.has(key)) monthMap.set(key, { count: 0, bhb: 0, volume: 0, ids: new Set() });
         const m = monthMap.get(key)!;
-        if (!m.ids.has(r.closingId)) { m.count++; m.volume += parseFloat(r.saleValue ?? "0"); m.ids.add(r.closingId); }
+        if (!m.ids.has(r.closingId)) { m.volume += parseFloat(r.saleValue ?? "0"); m.ids.add(r.closingId); }
+        m.count += islemOrani(r);
         if (r.bhbShare) m.bhb += parseFloat(r.bhbShare);
       }
       const monthlyTrend = Array.from(monthMap.entries())
         .sort(([a], [b]) => a.localeCompare(b))
-        .map(([month, v]) => ({ month, count: v.count, bhb: v.bhb, volume: v.volume }));
+        .map(([month, v]) => ({ month, count: Math.round(v.count), bhb: v.bhb, volume: v.volume }));
 
-      const dealTypeMap = new Map<string, Set<number>>();
-      const catMap = new Map<string, Set<number>>();
+      const dealTypeMap = new Map<string, number>();
+      const catMap = new Map<string, number>();
       for (const r of empRows) {
+        const o = islemOrani(r);
         const dt = r.dealType ?? "Diğer";
-        if (!dealTypeMap.has(dt)) dealTypeMap.set(dt, new Set());
-        dealTypeMap.get(dt)!.add(r.closingId);
+        dealTypeMap.set(dt, (dealTypeMap.get(dt) ?? 0) + o);
         const cat = r.dealCategory ?? "Satış";
-        if (!catMap.has(cat)) catMap.set(cat, new Set());
-        catMap.get(cat)!.add(r.closingId);
+        catMap.set(cat, (catMap.get(cat) ?? 0) + o);
       }
-      const byDealType = Array.from(dealTypeMap.entries()).map(([dealType, s]) => ({ dealType, count: s.size })).sort((a, b) => b.count - a.count);
-      const byCategory = Array.from(catMap.entries()).map(([category, s]) => ({ category, count: s.size }));
+      const byDealType = Array.from(dealTypeMap.entries()).map(([dealType, count]) => ({ dealType, count: Math.round(count) })).sort((a, b) => b.count - a.count);
+      const byCategory = Array.from(catMap.entries()).map(([category, count]) => ({ category, count: Math.round(count) }));
 
       const durMap = new Map<number, number>();
       for (const r of empRows) {
@@ -2800,7 +2901,7 @@ export class DatabaseStorage implements IStorage {
         coachId: e.emp.uretkenlikKoclugu
           ? (e.emp.uretkenlikKocluguManagerId ?? null)
           : ((e.emp as any).duaManagerId ?? null),
-        totalClosings: closingIds.size,
+        totalClosings: Math.round(totalIslem),
         totalVolume,
         totalBHB,
         totalBM,
@@ -2852,7 +2953,7 @@ export class DatabaseStorage implements IStorage {
     month?: number;
     startDate?: string;
     endDate?: string;
-  }): Promise<OfficeExpense[]> {
+  }): Promise<(OfficeExpense & { employeeName?: string | null })[]> {
     const conditions = [];
     if (filters?.type) conditions.push(eq(officeExpenses.type, filters.type));
     if (filters?.year && filters?.month) {
@@ -2868,11 +2969,15 @@ export class DatabaseStorage implements IStorage {
     if (filters?.startDate) conditions.push(gte(officeExpenses.date, filters.startDate));
     if (filters?.endDate) conditions.push(lte(officeExpenses.date, filters.endDate));
 
-    return db
-      .select()
+    const rows = await db
+      .select({ exp: officeExpenses, empName: candidates.name })
       .from(officeExpenses)
+      .leftJoin(employees, eq(officeExpenses.employeeId, employees.id))
+      .leftJoin(candidates, eq(employees.candidateId, candidates.id))
       .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(desc(officeExpenses.date), desc(officeExpenses.createdAt));
+
+    return rows.map(r => ({ ...r.exp, employeeName: r.empName }));
   }
 
   async updateOfficeExpense(id: number, data: Partial<InsertOfficeExpense>): Promise<OfficeExpense> {

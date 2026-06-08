@@ -80,6 +80,81 @@ function Empty() {
   return <div className="h-48 flex items-center justify-center text-sm text-muted-foreground">Bu dönem için veri yok</div>;
 }
 
+type GeoDuration = { il?: string; ilce?: string; mahalle?: string; avg: number; count: number };
+
+function AvgDurationCard({
+  label, avg, byIl, byIlce, byMahalle, color, loading,
+}: {
+  label: string;
+  avg: number | null;
+  byIl: GeoDuration[];
+  byIlce: GeoDuration[];
+  byMahalle: GeoDuration[];
+  color: string;
+  loading: boolean;
+}) {
+  const [tab, setTab] = useState<"il" | "ilce" | "mahalle">("ilce");
+  const rows = tab === "il" ? byIl : tab === "mahalle" ? byMahalle : byIlce;
+  const totalClosings = rows.reduce((s, r) => s + r.count, 0);
+
+  return (
+    <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+      <div className="px-5 py-4 border-b border-border flex items-center gap-4 flex-wrap">
+        <div>
+          <h2 className="text-base font-semibold">{label}</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">Yalnızca süre bilgisi olan kapanışlar · min. 3 kapanış</p>
+        </div>
+        {avg !== null && (
+          <div className="ml-auto text-right shrink-0">
+            <div className="text-2xl font-bold">{avg} <span className="text-sm font-normal text-muted-foreground">gün</span></div>
+            <div className="text-xs text-muted-foreground">{totalClosings} kapanış</div>
+          </div>
+        )}
+      </div>
+      <div className="px-5 py-2 border-b border-border bg-muted/20 flex gap-1">
+        {([
+          { key: "il", label: "İl" },
+          { key: "ilce", label: "İlçe" },
+          { key: "mahalle", label: "Mahalle" },
+        ] as const).map(t => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
+              tab === t.key
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      {loading ? <Skeleton h="h-44" /> : rows.length === 0 ? (
+        <div className="p-8 text-center text-sm text-muted-foreground">Yeterli veri yok</div>
+      ) : (
+        <div className="divide-y divide-border/50">
+          {rows.map((r) => {
+            const max = Math.max(...rows.map(x => x.avg), 1);
+            const name = (r as any)[tab] || "—";
+            return (
+              <div key={`${tab}-${name}`} className="px-5 py-3">
+                <div className="flex items-center justify-between text-xs mb-1">
+                  <span className="font-medium">{name}</span>
+                  <span className="text-muted-foreground">{r.count} kapanış · <span className="font-semibold text-foreground">{r.avg} gün</span></span>
+                </div>
+                <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                  <div className="h-full rounded-full" style={{ width: `${(r.avg / max) * 100}%`, backgroundColor: color }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Hooks ─────────────────────────────────────────────────────────────────────
 function useCapStatuses() {
   return useQuery<Record<string, any>>({
@@ -195,10 +270,14 @@ export default function FinancialReports() {
   const byDealType       = (stats?.byDealType ?? []) as { dealType: string; count: number; volume: number; bhb: number }[];
   const byIl             = (stats?.byIl ?? []).slice(0, 8);
   const byIlce           = (stats?.byIlce ?? []).slice(0, 8);
-  const avgSaleDays        = stats?.avgSaleDays ?? null;
-  const avgSaleDaysByIlce  = (stats?.avgSaleDaysByIlce ?? [])  as { ilce: string; avg: number; count: number }[];
-  const avgRentalDays      = stats?.avgRentalDays ?? null;
-  const avgRentalDaysByIlce = (stats?.avgRentalDaysByIlce ?? []) as { ilce: string; avg: number; count: number }[];
+  const avgSaleDays           = stats?.avgSaleDays ?? null;
+  const avgSaleDaysByIl       = (stats?.avgSaleDaysByIl ?? [])      as { il: string;      avg: number; count: number }[];
+  const avgSaleDaysByIlce     = (stats?.avgSaleDaysByIlce ?? [])    as { ilce: string;    avg: number; count: number }[];
+  const avgSaleDaysByMahalle  = (stats?.avgSaleDaysByMahalle ?? []) as { mahalle: string; avg: number; count: number }[];
+  const avgRentalDays         = stats?.avgRentalDays ?? null;
+  const avgRentalDaysByIl     = (stats?.avgRentalDaysByIl ?? [])      as { il: string;      avg: number; count: number }[];
+  const avgRentalDaysByIlce   = (stats?.avgRentalDaysByIlce ?? [])    as { ilce: string;    avg: number; count: number }[];
+  const avgRentalDaysByMahalle= (stats?.avgRentalDaysByMahalle ?? []) as { mahalle: string; avg: number; count: number }[];
 
   // dynamic height for agent bar chart so no labels are skipped
   const agentChartHeight = Math.max(260, topAgents.length * 28);
@@ -578,43 +657,19 @@ export default function FinancialReports() {
         {/* ── Average Sale/Rental Time ── */}
         <div className="grid lg:grid-cols-2 gap-6">
           {([
-            { label: "Ortalama Satış Süresi", avg: avgSaleDays, byIlce: avgSaleDaysByIlce, color: "#6366f1" },
-            { label: "Ortalama Kiralık Süresi", avg: avgRentalDays, byIlce: avgRentalDaysByIlce, color: "#f59e0b" },
-          ] as const).map(({ label, avg, byIlce: rows, color }) => (
-            <div key={label} className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-              <div className="px-5 py-4 border-b border-border flex items-center gap-4">
-                <div>
-                  <h2 className="text-base font-semibold">{label}</h2>
-                  <p className="text-xs text-muted-foreground mt-0.5">Yalnızca süre bilgisi olan kapanışlar · min. 3 kapanış/ilçe</p>
-                </div>
-                {avg !== null && (
-                  <div className="ml-auto text-right shrink-0">
-                    <div className="text-2xl font-bold">{avg} <span className="text-sm font-normal text-muted-foreground">gün</span></div>
-                    <div className="text-xs text-muted-foreground">{rows.reduce((s, r) => s + r.count, 0)} kapanış</div>
-                  </div>
-                )}
-              </div>
-              {isLoading ? <Skeleton h="h-44" /> : rows.length === 0 ? (
-                <div className="p-8 text-center text-sm text-muted-foreground">Yeterli veri yok</div>
-              ) : (
-                <div className="divide-y divide-border/50">
-                  {rows.map((r, i) => {
-                    const max = Math.max(...rows.map(x => x.avg), 1);
-                    return (
-                      <div key={r.ilce} className="px-5 py-3">
-                        <div className="flex items-center justify-between text-xs mb-1">
-                          <span className="font-medium">{r.ilce}</span>
-                          <span className="text-muted-foreground">{r.count} kapanış · <span className="font-semibold text-foreground">{r.avg} gün</span></span>
-                        </div>
-                        <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-                          <div className="h-full rounded-full" style={{ width: `${(r.avg / max) * 100}%`, backgroundColor: color }} />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
+            { label: "Ortalama Satış Süresi", avg: avgSaleDays, byIl: avgSaleDaysByIl, byIlce: avgSaleDaysByIlce, byMahalle: avgSaleDaysByMahalle, color: "#6366f1" },
+            { label: "Ortalama Kiralık Süresi", avg: avgRentalDays, byIl: avgRentalDaysByIl, byIlce: avgRentalDaysByIlce, byMahalle: avgRentalDaysByMahalle, color: "#f59e0b" },
+          ] as const).map(({ label, avg, byIl, byIlce, byMahalle, color }) => (
+            <AvgDurationCard
+              key={label}
+              label={label}
+              avg={avg}
+              byIl={byIl as any}
+              byIlce={byIlce as any}
+              byMahalle={byMahalle as any}
+              color={color}
+              loading={isLoading}
+            />
           ))}
         </div>
 

@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { Layout } from "@/components/Layout";
+import { EmployeePicker } from "@/components/EmployeePicker";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
@@ -29,6 +30,19 @@ import { format } from "date-fns";
 // ── Formatting ────────────────────────────────────────────────────────────────
 function fmtTRY(amount: number): string {
   return new Intl.NumberFormat("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount) + " ₺";
+}
+
+/** İşlem adedi oranı: bhbShare / per-side BHB.
+ *  Satış/Yönlendirme: per-side BHB = saleValue × commissionRate / 100
+ *  Kiralık: per-side BHB = saleValue / 2 (her taraftan kira bedelinin yarısı)
+ */
+function calcIslemOrani(bhbShare: string | number, saleValue: string | number, commissionRate: string | number, dealCategory?: string): number {
+  const bhb = typeof bhbShare === "number" ? bhbShare : parseFloat(bhbShare || "0");
+  const sale = typeof saleValue === "number" ? saleValue : parseFloat(saleValue || "0");
+  const rate = typeof commissionRate === "number" ? commissionRate : parseFloat(commissionRate || "0");
+  const perSideBhb = dealCategory === "Kiralık" ? sale / 2 : sale * rate / 100;
+  if (perSideBhb <= 0) return 0;
+  return bhb / perSideBhb;
 }
 
 /** Safely parse a date string from Postgres (handles both ISO and "YYYY-MM-DD HH:MM:SS" format) */
@@ -495,23 +509,19 @@ function SideSection({
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-medium text-muted-foreground w-5">{idx + 1}.</span>
                   <div className="flex-1">
-                    <Select
-                      value={agent.employeeId ? String(agent.employeeId) : ""}
-                      onValueChange={(v) => {
-                        updateAgent(agent.id, { ...newAgent(), id: agent.id, employeeId: Number(v), splitPercentage: agent.splitPercentage });
+                    <EmployeePicker
+                      employees={activeEmployees.map((e) => ({
+                        id: e.id,
+                        name: e.candidate?.name ?? `Çalışan #${e.id}`,
+                        kwuid: e.kwuid,
+                      }))}
+                      value={agent.employeeId}
+                      onChange={(id) => {
+                        if (id == null) return;
+                        updateAgent(agent.id, { ...newAgent(), id: agent.id, employeeId: id, splitPercentage: agent.splitPercentage });
                       }}
-                    >
-                      <SelectTrigger className="h-8 text-xs">
-                        <SelectValue placeholder="Danışman seçin..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {activeEmployees.map((e) => (
-                          <SelectItem key={e.id} value={String(e.id)} className="text-xs">
-                            {e.candidate?.name ?? `Çalışan #${e.id}`}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      triggerClassName="h-8 text-xs"
+                    />
                   </div>
                   <div className="w-24">
                     <Input
@@ -1496,7 +1506,15 @@ export default function Closings() {
   const completedClosings = yearFilteredClosings.filter((c) => (c as any).status !== "expected");
   const expectedClosings = yearFilteredClosings.filter((c) => (c as any).status === "expected");
 
-  const sumSides = (list: typeof closings) => list.reduce((s, c) => s + c.sides.length, 0);
+  const sumSides = (list: typeof closings) => list.reduce((s, c) => {
+    const sale = parseFloat(c.saleValue ?? "0");
+    const perSideBhb = (c as any).dealCategory === "Kiralık"
+      ? sale / 2
+      : sale * parseFloat(c.commissionRate ?? "0") / 100;
+    if (perSideBhb <= 0) return s;
+    return s + c.sides.reduce((ss, side) =>
+      ss + side.agents.reduce((sa, a) => sa + parseFloat(a.bhbShare ?? "0") / perSideBhb, 0), 0);
+  }, 0);
   const sumVolume = (list: typeof closings) => list.reduce((s, c) => s + parseFloat(c.saleValue ?? "0"), 0);
   const sumBHB = (list: typeof closings) => list.reduce((s, c) =>
     s + c.sides.reduce((ss, side) =>
@@ -1754,7 +1772,7 @@ export default function Closings() {
     };
     const headers = [
       "Danışman", "İlgili Ay", "İşlem", "İşlem Tipi", "Taraf",
-      "İşlem Tarihi", "İşlem Değeri", "BHB", "KWTR", "KWTR (+KDV)", "PlatinKarma", "PlatinKarma (KDV)",
+      "İşlem Tarihi", "İşlem Değeri", "BHB", "İşlem Adedi", "KWTR", "KWTR (+KDV)", "PlatinKarma", "PlatinKarma (KDV)",
       "ÜK Tutarı", "Danışman Net", "Kasa", "Nakit", "Banka",
       "BHB Oranı", "İşlem Hacmi",
       "İl", "İlçe", "Semt/Mahalle", "Adres", "Mülkle İlgili Detay",
@@ -1771,6 +1789,7 @@ export default function Closings() {
       r.closingDate,
       r.saleValue,
       r.bhbShare,
+      calcIslemOrani(r.bhbShare, r.saleValue, r.commissionRate, r.dealCategory).toFixed(4),
       r.mainBranchShare,
       r.kwtrKdv,
       r.marketCenterActual,
@@ -1977,21 +1996,21 @@ export default function Closings() {
               <tbody>
                 <tr className="border-b border-border/50">
                   <td className="py-2.5 px-4 text-xs font-medium text-emerald-700">Tamamlanan</td>
-                  <td className="py-2.5 px-4 text-right font-semibold">{completedSides}</td>
+                  <td className="py-2.5 px-4 text-right font-semibold">{Math.round(completedSides)}</td>
                   <td className="py-2.5 px-4 text-right font-semibold">{fmtTRY(completedVolume)}</td>
                   <td className="py-2.5 px-4 text-right font-semibold">{fmtTRY(completedBHB)}</td>
                   <td className="py-2.5 px-4 text-right font-semibold text-blue-700">{fmtTRY(completedBM)}</td>
                 </tr>
                 <tr className="border-b border-border/50">
                   <td className="py-2.5 px-4 text-xs font-medium text-amber-600">Beklenen</td>
-                  <td className="py-2.5 px-4 text-right text-amber-600 font-semibold">{expectedSides}</td>
+                  <td className="py-2.5 px-4 text-right text-amber-600 font-semibold">{Math.round(expectedSides)}</td>
                   <td className="py-2.5 px-4 text-right text-amber-600 font-semibold">{fmtTRY(expectedVolume)}</td>
                   <td className="py-2.5 px-4 text-right text-amber-600 font-semibold">{fmtTRY(expectedBHB)}</td>
                   <td className="py-2.5 px-4 text-right text-amber-600 font-semibold">{fmtTRY(expectedBM)}</td>
                 </tr>
                 <tr className="bg-muted/30">
                   <td className="py-2.5 px-4 text-xs font-semibold">Toplam</td>
-                  <td className="py-2.5 px-4 text-right font-bold">{completedSides + expectedSides}</td>
+                  <td className="py-2.5 px-4 text-right font-bold">{Math.round(completedSides + expectedSides)}</td>
                   <td className="py-2.5 px-4 text-right font-bold">{fmtTRY(completedVolume + expectedVolume)}</td>
                   <td className="py-2.5 px-4 text-right font-bold">{fmtTRY(completedBHB + expectedBHB)}</td>
                   <td className="py-2.5 px-4 text-right font-bold text-blue-700">{fmtTRY(completedBM + expectedBM)}</td>
@@ -2088,10 +2107,10 @@ export default function Closings() {
                 <p className="text-xs mt-1">Yeni bir kapanış ekleyin</p>
               </div>
             ) : (
-              <table className="w-full text-xs border-collapse min-w-[2800px]">
+              <table className="w-full text-xs border-collapse min-w-[2880px]">
                 <thead>
                   <tr className="border-b border-border bg-muted/40">
-                    {["Onay","Danışman","İşlem","İşlem Tipi","Taraf","İşlem Tarihi","İşlem Değeri","BHB","KWTR","KWTR (+KDV)","PlatinKarma","PlatinKarma (KDV)","Danışman Net","Kasa","Nakit","Banka","BHB Oranı","İl","İlçe","Semt/Mahalle","Adres","Mülkle İlgili Detay","Açılış Rakamı","İndirim Oranı","Pay%","Süre/Gün","Söz. Başlangıç","Söz. Bitiş","Müşteri Kaynağı","Yönlendirme",""].map((h, i) => (
+                    {["Onay","Danışman","İşlem","İşlem Tipi","Taraf","İşlem Tarihi","İşlem Değeri","BHB","İşlem Adedi","KWTR","KWTR (+KDV)","PlatinKarma","PlatinKarma (KDV)","Danışman Net","Kasa","Nakit","Banka","BHB Oranı","İl","İlçe","Semt/Mahalle","Adres","Mülkle İlgili Detay","Açılış Rakamı","İndirim Oranı","Pay%","Süre/Gün","Söz. Başlangıç","Söz. Bitiş","Müşteri Kaynağı","Yönlendirme",""].map((h, i) => (
                       <th key={`${h}-${i}`} className="text-left font-medium py-2 px-2 text-muted-foreground whitespace-nowrap text-[11px]">{h}</th>
                     ))}
                   </tr>
@@ -2132,6 +2151,9 @@ export default function Closings() {
                         <td className="px-2 py-1"><InlineCell value={row.closingDate} type="date" onSave={sc("closingDate")} /></td>
                         <td className="px-2 py-1 min-w-[90px]"><InlineCell value={row.saleValue} type="number" onSave={sc("saleValue")} /></td>
                         <td className="px-2 py-1 min-w-[80px]"><InlineCell value={row.bhbShare} type="number" onSave={sa("bhbShare")} /></td>
+                        <td className="px-2 py-1 min-w-[70px] text-center font-medium text-blue-700" title={row.dealCategory === "Kiralık" ? "Kiralık: BHB / (İşlem Değeri / 2)" : "BHB / (İşlem Değeri × BHB Oranı / 100)"}>
+                          {calcIslemOrani(row.bhbShare, row.saleValue, row.commissionRate, row.dealCategory).toFixed(2)}
+                        </td>
                         <td className="px-2 py-1 min-w-[80px] text-muted-foreground"><InlineCell value={row.mainBranchShare} type="number" onSave={sa("mainBranchShare")} /></td>
                         <td className="px-2 py-1 min-w-[80px] text-muted-foreground"><InlineCell value={row.kwtrKdv} type="number" onSave={sa("kwtrKdv")} /></td>
                         <td className="px-2 py-1 min-w-[80px] text-muted-foreground">

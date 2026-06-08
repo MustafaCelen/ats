@@ -14,7 +14,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { Plus, Pencil, Trash2, TrendingUp, TrendingDown, Receipt } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { INCOME_CATEGORIES, EXPENSE_CATEGORY_GROUPS } from "@shared/schema";
+import { INCOME_CATEGORIES, EXPENSE_CATEGORY_GROUPS, BM_PREPAYMENT_CATEGORY } from "@shared/schema";
+import { EmployeePicker } from "@/components/EmployeePicker";
 
 const MONTHS_TR = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"];
 const CURRENT_YEAR = new Date().getFullYear();
@@ -75,6 +76,23 @@ function ExpenseDialog({
   const [amount, setAmount] = useState(initial?.amount ?? "");
   const [date, setDate] = useState(initial?.date ?? todayYMD());
   const [notes, setNotes] = useState(initial?.notes ?? "");
+  const [employeeId, setEmployeeId] = useState<string>(initial?.employeeId ? String(initial.employeeId) : "");
+
+  const isBmPrepayment = type === "income" && category === BM_PREPAYMENT_CATEGORY;
+
+  const { data: employees = [] } = useQuery<{ id: number; candidateName: string }[]>({
+    queryKey: ["/api/employees"],
+    queryFn: async () => {
+      const res = await fetch("/api/employees", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed");
+      const list = await res.json();
+      return list
+        .filter((e: any) => e.status === "active")
+        .map((e: any) => ({ id: e.id, candidateName: e.candidate?.name ?? `#${e.id}` }))
+        .sort((a: any, b: any) => a.candidateName.localeCompare(b.candidateName, "tr"));
+    },
+    enabled: isBmPrepayment,
+  });
 
   const mutate = useMutation({
     mutationFn: async (data: any) => {
@@ -92,6 +110,8 @@ function ExpenseDialog({
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/office-expenses"] });
       qc.invalidateQueries({ queryKey: ["/api/office-expenses/monthly-pl"] });
+      qc.invalidateQueries({ queryKey: ["/api/employees/cap-statuses"] });
+      qc.invalidateQueries({ queryKey: ["/api/coaching/stats"] });
       toast({ title: isEdit ? "Güncellendi" : "Kaydedildi" });
       onOpenChange(false);
     },
@@ -103,13 +123,25 @@ function ExpenseDialog({
       toast({ title: "Tüm zorunlu alanları doldurun", variant: "destructive" });
       return;
     }
-    mutate.mutate({ type, category, amount: String(parseFloat(amount.replace(",", "."))), date, notes: notes || null });
+    if (isBmPrepayment && !employeeId) {
+      toast({ title: "Danışman seçimi zorunlu", variant: "destructive" });
+      return;
+    }
+    mutate.mutate({
+      type,
+      category,
+      amount: String(parseFloat(amount.replace(",", "."))),
+      date,
+      notes: notes || null,
+      employeeId: isBmPrepayment ? Number(employeeId) : null,
+    });
   };
 
   // Reset category when type changes
   const handleTypeChange = (t: "income" | "expense") => {
     setType(t);
     setCategory("");
+    setEmployeeId("");
   };
 
   return (
@@ -153,6 +185,21 @@ function ExpenseDialog({
             <Label className="text-xs mb-1 block">Kategori *</Label>
             <CategorySelect type={type} value={category} onChange={setCategory} />
           </div>
+
+          {/* Employee picker — only for BM Payı Ön Ödemesi */}
+          {isBmPrepayment && (
+            <div>
+              <Label className="text-xs mb-1 block">Danışman *</Label>
+              <EmployeePicker
+                employees={employees.map((e) => ({ id: e.id, name: e.candidateName }))}
+                value={employeeId ? Number(employeeId) : null}
+                onChange={(id) => setEmployeeId(id ? String(id) : "")}
+              />
+              <p className="text-[10px] text-muted-foreground mt-1">
+                Ödeme tarihine göre danışmanın mevcut cap dönemine eklenir.
+              </p>
+            </div>
+          )}
 
           {/* Amount + Date */}
           <div className="grid grid-cols-2 gap-3">
@@ -225,6 +272,8 @@ export default function Expenses() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/office-expenses"] });
       qc.invalidateQueries({ queryKey: ["/api/office-expenses/monthly-pl"] });
+      qc.invalidateQueries({ queryKey: ["/api/employees/cap-statuses"] });
+      qc.invalidateQueries({ queryKey: ["/api/coaching/stats"] });
       toast({ title: "Silindi" });
     },
     onError: () => toast({ title: "Silinemedi", variant: "destructive" }),
@@ -248,7 +297,7 @@ export default function Expenses() {
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h1 className="text-2xl font-display font-bold flex items-center gap-2">
-              <Receipt className="h-6 w-6 text-primary" /> Masraflar
+              <Receipt className="h-6 w-6 text-primary" /> Masraflar & Ek Gelirler
             </h1>
             <p className="text-sm text-muted-foreground mt-0.5">Aylık gelir ve gider kayıtları</p>
           </div>
@@ -340,6 +389,9 @@ export default function Expenses() {
                   </div>
                   <div>
                     <p className="text-sm font-medium">{row.category}</p>
+                    {row.employeeName && (
+                      <p className="text-xs text-blue-700 font-medium truncate">{row.employeeName}</p>
+                    )}
                     {row.notes && <p className="text-xs text-muted-foreground truncate">{row.notes}</p>}
                   </div>
                   <div>

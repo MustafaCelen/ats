@@ -1722,7 +1722,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             saleValue: normNum(first["İşlem Değeri"] ?? first["Kapanış Rakamı"] ?? first["Satış Bedeli"]) ?? "0",
             commissionRate: normNum(first["BHB Oranı"] ?? first["Komisyon Oranı (%)"]) || "2",
             openingPrice: normNum(first["Açılış Rakamı"] || null),
-            durationDays: first["Süre/Gün"] ? parseInt(first["Süre/Gün"]) : null,
+            durationDays: (() => {
+              const v = first["Süre/Gün"] ? parseInt(first["Süre/Gün"]) : null;
+              // Reject absurd values (e.g. CSV with date misparsed as int) — anything beyond ~10 years is bogus
+              return v && v > 0 && v <= 3650 ? v : null;
+            })(),
             customerSource: first["Müşteri nereden buldu?"] || null,
             referralInfo: first["Yönlendirme Bilgisi"] || null,
             contractStartDate,
