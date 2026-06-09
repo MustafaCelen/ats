@@ -21,7 +21,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Handshake, Plus, Trash2, TrendingUp, DollarSign, Users,
   AlertCircle, CheckCircle2, Settings, Pencil,
-  Download, Upload, MessageCircle,
+  Download, Upload, MessageCircle, ChevronUp, ChevronDown,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { DEAL_TYPES, DEAL_CATEGORIES, type DealCategory, type CapStatus, type ClosingWithDetails } from "@shared/schema";
@@ -1555,6 +1555,9 @@ export default function Closings() {
   const [statusFilter, setStatusFilter] = useState<"all" | "completed" | "expected">("all");
   const [yearFilter, setYearFilter] = useState("all");
   const [monthFilter, setMonthFilter] = useState("all");
+  // null sortKey = default order (closingId DESC)
+  const [sortKey, setSortKey] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const PAGE_SIZE = 50;
 
   const topScrollRef = useRef<HTMLDivElement>(null);
@@ -1801,20 +1804,53 @@ export default function Closings() {
         row.closingDate.includes(q)
       );
     }
-    // Sort by closingId DESC so newest closings first AND agents of same closing stay together
-    rows = [...rows].sort((a, b) => b.closingId - a.closingId);
-    // Recalculate isFirstOfClosing within the filtered+sorted result set — the original
-    // flag may be stale after any filter that drops the original first agent.
+    // Default order: closingId DESC. Custom column sort overrides it.
+    const collator = new Intl.Collator("tr", { sensitivity: "base" });
+    const cmpNum = (a: string, b: string) => parseFloat(a || "0") - parseFloat(b || "0");
+    const cmpStr = (a: string, b: string) => collator.compare(a || "", b || "");
+    const islemAdediVal = (r: FlatRow) => calcIslemOrani(r.bhbShare, r.saleValue, r.commissionRate, r.dealCategory);
+    const discountPctVal = (r: FlatRow) => {
+      const o = parseFloat(r.openingPrice || "0");
+      const s = parseFloat(r.saleValue || "0");
+      return o > 0 ? (o - s) / o * 100 : -Infinity;
+    };
+    const sortCmp = (a: FlatRow, b: FlatRow): number => {
+      if (!sortKey) return b.closingId - a.closingId;
+      let v = 0;
+      switch (sortKey) {
+        case "islemAdedi":   v = islemAdediVal(a) - islemAdediVal(b); break;
+        case "discountPct":  v = discountPctVal(a) - discountPctVal(b); break;
+        case "saleValue": case "bhbShare": case "mainBranchShare": case "kwtrKdv":
+        case "marketCenterActual": case "bmKdv": case "employeeNet": case "kasa":
+        case "nakit": case "banka": case "commissionRate": case "openingPrice":
+        case "splitPercentage": case "durationDays":
+          v = cmpNum((a as any)[sortKey], (b as any)[sortKey]); break;
+        default:
+          v = cmpStr(String((a as any)[sortKey] ?? ""), String((b as any)[sortKey] ?? ""));
+      }
+      if (v === 0) return b.closingId - a.closingId; // stable secondary
+      return sortDir === "asc" ? v : -v;
+    };
+    rows = [...rows].sort(sortCmp);
+    // Recalculate isFirstOfClosing in current order so edit/delete buttons land on
+    // the first row of each closing group regardless of sort/filter.
     const seenClosings = new Set<number>();
     return rows.map((row) => {
       const first = !seenClosings.has(row.closingId);
       if (first) seenClosings.add(row.closingId);
       return first === row.isFirstOfClosing ? row : { ...row, isFirstOfClosing: first };
     });
-  }, [flatRows, search, statusFilter, yearFilter, monthFilter]);
+  }, [flatRows, search, statusFilter, yearFilter, monthFilter, sortKey, sortDir]);
 
-  // Reset to page 1 when filters change
-  useEffect(() => { setCurrentPage(1); }, [search, statusFilter, yearFilter, monthFilter]);
+  // Reset to page 1 when filters or sort change
+  useEffect(() => { setCurrentPage(1); }, [search, statusFilter, yearFilter, monthFilter, sortKey, sortDir]);
+
+  // Click handler for column headers: cycle through asc → desc → default
+  const handleColumnSort = (key: string) => {
+    if (sortKey !== key) { setSortKey(key); setSortDir("desc"); return; }
+    if (sortDir === "desc") { setSortDir("asc"); return; }
+    setSortKey(null); setSortDir("desc");
+  };
 
   // Paginate by closing (keep agent rows of the same closing together)
   const { pagedRows, totalClosingsFiltered, totalPages } = useMemo(() => {
@@ -2313,9 +2349,54 @@ export default function Closings() {
               <table className="w-full text-xs border-collapse min-w-[2880px]">
                 <thead>
                   <tr className="border-b border-border bg-muted/40">
-                    {["Onay","Danışman","İşlem","İşlem Tipi","Taraf","İşlem Tarihi","İşlem Değeri","BHB","İşlem Adedi","KWTR","KWTR (+KDV)","PlatinKarma","PlatinKarma (KDV)","Danışman Net","Kasa","Nakit","Banka","BHB Oranı","İl","İlçe","Semt/Mahalle","Adres","Mülkle İlgili Detay","Açılış Rakamı","İndirim Oranı","Pay%","Süre/Gün","Söz. Başlangıç","Söz. Bitiş","Müşteri Kaynağı","Yönlendirme",""].map((h, i) => (
-                      <th key={`${h}-${i}`} className="text-left font-medium py-2 px-2 text-muted-foreground whitespace-nowrap text-[11px]">{h}</th>
-                    ))}
+                    {([
+                      { label: "Onay" },
+                      { label: "Danışman",            sk: "employeeName" },
+                      { label: "İşlem",               sk: "dealCategory" },
+                      { label: "İşlem Tipi",          sk: "dealType" },
+                      { label: "Taraf",               sk: "sideType" },
+                      { label: "İşlem Tarihi",        sk: "closingDate" },
+                      { label: "İşlem Değeri",        sk: "saleValue" },
+                      { label: "BHB",                 sk: "bhbShare" },
+                      { label: "İşlem Adedi",         sk: "islemAdedi" },
+                      { label: "KWTR",                sk: "mainBranchShare" },
+                      { label: "KWTR (+KDV)",         sk: "kwtrKdv" },
+                      { label: "PlatinKarma",         sk: "marketCenterActual" },
+                      { label: "PlatinKarma (KDV)",   sk: "bmKdv" },
+                      { label: "Danışman Net",        sk: "employeeNet" },
+                      { label: "Kasa",                sk: "kasa" },
+                      { label: "Nakit",               sk: "nakit" },
+                      { label: "Banka",               sk: "banka" },
+                      { label: "BHB Oranı",           sk: "commissionRate" },
+                      { label: "İl",                  sk: "il" },
+                      { label: "İlçe",                sk: "ilce" },
+                      { label: "Semt/Mahalle",        sk: "mahalle" },
+                      { label: "Adres",               sk: "propertyAddress" },
+                      { label: "Mülkle İlgili Detay", sk: "propertyDetails" },
+                      { label: "Açılış Rakamı",       sk: "openingPrice" },
+                      { label: "İndirim Oranı",       sk: "discountPct" },
+                      { label: "Pay%",                sk: "splitPercentage" },
+                      { label: "Süre/Gün",            sk: "durationDays" },
+                      { label: "Söz. Başlangıç",      sk: "contractStartDate" },
+                      { label: "Söz. Bitiş",          sk: "contractEndDate" },
+                      { label: "Müşteri Kaynağı",     sk: "customerSource" },
+                      { label: "Yönlendirme",         sk: "referralInfo" },
+                      { label: "" },
+                    ] as Array<{ label: string; sk?: string }>).map((col, i) => {
+                      const isActive = col.sk && sortKey === col.sk;
+                      const arrow = !col.sk ? null : isActive
+                        ? (sortDir === "asc" ? <ChevronUp className="ml-0.5 h-3 w-3 inline opacity-80" /> : <ChevronDown className="ml-0.5 h-3 w-3 inline opacity-80" />)
+                        : <ChevronUp className="ml-0.5 h-3 w-3 inline opacity-20" />;
+                      return (
+                        <th
+                          key={`${col.label}-${i}`}
+                          onClick={col.sk ? () => handleColumnSort(col.sk!) : undefined}
+                          className={`text-left font-medium py-2 px-2 text-muted-foreground whitespace-nowrap text-[11px] ${col.sk ? "cursor-pointer select-none hover:text-foreground" : ""} ${isActive ? "text-foreground" : ""}`}
+                        >
+                          {col.label}{arrow}
+                        </th>
+                      );
+                    })}
                   </tr>
                 </thead>
                 <tbody>

@@ -8,7 +8,7 @@ import {
 import {
   TrendingUp, DollarSign, Users, Handshake,
   ChevronLeft, ChevronRight, Calendar, BarChart2,
-  ChevronUp, ChevronDown,
+  ChevronUp, ChevronDown, Sparkles, Trophy,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -769,6 +769,75 @@ export default function FinancialReports() {
             </div>
           );
         })()}
+
+        {/* ── First-timers + New cappers (period highlights) ── */}
+        <div className="grid lg:grid-cols-2 gap-6">
+          {/* First-time closers */}
+          <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+            <div className="px-5 py-4 border-b border-border flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-indigo-500" />
+              <div>
+                <h2 className="text-base font-semibold">İlk Defa İşlem Yapanlar</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">Bu dönemde ilk kapanışını yapan danışmanlar</p>
+              </div>
+              <span className="ml-auto text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-full px-2 py-0.5">
+                {(stats?.firstTimers ?? []).length}
+              </span>
+            </div>
+            <div className="max-h-64 overflow-y-auto">
+              {isLoading ? (
+                <div className="p-5 space-y-2">{[...Array(3)].map((_, i) => <div key={i} className="h-7 bg-muted/40 rounded animate-pulse" />)}</div>
+              ) : (stats?.firstTimers ?? []).length === 0 ? (
+                <div className="px-5 py-8 text-center text-sm text-muted-foreground">Bu dönem için yok</div>
+              ) : (
+                <ul className="divide-y divide-border/50">
+                  {(stats?.firstTimers ?? []).map((p: any) => (
+                    <li key={p.employeeId} className="px-5 py-2.5 flex items-center gap-3 text-sm hover-elevate transition-colors">
+                      <span className="font-medium flex-1 truncate">{p.name}</span>
+                      {p.kwuid && <span className="text-[10px] text-muted-foreground">{p.kwuid}</span>}
+                      <span className="text-xs text-muted-foreground tabular-nums">
+                        {format(new Date(p.firstDate), "d MMM yyyy", { locale: tr })}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+
+          {/* New cappers */}
+          <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+            <div className="px-5 py-4 border-b border-border flex items-center gap-2">
+              <Trophy className="h-4 w-4 text-amber-500" />
+              <div>
+                <h2 className="text-base font-semibold">Yeni Capper Olanlar</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">Bu dönemde cap'ini dolduran danışmanlar</p>
+              </div>
+              <span className="ml-auto text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200 rounded-full px-2 py-0.5">
+                {(stats?.newCappers ?? []).length}
+              </span>
+            </div>
+            <div className="max-h-64 overflow-y-auto">
+              {isLoading ? (
+                <div className="p-5 space-y-2">{[...Array(3)].map((_, i) => <div key={i} className="h-7 bg-muted/40 rounded animate-pulse" />)}</div>
+              ) : (stats?.newCappers ?? []).length === 0 ? (
+                <div className="px-5 py-8 text-center text-sm text-muted-foreground">Bu dönem için yok</div>
+              ) : (
+                <ul className="divide-y divide-border/50">
+                  {(stats?.newCappers ?? []).map((p: any) => (
+                    <li key={p.employeeId} className="px-5 py-2.5 flex items-center gap-3 text-sm hover-elevate transition-colors">
+                      <span className="font-medium flex-1 truncate">{p.name}</span>
+                      {p.kwuid && <span className="text-[10px] text-muted-foreground">{p.kwuid}</span>}
+                      <span className="text-xs text-muted-foreground tabular-nums" title={`Cap: ${fmtTRY(p.capAmount)}`}>
+                        {format(new Date(p.capDate), "d MMM yyyy", { locale: tr })}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </div>
 
         {/* ── Cap Reset Calendar ── */}
         <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">

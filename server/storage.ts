@@ -2593,6 +2593,131 @@ export class DatabaseStorage implements IStorage {
     const avgRentalDaysByIlce   = buildGeoMap(rentalDurations, "ilce",    "ilce");
     const avgRentalDaysByMahalle= buildGeoMap(rentalDurations, "mahalle", "mahalle");
 
+    // ── First-time closers in this period ──
+    // Employees whose earliest-ever completed closing falls inside [startDate, end].
+    const firstDateRows = await db
+      .select({
+        employeeId: closingAgents.employeeId,
+        firstDate: sql<Date>`MIN(${effectiveDate})`,
+      })
+      .from(closingAgents)
+      .innerJoin(closingSides, eq(closingAgents.closingSideId, closingSides.id))
+      .innerJoin(closings, eq(closingSides.closingId, closings.id))
+      .where(and(
+        sql`${effectiveStatus} = 'completed'`,
+        sql`${effectiveDate} IS NOT NULL`,
+      ))
+      .groupBy(closingAgents.employeeId);
+
+    const firstTimers: Array<{ employeeId: number; name: string; kwuid: string; firstDate: string }> = [];
+    for (const r of firstDateRows) {
+      if (!r.employeeId || !r.firstDate) continue;
+      const fd = new Date(r.firstDate);
+      if (fd >= startDate && fd <= end) {
+        const emp = empMap.get(r.employeeId);
+        if (emp) firstTimers.push({
+          employeeId: r.employeeId,
+          name: emp.name, kwuid: emp.kwuid,
+          firstDate: fd.toISOString().split("T")[0],
+        });
+      }
+    }
+    firstTimers.sort((a, b) => a.firstDate.localeCompare(b.firstDate));
+
+    // ── New cappers in this period ──
+    // Walk per-employee closings chronologically since their cap period start; find the
+    // closing that pushed cumulative BM ≥ capAmount. If that date falls in the report
+    // range, the agent is a new capper this period.
+    const empCapRows = await db
+      .select({
+        id: employees.id,
+        capMonth: employees.capMonth,
+        capValue: employees.capValue,
+      })
+      .from(employees)
+      .where(eq(employees.status, "active"));
+    const capSettingRowsForNew = await db.select().from(capSettings);
+    const capSettingByYearFN = new Map(capSettingRowsForNew.map(s => [s.year, parseFloat(s.amount)]));
+
+    const TR_MONTHS_FN: Record<string, number> = {
+      "Ocak": 1, "Şubat": 2, "Mart": 3, "Nisan": 4, "Mayıs": 5, "Haziran": 6,
+      "Temmuz": 7, "Ağustos": 8, "Eylül": 9, "Ekim": 10, "Kasım": 11, "Aralık": 12,
+    };
+    const nowFN = new Date();
+    const currentYearFN = nowFN.getFullYear();
+    const currentMonthFN = nowFN.getMonth() + 1;
+
+    const empCapInfo = new Map<number, { capAmount: number; periodStart: Date }>();
+    let minPeriodStart: Date | null = null;
+    for (const e of empCapRows) {
+      if (!e.capMonth) continue;
+      const trimmed = e.capMonth.trim();
+      let capMonthNum = TR_MONTHS_FN[trimmed];
+      if (!capMonthNum) {
+        const parts = trimmed.split("-");
+        capMonthNum = parseInt(parts[1] ?? parts[0], 10);
+      }
+      if (isNaN(capMonthNum) || capMonthNum < 1 || capMonthNum > 12) continue;
+      const capYear = currentMonthFN >= capMonthNum ? currentYearFN : currentYearFN - 1;
+      const periodStart = new Date(capYear, capMonthNum - 1, 1);
+      const empCapValue = e.capValue ? parseFloat(e.capValue) : null;
+      const capAmount = empCapValue && empCapValue > 0
+        ? empCapValue
+        : (capSettingByYearFN.get(capYear) ?? 0);
+      if (capAmount <= 0) continue;
+      empCapInfo.set(e.id, { capAmount, periodStart });
+      if (!minPeriodStart || periodStart < minPeriodStart) minPeriodStart = periodStart;
+    }
+
+    const newCappers: Array<{ employeeId: number; name: string; kwuid: string; capDate: string; capAmount: number }> = [];
+    if (minPeriodStart && empCapInfo.size > 0) {
+      const capPeriodRows = await db
+        .select({
+          employeeId: closingAgents.employeeId,
+          effDate: effectiveDate,
+          bm: closingAgents.marketCenterActual,
+        })
+        .from(closingAgents)
+        .innerJoin(closingSides, eq(closingAgents.closingSideId, closingSides.id))
+        .innerJoin(closings, eq(closingSides.closingId, closings.id))
+        .where(and(
+          sql`${effectiveDate} IS NOT NULL`,
+          sql`${effectiveDate} >= ${minPeriodStart}`,
+          inArray(closingAgents.employeeId, Array.from(empCapInfo.keys())),
+        ));
+
+      const byEmp = new Map<number, Array<{ date: Date; bm: number }>>();
+      for (const r of capPeriodRows) {
+        if (!r.employeeId || !r.effDate) continue;
+        if (!byEmp.has(r.employeeId)) byEmp.set(r.employeeId, []);
+        byEmp.get(r.employeeId)!.push({ date: new Date(r.effDate), bm: parseFloat(r.bm ?? "0") });
+      }
+
+      for (const [empId, rows] of byEmp) {
+        const info = empCapInfo.get(empId);
+        if (!info) continue;
+        const inPeriod = rows
+          .filter(r => r.date >= info.periodStart)
+          .sort((a, b) => a.date.getTime() - b.date.getTime());
+        let running = 0;
+        let capDate: Date | null = null;
+        for (const r of inPeriod) {
+          running += r.bm;
+          if (running >= info.capAmount) { capDate = r.date; break; }
+        }
+        if (capDate && capDate >= startDate && capDate <= end) {
+          const emp = empMap.get(empId);
+          if (emp) newCappers.push({
+            employeeId: empId,
+            name: emp.name, kwuid: emp.kwuid,
+            capDate: capDate.toISOString().split("T")[0],
+            capAmount: info.capAmount,
+          });
+        }
+      }
+      newCappers.sort((a, b) => a.capDate.localeCompare(b.capDate));
+    }
+
     return {
       completedCount: Math.round(completedIslem),
       expectedCount: Math.round(expectedIslem),
@@ -2603,6 +2728,7 @@ export class DatabaseStorage implements IStorage {
       byIl, byIlce, byMahalle,
       avgSaleDays, avgSaleDaysByIl, avgSaleDaysByIlce, avgSaleDaysByMahalle,
       avgRentalDays, avgRentalDaysByIl, avgRentalDaysByIlce, avgRentalDaysByMahalle,
+      firstTimers, newCappers,
     };
   }
 
