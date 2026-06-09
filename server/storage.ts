@@ -2609,7 +2609,7 @@ export class DatabaseStorage implements IStorage {
       ))
       .groupBy(closingAgents.employeeId);
 
-    const firstTimers: Array<{ employeeId: number; name: string; kwuid: string; firstDate: string }> = [];
+    const firstTimers: Array<{ employeeId: number; name: string; kwuid: string; firstDate: string; bhb: number; bm: number }> = [];
     for (const r of firstDateRows) {
       if (!r.employeeId || !r.firstDate) continue;
       const fd = new Date(r.firstDate);
@@ -2619,10 +2619,40 @@ export class DatabaseStorage implements IStorage {
           employeeId: r.employeeId,
           name: emp.name, kwuid: emp.kwuid,
           firstDate: fd.toISOString().split("T")[0],
+          bhb: 0, bm: 0,
         });
       }
     }
     firstTimers.sort((a, b) => a.firstDate.localeCompare(b.firstDate));
+
+    // Fetch BHB for each first-timer's first closing
+    if (firstTimers.length > 0) {
+      const empIds = firstTimers.map(ft => ft.employeeId);
+      const bhbRows = await db
+        .select({
+          employeeId: closingAgents.employeeId,
+          effDate: effectiveDate,
+          bhbShare: closingAgents.bhbShare,
+          bm: closingAgents.marketCenterActual,
+        })
+        .from(closingAgents)
+        .innerJoin(closingSides, eq(closingAgents.closingSideId, closingSides.id))
+        .innerJoin(closings, eq(closingSides.closingId, closings.id))
+        .where(and(
+          sql`${effectiveStatus} = 'completed'`,
+          sql`${effectiveDate} IS NOT NULL`,
+          inArray(closingAgents.employeeId, empIds),
+        ));
+      for (const r of bhbRows) {
+        if (!r.employeeId || !r.effDate) continue;
+        const dateStr = new Date(r.effDate).toISOString().split("T")[0];
+        const ft = firstTimers.find(f => f.employeeId === r.employeeId);
+        if (ft && dateStr === ft.firstDate) {
+          ft.bhb += parseFloat(String(r.bhbShare) || "0");
+          ft.bm  += parseFloat(String(r.bm) || "0");
+        }
+      }
+    }
 
     // ── New cappers in this period ──
     // Walk per-employee closings chronologically since their cap period start; find the

@@ -794,7 +794,12 @@ export default function FinancialReports() {
                   {(stats?.firstTimers ?? []).map((p: any) => (
                     <li key={p.employeeId} className="px-5 py-2.5 flex items-center gap-3 text-sm hover-elevate transition-colors">
                       <span className="font-medium flex-1 truncate">{p.name}</span>
-                      {p.kwuid && <span className="text-[10px] text-muted-foreground">{p.kwuid}</span>}
+                      {p.bhb > 0 && (
+                        <span className="text-xs font-medium text-emerald-600 tabular-nums" title="BHB Payı">{fmtTRY(p.bhb)}</span>
+                      )}
+                      {p.bm > 0 && (
+                        <span className="text-xs font-medium text-blue-600 tabular-nums" title="BM Payı">{fmtTRY(p.bm)}</span>
+                      )}
                       <span className="text-xs text-muted-foreground tabular-nums">
                         {format(new Date(p.firstDate), "d MMM yyyy", { locale: tr })}
                       </span>
@@ -827,7 +832,6 @@ export default function FinancialReports() {
                   {(stats?.newCappers ?? []).map((p: any) => (
                     <li key={p.employeeId} className="px-5 py-2.5 flex items-center gap-3 text-sm hover-elevate transition-colors">
                       <span className="font-medium flex-1 truncate">{p.name}</span>
-                      {p.kwuid && <span className="text-[10px] text-muted-foreground">{p.kwuid}</span>}
                       <span className="text-xs text-muted-foreground tabular-nums" title={`Cap: ${fmtTRY(p.capAmount)}`}>
                         {format(new Date(p.capDate), "d MMM yyyy", { locale: tr })}
                       </span>
