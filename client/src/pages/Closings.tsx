@@ -265,6 +265,9 @@ interface AgentInputRow {
   bmKdvRatePct: string; // BM KDV rate as % of BHB, e.g. "0.40" = 0.40%
   ukShare: string;
   employeeNet: string;
+  closingDate: string; // per-agent transaction date (YYYY-MM-DD); "" = inherit from parent closing
+  status: string;       // "completed" | "expected" | "" (inherit)
+  paymentCollected: boolean; // BM payı tahsil edildi mi
   isManuallyEdited: boolean; // true = user has changed at least one field
 }
 
@@ -289,6 +292,9 @@ function newAgent(): AgentInputRow {
     bmKdvRatePct: "0.40",
     ukShare: "",
     employeeNet: "",
+    closingDate: "",
+    status: "",
+    paymentCollected: false,
     isManuallyEdited: false,
   };
 }
@@ -407,6 +413,8 @@ function SideSection({
   employees,
   capStatuses,
   runningCapUsed,
+  defaultClosingDate,
+  defaultStatus,
 }: {
   sideLabel: string;
   sideKey: "buyer" | "seller" | "referral";
@@ -417,19 +425,28 @@ function SideSection({
   employees: any[];
   capStatuses: Record<number, CapStatus>;
   runningCapUsed: Record<number, number>;
+  defaultClosingDate: string;
+  defaultStatus: string;
 }) {
   const activeEmployees = employees.filter((e) => e.status === "active");
+  const newAgentWithDefaults = () => ({
+    ...newAgent(),
+    closingDate: defaultClosingDate,
+    status: defaultStatus,
+    // Completed transactions are paid by default; expected ones aren't.
+    paymentCollected: defaultStatus === "completed",
+  });
 
   const toggle = () => {
     if (side.enabled) {
-      setSide({ enabled: false, agents: [newAgent()] });
+      setSide({ enabled: false, agents: [newAgentWithDefaults()] });
     } else {
-      setSide({ enabled: true, agents: [newAgent()] });
+      setSide({ enabled: true, agents: [newAgentWithDefaults()] });
     }
   };
 
   const addAgent = () => {
-    setSide({ ...side, agents: [...side.agents, newAgent()] });
+    setSide({ ...side, agents: [...side.agents, newAgentWithDefaults()] });
   };
 
   const removeAgent = (id: string) => {
@@ -533,7 +550,14 @@ function SideSection({
                       value={agent.employeeId}
                       onChange={(id) => {
                         if (id == null) return;
-                        updateAgent(agent.id, { ...newAgent(), id: agent.id, employeeId: id, splitPercentage: agent.splitPercentage });
+                        updateAgent(agent.id, {
+                          ...newAgentWithDefaults(),
+                          id: agent.id,
+                          employeeId: id,
+                          splitPercentage: agent.splitPercentage,
+                          closingDate: agent.closingDate || defaultClosingDate,
+                          status: agent.status || defaultStatus,
+                        });
                       }}
                       triggerClassName="h-8 text-xs"
                     />
@@ -545,7 +569,14 @@ function SideSection({
                       max="100"
                       step="0.01"
                       value={agent.splitPercentage}
-                      onChange={(e) => updateAgent(agent.id, { ...newAgent(), id: agent.id, employeeId: agent.employeeId, splitPercentage: e.target.value })}
+                      onChange={(e) => updateAgent(agent.id, {
+                        ...newAgentWithDefaults(),
+                        id: agent.id,
+                        employeeId: agent.employeeId,
+                        splitPercentage: e.target.value,
+                        closingDate: agent.closingDate || defaultClosingDate,
+                        status: agent.status || defaultStatus,
+                      })}
                       className="h-8 text-xs text-right"
                       placeholder="% Pay"
                     />
@@ -556,6 +587,49 @@ function SideSection({
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   )}
+                </div>
+
+                {/* Per-agent date + approval status */}
+                <div className="flex items-center gap-2 ml-5">
+                  <span className="text-xs text-muted-foreground w-28 shrink-0">İşlem Tarihi</span>
+                  <Input
+                    type="date"
+                    value={agent.closingDate}
+                    onChange={(e) => updateAgent(agent.id, { ...agent, closingDate: e.target.value, isManuallyEdited: true })}
+                    className="h-7 text-xs flex-1"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextStatus = agent.status === "completed" ? "expected" : "completed";
+                      updateAgent(agent.id, {
+                        ...agent,
+                        status: nextStatus,
+                        // Auto-flip payment: completed default = paid, expected default = unpaid.
+                        paymentCollected: nextStatus === "completed",
+                        isManuallyEdited: true,
+                      });
+                    }}
+                    className={`h-7 px-2 text-xs rounded border transition-colors shrink-0 ${
+                      agent.status === "completed"
+                        ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
+                        : "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100"
+                    }`}
+                  >
+                    {agent.status === "completed" ? "✓ Onaylı" : "⏳ Beklemede"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => updateAgent(agent.id, { ...agent, paymentCollected: !agent.paymentCollected, isManuallyEdited: true })}
+                    className={`h-7 px-2 text-xs rounded border transition-colors shrink-0 ${
+                      agent.paymentCollected
+                        ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
+                        : "bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100"
+                    }`}
+                    title="BM payı tahsil edildi mi?"
+                  >
+                    {agent.paymentCollected ? "💰 Tahsil Edildi" : "💸 Bekliyor"}
+                  </button>
                 </div>
 
                 {/* Editable breakdown */}
@@ -1102,6 +1176,9 @@ function NewClosingDialog({
           })(),
           ukShare: a.ukShare ?? "",
           employeeNet: a.employeeNet ?? "",
+          closingDate: a.closingDate ? new Date(a.closingDate).toISOString().split("T")[0] : "",
+          status: a.status ?? "",
+          paymentCollected: !!a.paymentCollected,
           isManuallyEdited: true,
         })),
       };
@@ -1156,6 +1233,9 @@ function NewClosingDialog({
         kasa: a.kasa || "0",
         nakit: a.nakit || "0",
         banka: a.banka || "0",
+        closingDate: a.closingDate || null,
+        status: a.status || null,
+        paymentCollected: a.paymentCollected,
       }));
 
     const sides = [];
@@ -1407,6 +1487,8 @@ function NewClosingDialog({
                 employees={employees}
                 capStatuses={capStatuses}
                 runningCapUsed={buyerRunningCap}
+                defaultClosingDate={closingDate}
+                defaultStatus={isExpected ? "expected" : "completed"}
               />
               <SideSection
                 sideLabel="Satıcı Tarafı"
@@ -1418,6 +1500,8 @@ function NewClosingDialog({
                 employees={employees}
                 capStatuses={capStatuses}
                 runningCapUsed={sellerRunningCap}
+                defaultClosingDate={closingDate}
+                defaultStatus={isExpected ? "expected" : "completed"}
               />
               <SideSection
                 sideLabel="Yönlendirme Tarafı"
@@ -1429,6 +1513,8 @@ function NewClosingDialog({
                 employees={employees}
                 capStatuses={capStatuses}
                 runningCapUsed={referralRunningCap}
+                defaultClosingDate={closingDate}
+                defaultStatus={isExpected ? "expected" : "completed"}
               />
             </div>
           </section>
@@ -1515,58 +1601,100 @@ export default function Closings() {
   const { data: capStatuses = {} } = useCapStatuses();
   const deleteClosing = useDeleteClosing();
 
-  // Available years from all closings (use closingDate or createdAt as fallback)
+  // Available years from all agents (use agent's effective date or createdAt fallback)
   const availableYears = useMemo(() => {
     const years = new Set<string>();
     for (const c of closings) {
-      const d = (c as any).closingDate ?? (c as any).createdAt;
-      if (d) years.add(new Date(d).getFullYear().toString());
+      for (const side of c.sides) {
+        for (const agent of side.agents) {
+          const d = (agent as any).closingDate ?? (c as any).closingDate ?? (c as any).createdAt;
+          if (d) years.add(new Date(d).getFullYear().toString());
+        }
+      }
+      // Always include closing-level even if it has no agents
+      if (!c.sides.length || !c.sides.some(s => s.agents.length > 0)) {
+        const d = (c as any).closingDate ?? (c as any).createdAt;
+        if (d) years.add(new Date(d).getFullYear().toString());
+      }
     }
     return Array.from(years).sort((a, b) => b.localeCompare(a));
   }, [closings]);
 
-  // Year + month filtered closings for stats and table
-  const yearFilteredClosings = useMemo(() =>
-    (yearFilter === "all" && monthFilter === "all") ? closings : closings.filter((c: any) => {
-      const d = (c as any).status === "expected"
-        ? ((c as any).closingDate ?? (c as any).createdAt)
-        : (c as any).closingDate;
-      if (!d) return false;
-      const ds = String(d);
-      const matchYear = yearFilter === "all" || ds.slice(0, 4) === yearFilter;
-      const matchMonth = monthFilter === "all" || ds.slice(5, 7) === monthFilter;
+  // Per-agent rows (with effective date/status from agent OR fallback to closing)
+  // Used for both upper summary cards AND list view, so onay/tarih danışman bazında ilerler.
+  const agentRowsAll = useMemo(() => {
+    const rows: Array<{
+      closing: any; agent: any; sideType: string;
+      effectiveDate: string | null; effectiveStatus: string;
+    }> = [];
+    for (const c of closings) {
+      for (const side of c.sides) {
+        for (const agent of side.agents) {
+          const agentDate = (agent as any).closingDate ?? null;
+          const agentStatus = (agent as any).status ?? null;
+          const effDateRaw = agentDate ?? (c as any).closingDate ?? null;
+          const effDate = effDateRaw ? new Date(effDateRaw).toISOString().split("T")[0] : null;
+          const effStatus = agentStatus ?? (c as any).status ?? "completed";
+          rows.push({ closing: c, agent, sideType: side.sideType, effectiveDate: effDate, effectiveStatus: effStatus });
+        }
+      }
+    }
+    return rows;
+  }, [closings]);
+
+  // Year + month filtered AGENT rows for stats
+  const yearFilteredAgentRows = useMemo(() => {
+    if (yearFilter === "all" && monthFilter === "all") return agentRowsAll;
+    return agentRowsAll.filter(r => {
+      const dRef = r.effectiveStatus === "expected"
+        ? (r.effectiveDate ?? ((r.closing as any).createdAt ? new Date((r.closing as any).createdAt).toISOString().split("T")[0] : null))
+        : r.effectiveDate;
+      if (!dRef) return false;
+      const matchYear = yearFilter === "all" || dRef.slice(0, 4) === yearFilter;
+      const matchMonth = monthFilter === "all" || dRef.slice(5, 7) === monthFilter;
       return matchYear && matchMonth;
-    }), [closings, yearFilter, monthFilter]);
+    });
+  }, [agentRowsAll, yearFilter, monthFilter]);
 
-  // Summary stats
-  const completedClosings = yearFilteredClosings.filter((c) => (c as any).status !== "expected");
-  const expectedClosings = yearFilteredClosings.filter((c) => (c as any).status === "expected");
+  const completedAgentRows = yearFilteredAgentRows.filter(r => r.effectiveStatus !== "expected");
+  const expectedAgentRows  = yearFilteredAgentRows.filter(r => r.effectiveStatus === "expected");
 
-  const sumSides = (list: typeof closings) => list.reduce((s, c) => {
-    const sale = parseFloat(c.saleValue ?? "0");
-    const perSideBhb = (c as any).dealCategory === "Kiralık"
-      ? sale / 2
-      : sale * parseFloat(c.commissionRate ?? "0") / 100;
-    if (perSideBhb <= 0) return s;
-    return s + c.sides.reduce((ss, side) =>
-      ss + side.agents.reduce((sa, a) => sa + parseFloat(a.bhbShare ?? "0") / perSideBhb, 0), 0);
+  // Fractional işlem adedi per agent (BHB share / per-side BHB)
+  const sumIslemAdetAgents = (rows: typeof agentRowsAll) => rows.reduce((s, r) => {
+    const sale = parseFloat(r.closing.saleValue ?? "0");
+    const perSide = r.closing.dealCategory === "Kiralık" ? sale / 2 : sale * parseFloat(r.closing.commissionRate ?? "0") / 100;
+    if (perSide <= 0) return s;
+    return s + parseFloat(r.agent.bhbShare ?? "0") / perSide;
   }, 0);
-  const sumVolume = (list: typeof closings) => list.reduce((s, c) => s + parseFloat(c.saleValue ?? "0"), 0);
-  const sumBHB = (list: typeof closings) => list.reduce((s, c) =>
-    s + c.sides.reduce((ss, side) =>
-      ss + side.agents.reduce((sa, a) => sa + parseFloat(a.bhbShare ?? "0"), 0), 0), 0);
-  const sumBM = (list: typeof closings) => list.reduce((s, c) =>
-    s + c.sides.reduce((ss, side) =>
-      ss + side.agents.reduce((sa, a) => sa + parseFloat(a.marketCenterActual ?? "0"), 0), 0), 0);
+  const sumBHBAgents = (rows: typeof agentRowsAll) => rows.reduce((s, r) => s + parseFloat(r.agent.bhbShare ?? "0"), 0);
+  const sumBMAgents  = (rows: typeof agentRowsAll) => rows.reduce((s, r) => s + parseFloat(r.agent.marketCenterActual ?? "0"), 0);
+  // Volume = sum of unique closing sale values. Mixed-status closings (≥1 completed agent
+  // + ≥1 expected agent) go to "completed" only — avoids double counting in Toplam row.
+  const completedClosingIds = useMemo(() => {
+    const ids = new Set<number>();
+    for (const r of completedAgentRows) ids.add(r.closing.id);
+    return ids;
+  }, [completedAgentRows]);
+  const sumVolumeAgents = (rows: typeof agentRowsAll, excludeIds?: Set<number>) => {
+    const seen = new Set<number>();
+    let total = 0;
+    for (const r of rows) {
+      if (seen.has(r.closing.id)) continue;
+      if (excludeIds?.has(r.closing.id)) continue;
+      seen.add(r.closing.id);
+      total += parseFloat(r.closing.saleValue ?? "0");
+    }
+    return total;
+  };
 
-  const completedSides = sumSides(completedClosings);
-  const expectedSides = sumSides(expectedClosings);
-  const completedVolume = sumVolume(completedClosings);
-  const expectedVolume = sumVolume(expectedClosings);
-  const completedBHB = sumBHB(completedClosings);
-  const expectedBHB = sumBHB(expectedClosings);
-  const completedBM = sumBM(completedClosings);
-  const expectedBM = sumBM(expectedClosings);
+  const completedSides = sumIslemAdetAgents(completedAgentRows);
+  const expectedSides  = sumIslemAdetAgents(expectedAgentRows);
+  const completedVolume = sumVolumeAgents(completedAgentRows);
+  const expectedVolume  = sumVolumeAgents(expectedAgentRows, completedClosingIds);
+  const completedBHB = sumBHBAgents(completedAgentRows);
+  const expectedBHB  = sumBHBAgents(expectedAgentRows);
+  const completedBM  = sumBMAgents(completedAgentRows);
+  const expectedBM   = sumBMAgents(expectedAgentRows);
 
   // Flatten closings into one row per agent per side
   type FlatRow = {
@@ -1585,6 +1713,7 @@ export default function Closings() {
     splitPercentage: string; bhbShare: string; mainBranchShare: string;
     kwtrKdv: string; marketCenterActual: string; marketCenterDue: string;
     bmKdv: string; ukShare: string; employeeNet: string;
+    paymentCollected: boolean;
     isFirstOfClosing: boolean;
     closingAgentCount: number;
   };
@@ -1596,13 +1725,17 @@ export default function Closings() {
       const agentCount = c.sides.reduce((s, side) => s + side.agents.length, 0);
       for (const side of c.sides) {
         for (const agent of side.agents) {
+          const agentDate = (agent as any).closingDate ?? null;
+          const agentStatus = (agent as any).status ?? null;
+          const effectiveDate = agentDate ?? c.closingDate ?? null;
+          const effectiveStatus = agentStatus ?? (c as any).status ?? "completed";
           rows.push({
             closingId: c.id,
             sideId: side.id,
             agentId: agent.id,
-            status: (c as any).status ?? "completed",
+            status: effectiveStatus,
             createdAt: (c as any).createdAt ? new Date((c as any).createdAt).toISOString().split("T")[0] : "",
-            closingDate: c.closingDate ? new Date(c.closingDate).toISOString().split("T")[0] : "",
+            closingDate: effectiveDate ? new Date(effectiveDate).toISOString().split("T")[0] : "",
             propertyAddress: c.propertyAddress ?? "",
             il: (c as any).il ?? "",
             ilce: (c as any).ilce ?? "",
@@ -1636,6 +1769,7 @@ export default function Closings() {
             bmKdv: agent.bmKdv ?? "0",
             ukShare: agent.ukShare ?? "0",
             employeeNet: agent.employeeNet ?? "0",
+            paymentCollected: !!(agent as any).paymentCollected,
             isFirstOfClosing: firstOfClosing,
             closingAgentCount: agentCount,
           });
@@ -1656,19 +1790,23 @@ export default function Closings() {
       return matchYear && matchMonth;
     });
     const q = search.trim().toLowerCase();
-    if (!q) return rows;
-    const filtered = rows.filter((row) =>
-      row.propertyAddress.toLowerCase().includes(q) ||
-      row.employeeName.toLowerCase().includes(q) ||
-      row.buyerName.toLowerCase().includes(q) ||
-      row.sellerName.toLowerCase().includes(q) ||
-      row.il.toLowerCase().includes(q) ||
-      row.ilce.toLowerCase().includes(q) ||
-      row.closingDate.includes(q)
-    );
-    // Recalculate isFirstOfClosing within the filtered result set
+    if (q) {
+      rows = rows.filter((row) =>
+        row.propertyAddress.toLowerCase().includes(q) ||
+        row.employeeName.toLowerCase().includes(q) ||
+        row.buyerName.toLowerCase().includes(q) ||
+        row.sellerName.toLowerCase().includes(q) ||
+        row.il.toLowerCase().includes(q) ||
+        row.ilce.toLowerCase().includes(q) ||
+        row.closingDate.includes(q)
+      );
+    }
+    // Sort by closingId DESC so newest closings first AND agents of same closing stay together
+    rows = [...rows].sort((a, b) => b.closingId - a.closingId);
+    // Recalculate isFirstOfClosing within the filtered+sorted result set — the original
+    // flag may be stale after any filter that drops the original first agent.
     const seenClosings = new Set<number>();
-    return filtered.map((row) => {
+    return rows.map((row) => {
       const first = !seenClosings.has(row.closingId);
       if (first) seenClosings.add(row.closingId);
       return first === row.isFirstOfClosing ? row : { ...row, isFirstOfClosing: first };
@@ -1744,6 +1882,35 @@ export default function Closings() {
     return isNaN(d.getTime()) ? null : d;
   };
 
+  const handleApproveAgent = async (agentId: number, currentDate?: string | null) => {
+    const def = currentDate || new Date().toISOString().split("T")[0];
+    const date = window.prompt("Danışmanın işlem tarihini girin (GG.AA.YYYY veya YYYY-AA-GG):", def);
+    if (!date) return;
+    const parsed = parseUserDate(date);
+    if (!parsed) {
+      toast({ title: "Hata", description: "Geçersiz tarih. Örnek: 07.06.2026", variant: "destructive" });
+      return;
+    }
+    try {
+      const res = await fetch(`/api/closing-agents/${agentId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        // Approval implies payment was collected — admin can flag pending separately if needed.
+        body: JSON.stringify({ status: "completed", closingDate: parsed.toISOString(), paymentCollected: true }),
+      });
+      if (!res.ok) {
+        toast({ title: "Onaylanamadı", description: `Sunucu hatası (${res.status})`, variant: "destructive" });
+        return;
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/closings"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/employees/cap-statuses"] });
+      toast({ title: "Onaylandı", description: "Danışman işlemi onaylandı." });
+    } catch {
+      toast({ title: "Hata", description: "Güncelleme başarısız (ağ hatası).", variant: "destructive" });
+    }
+  };
+
   const handleConfirm = async (closingId: number, currentDate?: string | null) => {
     const def = currentDate && currentDate.length >= 10
       ? currentDate.slice(0, 10)
@@ -1776,19 +1943,19 @@ export default function Closings() {
     }
   };
 
-  const handleNotify = async (closingId: number) => {
-    if (!window.confirm("Bu kapanışın danışman(lar)ına WhatsApp bildirimi gönderilsin mi?")) return;
+  const handleNotifyAgent = async (agentId: number, employeeName: string) => {
+    if (!window.confirm(`${employeeName} danışmanına WhatsApp bildirimi gönderilsin mi?`)) return;
     try {
-      const res = await fetch(`/api/closings/${closingId}/notify`, { method: "POST", credentials: "include" });
+      const res = await fetch(`/api/closing-agents/${agentId}/notify`, { method: "POST", credentials: "include" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         toast({ title: "Gönderilemedi", description: data.message || `Sunucu hatası (${res.status})`, variant: "destructive" });
         return;
       }
       if (data.sent > 0) {
-        toast({ title: "Gönderildi", description: `${data.sent} danışmana WhatsApp gönderildi${data.skipped ? `, ${data.skipped} atlandı (telefon/erişim yok)` : ""}.` });
+        toast({ title: "Gönderildi", description: `${employeeName} kişisine WhatsApp gönderildi.` });
       } else {
-        toast({ title: "Gönderilemedi", description: "Telefonu kayıtlı danışman bulunamadı veya WhatsApp yapılandırılmamış.", variant: "destructive" });
+        toast({ title: "Gönderilemedi", description: "Telefonu kayıtlı değil veya WhatsApp yapılandırılmamış.", variant: "destructive" });
       }
     } catch {
       toast({ title: "Hata", description: "Bildirim gönderilemedi (ağ hatası).", variant: "destructive" });
@@ -2159,20 +2326,53 @@ export default function Closings() {
                     return (
                       <tr key={row.agentId} className={`border-b border-border/50 hover:bg-muted/30 ${row.isFirstOfClosing ? "border-t-2 border-t-border" : ""}`}>
                         <td className="px-2 py-1 whitespace-nowrap">
-                          {row.isFirstOfClosing && row.status === "expected" && (
+                          <div className="flex items-center gap-1">
+                            {row.status === "expected" ? (
+                              <button
+                                onClick={() => handleApproveAgent(row.agentId, row.closingDate)}
+                                className="inline-flex items-center gap-1 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1 text-[11px] font-semibold transition-colors"
+                                title="Danışmanı onayla"
+                              >
+                                <CheckCircle2 className="h-3 w-3" /> Onayla
+                              </button>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 text-[10px] font-medium" title="Onaylı">
+                                <CheckCircle2 className="h-2.5 w-2.5" /> Onaylı
+                              </span>
+                            )}
                             <button
-                              onClick={() => handleConfirm(row.closingId, row.closingDate)}
-                              className="inline-flex items-center gap-1 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1 text-[11px] font-semibold transition-colors"
-                              title="Kapanışı onayla"
+                              onClick={() => saveAgentField(row.agentId, "paymentCollected", String(!row.paymentCollected))}
+                              className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
+                                row.paymentCollected
+                                  ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
+                                  : "bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100"
+                              }`}
+                              title={row.paymentCollected ? "Tahsil edildi (kaldırmak için tıkla)" : "Tahsilat bekleniyor (ödendi olarak işaretle)"}
                             >
-                              <CheckCircle2 className="h-3 w-3" /> Onayla
+                              {row.paymentCollected ? "💰" : "💸"}
                             </button>
-                          )}
+                            <button
+                              onClick={() => handleNotifyAgent(row.agentId, row.employeeName)}
+                              className="text-muted-foreground hover:text-emerald-600 transition-colors p-1 rounded"
+                              title="Bu danışmana WhatsApp gönder"
+                            >
+                              <MessageCircle className="h-3.5 w-3.5" />
+                            </button>
+                            {row.isFirstOfClosing && (
+                              <button
+                                onClick={() => handleEdit(row.closingId)}
+                                className="text-muted-foreground hover:text-primary transition-colors p-1 rounded"
+                                title="Kapanışı düzenle"
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                          </div>
                         </td>
                         <td className="px-2 py-1 whitespace-nowrap font-medium text-xs">
                           <div className="flex items-center gap-1">
                             {row.employeeName}
-                            {row.isFirstOfClosing && row.status === "expected" && (
+                            {row.status === "expected" && (
                               <Badge className="text-[9px] px-1 py-0 bg-amber-100 text-amber-700 border-amber-200 border">Beklenen</Badge>
                             )}
                           </div>
@@ -2184,7 +2384,7 @@ export default function Closings() {
                             {row.sideType === "buyer" ? "Alıcı" : row.sideType === "referral" ? "Yönlendirme" : "Satıcı"}
                           </Badge>
                         </td>
-                        <td className="px-2 py-1"><InlineCell value={row.closingDate} type="date" onSave={sc("closingDate")} /></td>
+                        <td className="px-2 py-1"><InlineCell value={row.closingDate} type="date" onSave={sa("closingDate")} /></td>
                         <td className="px-2 py-1 min-w-[90px]"><InlineCell value={row.saleValue} type="number" onSave={sc("saleValue")} /></td>
                         <td className="px-2 py-1 min-w-[80px]"><InlineCell value={row.bhbShare} type="number" onSave={sa("bhbShare")} /></td>
                         <td className="px-2 py-1 min-w-[70px] text-center font-medium text-blue-700" title={row.dealCategory === "Kiralık" ? "Kiralık: BHB / (İşlem Değeri / 2)" : "BHB / (İşlem Değeri × BHB Oranı / 100)"}>
@@ -2223,17 +2423,9 @@ export default function Closings() {
                         <td className="px-2 py-1 min-w-[100px]"><InlineCell value={row.referralInfo} onSave={sc("referralInfo")} /></td>
                         <td className="px-2 py-1 text-center">
                           {row.isFirstOfClosing && (
-                            <div className="flex items-center gap-0.5">
-                              <button onClick={() => handleNotify(row.closingId)} className="text-muted-foreground hover:text-emerald-600 transition-colors p-1 rounded" title="WhatsApp bildirimi gönder">
-                                <MessageCircle className="h-3.5 w-3.5" />
-                              </button>
-                              <button onClick={() => handleEdit(row.closingId)} className="text-muted-foreground hover:text-primary transition-colors p-1 rounded" title="Kapanışı düzenle">
-                                <Pencil className="h-3.5 w-3.5" />
-                              </button>
-                              <button onClick={() => handleDelete(row.closingId)} className="text-muted-foreground hover:text-destructive transition-colors p-1 rounded" title="Kapanışı sil">
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
+                            <button onClick={() => handleDelete(row.closingId)} className="text-muted-foreground hover:text-destructive transition-colors p-1 rounded" title="Kapanışı sil">
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
                           )}
                         </td>
                       </tr>

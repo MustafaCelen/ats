@@ -21,7 +21,7 @@ function jobFilter(req: Request): number[] | undefined {
 }
 
 // Send each agent of a closing a WhatsApp breakdown of their side. Returns delivery counts.
-async function sendClosingNotifications(closingId: number): Promise<{ sent: number; skipped: number }> {
+async function sendClosingNotifications(closingId: number, agentIdFilter?: number): Promise<{ sent: number; skipped: number }> {
   let sent = 0, skipped = 0;
   const details = await storage.getClosing(closingId) as any;
   if (!details) return { sent, skipped };
@@ -29,10 +29,13 @@ async function sendClosingNotifications(closingId: number): Promise<{ sent: numb
   const sideLabel: Record<string, string> = { buyer: "Alıcı", seller: "Satıcı", referral: "Referans" };
   const fmt = (n: string | null | undefined) =>
     n ? Number(n).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—";
-  const dateStr = details.closingDate ? new Date(details.closingDate).toLocaleDateString("tr-TR") : "—";
 
   for (const side of details.sides) {
     for (const agent of side.agents) {
+      if (agentIdFilter !== undefined && agent.id !== agentIdFilter) continue;
+      // Use agent's own date if set; otherwise fallback to closing-level date
+      const agentDate = (agent as any).closingDate ?? details.closingDate;
+      const dateStr = agentDate ? new Date(agentDate).toLocaleDateString("tr-TR") : "—";
       const emp = await storage.getEmployee(agent.employeeId);
       if (!emp?.candidate?.phone) { skipped++; continue; }
       const name = emp.candidate.name ?? "Danışman";
@@ -1699,6 +1702,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
                 kasa: normNum(row["Kasa"]) ?? "0",
                 nakit: normNum(row["Nakit"]) ?? "0",
                 banka: normNum(row["Banka"]) ?? "0",
+                // Default: completed (date-set) closings are considered paid; expected ones aren't.
+                paymentCollected: !!closingDate,
               });
             }
             if (agents.length > 0) sides.push({ sideType, agents });
@@ -1770,6 +1775,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (!saleValue || !sides) {
         return res.status(400).json({ message: "saleValue and sides are required" });
       }
+      // Convert per-agent closingDate from ISO string to Date
+      const normalizedSides = (sides as any[]).map((s: any) => ({
+        ...s,
+        agents: (s.agents ?? []).map((a: any) => ({
+          ...a,
+          closingDate: a.closingDate ? new Date(a.closingDate) : null,
+          status: a.status ?? null,
+          // Default: agents approved as "completed" are paid; expected ones aren't.
+          // Admin can override via the explicit toggle in the form.
+          paymentCollected: typeof a.paymentCollected === "boolean"
+            ? a.paymentCollected
+            : (a.status === "completed"),
+        })),
+      }));
       const closing = await storage.createClosing({
         propertyAddress: propertyAddress ?? "",
         il: il ?? null,
@@ -1791,14 +1810,26 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         sellerName: sellerName ?? null,
         notes: notes ?? null,
         createdByUserId: req.user!.id,
-        sides,
+        sides: normalizedSides,
       });
       res.status(201).json(closing);
 
-      // Fire-and-forget WhatsApp notifications — only for completed closings
-      if (closing.status === "completed") {
-        sendClosingNotifications(closing.id).catch((err) => console.warn("[WhatsApp notify]", err));
-      }
+      // Fire WhatsApp per agent whose effective status is "completed".
+      // (Agent-level status overrides closing-level when explicitly set.)
+      (async () => {
+        try {
+          const details = await storage.getClosing(closing.id) as any;
+          if (!details) return;
+          for (const side of details.sides ?? []) {
+            for (const agent of side.agents ?? []) {
+              const effStatus = (agent.status ?? details.status) === "completed";
+              if (effStatus) await sendClosingNotifications(closing.id, agent.id);
+            }
+          }
+        } catch (err) {
+          console.warn("[WhatsApp notify (per-agent on create)]", err);
+        }
+      })();
     } catch (err) {
       console.error("[POST /api/closings]", err);
       res.status(500).json({ message: "Internal server error" });
@@ -1812,6 +1843,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.json(result);
     } catch (err) {
       console.error("[POST /api/closings/:id/notify]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Send WhatsApp breakdown to a single agent within a closing
+  app.post("/api/closing-agents/:id/notify", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const agentId = Number(req.params.id);
+      const closingId = await storage.getClosingIdForAgent(agentId);
+      if (!closingId) return res.status(404).json({ message: "Agent not found" });
+      const result = await sendClosingNotifications(closingId, agentId);
+      res.json(result);
+    } catch (err) {
+      console.error("[POST /api/closing-agents/:id/notify]", err);
       res.status(500).json({ message: "Internal server error" });
     }
   });
@@ -1834,7 +1879,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (data.contractEndDate) data.contractEndDate = new Date(data.contractEndDate);
       await storage.updateClosing(Number(req.params.id), data);
       if (sides && Array.isArray(sides)) {
-        await storage.replaceClosingSides(Number(req.params.id), String(rest.saleValue ?? "0"), String(rest.commissionRate ?? "2"), sides);
+        const normalizedSides = sides.map((s: any) => ({
+          ...s,
+          agents: (s.agents ?? []).map((a: any) => ({
+            ...a,
+            closingDate: a.closingDate ? new Date(a.closingDate) : null,
+            status: a.status ?? null,
+          })),
+        }));
+        await storage.replaceClosingSides(Number(req.params.id), String(rest.saleValue ?? "0"), String(rest.commissionRate ?? "2"), normalizedSides);
       }
       res.status(204).send();
     } catch {
@@ -1844,8 +1897,30 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.patch("/api/closing-agents/:id", requireAuth, requireAdmin, async (req, res) => {
     try {
-      await storage.updateClosingAgent(Number(req.params.id), req.body);
+      const agentId = Number(req.params.id);
+      const body = { ...req.body };
+      if (body.closingDate !== undefined && body.closingDate !== null && typeof body.closingDate === "string") {
+        body.closingDate = new Date(body.closingDate);
+      }
+      if (body.paymentCollected !== undefined && typeof body.paymentCollected === "string") {
+        body.paymentCollected = body.paymentCollected === "true";
+      }
+      // Capture status transition to "completed" so we can fire WhatsApp
+      const becameCompleted = body.status === "completed";
+      await storage.updateClosingAgent(agentId, body);
       res.status(204).send();
+
+      // Fire-and-forget WhatsApp notification for the freshly approved agent
+      if (becameCompleted) {
+        (async () => {
+          try {
+            const closingId = await storage.getClosingIdForAgent(agentId);
+            if (closingId) await sendClosingNotifications(closingId, agentId);
+          } catch (err) {
+            console.warn("[WhatsApp notify (agent)]", err);
+          }
+        })();
+      }
     } catch {
       res.status(500).json({ message: "Internal server error" });
     }
@@ -1909,8 +1984,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const now = new Date();
       const start = startDate ? new Date(startDate) : new Date(now.getFullYear(), 0, 1);
       const end = endDate ? new Date(endDate) : new Date(now.getFullYear(), 11, 31);
-      // Admin sees all coaches; non-admin only sees students under their user id
-      const coachUserId = user.role === "admin" ? undefined : user.id;
+      // Admin + hiring_manager see all coaches; everyone else only sees their own students
+      const seesAll = user.role === "admin" || user.role === "hiring_manager";
+      const coachUserId = seesAll ? undefined : user.id;
       res.json(await storage.getCoachingStats(start, end, coachUserId));
     } catch (err) {
       console.error("[GET /api/coaching/stats]", err);

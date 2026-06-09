@@ -197,8 +197,10 @@ export interface IStorage {
     splitPercentage: string; bhbShare: string; mainBranchShare: string;
     kwtrKdv: string; marketCenterActual: string; bmKdv: string;
     ukShare: string; employeeNet: string; kasa: string; nakit: string; banka: string;
+    closingDate: Date | null; status: string | null; paymentCollected: boolean;
   }>): Promise<void>;
   updateClosingSide(id: number, data: Partial<{ kasa: string; nakit: string; banka: string }>): Promise<void>;
+  getClosingIdForAgent(agentId: number): Promise<number | null>;
   createClosing(data: {
     propertyAddress: string;
     il?: string | null;
@@ -236,6 +238,9 @@ export interface IStorage {
         bmKdv?: string;
         ukShare?: string;
         employeeNet?: string;
+        closingDate?: Date | null;
+        status?: string | null;
+        paymentCollected?: boolean;
       }>;
     }>;
   }): Promise<Closing>;
@@ -252,6 +257,9 @@ export interface IStorage {
       bmKdv?: string;
       ukShare?: string;
       employeeNet?: string;
+      closingDate?: Date | null;
+      status?: string | null;
+      paymentCollected?: boolean;
     }>;
   }>): Promise<void>;
   getInterviewTargets(year: number, month: number, jobIds?: number[]): Promise<import("@shared/schema").InterviewTarget[]>;
@@ -1634,7 +1642,12 @@ export class DatabaseStorage implements IStorage {
       capAmount = capRow ? parseFloat(capRow.amount) : null;
     }
 
-    // Sum marketCenterActual from completed closingAgents for this employee in current period
+    // Effective date: agent-level overrides closing-level when present.
+    // NOTE: cap deliberately counts ALL closings (including expected/pending) — payment
+    // collection status is tracked separately; the agent's BM payı çıkar çıkmaz cap'a sayılır.
+    const effDateCap   = sql<Date>`COALESCE(${closingAgents.closingDate}, ${closings.closingDate})`;
+
+    // Sum marketCenterActual from ALL closingAgents for this employee in current period
     const agentRows = await db
       .select({ marketCenterActual: closingAgents.marketCenterActual })
       .from(closingAgents)
@@ -1643,9 +1656,8 @@ export class DatabaseStorage implements IStorage {
       .where(
         and(
           eq(closingAgents.employeeId, employeeId),
-          eq(closings.status, "completed"),
-          isNotNull(closings.closingDate),
-          gte(closings.closingDate, periodStart)
+          sql`${effDateCap} IS NOT NULL`,
+          sql`${effDateCap} >= ${periodStart}`,
         )
       );
 
@@ -1680,10 +1692,9 @@ export class DatabaseStorage implements IStorage {
       .where(
         and(
           eq(closingAgents.employeeId, employeeId),
-          eq(closings.status, "completed"),
-          isNotNull(closings.closingDate),
-          gte(closings.closingDate, prevPeriodStart),
-          lt(closings.closingDate, periodStart)
+          sql`${effDateCap} IS NOT NULL`,
+          sql`${effDateCap} >= ${prevPeriodStart}`,
+          sql`${effDateCap} < ${periodStart}`,
         )
       );
     const prevCapUsed = prevRows.reduce((sum, r) => sum + parseFloat(r.marketCenterActual ?? "0"), 0);
@@ -1794,6 +1805,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getClosingsByEmployee(employeeId: number): Promise<EmployeeClosingRow[]> {
+    const effDate   = sql<Date>`COALESCE(${closingAgents.closingDate}, ${closings.closingDate})`;
+    const effStatus = sql<string>`COALESCE(${closingAgents.status}, ${closings.status})`;
     const rows = await db
       .select({
         closingId: closings.id,
@@ -1802,15 +1815,15 @@ export class DatabaseStorage implements IStorage {
         dealType: closings.dealType,
         saleValue: closings.saleValue,
         employeeNet: closingAgents.employeeNet,
-        closingDate: closings.closingDate,
+        closingDate: effDate,
         sideType: closingSides.sideType,
-        status: closings.status,
+        status: effStatus,
       })
       .from(closingAgents)
       .innerJoin(closingSides, eq(closingAgents.closingSideId, closingSides.id))
       .innerJoin(closings, eq(closingSides.closingId, closings.id))
       .where(eq(closingAgents.employeeId, employeeId))
-      .orderBy(desc(closings.closingDate));
+      .orderBy(sql`${effDate} DESC NULLS LAST`);
     return rows;
   }
 
@@ -1819,7 +1832,10 @@ export class DatabaseStorage implements IStorage {
     const cut3m = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
     const cut6m = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000);
 
-    // Fetch all active employees + all their completed closings in one query
+    // Fetch all active employees + all their completed closings in one query.
+    // Agent-level closingDate/status override closing-level when set.
+    const effDate   = sql<Date>`COALESCE(${closingAgents.closingDate}, ${closings.closingDate})`;
+    const effStatus = sql<string>`COALESCE(${closingAgents.status}, ${closings.status})`;
     const rows = await db
       .select({
         empId: employees.id,
@@ -1827,7 +1843,7 @@ export class DatabaseStorage implements IStorage {
         kwuid: employees.kwuid,
         category: candidates.category,
         startDate: employees.startDate,
-        closingDate: closings.closingDate,
+        closingDate: effDate,
       })
       .from(employees)
       .leftJoin(candidates, eq(employees.candidateId, candidates.id))
@@ -1835,7 +1851,7 @@ export class DatabaseStorage implements IStorage {
       .leftJoin(closingSides, eq(closingAgents.closingSideId, closingSides.id))
       .leftJoin(closings, and(
         eq(closingSides.closingId, closings.id),
-        eq(closings.status, "completed"),
+        sql`${effStatus} = 'completed'`,
       ))
       .where(eq(employees.status, "active"))
       .orderBy(asc(employees.id));
@@ -1936,6 +1952,7 @@ export class DatabaseStorage implements IStorage {
     splitPercentage: string; bhbShare: string; mainBranchShare: string;
     kwtrKdv: string; marketCenterActual: string; bmKdv: string;
     ukShare: string; employeeNet: string; kasa: string; nakit: string; banka: string;
+    closingDate: Date | null; status: string | null; paymentCollected: boolean;
   }>): Promise<void> {
     if (Object.keys(data).length === 0) return;
     await db.update(closingAgents).set(data as any).where(eq(closingAgents.id, id));
@@ -1944,6 +1961,16 @@ export class DatabaseStorage implements IStorage {
   async updateClosingSide(id: number, data: Partial<{ kasa: string; nakit: string; banka: string }>): Promise<void> {
     if (Object.keys(data).length === 0) return;
     await db.update(closingSides).set(data as any).where(eq(closingSides.id, id));
+  }
+
+  async getClosingIdForAgent(agentId: number): Promise<number | null> {
+    const [row] = await db
+      .select({ closingId: closingSides.closingId })
+      .from(closingAgents)
+      .innerJoin(closingSides, eq(closingAgents.closingSideId, closingSides.id))
+      .where(eq(closingAgents.id, agentId))
+      .limit(1);
+    return row?.closingId ?? null;
   }
 
   async createClosing(data: {
@@ -1984,6 +2011,9 @@ export class DatabaseStorage implements IStorage {
         kasa?: string;
         nakit?: string;
         banka?: string;
+        closingDate?: Date | null;
+        status?: string | null;
+        paymentCollected?: boolean;
       }>;
     }>;
   }): Promise<Closing> {
@@ -2140,6 +2170,9 @@ export class DatabaseStorage implements IStorage {
             ukRateSnapshot: String(ukRateSnapshot),
             capAmountApplied: capAmount !== null ? String(capAmount) : null,
             capUsedBefore: String(capUsedSoFar),
+            closingDate: agentInput.closingDate ?? null,
+            status: agentInput.status ?? null,
+            paymentCollected: agentInput.paymentCollected ?? false,
           });
         }
       }
@@ -2172,6 +2205,9 @@ export class DatabaseStorage implements IStorage {
       kasa?: string;
       nakit?: string;
       banka?: string;
+      closingDate?: Date | null;
+      status?: string | null;
+      paymentCollected?: boolean;
     }>;
   }>): Promise<void> {
     const saleValueNum = parseFloat(saleValue);
@@ -2283,6 +2319,9 @@ export class DatabaseStorage implements IStorage {
             ukRateSnapshot: String(ukRateSnapshot),
             capAmountApplied: capAmount !== null ? String(capAmount) : null,
             capUsedBefore: String(capUsedSoFar),
+            closingDate: agentInput.closingDate ?? null,
+            status: agentInput.status ?? null,
+            paymentCollected: agentInput.paymentCollected ?? false,
           });
         }
       }
@@ -2325,6 +2364,10 @@ export class DatabaseStorage implements IStorage {
       : undefined;
     const expectedAgentCond = completedAgentCond;
 
+    // Per-agent date/status take precedence; closing-level used as fallback.
+    const effectiveStatus = sql<string>`COALESCE(${closingAgents.status}, ${closings.status})`;
+    const effectiveDate   = sql<Date>`COALESCE(${closingAgents.closingDate}, ${closings.closingDate})`;
+
     const completedRows = await db
       .select({
         closingId: closings.id,
@@ -2335,7 +2378,7 @@ export class DatabaseStorage implements IStorage {
         il: closings.il,
         ilce: closings.ilce,
         mahalle: closings.mahalle,
-        closingDate: closings.closingDate,
+        closingDate: effectiveDate,
         durationDays: closings.durationDays,
         sideId: closingSides.id,
         sideType: closingSides.sideType,
@@ -2348,10 +2391,10 @@ export class DatabaseStorage implements IStorage {
       .leftJoin(closingSides, eq(closingSides.closingId, closings.id))
       .leftJoin(closingAgents, eq(closingAgents.closingSideId, closingSides.id))
       .where(and(
-        eq(closings.status, "completed"),
-        isNotNull(closings.closingDate),
-        gte(closings.closingDate, startDate),
-        lte(closings.closingDate, end),
+        sql`${effectiveStatus} = 'completed'`,
+        sql`${effectiveDate} IS NOT NULL`,
+        sql`${effectiveDate} >= ${startDate}`,
+        sql`${effectiveDate} <= ${end}`,
         ...(completedAgentCond ? [completedAgentCond] : []),
         ...(dealCategory ? [eq(closings.dealCategory, dealCategory)] : []),
         ...(dealType ? [eq(closings.dealType, dealType)] : []),
@@ -2363,7 +2406,7 @@ export class DatabaseStorage implements IStorage {
       .leftJoin(closingSides, eq(closingSides.closingId, closings.id))
       .leftJoin(closingAgents, eq(closingAgents.closingSideId, closingSides.id))
       .where(and(
-        eq(closings.status, "expected"),
+        sql`${effectiveStatus} = 'expected'`,
         ...(expectedAgentCond ? [expectedAgentCond] : []),
       ));
 
@@ -2404,10 +2447,15 @@ export class DatabaseStorage implements IStorage {
     bySideType.referral = Math.round(bySideType.referral);
 
     // ── Expected summary ──
+    // Volume is closing-level. Skip closings that already counted in the completed bucket
+    // (mixed-status closings: ≥1 completed agent + ≥1 expected agent) to avoid double-counting.
     const eIds = new Set<number>();
     let expectedVolume = 0, expectedBHB = 0, expectedBM = 0, expectedIslem = 0;
     for (const r of expectedRows) {
-      if (!eIds.has(r.closingId)) { expectedVolume += parseFloat(r.saleValue ?? "0"); eIds.add(r.closingId); }
+      if (!eIds.has(r.closingId) && !cIds.has(r.closingId)) {
+        expectedVolume += parseFloat(r.saleValue ?? "0");
+        eIds.add(r.closingId);
+      }
       if (r.bhbShare) expectedBHB += parseFloat(r.bhbShare);
       if (r.marketCenterActual) expectedBM += parseFloat(r.marketCenterActual);
       expectedIslem += islemOrani(r);
@@ -2653,13 +2701,17 @@ export class DatabaseStorage implements IStorage {
       ? `${minPrevStart.getFullYear()}-${String(minPrevStart.getMonth() + 1).padStart(2, "0")}-01`
       : null;
 
+    // Effective date/status: agent-level overrides closing-level when present.
+    const effStatusCoach = sql<string>`COALESCE(${closingAgents.status}, ${closings.status})`;
+    const effDateCoach   = sql<Date>`COALESCE(${closingAgents.closingDate}, ${closings.closingDate})`;
+
     const [rows, capRows, lastClosingRows, coachUsers, capSettingRows, prepayRows] = await Promise.all([
       // Closings in the selected date range
       db.select({
         closingId: closings.id,
         saleValue: closings.saleValue,
         commissionRate: closings.commissionRate,
-        closingDate: closings.closingDate,
+        closingDate: effDateCoach,
         dealCategory: closings.dealCategory,
         dealType: closings.dealType,
         durationDays: closings.durationDays,
@@ -2673,43 +2725,43 @@ export class DatabaseStorage implements IStorage {
       .leftJoin(closingSides, eq(closingSides.closingId, closings.id))
       .leftJoin(closingAgents, eq(closingAgents.closingSideId, closingSides.id))
       .where(and(
-        eq(closings.status, "completed"),
-        isNotNull(closings.closingDate),
-        gte(closings.closingDate, startDate),
-        lte(closings.closingDate, end),
+        sql`${effStatusCoach} = 'completed'`,
+        sql`${effDateCoach} IS NOT NULL`,
+        sql`${effDateCoach} >= ${startDate}`,
+        sql`${effDateCoach} <= ${end}`,
         inArray(closingAgents.employeeId, studentIds),
       )),
 
       // Cap period closings in batch (from earliest prev period start)
+      // NOTE: cap counts ALL closings (including pending) — see getEmployeeCapStatus
       minPrevStart
         ? db.select({
             employeeId: closingAgents.employeeId,
             marketCenterActual: closingAgents.marketCenterActual,
-            closingDate: closings.closingDate,
+            closingDate: effDateCoach,
           })
           .from(closingAgents)
           .innerJoin(closingSides, eq(closingAgents.closingSideId, closingSides.id))
           .innerJoin(closings, eq(closingSides.closingId, closings.id))
           .where(and(
             inArray(closingAgents.employeeId, studentIds),
-            eq(closings.status, "completed"),
-            isNotNull(closings.closingDate),
-            gte(closings.closingDate, minPrevStart),
+            sql`${effDateCoach} IS NOT NULL`,
+            sql`${effDateCoach} >= ${minPrevStart}`,
           ))
         : Promise.resolve([] as { employeeId: number | null; marketCenterActual: string | null; closingDate: Date | null }[]),
 
       // Last closing date per student via GROUP BY MAX (avoids fetching all rows)
       db.select({
         employeeId: closingAgents.employeeId,
-        lastDate: sql<string>`MAX(${closings.closingDate})`,
+        lastDate: sql<string>`MAX(${effDateCoach})`,
       })
       .from(closingAgents)
       .innerJoin(closingSides, eq(closingSides.id, closingAgents.closingSideId))
       .innerJoin(closings, eq(closings.id, closingSides.closingId))
       .where(and(
         inArray(closingAgents.employeeId, studentIds),
-        eq(closings.status, "completed"),
-        isNotNull(closings.closingDate),
+        sql`${effStatusCoach} = 'completed'`,
+        sql`${effDateCoach} IS NOT NULL`,
       ))
       .groupBy(closingAgents.employeeId),
 

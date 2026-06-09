@@ -421,10 +421,17 @@ export const closingAgents = pgTable("closing_agents", {
   ukRateSnapshot: numeric("uk_rate_snapshot", { precision: 10, scale: 2 }).notNull().default("0"),
   capAmountApplied: numeric("cap_amount_applied", { precision: 15, scale: 2 }),
   capUsedBefore: numeric("cap_used_before", { precision: 15, scale: 2 }).notNull().default("0"),
+  // Per-agent transaction date + approval. NULL ⇒ fall back to parent closing.
+  closingDate: timestamp("closing_date"),
+  status: text("status"),  // "completed" | "expected" | NULL → fallback to parent
+  // Payment collection flag: true = paid to office, false = still pending
+  paymentCollected: boolean("payment_collected").notNull().default(false),
   createdAt: timestamp("created_at").defaultNow(),
 }, (t) => ({
   sideIdIdx: index("closing_agents_side_id_idx").on(t.closingSideId),
   employeeIdIdx: index("closing_agents_employee_id_idx").on(t.employeeId),
+  closingDateIdx: index("closing_agents_closing_date_idx").on(t.closingDate),
+  statusIdx: index("closing_agents_status_idx").on(t.status),
 }));
 
 export type ClosingAgent = typeof closingAgents.$inferSelect;
