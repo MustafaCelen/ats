@@ -103,6 +103,7 @@ function calcAgentBreakdown(
   capUsedSoFar: number,
   capAmount: number | null, // null = unlimited (no cap configured)
   commissionRatePct: number = 2, // e.g. 2 → 2%
+  bmKdvRatePct: number = 0.40, // % of BHB share, e.g. 0.40 → 0.40%
 ): AgentBreakdown {
   const sideBHB = saleValue * (commissionRatePct / 100);
   const bhbShare = sideBHB * (splitPct / 100);
@@ -120,8 +121,7 @@ function calcAgentBreakdown(
     : Math.min(marketCenterDue, Math.max(0, capAmount - capUsedSoFar));
   const capUsedAfter = capUsedSoFar + marketCenterActual;
 
-  // BM KDV = BHB × %2 × %20
-  const bmKdv = bhbShare * 0.004;
+  const bmKdv = bhbShare * (bmKdvRatePct / 100);
 
   let ukShare = 0;
   if (employee?.uretkenlikKoclugu && employee?.uretkenlikKocluguOran) {
@@ -262,6 +262,7 @@ interface AgentInputRow {
   kwtrKdv: string;
   marketCenterActual: string;
   bmKdv: string;
+  bmKdvRatePct: string; // BM KDV rate as % of BHB, e.g. "0.40" = 0.40%
   ukShare: string;
   employeeNet: string;
   isManuallyEdited: boolean; // true = user has changed at least one field
@@ -285,6 +286,7 @@ function newAgent(): AgentInputRow {
     kwtrKdv: "",
     marketCenterActual: "",
     bmKdv: "",
+    bmKdvRatePct: "0.40",
     ukShare: "",
     employeeNet: "",
     isManuallyEdited: false,
@@ -475,21 +477,34 @@ function SideSection({
             const capUsedSoFar = agent.employeeId ? (runningCapUsed[agent.employeeId] ?? capStatus?.capUsed ?? 0) : 0;
             const splitPct = parseFloat(agent.splitPercentage || "0");
 
+            const bmKdvRate = parseFloat(agent.bmKdvRatePct || "0.40");
+
             const recalc = () => {
               if (!emp || saleValue <= 0 || splitPct <= 0) return;
-              const bd = calcAgentBreakdown(saleValue, splitPct, emp, capUsedSoFar, capAmount, commissionRatePct);
+              const bd = calcAgentBreakdown(saleValue, splitPct, emp, capUsedSoFar, capAmount, commissionRatePct, bmKdvRate);
               updateAgent(agent.id, applyBreakdown(agent, bd));
             };
 
             // Auto-fill when agent/split is first set and fields are empty
             const showBreakdown = !!emp && saleValue > 0 && splitPct > 0;
             if (showBreakdown && !agent.isManuallyEdited && agent.bhbShare === "") {
-              const bd = calcAgentBreakdown(saleValue, splitPct, emp, capUsedSoFar, capAmount, commissionRatePct);
+              const bd = calcAgentBreakdown(saleValue, splitPct, emp, capUsedSoFar, capAmount, commissionRatePct, bmKdvRate);
               // Trigger in next tick to avoid render-time setState
               setTimeout(() => updateAgent(agent.id, applyBreakdown(agent, bd)), 0);
             }
 
             const updateField = (field: keyof AgentInputRow, val: string) => {
+              if (field === "bmKdvRatePct") {
+                const rate = parseFloat(val) || 0;
+                const bhb = parseFloat(agent.bhbShare || "0");
+                const updated = { ...agent, bmKdvRatePct: val, isManuallyEdited: true };
+                updated.bmKdv = (bhb * rate / 100).toFixed(2);
+                updated.employeeNet = deriveNet(updated);
+                const dk = deriveKasaNakitBanka(updated);
+                updated.kasa = dk.kasa; updated.nakit = dk.nakit; updated.banka = dk.banka;
+                updateAgent(agent.id, updated);
+                return;
+              }
               const updated = { ...agent, [field]: val, isManuallyEdited: true };
               if (field !== "employeeNet") {
                 updated.employeeNet = deriveNet({ ...updated, [field]: val });
@@ -569,7 +584,22 @@ function SideSection({
                     <BreakdownField label="KWTR (10%)" prefix=" " value={agent.mainBranchShare} onChange={(v) => updateField("mainBranchShare", v)} />
                     <BreakdownField label="KWTR + KDV (toplam)" prefix="−" value={agent.kwtrKdv} onChange={(v) => updateField("kwtrKdv", v)} />
                     <BreakdownField label="BM (27%)" prefix="−" value={agent.marketCenterActual} onChange={(v) => updateField("marketCenterActual", v)} />
-                    <BreakdownField label="BM KDV (%2×%20)" prefix="−" value={agent.bmKdv} onChange={(v) => updateField("bmKdv", v)} />
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-muted-foreground">BM KDV Oranı (% BHB)</span>
+                      <div className="flex items-center gap-1">
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          max="100"
+                          value={agent.bmKdvRatePct}
+                          onChange={(e) => updateField("bmKdvRatePct", e.target.value)}
+                          className="h-6 w-20 text-xs text-right px-1.5 py-0"
+                        />
+                        <span className="text-muted-foreground">%</span>
+                      </div>
+                    </div>
+                    <BreakdownField label="BM KDV" prefix="−" value={agent.bmKdv} onChange={(v) => updateField("bmKdv", v)} />
                     <BreakdownField label="Üretkenlik Koçluğu" prefix="−" value={agent.ukShare} onChange={(v) => updateField("ukShare", v)} />
                     <BreakdownField label="Kasa" value={agent.kasa} onChange={(v) => updateField("kasa", v)} />
                     <BreakdownField label="Nakit" value={agent.nakit} onChange={(v) => updateField("nakit", v)} />
@@ -1064,6 +1094,12 @@ function NewClosingDialog({
           kwtrKdv: a.kwtrKdv ?? "",
           marketCenterActual: a.marketCenterActual ?? "",
           bmKdv: a.bmKdv ?? "",
+          bmKdvRatePct: (() => {
+            const bhb = parseFloat(a.bhbShare ?? "0");
+            const kdv = parseFloat(a.bmKdv ?? "0");
+            if (bhb > 0 && kdv > 0) return (kdv / bhb * 100).toFixed(4).replace(/\.?0+$/, "") || "0.40";
+            return "0.40";
+          })(),
           ukShare: a.ukShare ?? "",
           employeeNet: a.employeeNet ?? "",
           isManuallyEdited: true,

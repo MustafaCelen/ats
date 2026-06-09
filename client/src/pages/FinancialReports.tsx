@@ -8,6 +8,7 @@ import {
 import {
   TrendingUp, DollarSign, Users, Handshake,
   ChevronLeft, ChevronRight, Calendar, BarChart2,
+  ChevronUp, ChevronDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -191,6 +192,7 @@ export default function FinancialReports() {
   const [officeFilter, setOfficeFilter] = useState<string | undefined>(undefined);
   const [categoryFilter, setCategoryFilter] = useState<string | undefined>(undefined);
   const [dealTypeFilter, setDealTypeFilter] = useState<string | undefined>(undefined);
+  const [agentSort, setAgentSort] = useState<{ key: string; dir: "asc" | "desc" }>({ key: "bhb", dir: "desc" });
 
   const vy = viewDate.getFullYear();
   const vm = viewDate.getMonth();
@@ -203,6 +205,21 @@ export default function FinancialReports() {
   const computedEnd   = useCustomRange ? toDate   : monthEnd;
   const { data: stats, isLoading } = useClosingStats(computedStart, computedEnd, officeFilter, categoryFilter, dealTypeFilter);
   const { data: capStatuses = {} } = useCapStatuses();
+
+  const sortedAgents = useMemo(() => {
+    const rows = [...(stats?.byAgent ?? [])];
+    const { key, dir } = agentSort;
+    rows.sort((a: any, b: any) => {
+      let av: any, bv: any;
+      if (key === "bhbpc") { av = a.count > 0 ? a.bhb / a.count : -1; bv = b.count > 0 ? b.bhb / b.count : -1; }
+      else if (key === "name" || key === "kwuid") { av = (a[key] ?? "").toLowerCase(); bv = (b[key] ?? "").toLowerCase(); }
+      else { av = a[key] ?? 0; bv = b[key] ?? 0; }
+      if (av < bv) return dir === "asc" ? -1 : 1;
+      if (av > bv) return dir === "asc" ? 1 : -1;
+      return 0;
+    });
+    return rows;
+  }, [stats?.byAgent, agentSort]);
 
   const capList = useMemo(() => {
     return Object.values(capStatuses as Record<string, any>)
@@ -674,53 +691,84 @@ export default function FinancialReports() {
         </div>
 
         {/* ── Agent Productivity Table ── */}
-        <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-          <div className="px-5 py-4 border-b border-border">
-            <h2 className="text-base font-semibold">Danışman Performans Tablosu</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">Seçili dönem tamamlanan kapanışlar — BHB'ye göre sıralı</p>
-          </div>
-          {isLoading ? (
-            <div className="p-5 space-y-2">{[...Array(6)].map((_, i) => <div key={i} className="h-8 bg-muted/40 rounded animate-pulse" />)}</div>
-          ) : (stats?.byAgent ?? []).length === 0 ? (
-            <div className="p-10 text-center text-sm text-muted-foreground">Bu dönem için veri yok</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-muted/40 border-b border-border">
-                    {["#","Danışman","KWUID","Kapanış","BHB","BM Payı","Danışman Net","BHB/Kapanış"].map((h) => (
-                      <th key={h} className={`text-xs font-medium text-muted-foreground py-2 px-4 ${h === "#" || h === "Danışman" || h === "KWUID" ? "text-left" : "text-right"}`}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {(stats?.byAgent ?? []).map((a: any, i: number) => (
-                    <tr key={a.name} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
-                      <td className="py-2 px-4 text-xs text-muted-foreground">{i + 1}</td>
-                      <td className="py-2 px-4 font-medium">{a.name}</td>
-                      <td className="py-2 px-4 text-xs text-muted-foreground">{a.kwuid || "—"}</td>
-                      <td className="py-2 px-4 text-right">{a.count}</td>
-                      <td className="py-2 px-4 text-right font-medium">{fmtTRY(a.bhb)}</td>
-                      <td className="py-2 px-4 text-right text-blue-700">{fmtTRY(a.bm)}</td>
-                      <td className="py-2 px-4 text-right font-semibold text-emerald-700">{fmtTRY(a.net)}</td>
-                      <td className="py-2 px-4 text-right text-muted-foreground">{a.count > 0 ? fmtTRY(a.bhb / a.count) : "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr className="bg-muted/30 font-semibold border-t border-border">
-                    <td colSpan={3} className="py-2.5 px-4 text-xs">Toplam</td>
-                    <td className="py-2.5 px-4 text-right">{(stats?.byAgent ?? []).reduce((s: number, a: any) => s + a.count, 0)}</td>
-                    <td className="py-2.5 px-4 text-right">{fmtTRY((stats?.byAgent ?? []).reduce((s: number, a: any) => s + a.bhb, 0))}</td>
-                    <td className="py-2.5 px-4 text-right text-blue-700">{fmtTRY((stats?.byAgent ?? []).reduce((s: number, a: any) => s + a.bm, 0))}</td>
-                    <td className="py-2.5 px-4 text-right text-emerald-700">{fmtTRY((stats?.byAgent ?? []).reduce((s: number, a: any) => s + a.net, 0))}</td>
-                    <td />
-                  </tr>
-                </tfoot>
-              </table>
+        {(() => {
+          const agentCols: { key: string; label: string; align: "left" | "right" }[] = [
+            { key: "#",    label: "#",            align: "left"  },
+            { key: "name", label: "Danışman",     align: "left"  },
+            { key: "kwuid",label: "KWUID",        align: "left"  },
+            { key: "count",label: "Kapanış",      align: "right" },
+            { key: "bhb",  label: "BHB",          align: "right" },
+            { key: "bm",   label: "BM Payı",      align: "right" },
+            { key: "net",  label: "Danışman Net", align: "right" },
+            { key: "bhbpc",label: "BHB/Kapanış",  align: "right" },
+          ];
+          const handleAgentSort = (key: string) => {
+            if (key === "#") return;
+            setAgentSort(prev => prev.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: "desc" });
+          };
+          const SortIcon = ({ col }: { col: string }) => {
+            if (agentSort.key !== col) return <ChevronUp className="ml-1 h-3 w-3 opacity-20 inline" />;
+            return agentSort.dir === "asc"
+              ? <ChevronUp className="ml-1 h-3 w-3 opacity-80 inline" />
+              : <ChevronDown className="ml-1 h-3 w-3 opacity-80 inline" />;
+          };
+          return (
+            <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+              <div className="px-5 py-4 border-b border-border">
+                <h2 className="text-base font-semibold">Danışman Performans Tablosu</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">Seçili dönem tamamlanan kapanışlar — kolona tıklayarak sırala</p>
+              </div>
+              {isLoading ? (
+                <div className="p-5 space-y-2">{[...Array(6)].map((_, i) => <div key={i} className="h-8 bg-muted/40 rounded animate-pulse" />)}</div>
+              ) : sortedAgents.length === 0 ? (
+                <div className="p-10 text-center text-sm text-muted-foreground">Bu dönem için veri yok</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-muted/40 border-b border-border">
+                        {agentCols.map((col) => (
+                          <th
+                            key={col.key}
+                            onClick={() => handleAgentSort(col.key)}
+                            className={`text-xs font-medium text-muted-foreground py-2 px-4 ${col.align === "right" ? "text-right" : "text-left"} ${col.key !== "#" ? "cursor-pointer select-none hover:text-foreground" : ""}`}
+                          >
+                            {col.label}
+                            {col.key !== "#" && <SortIcon col={col.key} />}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sortedAgents.map((a: any, i: number) => (
+                        <tr key={a.name} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
+                          <td className="py-2 px-4 text-xs text-muted-foreground">{i + 1}</td>
+                          <td className="py-2 px-4 font-medium">{a.name}</td>
+                          <td className="py-2 px-4 text-xs text-muted-foreground">{a.kwuid || "—"}</td>
+                          <td className="py-2 px-4 text-right">{a.count}</td>
+                          <td className="py-2 px-4 text-right font-medium">{fmtTRY(a.bhb)}</td>
+                          <td className="py-2 px-4 text-right text-blue-700">{fmtTRY(a.bm)}</td>
+                          <td className="py-2 px-4 text-right font-semibold text-emerald-700">{fmtTRY(a.net)}</td>
+                          <td className="py-2 px-4 text-right text-muted-foreground">{a.count > 0 ? fmtTRY(a.bhb / a.count) : "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="bg-muted/30 font-semibold border-t border-border">
+                        <td colSpan={3} className="py-2.5 px-4 text-xs">Toplam</td>
+                        <td className="py-2.5 px-4 text-right">{(stats?.byAgent ?? []).reduce((s: number, a: any) => s + a.count, 0)}</td>
+                        <td className="py-2.5 px-4 text-right">{fmtTRY((stats?.byAgent ?? []).reduce((s: number, a: any) => s + a.bhb, 0))}</td>
+                        <td className="py-2.5 px-4 text-right text-blue-700">{fmtTRY((stats?.byAgent ?? []).reduce((s: number, a: any) => s + a.bm, 0))}</td>
+                        <td className="py-2.5 px-4 text-right text-emerald-700">{fmtTRY((stats?.byAgent ?? []).reduce((s: number, a: any) => s + a.net, 0))}</td>
+                        <td />
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          );
+        })()}
 
         {/* ── Cap Reset Calendar ── */}
         <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
