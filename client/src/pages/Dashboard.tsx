@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, Fragment } from "react";
 import { Link } from "wouter";
 import { Layout } from "@/components/Layout";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -409,12 +409,12 @@ export default function Dashboard() {
                 </tr>
                 <tr className="border-b border-border bg-muted/20">
                   {jobs.map((job: any) => (
-                    <>
+                    <Fragment key={job.id}>
                       {CANDIDATE_CATEGORIES.map((cat) => (
                         <th key={`${job.id}-${cat}`} className={`text-center font-semibold py-1.5 px-3 w-12 ${CAT_COLORS[cat].text} ${cat === "K0" ? "border-l border-border" : ""}`}>{cat}</th>
                       ))}
-                      <th key={`${job.id}-total`} className="text-center font-medium text-muted-foreground py-1.5 px-3 w-12">Top.</th>
-                    </>
+                      <th className="text-center font-medium text-muted-foreground py-1.5 px-3 w-12">Top.</th>
+                    </Fragment>
                   ))}
                 </tr>
               </thead>
@@ -438,7 +438,7 @@ export default function Dashboard() {
                         const dayData = matrix[day] ?? { K0: 0, K1: 0, K2: 0 };
                         const dayTotal = CANDIDATE_CATEGORIES.reduce((s, c) => s + dayData[c], 0);
                         return (
-                          <>
+                          <Fragment key={job.id}>
                             {CANDIDATE_CATEGORIES.map((cat) => {
                               const count = dayData[cat];
                               return (
@@ -453,12 +453,12 @@ export default function Dashboard() {
                                 </td>
                               );
                             })}
-                            <td key={`${job.id}-total`} className="py-1.5 px-3 text-center">
+                            <td className="py-1.5 px-3 text-center">
                               <span className={`${dayTotal > 0 ? "font-semibold text-foreground" : isFutureDay ? "text-muted-foreground/25" : "text-muted-foreground/40"}`}>
                                 {isFutureDay && dayTotal === 0 ? "—" : dayTotal}
                               </span>
                             </td>
-                          </>
+                          </Fragment>
                         );
                       })}
                     </tr>
@@ -471,7 +471,7 @@ export default function Dashboard() {
                   {jobs.map((job: any) => {
                     const matrix = dailyMatrixByJob[job.id] ?? {};
                     return (
-                      <>
+                      <Fragment key={job.id}>
                         {CANDIDATE_CATEGORIES.map((cat) => (
                           <td key={`${job.id}-${cat}`} className={`py-2 px-3 text-center ${cat === "K0" ? "border-l border-border/50" : ""}`}>
                             <span className={`font-bold ${CAT_COLORS[cat].text}`}>
@@ -479,10 +479,10 @@ export default function Dashboard() {
                             </span>
                           </td>
                         ))}
-                        <td key={`${job.id}-total`} className="py-2 px-3 text-center font-bold text-foreground">
+                        <td className="py-2 px-3 text-center font-bold text-foreground">
                           {Object.values(matrix).reduce((s, d) => s + CANDIDATE_CATEGORIES.reduce((ss, c) => ss + d[c], 0), 0)}
                         </td>
-                      </>
+                      </Fragment>
                     );
                   })}
                 </tr>
