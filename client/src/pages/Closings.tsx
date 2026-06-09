@@ -1570,7 +1570,7 @@ export default function Closings() {
     updateWidth();
     window.addEventListener("resize", updateWidth);
     return () => window.removeEventListener("resize", updateWidth);
-  });
+  }, []);
 
   const syncFromTop = useCallback(() => {
     if (tableScrollRef.current && topScrollRef.current) {

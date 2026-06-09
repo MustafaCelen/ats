@@ -46,7 +46,7 @@ export function EmployeePicker({
     const q = normalize(query.trim());
     if (!q) return employees;
     return employees.filter((e) => {
-      const nameMatch = normalize(e.name).includes(q);
+      const nameMatch = normalize(e.name ?? "").includes(q);
       const kwuidMatch = !!e.kwuid && normalize(String(e.kwuid)).includes(q);
       return nameMatch || kwuidMatch;
     });
