@@ -1,19 +1,21 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Layout } from "@/components/Layout";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip,
   ResponsiveContainer, CartesianGrid, Legend, Cell,
+  ComposedChart, Line,
 } from "recharts";
 import {
   TrendingUp, DollarSign, Users, Handshake,
   ChevronLeft, ChevronRight, Calendar, BarChart2,
-  ChevronUp, ChevronDown, Sparkles, Trophy,
+  ChevronUp, ChevronDown, Sparkles, Trophy, Target, Save,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { format } from "date-fns";
 import { tr } from "date-fns/locale";
+import { useAuth } from "@/hooks/use-auth";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmtTRY(n: number) {
@@ -183,6 +185,92 @@ function useClosingStats(startDate: string, endDate: string, office?: string, de
   });
 }
 
+function mergeTargetRows(a: any[], b: any[]): any[] {
+  const sumN = (x: string | null | undefined, y: string | null | undefined) =>
+    x == null && y == null ? null : String(parseFloat(x ?? "0") + parseFloat(y ?? "0"));
+  const sumI = (x: number | null | undefined, y: number | null | undefined) =>
+    x == null && y == null ? null : (x ?? 0) + (y ?? 0);
+  const map = new Map<number, any>();
+  for (const t of a) map.set(t.month, { ...t });
+  for (const t of b) {
+    if (!map.has(t.month)) { map.set(t.month, { ...t }); continue; }
+    const e = map.get(t.month)!;
+    map.set(t.month, {
+      ...e,
+      bhbTarget:             sumN(e.bhbTarget,             t.bhbTarget),
+      bhbHighTarget:         sumN(e.bhbHighTarget,         t.bhbHighTarget),
+      bmTarget:              sumN(e.bmTarget,              t.bmTarget),
+      bmHighTarget:          sumN(e.bmHighTarget,          t.bmHighTarget),
+      satilikAdetTarget:     sumI(e.satilikAdetTarget,     t.satilikAdetTarget),
+      satilikAdetHighTarget: sumI(e.satilikAdetHighTarget, t.satilikAdetHighTarget),
+      kiralikAdetTarget:     sumI(e.kiralikAdetTarget,     t.kiralikAdetTarget),
+      kiralikAdetHighTarget: sumI(e.kiralikAdetHighTarget, t.kiralikAdetHighTarget),
+    });
+  }
+  return Array.from(map.values()).sort((x, y) => x.month - y.month);
+}
+
+function useFinancialTargets(year: number, office: string) {
+  return useQuery<any[]>({
+    queryKey: ["/api/financial-targets", year, office],
+    queryFn: async () => {
+      const res = await fetch(`/api/financial-targets?year=${year}&office=${encodeURIComponent(office)}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+  });
+}
+
+function TargetProgressCard({ label, actual, reelTarget, highTarget, color, format: fmt }: {
+  label: string; actual: number; reelTarget: number; highTarget: number; color: string;
+  format: (n: number) => string;
+}) {
+  const maxT = Math.max(reelTarget, highTarget, 0);
+  const meetsHigh = highTarget > 0 && actual >= highTarget;
+  const meetsReel = reelTarget > 0 && actual >= reelTarget;
+  const barFill  = maxT > 0 ? Math.min(100, (actual / maxT) * 100) : 0;
+  const reelMark = maxT > 0 && highTarget > reelTarget && reelTarget > 0
+    ? (reelTarget / maxT) * 100 : null;
+  const barColor = meetsHigh ? "#f59e0b" : meetsReel ? "#10b981" : color;
+
+  const badge = (pct: number, over: boolean, label: string) => (
+    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${over ? (label === "Y" ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700") : "bg-muted text-muted-foreground"}`}>
+      {label} %{Math.round(Math.min(100, pct))}
+    </span>
+  );
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-2">
+      <div className="flex items-center justify-between gap-1 flex-wrap">
+        <span className="text-xs font-medium text-muted-foreground">{label}</span>
+        <div className="flex gap-1">
+          {reelTarget > 0 && badge(actual / reelTarget * 100, meetsReel, "R")}
+          {highTarget > 0 && badge(actual / highTarget * 100, meetsHigh, "Y")}
+        </div>
+      </div>
+      <div className="text-xl font-bold text-foreground">{fmt(actual)}</div>
+      {maxT > 0 ? (
+        <>
+          <div className="relative h-2 rounded-full bg-muted overflow-hidden">
+            {reelMark !== null && (
+              <div className="absolute top-0 bottom-0 w-px bg-white/80 z-10" style={{ left: `${reelMark}%` }} />
+            )}
+            <div className="h-full rounded-full transition-all" style={{ width: `${barFill}%`, backgroundColor: barColor }} />
+          </div>
+          <div className="flex justify-between text-[10px] text-muted-foreground">
+            {reelTarget > 0 && <span>Reel: <span className="font-medium text-foreground">{fmt(reelTarget)}</span></span>}
+            {highTarget > 0 && <span>Yüksek: <span className="font-medium text-foreground">{fmt(highTarget)}</span></span>}
+          </div>
+          {meetsHigh && <p className="text-[10px] text-amber-600 font-semibold">Yüksek hedef aşıldı!</p>}
+          {!meetsHigh && meetsReel && <p className="text-[10px] text-emerald-600 font-semibold">Reel hedef aşıldı!</p>}
+        </>
+      ) : (
+        <div className="text-xs text-muted-foreground/50 italic">Hedef belirlenmedi</div>
+      )}
+    </div>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function FinancialReports() {
   const [viewDate, setViewDate] = useState(() => new Date());
@@ -193,6 +281,15 @@ export default function FinancialReports() {
   const [categoryFilter, setCategoryFilter] = useState<string | undefined>(undefined);
   const [dealTypeFilter, setDealTypeFilter] = useState<string | undefined>(undefined);
   const [agentSort, setAgentSort] = useState<{ key: string; dir: "asc" | "desc" }>({ key: "bhb", dir: "desc" });
+  const [showEditor, setShowEditor] = useState(false);
+  const [editorYear, setEditorYear] = useState(() => new Date().getFullYear());
+  const [editorOffice, setEditorOffice] = useState<string>("Akatlar");
+  const [draftTargets, setDraftTargets] = useState<Record<number, { bhb: string; bhbHigh: string; bm: string; bmHigh: string; satilik: string; satilikHigh: string; kiralik: string; kiralikHigh: string }>>({});
+  const [savingMonth, setSavingMonth] = useState<number | null>(null);
+
+  const { data: currentUser } = useAuth();
+  const isAdmin = currentUser?.role === "admin";
+  const qc = useQueryClient();
 
   const vy = viewDate.getFullYear();
   const vm = viewDate.getMonth();
@@ -205,6 +302,61 @@ export default function FinancialReports() {
   const computedEnd   = useCustomRange ? toDate   : monthEnd;
   const { data: stats, isLoading } = useClosingStats(computedStart, computedEnd, officeFilter, categoryFilter, dealTypeFilter);
   const { data: capStatuses = {} } = useCapStatuses();
+
+  const targetFetchYear = useCustomRange ? parseInt(fromDate.substring(0, 4)) : vy;
+  const { data: targetsAk = [] } = useFinancialTargets(targetFetchYear, "Akatlar");
+  const { data: targetsZk = [] } = useFinancialTargets(targetFetchYear, "Zekeriyaköy");
+  const targets = useMemo(
+    () => !officeFilter ? mergeTargetRows(targetsAk, targetsZk)
+        : officeFilter === "Akatlar" ? targetsAk : targetsZk,
+    [officeFilter, targetsAk, targetsZk]
+  );
+  const { data: editorTargetsRaw = [] } = useFinancialTargets(editorYear, editorOffice);
+
+  // Sync editor draft whenever server data or editorYear changes
+  useEffect(() => {
+    const rows: typeof draftTargets = {};
+    const p = (v: any) => v != null ? String(parseFloat(v)) : "";
+    const i = (v: any) => v != null ? String(v) : "";
+    for (let m = 1; m <= 12; m++) {
+      const t = editorTargetsRaw.find((x: any) => x.month === m);
+      rows[m] = {
+        bhb: p(t?.bhbTarget), bhbHigh: p(t?.bhbHighTarget),
+        bm: p(t?.bmTarget), bmHigh: p(t?.bmHighTarget),
+        satilik: i(t?.satilikAdetTarget), satilikHigh: i(t?.satilikAdetHighTarget),
+        kiralik: i(t?.kiralikAdetTarget), kiralikHigh: i(t?.kiralikAdetHighTarget),
+      };
+    }
+    setDraftTargets(rows);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editorTargetsRaw, editorYear]);
+
+  const saveTarget = async (month: number) => {
+    const row = draftTargets[month];
+    if (!row) return;
+    setSavingMonth(month);
+    try {
+      await fetch(`/api/financial-targets/${editorYear}/${month}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          office: editorOffice,
+          bhbTarget:             row.bhb         !== "" ? parseFloat(row.bhb)         || null : null,
+          bhbHighTarget:         row.bhbHigh     !== "" ? parseFloat(row.bhbHigh)     || null : null,
+          bmTarget:              row.bm          !== "" ? parseFloat(row.bm)          || null : null,
+          bmHighTarget:          row.bmHigh      !== "" ? parseFloat(row.bmHigh)      || null : null,
+          satilikAdetTarget:     row.satilik     !== "" ? parseInt(row.satilik)       || null : null,
+          satilikAdetHighTarget: row.satilikHigh !== "" ? parseInt(row.satilikHigh)   || null : null,
+          kiralikAdetTarget:     row.kiralik     !== "" ? parseInt(row.kiralik)       || null : null,
+          kiralikAdetHighTarget: row.kiralikHigh !== "" ? parseInt(row.kiralikHigh)   || null : null,
+        }),
+      });
+      qc.invalidateQueries({ queryKey: ["/api/financial-targets", editorYear, editorOffice] });
+    } finally {
+      setSavingMonth(null);
+    }
+  };
 
   const sortedAgents = useMemo(() => {
     const rows = [...(stats?.byAgent ?? [])];
@@ -279,9 +431,63 @@ export default function FinancialReports() {
   };
 
   const monthlyData = useMemo(
-    () => (stats?.monthlyTrend ?? []).map((r: any) => ({ ...r, month: fmtMonthKey(r.month) })),
+    () => (stats?.monthlyTrend ?? []).map((r: any) => ({ ...r, monthKey: r.month, month: fmtMonthKey(r.month) })),
     [stats?.monthlyTrend]
   );
+
+  const targetsByMonthKey = useMemo(() => {
+    const map = new Map<string, any>();
+    for (const t of targets) {
+      map.set(`${(t as any).year}-${String((t as any).month).padStart(2, "0")}`, t);
+    }
+    return map;
+  }, [targets]);
+
+  const monthlyDataWithTargets = useMemo(() =>
+    monthlyData.map((r: any) => {
+      const t = targetsByMonthKey.get(r.monthKey);
+      return {
+        ...r,
+        bhbTarget:     t?.bhbTarget     ? parseFloat(t.bhbTarget)     : null,
+        bhbHighTarget: t?.bhbHighTarget ? parseFloat(t.bhbHighTarget) : null,
+        bmTarget:      t?.bmTarget      ? parseFloat(t.bmTarget)      : null,
+        bmHighTarget:  t?.bmHighTarget  ? parseFloat(t.bmHighTarget)  : null,
+        satilikTarget:     t?.satilikAdetTarget     ?? null,
+        satilikHighTarget: t?.satilikAdetHighTarget ?? null,
+        kiralikTarget:     t?.kiralikAdetTarget     ?? null,
+        kiralikHighTarget: t?.kiralikAdetHighTarget ?? null,
+      };
+    }),
+    [monthlyData, targetsByMonthKey]
+  );
+
+  const periodTargets = useMemo(() => {
+    const tMap = new Map((targets as any[]).map(t => [t.month as number, t]));
+    const start = new Date(computedStart + "T00:00:00");
+    const end   = new Date(computedEnd   + "T00:00:00");
+    let bhb = 0, bhbHigh = 0, bm = 0, bmHigh = 0;
+    let satilik = 0, satilikHigh = 0, kiralik = 0, kiralikHigh = 0, count = 0;
+    const cur = new Date(start.getFullYear(), start.getMonth(), 1);
+    const endD = new Date(end.getFullYear(), end.getMonth(), 1);
+    while (cur <= endD) {
+      if (cur.getFullYear() === targetFetchYear) {
+        const t = tMap.get(cur.getMonth() + 1) as any;
+        if (t) {
+          bhb     += parseFloat(t.bhbTarget     ?? "0");
+          bhbHigh += parseFloat(t.bhbHighTarget ?? "0");
+          bm      += parseFloat(t.bmTarget      ?? "0");
+          bmHigh  += parseFloat(t.bmHighTarget  ?? "0");
+          satilik     += t.satilikAdetTarget     ?? 0;
+          satilikHigh += t.satilikAdetHighTarget ?? 0;
+          kiralik     += t.kiralikAdetTarget     ?? 0;
+          kiralikHigh += t.kiralikAdetHighTarget ?? 0;
+          count++;
+        }
+      }
+      cur.setMonth(cur.getMonth() + 1);
+    }
+    return { bhb, bhbHigh, bm, bmHigh, satilik, satilikHigh, kiralik, kiralikHigh, hasAny: count > 0 };
+  }, [targets, computedStart, computedEnd, targetFetchYear]);
   const topAgents        = (stats?.byAgent ?? []).slice(0, 12);
   const byCategory       = stats?.byCategory ?? [];
   const byDealType       = (stats?.byDealType ?? []) as { dealType: string; count: number; volume: number; bhb: number }[];
@@ -411,6 +617,38 @@ export default function FinancialReports() {
           />
         </div>
 
+        {/* ── Target Progress ── */}
+        {(periodTargets.hasAny || isAdmin) && (
+          <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+            <div className="px-5 py-3 border-b border-border flex items-center gap-2">
+              <Target className="h-4 w-4 text-primary" />
+              <h2 className="text-base font-semibold">Hedef Takibi</h2>
+              {officeFilter && (
+                <span className="text-xs font-medium bg-primary/10 text-primary px-2 py-0.5 rounded-full">{officeFilter}</span>
+              )}
+              <span className="text-xs text-muted-foreground ml-1">
+                {useCustomRange ? `${fromDate} – ${toDate}` : format(viewDate, "MMMM yyyy", { locale: tr })}
+              </span>
+              {isAdmin && (
+                <Button
+                  size="sm" variant="ghost"
+                  className="ml-auto h-7 text-xs gap-1"
+                  onClick={() => setShowEditor(v => !v)}
+                >
+                  <Save className="h-3.5 w-3.5" />
+                  Hedef Düzenle
+                </Button>
+              )}
+            </div>
+            <div className="p-4 grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <TargetProgressCard label="BHB Hedefi" actual={stats?.completedBHB ?? 0} reelTarget={periodTargets.bhb} highTarget={periodTargets.bhbHigh} color="#10b981" format={fmtTRY} />
+              <TargetProgressCard label="BM Payı Hedefi" actual={stats?.completedBM ?? 0} reelTarget={periodTargets.bm} highTarget={periodTargets.bmHigh} color="#8b5cf6" format={fmtTRY} />
+              <TargetProgressCard label="Satılık Adet Hedefi" actual={stats?.completedSatilikCount ?? 0} reelTarget={periodTargets.satilik} highTarget={periodTargets.satilikHigh} color="#3b82f6" format={(n) => String(Math.round(n))} />
+              <TargetProgressCard label="Kiralık Adet Hedefi" actual={stats?.completedKiralikCount ?? 0} reelTarget={periodTargets.kiralik} highTarget={periodTargets.kiralikHigh} color="#f97316" format={(n) => String(Math.round(n))} />
+            </div>
+          </div>
+        )}
+
         {/* ── Side Type Breakdown ── */}
         <div className="grid grid-cols-3 gap-4">
           <div className="rounded-xl border border-border bg-card p-4 shadow-sm flex items-center gap-3">
@@ -440,9 +678,9 @@ export default function FinancialReports() {
         <div className="grid lg:grid-cols-2 gap-6">
           <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
             <h2 className="text-base font-semibold mb-4">Aylık İşlem Hacmi</h2>
-            {isLoading ? <Skeleton /> : monthlyData.length === 0 ? <Empty /> : (
+            {isLoading ? <Skeleton /> : monthlyDataWithTargets.length === 0 ? <Empty /> : (
               <ResponsiveContainer width="100%" height={260}>
-                <AreaChart data={monthlyData} margin={{ top: 4, right: 8, bottom: 0, left: 8 }}>
+                <AreaChart data={monthlyDataWithTargets} margin={{ top: 4, right: 8, bottom: 0, left: 8 }}>
                   <defs>
                     <linearGradient id="gVol" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.25} />
@@ -461,9 +699,9 @@ export default function FinancialReports() {
 
           <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
             <h2 className="text-base font-semibold mb-4">Aylık BHB Geliri</h2>
-            {isLoading ? <Skeleton /> : monthlyData.length === 0 ? <Empty /> : (
+            {isLoading ? <Skeleton /> : monthlyDataWithTargets.length === 0 ? <Empty /> : (
               <ResponsiveContainer width="100%" height={260}>
-                <AreaChart data={monthlyData} margin={{ top: 4, right: 8, bottom: 0, left: 8 }}>
+                <ComposedChart data={monthlyDataWithTargets} margin={{ top: 4, right: 8, bottom: 0, left: 8 }}>
                   <defs>
                     <linearGradient id="gBHB" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#10b981" stopOpacity={0.25} />
@@ -475,7 +713,9 @@ export default function FinancialReports() {
                   <YAxis tickFormatter={fmtShort} tick={{ fontSize: 11 }} width={48} />
                   <Tooltip content={<TRYTooltip />} />
                   <Area type="monotone" dataKey="bhb" name="BHB" stroke="#10b981" fill="url(#gBHB)" strokeWidth={2} />
-                </AreaChart>
+                  <Line type="monotone" dataKey="bhbTarget" name="BHB Reel Hedef" stroke="#10b981" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#10b981" }} connectNulls={false} />
+                  <Line type="monotone" dataKey="bhbHighTarget" name="BHB Yüksek Hedef" stroke="#f59e0b" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#f59e0b" }} connectNulls={false} />
+                </ComposedChart>
               </ResponsiveContainer>
             )}
           </div>
@@ -485,30 +725,38 @@ export default function FinancialReports() {
         <div className="grid lg:grid-cols-2 gap-6">
           <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
             <h2 className="text-base font-semibold mb-4">Aylık BM Geliri (Ofis)</h2>
-            {isLoading ? <Skeleton h="h-48" /> : monthlyData.length === 0 ? <Empty /> : (
+            {isLoading ? <Skeleton h="h-48" /> : monthlyDataWithTargets.length === 0 ? <Empty /> : (
               <ResponsiveContainer width="100%" height={200}>
-                <BarChart data={monthlyData} margin={{ top: 4, right: 8, bottom: 0, left: 8 }}>
+                <ComposedChart data={monthlyDataWithTargets} margin={{ top: 4, right: 8, bottom: 0, left: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                   <XAxis dataKey="month" tick={{ fontSize: 11 }} />
                   <YAxis tickFormatter={fmtShort} tick={{ fontSize: 11 }} width={48} />
                   <Tooltip content={<TRYTooltip />} />
                   <Bar dataKey="bm" name="BM Geliri" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
-                </BarChart>
+                  <Line type="monotone" dataKey="bmTarget" name="BM Reel Hedef" stroke="#8b5cf6" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#8b5cf6" }} connectNulls={false} />
+                  <Line type="monotone" dataKey="bmHighTarget" name="BM Yüksek Hedef" stroke="#f59e0b" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#f59e0b" }} connectNulls={false} />
+                </ComposedChart>
               </ResponsiveContainer>
             )}
           </div>
 
           <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-            <h2 className="text-base font-semibold mb-4">Aylık Kapanış Adedi</h2>
-            {isLoading ? <Skeleton h="h-48" /> : monthlyData.length === 0 ? <Empty /> : (
+            <h2 className="text-base font-semibold mb-4">Aylık İşlem Adedi (Satılık / Kiralık)</h2>
+            {isLoading ? <Skeleton h="h-48" /> : monthlyDataWithTargets.length === 0 ? <Empty /> : (
               <ResponsiveContainer width="100%" height={200}>
-                <BarChart data={monthlyData} margin={{ top: 4, right: 8, bottom: 0, left: 8 }}>
+                <ComposedChart data={monthlyDataWithTargets} margin={{ top: 4, right: 8, bottom: 0, left: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                   <XAxis dataKey="month" tick={{ fontSize: 11 }} />
                   <YAxis tick={{ fontSize: 11 }} width={32} allowDecimals={false} />
                   <Tooltip content={<CountTooltip />} />
-                  <Bar dataKey="count" name="Kapanış" fill="#06b6d4" radius={[4, 4, 0, 0]} />
-                </BarChart>
+                  <Legend iconSize={10} wrapperStyle={{ fontSize: 10 }} />
+                  <Bar dataKey="satilikCount" name="Satılık" fill="#3b82f6" barSize={10} radius={[3, 3, 0, 0]} />
+                  <Bar dataKey="kiralikCount" name="Kiralık" fill="#f97316" barSize={10} radius={[3, 3, 0, 0]} />
+                  <Line type="monotone" dataKey="satilikTarget" name="Satılık Reel" stroke="#3b82f6" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#3b82f6" }} connectNulls={false} />
+                  <Line type="monotone" dataKey="satilikHighTarget" name="Satılık Yüksek" stroke="#60a5fa" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#60a5fa" }} connectNulls={false} />
+                  <Line type="monotone" dataKey="kiralikTarget" name="Kiralık Reel" stroke="#f97316" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#f97316" }} connectNulls={false} />
+                  <Line type="monotone" dataKey="kiralikHighTarget" name="Kiralık Yüksek" stroke="#fb923c" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#fb923c" }} connectNulls={false} />
+                </ComposedChart>
               </ResponsiveContainer>
             )}
           </div>
@@ -981,6 +1229,91 @@ export default function FinancialReports() {
             )}
           </div>
         </div>
+
+        {/* ── Admin Target Editor ── */}
+        {isAdmin && showEditor && (() => {
+          const MONTH_LABELS = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"];
+          return (
+            <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+              <div className="px-5 py-4 border-b border-border flex items-center gap-3 flex-wrap">
+                <Target className="h-4 w-4 text-primary shrink-0" />
+                <h2 className="text-base font-semibold">Aylık Hedef Yönetimi</h2>
+                {/* Office selector */}
+                <div className="flex items-center gap-1 rounded-lg border border-border bg-muted/30 p-0.5">
+                  {(["Akatlar", "Zekeriyaköy"] as const).map(o => (
+                    <Button key={o} size="sm" variant={editorOffice === o ? "default" : "ghost"} className="h-6 text-xs px-3" onClick={() => setEditorOffice(o)}>
+                      {o}
+                    </Button>
+                  ))}
+                </div>
+                {/* Year selector */}
+                <div className="flex items-center gap-1 ml-auto">
+                  {[new Date().getFullYear() - 1, new Date().getFullYear(), new Date().getFullYear() + 1].map(y => (
+                    <Button key={y} size="sm" variant={editorYear === y ? "default" : "outline"} className="h-7 text-xs px-3" onClick={() => setEditorYear(y)}>
+                      {y}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-muted/40 border-b border-border">
+                      <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-left w-20" rowSpan={2}>Ay</th>
+                      <th colSpan={2} className="text-xs font-medium text-muted-foreground py-1 px-2 text-center border-l border-border">BHB (₺)</th>
+                      <th colSpan={2} className="text-xs font-medium text-muted-foreground py-1 px-2 text-center border-l border-border">BM Payı (₺)</th>
+                      <th colSpan={2} className="text-xs font-medium text-muted-foreground py-1 px-2 text-center border-l border-border">Satılık Adet</th>
+                      <th colSpan={2} className="text-xs font-medium text-muted-foreground py-1 px-2 text-center border-l border-border">Kiralık Adet</th>
+                      <th className="w-8" rowSpan={2}></th>
+                    </tr>
+                    <tr className="bg-muted/30 border-b border-border">
+                      {["Reel","Yüksek","Reel","Yüksek","Reel","Yüksek","Reel","Yüksek"].map((lbl, i) => (
+                        <th key={i} className={`text-[10px] font-medium text-muted-foreground py-1 px-2 text-right ${i % 2 === 0 ? "border-l border-border" : ""}`}>{lbl}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Array.from({ length: 12 }, (_, i) => i + 1).map((month) => {
+                      const empty = { bhb: "", bhbHigh: "", bm: "", bmHigh: "", satilik: "", satilikHigh: "", kiralik: "", kiralikHigh: "" };
+                      const row = draftTargets[month] ?? empty;
+                      const isSaving = savingMonth === month;
+                      const setRow = (field: string, val: string) =>
+                        setDraftTargets(prev => ({ ...prev, [month]: { ...(prev[month] ?? empty), [field]: val } }));
+                      const inp = (field: keyof typeof empty, wide?: boolean) => (
+                        <td key={field} className={`py-1 px-1.5 ${["bhb","bm","satilik","kiralik"].includes(field) ? "border-l border-border/40" : ""}`}>
+                          <Input
+                            type="number"
+                            value={row[field] ?? ""}
+                            onChange={e => setRow(field, e.target.value)}
+                            onBlur={() => saveTarget(month)}
+                            placeholder="—"
+                            className={`h-6 text-xs text-right tabular-nums ${wide ? "w-28" : "w-20"}`}
+                            disabled={isSaving}
+                          />
+                        </td>
+                      );
+                      return (
+                        <tr key={month} className="border-b border-border/50 hover:bg-muted/20">
+                          <td className="py-1.5 px-4 font-medium text-xs">{MONTH_LABELS[month - 1]}</td>
+                          {inp("bhb", true)}{inp("bhbHigh", true)}
+                          {inp("bm", true)}{inp("bmHigh", true)}
+                          {inp("satilik")}{inp("satilikHigh")}
+                          {inp("kiralik")}{inp("kiralikHigh")}
+                          <td className="py-1 px-1 text-center text-xs text-muted-foreground">
+                            {isSaving ? "…" : ""}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div className="px-5 py-3 border-t border-border bg-muted/20 text-xs text-muted-foreground">
+                Alandan çıktığınızda (blur) otomatik kaydedilir.
+              </div>
+            </div>
+          );
+        })()}
 
       </div>
     </Layout>

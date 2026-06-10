@@ -1,4 +1,4 @@
-import { pgTable, text, serial, timestamp, integer, boolean, numeric, index } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, timestamp, integer, boolean, numeric, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { relations } from "drizzle-orm";
@@ -344,6 +344,27 @@ export const capSettings = pgTable("cap_settings", {
 });
 
 export type CapSetting = typeof capSettings.$inferSelect;
+
+// ── Financial Targets (monthly BHB / BM / Satılık / Kiralık adet) ─────────────
+export const financialTargets = pgTable("financial_targets", {
+  id: serial("id").primaryKey(),
+  year: integer("year").notNull(),
+  month: integer("month").notNull(),       // 1–12
+  office: text("office").notNull().default(""),  // "" = global, "Akatlar", "Zekeriyaköy"
+  bhbTarget: numeric("bhb_target", { precision: 15, scale: 2 }),
+  bhbHighTarget: numeric("bhb_high_target", { precision: 15, scale: 2 }),
+  bmTarget: numeric("bm_target", { precision: 15, scale: 2 }),
+  bmHighTarget: numeric("bm_high_target", { precision: 15, scale: 2 }),
+  satilikAdetTarget: integer("satilik_adet_target"),
+  satilikAdetHighTarget: integer("satilik_adet_high_target"),
+  kiralikAdetTarget: integer("kiralik_adet_target"),
+  kiralikAdetHighTarget: integer("kiralik_adet_high_target"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (t) => ({
+  yearMonthOfficeUniq: uniqueIndex("financial_targets_year_month_office_idx").on(t.year, t.month, t.office),
+}));
+
+export type FinancialTarget = typeof financialTargets.$inferSelect;
 
 // ── Closings ──────────────────────────────────────────────────────────────────
 export const DEAL_TYPES = ["Arsa", "Konut", "Ticari", "Yönlendirme", "Kiralama"] as const;

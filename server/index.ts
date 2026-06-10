@@ -114,6 +114,24 @@ app.use((req, res, next) => {
       "created_by_user_id" integer,
       "created_at" timestamp DEFAULT now()
     );
+
+    CREATE TABLE IF NOT EXISTS "financial_targets" (
+      "id" serial PRIMARY KEY NOT NULL,
+      "year" integer NOT NULL,
+      "month" integer NOT NULL,
+      "bhb_target" numeric(15, 2),
+      "bm_target" numeric(15, 2),
+      "satilik_adet_target" integer,
+      "kiralik_adet_target" integer,
+      "created_at" timestamp DEFAULT now()
+    );
+    ALTER TABLE "financial_targets" ADD COLUMN IF NOT EXISTS "bhb_high_target" numeric(15,2);
+    ALTER TABLE "financial_targets" ADD COLUMN IF NOT EXISTS "bm_high_target" numeric(15,2);
+    ALTER TABLE "financial_targets" ADD COLUMN IF NOT EXISTS "satilik_adet_high_target" integer;
+    ALTER TABLE "financial_targets" ADD COLUMN IF NOT EXISTS "kiralik_adet_high_target" integer;
+    ALTER TABLE "financial_targets" ADD COLUMN IF NOT EXISTS "office" text NOT NULL DEFAULT '';
+    DROP INDEX IF EXISTS "financial_targets_year_month_idx";
+    CREATE UNIQUE INDEX IF NOT EXISTS "financial_targets_year_month_office_idx" ON "financial_targets" ("year", "month", "office");
   `);
 
   await registerRoutes(httpServer, app);

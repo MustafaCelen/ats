@@ -2066,5 +2066,38 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // ── Financial Targets ─────────────────────────────────────────────────────────
+
+  app.get("/api/financial-targets", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const year = parseInt(req.query.year as string) || new Date().getFullYear();
+      const office = (req.query.office as string) ?? "";
+      res.json(await storage.getFinancialTargets(year, office));
+    } catch (err) {
+      console.error("[GET /api/financial-targets]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.put("/api/financial-targets/:year/:month", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const year = parseInt(req.params.year);
+      const month = parseInt(req.params.month);
+      if (!year || !month || month < 1 || month > 12) return res.status(400).json({ message: "Geçersiz yıl/ay" });
+      const { office = "", bhbTarget, bhbHighTarget, bmTarget, bmHighTarget, satilikAdetTarget, satilikAdetHighTarget, kiralikAdetTarget, kiralikAdetHighTarget } = req.body;
+      const n = (v: any) => v != null ? Number(v) : null;
+      await storage.upsertFinancialTarget(year, month, office, {
+        bhbTarget: n(bhbTarget), bhbHighTarget: n(bhbHighTarget),
+        bmTarget: n(bmTarget), bmHighTarget: n(bmHighTarget),
+        satilikAdetTarget: n(satilikAdetTarget), satilikAdetHighTarget: n(satilikAdetHighTarget),
+        kiralikAdetTarget: n(kiralikAdetTarget), kiralikAdetHighTarget: n(kiralikAdetHighTarget),
+      });
+      res.json({ ok: true });
+    } catch (err) {
+      console.error("[PUT /api/financial-targets]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   return httpServer;
 }

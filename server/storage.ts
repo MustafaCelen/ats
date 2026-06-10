@@ -3,7 +3,7 @@ import {
   jobs, candidates, applications, stageHistory, interviews, offers, candidateNotes,
   users, jobAssignments, applicationDocuments, tasks, employees,
   capSettings, closings, closingSides, closingAgents, interviewTargets,
-  officeExpenses, listings,
+  officeExpenses, listings, financialTargets,
   APPLICATION_STAGES, BM_PREPAYMENT_CATEGORY,
   type Job, type InsertJob,
   type Candidate, type InsertCandidate,
@@ -20,6 +20,7 @@ import {
   type CapStatus, type ClosingWithDetails, type InterviewTarget,
   type OfficeExpense, type InsertOfficeExpense,
   type Listing, type ListingWithEmployee,
+  type FinancialTarget,
 } from "@shared/schema";
 import { eq, desc, asc, count, sql, gte, lte, lt, and, or, isNull, isNotNull, inArray, notInArray } from "drizzle-orm";
 import { differenceInDays } from "date-fns";
@@ -2429,11 +2430,15 @@ export class DatabaseStorage implements IStorage {
     // ── Completed summary ──
     const cIds = new Set<number>();
     let completedVolume = 0, completedBHB = 0, completedBM = 0, completedIslem = 0;
+    let completedSatilikIslem = 0, completedKiralikIslem = 0;
     for (const r of completedRows) {
       if (!cIds.has(r.closingId)) { completedVolume += parseFloat(r.saleValue ?? "0"); cIds.add(r.closingId); }
       if (r.bhbShare) completedBHB += parseFloat(r.bhbShare);
       if (r.marketCenterActual) completedBM += parseFloat(r.marketCenterActual);
-      completedIslem += islemOrani(r);
+      const ratio = islemOrani(r);
+      completedIslem += ratio;
+      if (r.dealCategory === "Kiralık") completedKiralikIslem += ratio;
+      else completedSatilikIslem += ratio;
     }
 
     // ── Side type counts (işlem adedi) ──
@@ -2462,21 +2467,24 @@ export class DatabaseStorage implements IStorage {
     }
 
     // ── Monthly trend ──
-    const monthMap = new Map<string, { volume: number; bhb: number; bm: number; count: number; ids: Set<number> }>();
+    const monthMap = new Map<string, { volume: number; bhb: number; bm: number; count: number; satilikCount: number; kiralikCount: number; ids: Set<number> }>();
     for (const r of completedRows) {
       if (!r.closingDate) continue;
       const d = new Date(r.closingDate);
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-      if (!monthMap.has(key)) monthMap.set(key, { volume: 0, bhb: 0, bm: 0, count: 0, ids: new Set() });
+      if (!monthMap.has(key)) monthMap.set(key, { volume: 0, bhb: 0, bm: 0, count: 0, satilikCount: 0, kiralikCount: 0, ids: new Set() });
       const m = monthMap.get(key)!;
       if (!m.ids.has(r.closingId)) { m.volume += parseFloat(r.saleValue ?? "0"); m.ids.add(r.closingId); }
-      m.count += islemOrani(r);
+      const ratio = islemOrani(r);
+      m.count += ratio;
+      if (r.dealCategory === "Kiralık") m.kiralikCount += ratio;
+      else m.satilikCount += ratio;
       if (r.bhbShare) m.bhb += parseFloat(r.bhbShare);
       if (r.marketCenterActual) m.bm += parseFloat(r.marketCenterActual);
     }
     const monthlyTrend = Array.from(monthMap.entries())
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([month, v]) => ({ month, volume: v.volume, bhb: v.bhb, bm: v.bm, count: Math.round(v.count) }));
+      .map(([month, v]) => ({ month, volume: v.volume, bhb: v.bhb, bm: v.bm, count: Math.round(v.count), satilikCount: Math.round(v.satilikCount), kiralikCount: Math.round(v.kiralikCount) }));
 
     // ── By agent ──
     const agentMap = new Map<number, { bhb: number; bm: number; net: number; count: number }>();
@@ -2751,6 +2759,8 @@ export class DatabaseStorage implements IStorage {
     return {
       completedCount: Math.round(completedIslem),
       expectedCount: Math.round(expectedIslem),
+      completedSatilikCount: Math.round(completedSatilikIslem),
+      completedKiralikCount: Math.round(completedKiralikIslem),
       completedVolume, expectedVolume,
       completedBHB, expectedBHB, completedBM, expectedBM,
       bySideType,
@@ -2760,6 +2770,29 @@ export class DatabaseStorage implements IStorage {
       avgRentalDays, avgRentalDaysByIl, avgRentalDaysByIlce, avgRentalDaysByMahalle,
       firstTimers, newCappers,
     };
+  }
+
+  async getFinancialTargets(year: number, office: string = ""): Promise<FinancialTarget[]> {
+    return db.select().from(financialTargets)
+      .where(and(eq(financialTargets.year, year), eq(financialTargets.office, office)))
+      .orderBy(financialTargets.month);
+  }
+
+  async upsertFinancialTarget(year: number, month: number, office: string, data: {
+    bhbTarget?: number | null; bhbHighTarget?: number | null;
+    bmTarget?: number | null; bmHighTarget?: number | null;
+    satilikAdetTarget?: number | null; satilikAdetHighTarget?: number | null;
+    kiralikAdetTarget?: number | null; kiralikAdetHighTarget?: number | null;
+  }): Promise<void> {
+    const n = (v?: number | null) => v != null ? String(v) : null;
+    const vals = {
+      bhbTarget: n(data.bhbTarget), bhbHighTarget: n(data.bhbHighTarget),
+      bmTarget: n(data.bmTarget), bmHighTarget: n(data.bmHighTarget),
+      satilikAdetTarget: data.satilikAdetTarget ?? null, satilikAdetHighTarget: data.satilikAdetHighTarget ?? null,
+      kiralikAdetTarget: data.kiralikAdetTarget ?? null, kiralikAdetHighTarget: data.kiralikAdetHighTarget ?? null,
+    };
+    await db.insert(financialTargets).values({ year, month, office, ...vals })
+      .onConflictDoUpdate({ target: [financialTargets.year, financialTargets.month, financialTargets.office], set: vals });
   }
 
   async upsertInterviewTarget(data: { jobId: number; year: number; month: number; category: string; target: number }): Promise<void> {

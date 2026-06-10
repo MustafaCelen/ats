@@ -75,13 +75,26 @@ const MONTHS_TR = [
   "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık",
 ];
 
+// tr-TR locale formatter: "1234567.5" → "1.234.567,5", "350000" → "350.000". Returns raw string if not finite.
+const fmtNumberCell = (s: string): string => {
+  const n = parseFloat(s);
+  if (!Number.isFinite(n)) return s;
+  return new Intl.NumberFormat("tr-TR", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(n);
+};
+
 // Read-only display cells. List editing is disabled — use the edit dialog (Pencil) instead.
-function InlineCell({ value, className = "" }: {
+function InlineCell({ value, type, className = "" }: {
   value: string; onSave?: (v: string) => void; type?: string; className?: string;
 }) {
+  const empty = value === "" || value == null;
+  const display = !empty && type === "number" ? fmtNumberCell(value) : value;
+  const alignCls = type === "number" ? "text-right tabular-nums" : "";
   return (
-    <span className={`block w-full min-w-[60px] px-1 py-0 text-xs whitespace-nowrap ${className}`}>
-      {value !== "" && value != null ? value : <span className="text-muted-foreground">—</span>}
+    <span className={`block w-full min-w-[60px] px-1 py-0 text-xs whitespace-nowrap ${alignCls} ${className}`}>
+      {!empty ? display : <span className="text-muted-foreground">—</span>}
     </span>
   );
 }
