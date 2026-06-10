@@ -23,7 +23,18 @@ function toWhatsAppId(phone: string): string | null {
 
 /** Public base URL advisors use to open self-service links (agreement upload / close reason). */
 export function publicBaseUrl(): string {
-  return (process.env.PUBLIC_BASE_URL || "").replace(/\/+$/, "");
+  if (process.env.PUBLIC_BASE_URL) {
+    return process.env.PUBLIC_BASE_URL.replace(/\/+$/, "");
+  }
+  // Replit: newer environments expose REPLIT_DEV_DOMAIN
+  if (process.env.REPLIT_DEV_DOMAIN) {
+    return `https://${process.env.REPLIT_DEV_DOMAIN}`;
+  }
+  // Replit: legacy REPL_SLUG + REPL_OWNER
+  if (process.env.REPL_SLUG && process.env.REPL_OWNER) {
+    return `https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co`;
+  }
+  return "";
 }
 
 /**
