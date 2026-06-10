@@ -3634,26 +3634,52 @@ export class DatabaseStorage implements IStorage {
           });
           created++;
         } else {
-          const wasActive = prev.status === "active";
-          await db.update(listings).set({
-            price: r.price ?? prev.price,
-            removedDate: r.removedDate ?? prev.removedDate,
-            durationDays: r.durationDays ?? prev.durationDays,
-            advisorName: advisor || prev.advisorName,
-            employeeId: empId ?? prev.employeeId,
-            office: r.office ?? prev.office,
-            store: r.store ?? prev.store,
-            status: "passive",
-            updatedAt: new Date(),
-          }).where(eq(listings.id, prev.id));
-          updated++;
-          // Newly removed from publication → ask for a reason (if it's our advisor & not already asked)
-          const targetEmp = empId ?? prev.employeeId;
-          if (wasActive && targetEmp && !prev.closeReasonSubmittedAt) {
-            const [fresh] = await db.select().from(listings).where(eq(listings.id, prev.id));
-            if (fresh) newlyPassive.push(fresh);
+          if (prev.status === "active") {
+            // Listing is currently active — it was re-listed after a prior removal.
+            // Active always wins: only sync metadata, never flip status to passive.
+            await db.update(listings).set({
+              price: r.price ?? prev.price,
+              advisorName: advisor || prev.advisorName,
+              employeeId: empId ?? prev.employeeId,
+              office: r.office ?? prev.office,
+              store: r.store ?? prev.store,
+              updatedAt: new Date(),
+            }).where(eq(listings.id, prev.id));
+            updated++;
+          } else {
+            await db.update(listings).set({
+              price: r.price ?? prev.price,
+              removedDate: r.removedDate ?? prev.removedDate,
+              durationDays: r.durationDays ?? prev.durationDays,
+              advisorName: advisor || prev.advisorName,
+              employeeId: empId ?? prev.employeeId,
+              office: r.office ?? prev.office,
+              store: r.store ?? prev.store,
+              status: "passive",
+              updatedAt: new Date(),
+            }).where(eq(listings.id, prev.id));
+            updated++;
+            // Newly removed from publication → ask for a reason (if it's our advisor & not already asked)
+            const targetEmp = empId ?? prev.employeeId;
+            if (!prev.closeReasonSubmittedAt && targetEmp) {
+              const [fresh] = await db.select().from(listings).where(eq(listings.id, prev.id));
+              if (fresh) newlyPassive.push(fresh);
+            }
           }
         }
+      }
+    }
+
+    // For active imports: the CSV is the complete list of currently active listings.
+    // Any listing that is "active" in the DB but absent from this import has gone passive.
+    if (type === "active") {
+      const importedNumbers = new Set(byNumber.keys());
+      const stillActiveInDb = await db.select().from(listings).where(eq(listings.status, "active"));
+      const toFlip = stillActiveInDb.filter((l) => !importedNumbers.has(l.listingNumber));
+      for (const l of toFlip) {
+        await db.update(listings).set({ status: "passive", updatedAt: new Date() }).where(eq(listings.id, l.id));
+        updated++;
+        if (l.employeeId && !l.closeReasonSubmittedAt) newlyPassive.push(l);
       }
     }
 

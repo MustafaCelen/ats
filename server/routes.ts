@@ -191,8 +191,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             await storage.markListingNotified(l.id, kind, msgId);
             console.log(`[listings notify] ${l.listingNumber} → ${phone} msgId=${msgId ?? "n/a"}`);
           } catch (e) { console.warn("[listings notify]", e); }
-          // 60-second gap between sends to avoid Green API rate-limit bans
-          if (i < targets.length - 1) await new Promise(r => setTimeout(r, 60_000));
+          // Random 45–60 s gap between sends to avoid Green API rate-limit bans
+          if (i < targets.length - 1) {
+            const delay = 45_000 + Math.floor(Math.random() * 15_001);
+            await new Promise(r => setTimeout(r, delay));
+          }
         }
       })();
     } catch (err) {
@@ -263,6 +266,43 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       await storage.markListingNotified(l.id, kind, msgId);
       res.json({ ok: true });
     } catch { res.status(500).json({ message: "Internal server error" }); }
+  });
+
+  // Bulk WhatsApp notify for a set of listing IDs (fire-and-forget, random 45-60 s delay)
+  app.post("/api/listings/notify-bulk", requireAuth, requireAdmin, async (req, res) => {
+    const { ids } = req.body as { ids: number[] };
+    if (!Array.isArray(ids) || ids.length === 0)
+      return res.status(400).json({ message: "ids[] gerekli" });
+    res.json({ queued: ids.length });
+
+    (async () => {
+      const base = publicBaseUrl();
+      const COOLDOWN_MS = 5 * 60 * 1000;
+      for (let i = 0; i < ids.length; i++) {
+        try {
+          const l = await storage.getListing(ids[i]);
+          if (!l || !l.employeeId) continue;
+          const kind: "new" | "passive" = l.status === "active" ? "new" : "passive";
+          const lastSent = kind === "new" ? (l as any).notifiedNewAt : (l as any).notifiedPassiveAt;
+          if (lastSent && Date.now() - new Date(lastSent).getTime() < COOLDOWN_MS) continue;
+          const emp = await storage.getEmployee(l.employeeId);
+          const phone = emp?.candidate?.phone;
+          const name = emp?.candidate?.name ?? "Danışman";
+          if (!phone) continue;
+          const link = `${base}/l/${l.publicToken}`;
+          const msg = kind === "new"
+            ? [`Merhaba ${name} 👋`, "", `${l.listingNumber} numaralı ilanınız için *yetki sözleşmesi* bekleniyor:`, link].join("\n")
+            : [`Merhaba ${name} 👋`, "", `${l.listingNumber} numaralı ilanınız yayından kalkmış. Lütfen sebebini girin:`, link].join("\n");
+          const msgId = await sendWhatsApp(phone, msg);
+          await storage.markListingNotified(l.id, kind, msgId);
+          console.log(`[bulk notify] ${l.listingNumber} → ${phone} msgId=${msgId ?? "n/a"}`);
+        } catch (e) { console.warn("[bulk notify]", e); }
+        if (i < ids.length - 1) {
+          const delay = 45_000 + Math.floor(Math.random() * 15_001);
+          await new Promise(r => setTimeout(r, delay));
+        }
+      }
+    })();
   });
 
   // Download the uploaded yetki sözleşmesi

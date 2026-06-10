@@ -11,7 +11,7 @@ import { apiRequest } from "@/lib/queryClient";
 import {
   Building2, Upload, Search, FileCheck2, FileWarning, HelpCircle,
   CheckCircle2, Clock, Send, ExternalLink, ChevronLeft, ChevronRight, Download, Plus,
-  RefreshCw,
+  RefreshCw, MessageSquare,
 } from "lucide-react";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -347,8 +347,11 @@ export default function Listings() {
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<FilterTab>("needsAgreement");
   const [search, setSearch] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [notify, setNotify] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [bulkSending, setBulkSending] = useState(false);
   const [viewer, setViewer] = useState<Listing | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [page, setPage] = useState(0);
@@ -374,11 +377,22 @@ export default function Listings() {
     queryFn: () => fetch(`/api/listings?${listQuery}`, { credentials: "include" }).then((r) => r.json()),
   });
 
-  // Reset to first page whenever the filter/search changes
-  useEffect(() => { setPage(0); }, [tab, search]);
+  // Client-side date filter on publishedDate
+  const filteredRows = rows.filter((l) => {
+    if (!dateFrom && !dateTo) return true;
+    if (!l.publishedDate) return false;
+    const d = new Date(l.publishedDate);
+    if (isNaN(d.getTime())) return false;
+    if (dateFrom && d < new Date(dateFrom)) return false;
+    if (dateTo && d > new Date(dateTo + "T23:59:59")) return false;
+    return true;
+  });
 
-  const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
-  const pageRows = rows.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
+  // Reset to first page whenever the filter/search/date changes
+  useEffect(() => { setPage(0); }, [tab, search, dateFrom, dateTo]);
+
+  const pageCount = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
+  const pageRows = filteredRows.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ["/api/listings"] });
@@ -434,6 +448,29 @@ export default function Listings() {
     }
   };
 
+
+  const bulkNotifyCount = filteredRows.filter((l) => !!l.employeeId).length;
+
+  const handleBulkNotify = async () => {
+    if (!bulkNotifyCount || bulkSending) return;
+    const ids = filteredRows.filter((l) => !!l.employeeId).map((l) => l.id);
+    setBulkSending(true);
+    try {
+      const res = await fetch("/api/listings/notify-bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ ids }),
+      });
+      const data = await res.json();
+      if (!res.ok) { toast({ title: "Hata", description: data.message, variant: "destructive" }); return; }
+      toast({ title: "Bildirim kuyruğa alındı", description: `${data.queued} ilana sırayla gönderilecek (45–60 sn aralıkla).` });
+    } catch {
+      toast({ title: "Hata", description: "İstek gönderilemedi.", variant: "destructive" });
+    } finally {
+      setBulkSending(false);
+    }
+  };
 
   const tabs: { key: FilterTab; label: string; count?: number }[] = [
     { key: "needsAgreement", label: "Yetki Sözleşmesi Bekleyen", count: summary?.needsAgreement },
@@ -513,6 +550,45 @@ export default function Listings() {
           </div>
         </div>
 
+        {/* Date filter + bulk notify */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs text-muted-foreground">Yayın tarihi:</span>
+          <Input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            className="h-8 w-36 text-xs"
+          />
+          <span className="text-xs text-muted-foreground">—</span>
+          <Input
+            type="date"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+            className="h-8 w-36 text-xs"
+          />
+          {(dateFrom || dateTo) && (
+            <button
+              onClick={() => { setDateFrom(""); setDateTo(""); }}
+              className="text-xs text-muted-foreground hover:text-foreground underline"
+            >
+              Temizle
+            </button>
+          )}
+          <div className="ml-auto">
+            <Button
+              size="sm"
+              className="h-8 text-xs gap-1.5"
+              disabled={bulkSending || bulkNotifyCount === 0}
+              onClick={handleBulkNotify}
+            >
+              {bulkSending
+                ? <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                : <MessageSquare className="h-3.5 w-3.5" />}
+              Toplu WA Gönder ({bulkNotifyCount})
+            </Button>
+          </div>
+        </div>
+
         {/* Table */}
         <div className="rounded-xl border border-border bg-card overflow-hidden">
           <div className="overflow-x-auto">
@@ -534,8 +610,8 @@ export default function Listings() {
               <tbody>
                 {isLoading ? (
                   <tr><td colSpan={9} className="px-3 py-10 text-center text-muted-foreground">Yükleniyor…</td></tr>
-                ) : rows.length === 0 ? (
-                  <tr><td colSpan={9} className="px-3 py-10 text-center text-muted-foreground">Kayıt yok. Bir CSV içe aktarın.</td></tr>
+                ) : filteredRows.length === 0 ? (
+                  <tr><td colSpan={9} className="px-3 py-10 text-center text-muted-foreground">Kayıt yok.</td></tr>
                 ) : pageRows.map((l) => (
                   <tr key={l.id} className="border-b border-border last:border-0 hover:bg-muted/30">
                     <td className="px-3 py-2.5 font-mono text-xs">{l.listingNumber}</td>
@@ -627,10 +703,10 @@ export default function Listings() {
             </table>
           </div>
           {/* Pager */}
-          {rows.length > PAGE_SIZE && (
+          {filteredRows.length > PAGE_SIZE && (
             <div className="flex items-center justify-between px-3 py-2.5 border-t border-border text-xs text-muted-foreground">
               <span>
-                {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, rows.length)} / {rows.length}
+                {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, filteredRows.length)} / {filteredRows.length}
               </span>
               <div className="flex items-center gap-1">
                 <button
