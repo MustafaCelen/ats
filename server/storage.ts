@@ -3404,15 +3404,23 @@ export class DatabaseStorage implements IStorage {
     employeeId?: number;
     needsAgreement?: boolean;
     needsReason?: boolean;
+    hasAgreement?: boolean;
+    hasReason?: boolean;
     onlyMatched?: boolean;
+    onlyUnmatched?: boolean;
+    missingPhone?: boolean;
     search?: string;
   }): Promise<ListingWithEmployee[]> {
     const conds = [];
     if (filters?.status) conds.push(eq(listings.status, filters.status));
     if (filters?.employeeId !== undefined) conds.push(eq(listings.employeeId, filters.employeeId));
     if (filters?.onlyMatched) conds.push(isNotNull(listings.employeeId));
-    if (filters?.needsAgreement) conds.push(and(eq(listings.status, "active"), isNull(listings.agreementUploadedAt)));
+    if (filters?.onlyUnmatched) conds.push(and(isNull(listings.employeeId), eq(listings.status, "active")));
+    if (filters?.missingPhone) conds.push(and(isNotNull(listings.employeeId), isNull(candidates.phone)));
+    if (filters?.needsAgreement) conds.push(and(eq(listings.status, "active"), isNull(listings.agreementUploadedAt), isNull(listings.noAgreementAt)));
     if (filters?.needsReason) conds.push(and(eq(listings.status, "passive"), isNull(listings.closeReasonSubmittedAt)));
+    if (filters?.hasAgreement) conds.push(and(eq(listings.status, "active"), isNotNull(listings.agreementUploadedAt)));
+    if (filters?.hasReason) conds.push(and(eq(listings.status, "passive"), isNotNull(listings.closeReasonSubmittedAt)));
     if (filters?.search) conds.push(or(
       sql`${listings.listingNumber} ILIKE ${"%" + filters.search + "%"}`,
       sql`${listings.advisorName} ILIKE ${"%" + filters.search + "%"}`,
@@ -3437,15 +3445,16 @@ export class DatabaseStorage implements IStorage {
 
   async getListingsSummary(): Promise<{
     totalActive: number; totalPassive: number;
-    matchedActive: number; needsAgreement: number; needsReason: number; soldPassive: number;
+    matchedActive: number; needsAgreement: number; needsReason: number; soldPassive: number; noAgreement: number;
   }> {
     const [row] = await db.select({
-      totalActive:   sql<number>`count(*) filter (where ${listings.status} = 'active')`,
-      totalPassive:  sql<number>`count(*) filter (where ${listings.status} = 'passive')`,
-      matchedActive: sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.employeeId} is not null)`,
-      needsAgreement: sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.employeeId} is not null and ${listings.agreementUploadedAt} is null)`,
-      needsReason:   sql<number>`count(*) filter (where ${listings.status} = 'passive' and ${listings.employeeId} is not null and ${listings.closeReasonSubmittedAt} is null)`,
-      soldPassive:   sql<number>`count(*) filter (where ${listings.closeReason} in ('Satıldı','Kiralandı'))`,
+      totalActive:    sql<number>`count(*) filter (where ${listings.status} = 'active')`,
+      totalPassive:   sql<number>`count(*) filter (where ${listings.status} = 'passive')`,
+      matchedActive:  sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.employeeId} is not null)`,
+      needsAgreement: sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.employeeId} is not null and ${listings.agreementUploadedAt} is null and ${listings.noAgreementAt} is null)`,
+      needsReason:    sql<number>`count(*) filter (where ${listings.status} = 'passive' and ${listings.employeeId} is not null and ${listings.closeReasonSubmittedAt} is null)`,
+      soldPassive:    sql<number>`count(*) filter (where ${listings.closeReason} in ('Satıldı','Kiralandı'))`,
+      noAgreement:    sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.noAgreementAt} is not null)`,
     }).from(listings);
     return {
       totalActive: Number(row?.totalActive ?? 0),
@@ -3454,6 +3463,7 @@ export class DatabaseStorage implements IStorage {
       needsAgreement: Number(row?.needsAgreement ?? 0),
       needsReason: Number(row?.needsReason ?? 0),
       soldPassive: Number(row?.soldPassive ?? 0),
+      noAgreement: Number(row?.noAgreement ?? 0),
     };
   }
 
@@ -3739,6 +3749,7 @@ export class DatabaseStorage implements IStorage {
         .from(closingAgents)
         .innerJoin(closingSides, eq(closingAgents.closingSideId, closingSides.id))
         .innerJoin(closings, eq(closingSides.closingId, closings.id))
+        .where(sql`extract(year from coalesce(${closingAgents.closingDate}, ${closings.closingDate})) = extract(year from current_date)`)
         .groupBy(closingAgents.employeeId),
     ]);
 
@@ -3809,6 +3820,82 @@ export class DatabaseStorage implements IStorage {
     }));
   }
 
+  async getFuzzySuggestions(): Promise<{ advisorName: string; suggestions: { id: number; name: string; reason: string }[] }[]> {
+    const unmatched = await this.getUnmatchedAdvisors();
+    const empRows = await db
+      .select({ id: employees.id, name: candidates.name })
+      .from(employees)
+      .leftJoin(candidates, eq(employees.candidateId, candidates.id))
+      .where(eq(employees.status, "active"));
+
+    const norm = (s: string) => this.normForMatch(s);
+    const tok = (s: string) => this.nameTokens(s);
+
+    const editDist = (a: string, b: string): number => {
+      const m = a.length, n = b.length;
+      const dp = Array.from({ length: m + 1 }, (_, i) => Array.from({ length: n + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)));
+      for (let i = 1; i <= m; i++)
+        for (let j = 1; j <= n; j++)
+          dp[i][j] = a[i - 1] === b[j - 1] ? dp[i - 1][j - 1] : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+      return dp[m][n];
+    };
+
+    const result: { advisorName: string; suggestions: { id: number; name: string; reason: string }[] }[] = [];
+
+    for (const { advisorName } of unmatched) {
+      const csvToks = tok(advisorName);
+      if (csvToks.length === 0) continue;
+      const csvFirst = csvToks[0];
+      const csvLast = csvToks[csvToks.length - 1];
+      const suggestions: { id: number; name: string; reason: string }[] = [];
+      const seen = new Set<number>();
+
+      for (const emp of empRows) {
+        if (!emp.name) continue;
+        const empToks = tok(emp.name);
+        if (empToks.length === 0) continue;
+        const empFirst = empToks[0];
+        const empLast = empToks[empToks.length - 1];
+
+        // Same last name + first name edit distance ≤ 2
+        if (empLast === csvLast && empFirst !== csvFirst) {
+          const dist = editDist(csvFirst, empFirst);
+          if (dist <= 2 && !seen.has(emp.id)) {
+            suggestions.push({ id: emp.id, name: emp.name, reason: `Soyisim eşleşti, isim benzer (${csvFirst}→${empFirst})` });
+            seen.add(emp.id);
+            continue;
+          }
+        }
+
+        // One first name is prefix of the other (e.g. "Damla" vs "Damlagül")
+        if (empLast === csvLast && (empFirst.startsWith(csvFirst) || csvFirst.startsWith(empFirst)) && empFirst !== csvFirst) {
+          if (!seen.has(emp.id)) {
+            suggestions.push({ id: emp.id, name: emp.name, reason: `Soyisim eşleşti, isim önek (${csvFirst}↔${empFirst})` });
+            seen.add(emp.id);
+            continue;
+          }
+        }
+
+        // All CSV tokens present in employee tokens (subset), not an exact match
+        if (csvToks.length >= 2 && empToks.length >= 2) {
+          const empSet = new Set(empToks);
+          const csvSet = new Set(csvToks);
+          const csvInEmp = csvToks.every((t) => empSet.has(t));
+          const empInCsv = empToks.every((t) => csvSet.has(t));
+          if ((csvInEmp || empInCsv) && norm(advisorName) !== norm(emp.name)) {
+            if (!seen.has(emp.id)) {
+              suggestions.push({ id: emp.id, name: emp.name, reason: "Token alt kümesi eşleşti" });
+              seen.add(emp.id);
+            }
+          }
+        }
+      }
+
+      if (suggestions.length > 0) result.push({ advisorName, suggestions });
+    }
+    return result;
+  }
+
   async assignListingsByAdvisorName(advisorName: string, employeeId: number): Promise<number> {
     const result = await db.execute(sql`
       UPDATE listings
@@ -3827,7 +3914,14 @@ export class DatabaseStorage implements IStorage {
   }[]> {
     const rows = await db.execute(sql`
       SELECT
-        to_char(to_date(published_date, 'Mon DD, YYYY'), 'YYYY-MM') AS month,
+        to_char(
+          CASE
+            WHEN published_date ~ '^\d{1,2}/\d{1,2}/\d{4}$' THEN to_date(published_date, 'MM/DD/YYYY')
+            WHEN published_date ~ '^[A-Za-z]'                THEN to_date(published_date, 'Mon DD, YYYY')
+            ELSE NULL
+          END,
+          'YYYY-MM'
+        ) AS month,
         CASE WHEN price::numeric >= 1000000 THEN 'satilik' ELSE 'kiralik' END AS type,
         status,
         COUNT(*)::int AS count,
@@ -3846,6 +3940,7 @@ export class DatabaseStorage implements IStorage {
       kiralikActive: number; kiralikPassive: number; kiralikVolume: number;
     }>();
     for (const r of rows.rows as any[]) {
+      if (!r.month) continue;
       if (!map.has(r.month)) map.set(r.month, { satilikActive: 0, satilikPassive: 0, satilikVolume: 0, kiralikActive: 0, kiralikPassive: 0, kiralikVolume: 0 });
       const entry = map.get(r.month)!;
       const vol = Number(r.total_volume);
@@ -3919,28 +4014,48 @@ export class DatabaseStorage implements IStorage {
   // ── Feature 4: Aylık trend ───────────────────────────────────────────────────
 
   async getListingMonthlyTrend(): Promise<{ month: string; newActive: number; newPassive: number }[]> {
-    // publishedDate and removedDate are stored as text "Jun 8, 2026"
-    // Use to_date with 'Mon DD, YYYY' format for PostgreSQL
     const activeRows = await db.execute(sql`
       SELECT
-        to_char(to_date(published_date, 'Mon DD, YYYY'), 'YYYY-MM') AS month,
+        to_char(
+          CASE
+            WHEN published_date ~ '^\d{1,2}/\d{1,2}/\d{4}$' THEN to_date(published_date, 'MM/DD/YYYY')
+            WHEN published_date ~ '^[A-Za-z]'                THEN to_date(published_date, 'Mon DD, YYYY')
+            ELSE NULL
+          END,
+          'YYYY-MM'
+        ) AS month,
         count(*) AS cnt
       FROM listings
       WHERE published_date IS NOT NULL
-        AND published_date ~ '^[A-Za-z]+ [0-9]+, [0-9]{4}$'
-        AND to_date(published_date, 'Mon DD, YYYY') >= (now() - interval '12 months')
+        AND (published_date ~ '^\d{1,2}/\d{1,2}/\d{4}$' OR published_date ~ '^[A-Za-z]')
+        AND extract(year from CASE
+          WHEN published_date ~ '^\d{1,2}/\d{1,2}/\d{4}$' THEN to_date(published_date, 'MM/DD/YYYY')
+          WHEN published_date ~ '^[A-Za-z]'                THEN to_date(published_date, 'Mon DD, YYYY')
+          ELSE NULL
+        END) = extract(year from current_date)
       GROUP BY 1
       ORDER BY 1
     `);
 
     const passiveRows = await db.execute(sql`
       SELECT
-        to_char(to_date(removed_date, 'Mon DD, YYYY'), 'YYYY-MM') AS month,
+        to_char(
+          CASE
+            WHEN removed_date ~ '^\d{1,2}/\d{1,2}/\d{4}$' THEN to_date(removed_date, 'MM/DD/YYYY')
+            WHEN removed_date ~ '^[A-Za-z]'                THEN to_date(removed_date, 'Mon DD, YYYY')
+            ELSE NULL
+          END,
+          'YYYY-MM'
+        ) AS month,
         count(*) AS cnt
       FROM listings
       WHERE removed_date IS NOT NULL
-        AND removed_date ~ '^[A-Za-z]+ [0-9]+, [0-9]{4}$'
-        AND to_date(removed_date, 'Mon DD, YYYY') >= (now() - interval '12 months')
+        AND (removed_date ~ '^\d{1,2}/\d{1,2}/\d{4}$' OR removed_date ~ '^[A-Za-z]')
+        AND extract(year from CASE
+          WHEN removed_date ~ '^\d{1,2}/\d{1,2}/\d{4}$' THEN to_date(removed_date, 'MM/DD/YYYY')
+          WHEN removed_date ~ '^[A-Za-z]'                THEN to_date(removed_date, 'Mon DD, YYYY')
+          ELSE NULL
+        END) = extract(year from current_date)
       GROUP BY 1
       ORDER BY 1
     `);
@@ -3962,6 +4077,116 @@ export class DatabaseStorage implements IStorage {
       month,
       newActive: activeMap.get(month) ?? 0,
       newPassive: passiveMap.get(month) ?? 0,
+    }));
+  }
+
+  // ── İlan yaş grubu dağılımı (pie chart) ─────────────────────────────────────
+
+  async getListingAgeGroups(): Promise<{
+    label: string; order: number;
+    count: number; volume: number;
+    satilikCount: number; satilikVolume: number;
+    kiralikCount: number; kiralikVolume: number;
+  }[]> {
+    const rows = await db.execute(sql`
+      WITH parsed AS (
+        SELECT
+          CASE
+            WHEN published_date ~ '^\d+/\d+/\d+$' THEN to_date(published_date, 'MM/DD/YYYY')
+            WHEN published_date ~ '^[A-Za-z]'      THEN to_date(published_date, 'Mon DD, YYYY')
+            ELSE NULL
+          END AS pub_date,
+          CASE WHEN price >= 1000000 THEN 'satilik' ELSE 'kiralik' END AS type,
+          price AS price_num
+        FROM listings
+        WHERE status = 'active'
+          AND published_date IS NOT NULL
+          AND price IS NOT NULL
+      ),
+      with_group AS (
+        SELECT
+          CASE
+            WHEN (current_date - pub_date) > 180 THEN '180+'
+            WHEN (current_date - pub_date) > 150 THEN '150-180'
+            WHEN (current_date - pub_date) > 120 THEN '120-150'
+            WHEN (current_date - pub_date) > 90  THEN '90-120'
+            WHEN (current_date - pub_date) > 60  THEN '60-90'
+            WHEN (current_date - pub_date) > 30  THEN '30-60'
+            ELSE '0-30'
+          END AS age_group,
+          type, price_num
+        FROM parsed
+        WHERE pub_date IS NOT NULL AND (current_date - pub_date) >= 0
+      )
+      SELECT age_group, type, count(*)::int AS cnt, coalesce(sum(price_num), 0) AS total_volume
+      FROM with_group
+      GROUP BY age_group, type
+    `);
+
+    const ORDER = ["0-30","30-60","60-90","90-120","120-150","150-180","180+"];
+    const map = new Map<string, { count: number; volume: number; satilikCount: number; satilikVolume: number; kiralikCount: number; kiralikVolume: number }>();
+    for (const label of ORDER) map.set(label, { count: 0, volume: 0, satilikCount: 0, satilikVolume: 0, kiralikCount: 0, kiralikVolume: 0 });
+
+    for (const r of rows.rows as any[]) {
+      const e = map.get(r.age_group);
+      if (!e) continue;
+      const cnt = Number(r.cnt); const vol = Number(r.total_volume);
+      e.count += cnt; e.volume += vol;
+      if (r.type === "satilik") { e.satilikCount += cnt; e.satilikVolume += vol; }
+      else                      { e.kiralikCount += cnt; e.kiralikVolume += vol; }
+    }
+
+    return ORDER.map((label, order) => ({ label, order, ...map.get(label)! }));
+  }
+
+  // ── 90+ gün aktif ilanlar ───────────────────────────────────────────────────
+
+  async getListingsOver90Days(): Promise<{
+    id: number;
+    listingNumber: string;
+    advisorName: string | null;
+    employeeName: string | null;
+    office: string | null;
+    price: string | null;
+    publishedDate: string | null;
+    daysActive: number;
+  }[]> {
+    const rows = await db.execute(sql`
+      SELECT
+        l.id,
+        l.listing_number,
+        l.advisor_name,
+        c.name AS employee_name,
+        l.office,
+        l.price,
+        l.published_date,
+        (current_date - CASE
+          WHEN l.published_date ~ '^\d{1,2}/\d{1,2}/\d{4}$' THEN to_date(l.published_date, 'MM/DD/YYYY')
+          WHEN l.published_date ~ '^[A-Za-z]'                THEN to_date(l.published_date, 'Mon DD, YYYY')
+          ELSE NULL
+        END)::int AS days_active
+      FROM listings l
+      LEFT JOIN employees e ON l.employee_id = e.id
+      LEFT JOIN candidates c ON e.candidate_id = c.id
+      WHERE l.status = 'active'
+        AND l.published_date IS NOT NULL
+        AND (l.published_date ~ '^\d{1,2}/\d{1,2}/\d{4}$' OR l.published_date ~ '^[A-Za-z]')
+        AND (current_date - CASE
+          WHEN l.published_date ~ '^\d{1,2}/\d{1,2}/\d{4}$' THEN to_date(l.published_date, 'MM/DD/YYYY')
+          WHEN l.published_date ~ '^[A-Za-z]'                THEN to_date(l.published_date, 'Mon DD, YYYY')
+          ELSE NULL
+        END) > 90
+      ORDER BY days_active DESC
+    `);
+    return (rows.rows as any[]).map(r => ({
+      id: Number(r.id),
+      listingNumber: r.listing_number,
+      advisorName: r.advisor_name ?? null,
+      employeeName: r.employee_name ?? null,
+      office: r.office ?? null,
+      price: r.price ?? null,
+      publishedDate: r.published_date ?? null,
+      daysActive: Number(r.days_active),
     }));
   }
 
@@ -4163,6 +4388,49 @@ export class DatabaseStorage implements IStorage {
       if (a.achievementDays !== null && b.achievementDays !== null) return a.achievementDays - b.achievementDays;
       return b.capUsed / b.capAmount - a.capUsed / a.capAmount;
     });
+  }
+
+  // ── Advisor batch self-service ────────────────────────────────────────────────
+
+  async ensureAdvisorToken(employeeId: number): Promise<string> {
+    const [emp] = await db.select({ advisorToken: employees.advisorToken }).from(employees).where(eq(employees.id, employeeId));
+    if (emp?.advisorToken) return emp.advisorToken;
+    const token = randomBytes(20).toString("hex");
+    await db.update(employees).set({ advisorToken: token } as any).where(eq(employees.id, employeeId));
+    return token;
+  }
+
+  async getAdvisorByToken(token: string): Promise<EmployeeWithRelations | undefined> {
+    const [row] = await db.select({ id: employees.id }).from(employees).where(eq(employees.advisorToken, token));
+    if (!row) return undefined;
+    return this.getEmployee(row.id);
+  }
+
+  async getAdvisorPendingListings(employeeId: number): Promise<{ active: Listing[]; passive: Listing[] }> {
+    const active = await db.select().from(listings).where(
+      and(eq(listings.employeeId, employeeId), eq(listings.status, "active"), isNull(listings.agreementUploadedAt))
+    ).orderBy(desc(listings.updatedAt));
+    const passive = await db.select().from(listings).where(
+      and(eq(listings.employeeId, employeeId), eq(listings.status, "passive"), isNull(listings.closeReasonSubmittedAt))
+    ).orderBy(desc(listings.updatedAt));
+    return { active, passive };
+  }
+
+  async toggleListingNoAgreement(listingId: number, employeeId: number): Promise<Listing | null> {
+    const [row] = await db.select().from(listings).where(
+      and(eq(listings.id, listingId), eq(listings.employeeId, employeeId))
+    );
+    if (!row) return null;
+    const newVal = row.noAgreementAt ? null : new Date();
+    const [updated] = await db.update(listings)
+      .set({ noAgreementAt: newVal } as any)
+      .where(eq(listings.id, listingId))
+      .returning();
+    return updated ?? null;
+  }
+
+  async markAdvisorNotified(employeeId: number): Promise<void> {
+    await db.update(employees).set({ advisorLastNotifiedAt: new Date() } as any).where(eq(employees.id, employeeId));
   }
 }
 

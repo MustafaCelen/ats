@@ -11,7 +11,7 @@ import { apiRequest } from "@/lib/queryClient";
 import {
   Building2, Upload, Search, FileCheck2, FileWarning, HelpCircle,
   CheckCircle2, Clock, Send, ExternalLink, ChevronLeft, ChevronRight, Download, Plus,
-  RefreshCw, MessageSquare,
+  RefreshCw, MessageSquare, Link2,
 } from "lucide-react";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -42,14 +42,15 @@ interface Listing {
   notifiedPassiveAt: string | null;
   notifyMsgIdNew: string | null;
   notifyMsgIdPassive: string | null;
+  noAgreementAt: string | null;
 }
 
 interface Summary {
   totalActive: number; totalPassive: number; matchedActive: number;
-  needsAgreement: number; needsReason: number; soldPassive: number;
+  needsAgreement: number; needsReason: number; soldPassive: number; noAgreement: number;
 }
 
-type FilterTab = "all" | "needsAgreement" | "needsReason" | "passive" | "unmatched";
+type FilterTab = "needsAgreement" | "needsReason" | "hasAgreement" | "hasReason" | "unmatched" | "missingPhone";
 
 // ── CSV helpers ─────────────────────────────────────────────────────────────────
 
@@ -153,64 +154,6 @@ function fmtPrice(p: string | null): string {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-// ── WhatsApp notify status cell ───────────────────────────────────────────────
-
-const STATUS_LABEL: Record<string, { label: string; cls: string }> = {
-  pending:   { label: "Kuyrukta",  cls: "bg-yellow-100 text-yellow-700" },
-  sent:      { label: "Gönderildi", cls: "bg-blue-100 text-blue-700" },
-  delivered: { label: "İletildi",  cls: "bg-emerald-100 text-emerald-700" },
-  read:      { label: "Okundu",    cls: "bg-emerald-200 text-emerald-800" },
-  played:    { label: "Oynatıldı", cls: "bg-emerald-200 text-emerald-800" },
-  failed:    { label: "Başarısız", cls: "bg-red-100 text-red-700" },
-};
-
-function NotifyStatusCell({ listing, kind }: { listing: Listing; kind: "new" | "passive" }) {
-  const { toast } = useToast();
-  const notifiedAt  = kind === "new" ? listing.notifiedNewAt    : listing.notifiedPassiveAt;
-  const msgId       = kind === "new" ? listing.notifyMsgIdNew   : listing.notifyMsgIdPassive;
-  const [status, setStatus] = useState<string | null>(null);
-  const [checking, setChecking] = useState(false);
-
-  if (!notifiedAt) return <span className="text-[11px] text-muted-foreground">—</span>;
-
-  const checkStatus = async () => {
-    setChecking(true);
-    try {
-      const res = await fetch(`/api/listings/${listing.id}/notify-status?kind=${kind}`, { credentials: "include" });
-      const data = await res.json();
-      setStatus(data.status ?? "unknown");
-      if (data.note) toast({ title: data.note });
-    } catch {
-      toast({ title: "Durum sorgulanamadı", variant: "destructive" });
-    } finally {
-      setChecking(false);
-    }
-  };
-
-  const meta = status ? (STATUS_LABEL[status] ?? { label: status, cls: "bg-muted text-muted-foreground" }) : null;
-
-  return (
-    <div className="flex items-center gap-1.5 flex-wrap">
-      {meta ? (
-        <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${meta.cls}`}>{meta.label}</span>
-      ) : (
-        <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
-          {msgId ? "Gönderildi" : "WA Gönderildi"}
-        </span>
-      )}
-      {msgId && (
-        <button
-          onClick={checkStatus}
-          disabled={checking}
-          title="Teslimat durumunu sorgula"
-          className="p-0.5 rounded text-muted-foreground hover:text-foreground disabled:opacity-40"
-        >
-          <RefreshCw className={`h-3 w-3 ${checking ? "animate-spin" : ""}`} />
-        </button>
-      )}
-    </div>
-  );
-}
 
 // ── Manual add dialog ─────────────────────────────────────────────────────────
 
@@ -373,9 +316,10 @@ export default function Listings() {
     const params = new URLSearchParams();
     if (tab === "needsAgreement") { params.set("needsAgreement", "1"); params.set("onlyMatched", "1"); }
     else if (tab === "needsReason") { params.set("needsReason", "1"); params.set("onlyMatched", "1"); }
-    else if (tab === "passive") params.set("status", "passive");
-    else if (tab === "unmatched") params.set("status", "active");
-    else params.set("onlyMatched", "1");
+    else if (tab === "hasAgreement") { params.set("hasAgreement", "1"); params.set("onlyMatched", "1"); }
+    else if (tab === "hasReason") { params.set("hasReason", "1"); params.set("onlyMatched", "1"); }
+    else if (tab === "unmatched") params.set("onlyUnmatched", "1");
+    else if (tab === "missingPhone") params.set("missingPhone", "1");
     if (search.trim()) params.set("search", search.trim());
     return params.toString();
   })();
@@ -396,6 +340,17 @@ export default function Listings() {
     queryFn: () => fetch("/api/listings/unmatched-advisors", { credentials: "include" }).then((r) => r.json()),
     enabled: tab === "unmatched",
   });
+
+  const { data: fuzzySuggestions = [] } = useQuery<{ advisorName: string; suggestions: { id: number; name: string; reason: string }[] }[]>({
+    queryKey: ["/api/listings/fuzzy-suggestions"],
+    queryFn: () => fetch("/api/listings/fuzzy-suggestions", { credentials: "include" }).then((r) => r.json()),
+    enabled: tab === "unmatched",
+  });
+
+  const fuzzyMap = Object.fromEntries(fuzzySuggestions.map((f) => [f.advisorName, f.suggestions]));
+
+  // Per-row employee search state for the assignment combobox
+  const [empSearch, setEmpSearch] = useState<Record<string, string>>({});
 
   const assignByName = async (advisorName: string) => {
     const employeeId = nameAssignments[advisorName];
@@ -447,9 +402,8 @@ export default function Listings() {
     }
   };
 
-  // Client-side date filter on publishedDate + unmatched filter
+  // Client-side date filter
   const filteredRows = rows.filter((l) => {
-    if (tab === "unmatched" && l.employeeId !== null) return false;
     if (!dateFrom && !dateTo) return true;
     if (!l.publishedDate) return false;
     const d = new Date(l.publishedDate);
@@ -522,58 +476,81 @@ export default function Listings() {
   };
 
   const [sendingIds, setSendingIds] = useState<Set<number>>(new Set());
+  const [linkLoadingIds, setLinkLoadingIds] = useState<Set<number>>(new Set());
 
-  const sendNotify = async (id: number) => {
-    if (sendingIds.has(id)) return;
-    setSendingIds(prev => new Set(prev).add(id));
+  const sendNotify = async (employeeId: number) => {
+    if (sendingIds.has(employeeId)) return;
+    setSendingIds(prev => new Set(prev).add(employeeId));
     try {
-      await apiRequest("POST", `/api/listings/${id}/notify`, {});
-      toast({ title: "Bildirim gönderildi" });
+      await apiRequest("POST", `/api/listings/notify-advisor/${employeeId}`, {});
+      toast({ title: "Bildirim gönderildi", description: "Danışmana tüm bekleyen ilanları içeren tek mesaj gönderildi." });
       refresh();
     } catch (err: any) {
       toast({ title: "Gönderilemedi", description: err?.message, variant: "destructive" });
     } finally {
-      setSendingIds(prev => { const s = new Set(prev); s.delete(id); return s; });
+      setSendingIds(prev => { const s = new Set(prev); s.delete(employeeId); return s; });
+    }
+  };
+
+  const openAdvisorLink = async (employeeId: number) => {
+    if (linkLoadingIds.has(employeeId)) return;
+    setLinkLoadingIds(prev => new Set(prev).add(employeeId));
+    try {
+      const res = await fetch(`/api/listings/advisor-link/${employeeId}`, { credentials: "include" });
+      const data = await res.json();
+      if (data.link) window.open(data.link, "_blank", "noreferrer");
+    } catch {
+      toast({ title: "Link alınamadı", variant: "destructive" });
+    } finally {
+      setLinkLoadingIds(prev => { const s = new Set(prev); s.delete(employeeId); return s; });
     }
   };
 
 
-  const bulkNotifyCount = filteredRows.filter((l) => !!l.employeeId).length;
+  const uniqueAdvisorIds = [...new Set(filteredRows.filter((l) => !!l.employeeId).map((l) => l.employeeId!))];
+  const bulkNotifyCount = uniqueAdvisorIds.length;
 
   const handleBulkNotify = async () => {
     if (!bulkNotifyCount || bulkSending) return;
-    const ids = filteredRows.filter((l) => !!l.employeeId).map((l) => l.id);
     setBulkSending(true);
-    setBulkStatus({ active: true, total: ids.length, sent: 0, skipped: 0, failed: 0, current: null, done: false });
-    try {
-      const res = await fetch("/api/listings/notify-bulk", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ ids }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        toast({ title: "Hata", description: data.message, variant: "destructive" });
-        setBulkSending(false);
-        setBulkStatus(null);
-        return;
+    setBulkStatus({ active: true, total: bulkNotifyCount, sent: 0, skipped: 0, failed: 0, current: null, done: false });
+
+    let sent = 0, skipped = 0, failed = 0;
+    for (let i = 0; i < uniqueAdvisorIds.length; i++) {
+      const empId = uniqueAdvisorIds[i];
+      const name = filteredRows.find((l) => l.employeeId === empId)?.employeeName ?? String(empId);
+      setBulkStatus((s) => s ? { ...s, current: name } : s);
+      try {
+        const res = await fetch(`/api/listings/notify-advisor/${empId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({}),
+        });
+        if (res.ok) sent++;
+        else if (res.status === 400) skipped++; // no pending listings
+        else failed++;
+      } catch {
+        failed++;
       }
-    } catch {
-      toast({ title: "Hata", description: "İstek gönderilemedi.", variant: "destructive" });
-      setBulkSending(false);
-      setBulkStatus(null);
+      setBulkStatus((s) => s ? { ...s, sent, skipped, failed } : s);
     }
+    setBulkSending(false);
+    setBulkStatus((s) => s ? { ...s, active: false, done: true, current: null } : s);
+    toast({ title: `Toplu bildirim tamamlandı`, description: `${sent} gönderildi, ${skipped} atlandı, ${failed} başarısız` });
+    refresh();
   };
 
   const unmatchedCount = tab === "unmatched" ? filteredRows.length : undefined;
+  const missingPhoneCount = tab === "missingPhone" ? filteredRows.length : undefined;
 
   const tabs: { key: FilterTab; label: string; count?: number }[] = [
     { key: "needsAgreement", label: "Yetki Sözleşmesi Bekleyen", count: summary?.needsAgreement },
-    { key: "needsReason", label: "Kalkış Sebebi Bekleyen", count: summary?.needsReason },
-    { key: "passive", label: "Pasif İlanlar", count: summary?.totalPassive },
-    { key: "all", label: "Tüm Eşleşen İlanlar", count: summary?.matchedActive },
-    { key: "unmatched", label: "Eşleşmeyenler", count: unmatchedCount },
+    { key: "hasAgreement",   label: "Yetki Sözleşmesi Girilmiş" },
+    { key: "needsReason",    label: "Kalkış Sebebi Bekleyen", count: summary?.needsReason },
+    { key: "hasReason",      label: "Kapanış Sebebi Girilmiş" },
+    { key: "unmatched",      label: "Eşleşmeyenler", count: unmatchedCount },
+    { key: "missingPhone",   label: "Telefon Eksik", count: missingPhoneCount },
   ];
 
   return (
@@ -619,6 +596,9 @@ export default function Listings() {
           <StatCard icon={HelpCircle} label="Kalkış Sebebi Bekleyen" value={summary?.needsReason ?? 0} tone="text-violet-500" />
           <StatCard icon={CheckCircle2} label="Satılan / Kiralanan" value={summary?.soldPassive ?? 0} tone="text-emerald-500" />
           <StatCard icon={FileCheck2} label="Eşleşen Aktif İlan" value={summary?.matchedActive ?? 0} tone="text-primary" />
+          {(summary?.noAgreement ?? 0) > 0 && (
+            <StatCard icon={FileWarning} label="Sözleşme Yok (Danışman)" value={summary?.noAgreement ?? 0} tone="text-slate-400" />
+          )}
         </div>
 
         {/* Tabs + search */}
@@ -681,7 +661,7 @@ export default function Listings() {
               {bulkSending
                 ? <RefreshCw className="h-3.5 w-3.5 animate-spin" />
                 : <MessageSquare className="h-3.5 w-3.5" />}
-              Toplu WA Gönder ({bulkNotifyCount})
+              Toplu Bildirim ({bulkNotifyCount} danışman)
             </Button>
           </div>
         </div>
@@ -719,53 +699,91 @@ export default function Listings() {
         {tab === "unmatched" && unmatchedAdvisors.length > 0 && (
           <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-3">
             <div className="text-sm font-semibold text-amber-800">İsim Bazlı Toplu Atama</div>
-            <p className="text-xs text-amber-700">Her danışman adı için bir çalışan seçip "Ata" butonuna basın — o isimdeki tüm ilanlar tek seferde atanır.</p>
+            <p className="text-xs text-amber-700">Her danışman adı için bir çalışan seçip "Ata" butonuna basın. Sarı öneri satırları fuzzy eşleşme bulunanları gösterir.</p>
             <div className="rounded-lg border border-amber-200 bg-white overflow-hidden">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-amber-100 bg-amber-50/60 text-left text-xs text-muted-foreground">
                     <th className="px-3 py-2 font-medium">Danışman Adı (CSV)</th>
-                    <th className="px-3 py-2 font-medium text-center">İlan Sayısı</th>
+                    <th className="px-3 py-2 font-medium text-center">İlan</th>
                     <th className="px-3 py-2 font-medium">Atanacak Çalışan</th>
                     <th className="px-3 py-2 font-medium text-right">İşlem</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {unmatchedAdvisors.map((row) => (
-                    <tr key={row.advisorName} className="border-b border-amber-50 last:border-0">
-                      <td className="px-3 py-2 font-medium text-xs">{row.advisorName}</td>
-                      <td className="px-3 py-2 text-center">
-                        <span className="inline-flex items-center justify-center rounded-full bg-amber-100 text-amber-800 text-xs font-semibold px-2 py-0.5 min-w-[28px]">{row.count}</span>
-                      </td>
-                      <td className="px-3 py-2">
-                        <Select
-                          value={nameAssignments[row.advisorName] ? String(nameAssignments[row.advisorName]) : ""}
-                          onValueChange={(v) => setNameAssignments((prev) => ({ ...prev, [row.advisorName]: Number(v) }))}
-                        >
-                          <SelectTrigger className="h-7 text-xs w-48">
-                            <SelectValue placeholder="Çalışan seç…" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {activeEmployees.map((e: any) => (
-                              <SelectItem key={e.id} value={String(e.id)} className="text-xs">
-                                {e.candidate?.name ?? `#${e.id}`}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </td>
-                      <td className="px-3 py-2 text-right">
-                        <Button
-                          size="sm"
-                          className="h-7 text-xs px-3"
-                          disabled={!nameAssignments[row.advisorName] || assigningNames.has(row.advisorName)}
-                          onClick={() => assignByName(row.advisorName)}
-                        >
-                          {assigningNames.has(row.advisorName) ? "Atanıyor…" : "Ata"}
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
+                  {unmatchedAdvisors.map((row) => {
+                    const suggestions = fuzzyMap[row.advisorName] ?? [];
+                    const hasSuggestion = suggestions.length > 0;
+                    const selectedId = nameAssignments[row.advisorName];
+                    const search = empSearch[row.advisorName] ?? "";
+                    const filtered = activeEmployees.filter((e: any) => {
+                      const name: string = e.candidate?.name ?? "";
+                      return name.toLowerCase().includes(search.toLowerCase());
+                    });
+                    return (
+                      <tr key={row.advisorName} className={`border-b border-amber-50 last:border-0 ${hasSuggestion ? "bg-yellow-50" : ""}`}>
+                        <td className="px-3 py-2 text-xs">
+                          <div className="font-medium">{row.advisorName}</div>
+                          {hasSuggestion && (
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {suggestions.map((s) => (
+                                <button
+                                  key={s.id}
+                                  onClick={() => setNameAssignments((prev) => ({ ...prev, [row.advisorName]: s.id }))}
+                                  title={s.reason}
+                                  className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-200 text-yellow-800 hover:bg-yellow-300"
+                                >
+                                  💡 {s.name}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          <span className="inline-flex items-center justify-center rounded-full bg-amber-100 text-amber-800 text-xs font-semibold px-2 py-0.5 min-w-[24px]">{row.count}</span>
+                        </td>
+                        <td className="px-3 py-2">
+                          <div className="relative w-52">
+                            <input
+                              type="text"
+                              placeholder={selectedId ? (activeEmployees.find((e: any) => e.id === selectedId)?.candidate?.name ?? "Seçildi") : "Ara veya seç…"}
+                              value={search}
+                              onChange={(e) => setEmpSearch((prev) => ({ ...prev, [row.advisorName]: e.target.value }))}
+                              className={`w-full h-7 text-xs border rounded px-2 ${selectedId && !search ? "border-primary bg-primary/5" : "border-input bg-background"}`}
+                            />
+                            {search && (
+                              <div className="absolute z-20 top-8 left-0 w-52 max-h-48 overflow-y-auto rounded-lg border border-border bg-white shadow-lg">
+                                {filtered.length === 0 ? (
+                                  <div className="px-3 py-2 text-xs text-muted-foreground">Sonuç yok</div>
+                                ) : filtered.map((e: any) => (
+                                  <button
+                                    key={e.id}
+                                    className="w-full text-left px-3 py-1.5 text-xs hover:bg-muted"
+                                    onClick={() => {
+                                      setNameAssignments((prev) => ({ ...prev, [row.advisorName]: e.id }));
+                                      setEmpSearch((prev) => ({ ...prev, [row.advisorName]: "" }));
+                                    }}
+                                  >
+                                    {e.candidate?.name ?? `#${e.id}`}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <Button
+                            size="sm"
+                            className="h-7 text-xs px-3"
+                            disabled={!selectedId || assigningNames.has(row.advisorName)}
+                            onClick={() => assignByName(row.advisorName)}
+                          >
+                            {assigningNames.has(row.advisorName) ? "Atanıyor…" : "Ata"}
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -787,15 +805,13 @@ export default function Listings() {
                   <th className="px-3 py-2.5 font-medium">Durum</th>
                   <th className="px-3 py-2.5 font-medium">Yetki Sözleşmesi</th>
                   <th className="px-3 py-2.5 font-medium">Kalkış Sebebi</th>
-                  <th className="px-3 py-2.5 font-medium">WA Bildirim</th>
-                  <th className="px-3 py-2.5 font-medium text-right">İşlem</th>
                 </tr>
               </thead>
               <tbody>
                 {isLoading ? (
-                  <tr><td colSpan={11} className="px-3 py-10 text-center text-muted-foreground">Yükleniyor…</td></tr>
+                  <tr><td colSpan={9} className="px-3 py-10 text-center text-muted-foreground">Yükleniyor…</td></tr>
                 ) : filteredRows.length === 0 ? (
-                  <tr><td colSpan={11} className="px-3 py-10 text-center text-muted-foreground">Kayıt yok.</td></tr>
+                  <tr><td colSpan={9} className="px-3 py-10 text-center text-muted-foreground">Kayıt yok.</td></tr>
                 ) : pageRows.map((l) => (
                   <tr key={l.id} className="border-b border-border last:border-0 hover:bg-muted/30">
                     <td className="px-3 py-2.5 font-mono text-xs">{l.listingNumber}</td>
@@ -804,6 +820,26 @@ export default function Listings() {
                         <>
                           <div className="font-medium">{l.employeeName ?? l.advisorName ?? "—"}</div>
                           {l.office && <div className="text-[11px] text-muted-foreground truncate max-w-[160px]">{l.office}</div>}
+                          <div className="flex items-center gap-1 mt-1">
+                            <button
+                              onClick={() => openAdvisorLink(l.employeeId!)}
+                              disabled={linkLoadingIds.has(l.employeeId!)}
+                              title="Danışman toplu sayfasını aç (/a/token)"
+                              className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-50"
+                            >
+                              {linkLoadingIds.has(l.employeeId!) ? <RefreshCw className="h-2.5 w-2.5 animate-spin" /> : <Link2 className="h-2.5 w-2.5" />}
+                              Linki Aç
+                            </button>
+                            <button
+                              onClick={() => sendNotify(l.employeeId!)}
+                              disabled={sendingIds.has(l.employeeId!)}
+                              title="Danışmana WhatsApp gönder (tüm bekleyen ilanları içeren tek mesaj)"
+                              className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-green-50 text-green-700 hover:bg-green-100 disabled:opacity-50"
+                            >
+                              {sendingIds.has(l.employeeId!) ? <RefreshCw className="h-2.5 w-2.5 animate-spin" /> : <Send className="h-2.5 w-2.5" />}
+                              Bildir
+                            </button>
+                          </div>
                         </>
                       ) : (
                         <div className="space-y-1">
@@ -837,12 +873,17 @@ export default function Listings() {
                     <td className="px-3 py-2.5 whitespace-nowrap">{fmtPrice(l.price)}</td>
                     <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap">{l.publishedDate ?? "—"}</td>
                     <td className="px-3 py-2.5 whitespace-nowrap">
-                      {l.status === "active" && !l.agreementUploadedAt && l.publishedDate ? (() => {
-                        const d = new Date(l.publishedDate);
+                      {l.publishedDate ? (() => {
+                        const raw = l.publishedDate;
+                        // handle both "M/D/YYYY" and "Mon DD, YYYY"
+                        const d = new Date(raw);
                         if (isNaN(d.getTime())) return <span className="text-xs text-muted-foreground">—</span>;
                         const age = Math.floor((Date.now() - d.getTime()) / 86400000);
-                        const cls = age > 60
-                          ? "text-red-600 font-semibold"
+                        if (age < 0) return <span className="text-xs text-muted-foreground">—</span>;
+                        const cls = age > 90
+                          ? "text-red-600 font-bold"
+                          : age > 60
+                          ? "text-red-500 font-semibold"
                           : age > 30
                           ? "text-orange-500 font-medium"
                           : "text-muted-foreground";
@@ -864,6 +905,10 @@ export default function Listings() {
                         >
                           <FileCheck2 className="h-3 w-3" /> Görüntüle
                         </button>
+                      ) : l.noAgreementAt ? (
+                        <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-slate-200 text-slate-600">
+                          Sözleşme Yok
+                        </span>
                       ) : l.agreementRequestedAt ? (
                         <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
                           <Clock className="h-3 w-3" /> İstendi
@@ -888,35 +933,6 @@ export default function Listings() {
                       ) : (
                         <span className="text-[11px] text-muted-foreground">—</span>
                       )}
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <NotifyStatusCell listing={l} kind={l.status === "active" ? "new" : "passive"} />
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <div className="flex items-center justify-end gap-1">
-                        <a
-                          href={`/l/${l.publicToken}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          title="Danışman bağlantısını aç"
-                          className="p-1.5 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-                        >
-                          <ExternalLink className="h-3.5 w-3.5" />
-                        </a>
-                        {l.employeeId && (
-                          <button
-                            onClick={() => sendNotify(l.id)}
-                            disabled={sendingIds.has(l.id)}
-                            title="WhatsApp bildirimi gönder"
-                            className="p-1.5 rounded-md text-muted-foreground hover:bg-muted hover:text-primary disabled:opacity-40"
-                          >
-                            {sendingIds.has(l.id)
-                              ? <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                              : <Send className="h-3.5 w-3.5" />
-                            }
-                          </button>
-                        )}
-                      </div>
                     </td>
                   </tr>
                 ))}

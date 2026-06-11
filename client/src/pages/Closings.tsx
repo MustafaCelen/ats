@@ -2022,53 +2022,81 @@ export default function Closings() {
       const o = parseFloat(opening), s = parseFloat(sale);
       return o > 0 ? ((o - s) / o * 100).toFixed(2) : "";
     };
+    // Build employee lookup for KWUID and ÜK rate
+    const empMap = new Map<number, any>();
+    for (const e of employees) empMap.set(e.id, e);
+
     const headers = [
-      "Danışman", "İlgili Ay", "İşlem", "İşlem Tipi", "Taraf",
-      "İşlem Tarihi", "İşlem Değeri", "BHB", "İşlem Adedi", "KWTR", "KWTR (+KDV)", "PlatinKarma", "PlatinKarma (KDV)",
-      "ÜK Tutarı", "Danışman Net", "Kasa", "Nakit", "Banka",
-      "BHB Oranı", "İşlem Hacmi",
-      "İl", "İlçe", "Semt/Mahalle", "Adres", "Mülkle İlgili Detay",
-      "Açılış Rakamı", "Kapanış Rakamı", "İndirim Oranı",
-      "Süre/Gün", "Müşteri Kaynağı", "Yönlendirme",
-      "Söz. Başlangıç", "Söz. Bitiş", "Alıcı", "Satıcı", "Pay (%)", "Notlar",
+      "No", "",
+      "Danışman", "KWUID", "İlgili Ay", "İşlem", "İşlem Tipi", "Taraf", "CAP", "ÜK",
+      "İşlem Tarihi", "İşlem Değeri", "BHB", "KWTR", "KWTR (+KDV)", "PlatinKarma", "PlatinKarma\n(KDV)",
+      "ÜK", "Danışman", "Kasa", "Nakit", "Banka",
+      "BHB Oranı", "İşlem Hacmi", "İşlem\nOranı \n(Taraf Sayısı)",
+      "İl", "İlçe", "Semt/Mahalle", "Adres", "Mülkle İlgili Detay Bilgiler",
+      "Açılış Rakamı", "Kapanış Rakamı", "İndirim \nOranı", "Süre/Gün",
+      "Müşteri nereden buldu?", "Yönlendirme Bilgisi",
+      "Sözleşme Başlangıç Tarihi", "Sözleşme Bitiş Tarihi",
+      "İşlemi Alan", "Ödemeyi Alan", "notlar",
     ];
-    const rowsData = filteredRows.map((r) => [
-      r.employeeName,
-      fmtMonth(r.closingDate),
-      r.dealCategory,
-      r.dealType,
-      sideLabel(r.sideType),
-      r.closingDate,
-      r.saleValue,
-      r.bhbShare,
-      calcIslemOrani(r.bhbShare, r.saleValue, r.commissionRate, r.dealCategory).toFixed(4),
-      r.mainBranchShare,
-      r.kwtrKdv,
-      r.marketCenterActual,
-      r.bmKdv,
-      r.ukShare,
-      r.employeeNet,
-      r.kasa,
-      r.nakit,
-      r.banka,
-      r.commissionRate,
-      r.saleValue,
-      r.il, r.ilce, r.mahalle,
-      r.propertyAddress,
-      r.propertyDetails,
-      r.openingPrice,
-      r.saleValue,
-      discountRate(r.openingPrice, r.saleValue),
-      r.durationDays,
-      r.customerSource,
-      r.referralInfo,
-      r.contractStartDate,
-      r.contractEndDate,
-      r.buyerName,
-      r.sellerName,
-      r.splitPercentage,
-      r.notes,
-    ]);
+
+    const rowsData = filteredRows.map((r, idx) => {
+      const emp = empMap.get(r.employeeId);
+      const kwuid = emp?.kwuid ?? "";
+      const ukRate = emp?.uretkenlikKoclugu && emp?.uretkenlikKocluguOran
+        ? emp.uretkenlikKocluguOran
+        : "";
+      const capStatus = capStatuses[r.employeeId];
+      const capLabel = capStatus
+        ? (capStatus.capRemaining <= 0 ? "Capper" : "")
+        : "";
+      const totalBhb = (parseFloat(r.saleValue || "0") * parseFloat(r.commissionRate || "0") / 100).toFixed(2);
+      const islemOrani = calcIslemOrani(r.bhbShare, r.saleValue, r.commissionRate, r.dealCategory).toFixed(4);
+
+      return [
+        idx + 1,                        // No
+        "",                             // (empty)
+        r.employeeName,                 // Danışman
+        kwuid,                          // KWUID
+        fmtMonth(r.closingDate),        // İlgili Ay
+        r.dealCategory,                 // İşlem
+        r.dealType,                     // İşlem Tipi
+        sideLabel(r.sideType),          // Taraf
+        capLabel,                       // CAP
+        ukRate,                         // ÜK (oran)
+        r.closingDate,                  // İşlem Tarihi
+        r.bhbShare,                     // İşlem Değeri
+        totalBhb,                       // BHB (toplam)
+        r.mainBranchShare,              // KWTR
+        r.kwtrKdv,                      // KWTR (+KDV)
+        r.marketCenterActual,           // PlatinKarma
+        r.bmKdv,                        // PlatinKarma (KDV)
+        r.ukShare,                      // ÜK (tutar)
+        r.employeeNet,                  // Danışman
+        r.kasa,                         // Kasa
+        r.nakit,                        // Nakit
+        r.banka,                        // Banka
+        r.commissionRate,               // BHB Oranı
+        r.saleValue,                    // İşlem Hacmi
+        islemOrani,                     // İşlem Oranı (Taraf Sayısı)
+        r.il,                           // İl
+        r.ilce,                         // İlçe
+        r.mahalle,                      // Semt/Mahalle
+        r.propertyAddress,              // Adres
+        r.propertyDetails,              // Mülkle İlgili Detay Bilgiler
+        r.openingPrice,                 // Açılış Rakamı
+        r.saleValue,                    // Kapanış Rakamı
+        discountRate(r.openingPrice, r.saleValue), // İndirim Oranı
+        r.durationDays,                 // Süre/Gün
+        r.customerSource,               // Müşteri nereden buldu?
+        r.referralInfo,                 // Yönlendirme Bilgisi
+        r.contractStartDate,            // Sözleşme Başlangıç Tarihi
+        r.contractEndDate,              // Sözleşme Bitiş Tarihi
+        r.buyerName,                    // İşlemi Alan
+        r.sellerName,                   // Ödemeyi Alan
+        r.notes,                        // notlar
+      ];
+    });
+
     const csv = [headers, ...rowsData]
       .map((row) => row.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(","))
       .join("\n");

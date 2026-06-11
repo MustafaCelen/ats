@@ -1,3 +1,13 @@
+// Global rate limit: minimum 45-60 seconds between any two WhatsApp sends
+let lastSendTime = 0;
+
+async function waitForSendSlot(): Promise<void> {
+  const interval = 45_000 + Math.floor(Math.random() * 15_001);
+  const wait = interval - (Date.now() - lastSendTime);
+  if (wait > 0) await new Promise(r => setTimeout(r, wait));
+  lastSendTime = Date.now();
+}
+
 // Newer Green API instances use a subdomain derived from the first 4 digits of the instance ID
 // e.g. instance 7107639535 → https://7107.api.greenapi.com
 function getBaseUrl(instanceId: string): string {
@@ -52,6 +62,8 @@ export async function sendWhatsApp(phone: string, message: string): Promise<stri
     console.warn(`[WhatsApp] Invalid phone number: ${phone}`);
     return null;
   }
+
+  await waitForSendSlot();
 
   try {
     const baseUrl = getBaseUrl(instanceId);

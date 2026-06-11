@@ -142,7 +142,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         status: q.status ? String(q.status) : undefined,
         needsAgreement: q.needsAgreement === "1",
         needsReason: q.needsReason === "1",
+        hasAgreement: q.hasAgreement === "1",
+        hasReason: q.hasReason === "1",
         onlyMatched: q.onlyMatched === "1",
+        onlyUnmatched: q.onlyUnmatched === "1",
+        missingPhone: q.missingPhone === "1",
         search: q.search ? String(q.search) : undefined,
       }));
     } catch (err) {
@@ -240,7 +244,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   function buildListingMessage(kind: "new" | "passive", name: string, listingNumber: string, price: string | null, link: string): string {
     const fmtPrice = price ? Number(price).toLocaleString("tr-TR") + " ₺" : "—";
     if (kind === "new") {
-      return [`Merhaba ${name} 👋`, "", `Yeni bir ilanınız yayına alındı:`, "",
+      return [`Merhaba ${name} 👋`, "",
         `🔢 İlan No: ${listingNumber}`, `💰 Fiyat: ${fmtPrice}`, "",
         `Lütfen bu ilana ait *yetki sözleşmesini* sisteme yükleyin:`, link].join("\n");
     }
@@ -338,10 +342,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           bulkNotifyState.failed++;
           console.warn("[bulk notify]", e);
         }
-        if (i < ids.length - 1) {
-          const delay = 45_000 + Math.floor(Math.random() * 15_001);
-          await new Promise(r => setTimeout(r, delay));
-        }
+        // delay is handled globally inside sendWhatsApp (45-60 s between sends)
       }
       bulkNotifyState.active = false;
       bulkNotifyState.done = true;
@@ -402,6 +403,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.get("/api/listings/reports/date-report", requireAuth, requireAdmin, async (_req, res) => {
     try { res.json(await storage.getListingDateReport()); }
     catch (err) { console.error("[GET /api/listings/reports/date-report]", err); res.status(500).json({ message: "Internal server error" }); }
+  });
+
+  app.get("/api/listings/reports/age-groups", requireAuth, requireAdmin, async (_req, res) => {
+    try { res.json(await storage.getListingAgeGroups()); }
+    catch (err) { console.error("[GET /api/listings/reports/age-groups]", err); res.status(500).json({ message: "Internal server error" }); }
+  });
+
+  app.get("/api/listings/reports/over-90-days", requireAuth, requireAdmin, async (_req, res) => {
+    try { res.json(await storage.getListingsOver90Days()); }
+    catch (err) { console.error("[GET /api/listings/reports/over-90-days]", err); res.status(500).json({ message: "Internal server error" }); }
   });
 
   // Feature 5 & 6: Otomatik hatırlatma (manual trigger)
@@ -484,6 +495,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.get("/api/listings/unmatched-advisors", requireAuth, requireAdmin, async (req, res) => {
     try { res.json(await storage.getUnmatchedAdvisors()); }
     catch (err) { console.error("[GET /api/listings/unmatched-advisors]", err); res.status(500).json({ message: "Internal server error" }); }
+  });
+
+  app.get("/api/listings/fuzzy-suggestions", requireAuth, requireAdmin, async (_req, res) => {
+    try { res.json(await storage.getFuzzySuggestions()); }
+    catch (err) { console.error("[GET /api/listings/fuzzy-suggestions]", err); res.status(500).json({ message: "Internal server error" }); }
   });
 
   // Bulk assign all unmatched listings for a given advisor name
@@ -595,6 +611,132 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (!row) return res.status(404).json({ message: "Bağlantı geçersiz" });
       res.json({ ok: true });
     } catch { res.status(500).json({ message: "Internal server error" }); }
+  });
+
+  // ── Public advisor batch self-service (token, no auth) ──────────────────────
+
+  app.get("/api/public/advisor/:token", async (req, res) => {
+    try {
+      const emp = await storage.getAdvisorByToken(req.params.token);
+      if (!emp) return res.status(404).json({ message: "Bağlantı geçersiz" });
+      const pending = await storage.getAdvisorPendingListings(emp.id);
+      res.json({
+        name: (emp as any).candidate?.name ?? "Danışman",
+        active: pending.active.map((l) => ({
+          id: l.id, listingNumber: l.listingNumber, price: l.price,
+          publishedDate: l.publishedDate, office: l.office, store: l.store,
+          publicToken: l.publicToken,
+          noAgreementAt: (l as any).noAgreementAt ?? null,
+        })),
+        passive: pending.passive.map((l) => ({
+          id: l.id, listingNumber: l.listingNumber, price: l.price,
+          removedDate: l.removedDate, office: l.office, store: l.store,
+          publicToken: l.publicToken,
+        })),
+      });
+    } catch { res.status(500).json({ message: "Internal server error" }); }
+  });
+
+  app.post("/api/public/advisor/:token/listings/:listingId/agreement", async (req, res) => {
+    try {
+      const emp = await storage.getAdvisorByToken(req.params.token);
+      if (!emp) return res.status(404).json({ message: "Bağlantı geçersiz" });
+      const listing = await storage.getListing(Number(req.params.listingId));
+      if (!listing || listing.employeeId !== emp.id) return res.status(404).json({ message: "İlan bulunamadı" });
+      const { fileName, mime, data } = req.body as { fileName?: string; mime?: string; data?: string };
+      if (!data) return res.status(400).json({ message: "Dosya gerekli" });
+      if (data.length > 9_500_000) return res.status(413).json({ message: "Dosya çok büyük (en fazla ~7MB)" });
+      const row = await storage.setListingAgreement(listing.publicToken!, {
+        name: fileName || "yetki-sozlesmesi", mime: mime || "application/octet-stream", data,
+      });
+      if (!row) return res.status(404).json({ message: "İlan bulunamadı" });
+      res.json({ ok: true });
+    } catch { res.status(500).json({ message: "Internal server error" }); }
+  });
+
+  app.post("/api/public/advisor/:token/listings/:listingId/no-agreement", async (req, res) => {
+    try {
+      const emp = await storage.getAdvisorByToken(req.params.token);
+      if (!emp) return res.status(404).json({ message: "Bağlantı geçersiz" });
+      const row = await storage.toggleListingNoAgreement(Number(req.params.listingId), emp.id);
+      if (!row) return res.status(404).json({ message: "İlan bulunamadı" });
+      res.json({ ok: true, noAgreementAt: (row as any).noAgreementAt });
+    } catch { res.status(500).json({ message: "Internal server error" }); }
+  });
+
+  app.post("/api/public/advisor/:token/listings/:listingId/reason", async (req, res) => {
+    try {
+      const emp = await storage.getAdvisorByToken(req.params.token);
+      if (!emp) return res.status(404).json({ message: "Bağlantı geçersiz" });
+      const listing = await storage.getListing(Number(req.params.listingId));
+      if (!listing || listing.employeeId !== emp.id) return res.status(404).json({ message: "İlan bulunamadı" });
+      const { reason, note } = req.body as { reason?: string; note?: string };
+      if (!reason) return res.status(400).json({ message: "Sebep gerekli" });
+      const row = await storage.setListingCloseReason(listing.publicToken!, reason, note || null);
+      if (!row) return res.status(404).json({ message: "İlan bulunamadı" });
+      res.json({ ok: true });
+    } catch { res.status(500).json({ message: "Internal server error" }); }
+  });
+
+  // ── Get (or create) advisor self-service link without sending WA ─────────────
+
+  app.get("/api/listings/advisor-link/:employeeId", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const employeeId = Number(req.params.employeeId);
+      const token = await storage.ensureAdvisorToken(employeeId);
+      res.json({ link: `${publicBaseUrl()}/a/${token}`, token });
+    } catch (err) {
+      console.error("[GET /api/listings/advisor-link]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Notify a single advisor (one WhatsApp with link to all their pending listings) ──
+
+  app.post("/api/listings/notify-advisor/:employeeId", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const employeeId = Number(req.params.employeeId);
+      const emp = await storage.getEmployee(employeeId);
+      if (!emp) return res.status(404).json({ message: "Danışman bulunamadı" });
+      const phone = (emp as any).candidate?.phone;
+      if (!phone) return res.status(400).json({ message: "Danışmanın telefonu kayıtlı değil" });
+      const name = (emp as any).candidate?.name ?? "Danışman";
+
+      // Cooldown: same advisor can't be re-notified within 5 minutes
+      const COOLDOWN_MS = 5 * 60 * 1000;
+      const lastNotified = (emp as any).advisorLastNotifiedAt;
+      if (lastNotified && Date.now() - new Date(lastNotified).getTime() < COOLDOWN_MS) {
+        const remaining = Math.ceil((COOLDOWN_MS - (Date.now() - new Date(lastNotified).getTime())) / 1000);
+        return res.status(429).json({ message: `Son bildirimden ${remaining} saniye sonra tekrar gönderilebilir` });
+      }
+
+      const pending = await storage.getAdvisorPendingListings(employeeId);
+      if (pending.active.length === 0 && pending.passive.length === 0) {
+        return res.status(400).json({ message: "Bu danışmanın bekleyen ilanı yok" });
+      }
+
+      const advisorToken = await storage.ensureAdvisorToken(employeeId);
+      const link = `${publicBaseUrl()}/a/${advisorToken}`;
+
+      const activeCount = pending.active.length;
+      const passiveCount = pending.passive.length;
+
+      const lines: string[] = [
+        `Merhaba ${name} 👋`,
+        "",
+      ];
+      if (activeCount > 0) lines.push(`📋 ${activeCount} aktif ilanınız için yetki sözleşmesi bekleniyor.`);
+      if (passiveCount > 0) lines.push(`📋 ${passiveCount} pasife düşen ilanınız için kapanış sebebi bekleniyor.`);
+      lines.push("", "Tüm ilanlarınızı aşağıdaki *size özel* link üzerinden görüntüleyip işlem yapabilirsiniz. Bu bağlantıyı lütfen başkalarıyla paylaşmayın:");
+      lines.push(link);
+
+      const msgId = await sendWhatsApp(phone, lines.join("\n"));
+      await storage.markAdvisorNotified(employeeId);
+      res.json({ ok: true, msgId });
+    } catch (err) {
+      console.error("[POST /api/listings/notify-advisor]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
   });
 
   // ── Google OAuth ─────────────────────────────────────────────────────────────

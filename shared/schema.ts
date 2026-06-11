@@ -254,6 +254,8 @@ export const employees = pgTable("employees", {
   taxId: text("tax_id"),                      // Vergi / TCK No
   birthDate: text("birth_date"),              // Doğum Tarihi
   passiveAt: timestamp("passive_at"),
+  advisorToken: text("advisor_token").unique(),
+  advisorLastNotifiedAt: timestamp("advisor_last_notified_at"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -600,6 +602,7 @@ export const listings = pgTable("listings", {
   agreementFileName: text("agreement_file_name"),
   agreementFileMime: text("agreement_file_mime"),
   agreementFileData: text("agreement_file_data"),               // base64
+  noAgreementAt: timestamp("no_agreement_at"),                  // danışman "sözleşmem yok" dedi
 
   // Yayından kalkış sebebi (advisor submits via public link)
   closeReasonRequestedAt: timestamp("close_reason_requested_at"),

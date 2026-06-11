@@ -26,6 +26,7 @@ import PLReport from "@/pages/PLReport";
 import Listings from "@/pages/Listings";
 import ListingReports from "@/pages/ListingReports";
 import PublicListing from "@/pages/PublicListing";
+import AdvisorSelfService from "@/pages/AdvisorSelfService";
 
 function ProtectedRoute({
   children,
@@ -56,6 +57,7 @@ function Router() {
     <Switch>
       <Route path="/login" component={Login} />
       <Route path="/l/:token" component={PublicListing} />
+      <Route path="/a/:token" component={AdvisorSelfService} />
       <Route path="/" component={() => <Redirect to="/dashboard" />} />
       <Route path="/dashboard" component={() => <ProtectedRoute noAssistant><Dashboard /></ProtectedRoute>} />
       <Route path="/jobs" component={() => <ProtectedRoute><Jobs /></ProtectedRoute>} />

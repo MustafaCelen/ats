@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Layout } from "@/components/Layout";
 import { Button } from "@/components/ui/button";
@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import {
   BarChart2, Building2, Users, TrendingDown, TrendingUp, Bell, RefreshCw,
+  ChevronLeft, ChevronRight,
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
@@ -65,6 +66,28 @@ interface DateReportRow {
   kiralikActive: number; kiralikPassive: number; kiralikVolume: number;
 }
 
+interface Over90DayListing {
+  id: number;
+  listingNumber: string;
+  advisorName: string | null;
+  employeeName: string | null;
+  office: string | null;
+  price: string | null;
+  publishedDate: string | null;
+  daysActive: number;
+}
+
+interface AgeGroupRow {
+  label: string; order: number;
+  count: number; volume: number;
+  satilikCount: number; satilikVolume: number;
+  kiralikCount: number; kiralikVolume: number;
+}
+
+const AGE_COLORS = ["#22c55e","#84cc16","#eab308","#f97316","#ef4444","#dc2626","#7f1d1d"];
+
+const PAGE_SIZE = 25;
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmtVol(n: number): string {
@@ -106,25 +129,40 @@ export default function ListingReports() {
   const [runningReminders, setRunningReminders] = useState(false);
   const [reminderResult, setReminderResult] = useState<{ agreementQueued: number; closeReasonQueued: number } | null>(null);
 
+  // ── Advisor table sort + pagination ──
   const [sortKey, setSortKey] = useState<AdvisorSortKey>("totalActive");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [advisorPage, setAdvisorPage] = useState(0);
 
   const { data: advisorData = [], isLoading: loadingAdvisor } = useQuery<AdvisorReport[]>({
     queryKey: ["/api/listings/reports/advisor"],
     queryFn: () => fetch("/api/listings/reports/advisor", { credentials: "include" }).then((r) => r.json()),
   });
 
-  const sortedAdvisors = [...advisorData].sort((a, b) => {
+  const sortedAdvisors = useMemo(() => [...advisorData].sort((a, b) => {
     const av = a[sortKey], bv = b[sortKey];
     if (av === null || av === undefined) return 1;
     if (bv === null || bv === undefined) return -1;
     const cmp = av < bv ? -1 : av > bv ? 1 : 0;
     return sortDir === "asc" ? cmp : -cmp;
-  });
+  }), [advisorData, sortKey, sortDir]);
+
+  const advisorPageCount = Math.ceil(sortedAdvisors.length / PAGE_SIZE);
+  const advisorPageRows = sortedAdvisors.slice(advisorPage * PAGE_SIZE, (advisorPage + 1) * PAGE_SIZE);
 
   const toggleSort = (key: AdvisorSortKey) => {
+    setAdvisorPage(0);
     if (sortKey === key) setSortDir((d) => d === "asc" ? "desc" : "asc");
     else { setSortKey(key); setSortDir("desc"); }
+  };
+
+  // ── Over-90 sort + pagination ──
+  type Over90SortKey = "listingNumber" | "employeeName" | "office" | "price" | "daysActive";
+  const [o90Sort, setO90Sort] = useState<{ key: Over90SortKey; dir: "asc" | "desc" }>({ key: "daysActive", dir: "desc" });
+  const [o90Page, setO90Page] = useState(0);
+  const toggleO90Sort = (key: Over90SortKey) => {
+    setO90Page(0);
+    setO90Sort(s => s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "desc" });
   };
 
   const SortTh = ({ col, label }: { col: AdvisorSortKey; label: string }) => (
@@ -135,6 +173,27 @@ export default function ListingReports() {
       {label}{sortKey === col ? (sortDir === "desc" ? " ↓" : " ↑") : ""}
     </th>
   );
+
+  const O90Th = ({ col, label, align = "right" }: { col: Over90SortKey; label: string; align?: "left" | "right" }) => (
+    <th
+      className={`px-3 py-2.5 font-medium cursor-pointer select-none hover:text-foreground whitespace-nowrap text-${align}`}
+      onClick={() => toggleO90Sort(col)}
+    >
+      {label}{o90Sort.key === col ? (o90Sort.dir === "desc" ? " ↓" : " ↑") : ""}
+    </th>
+  );
+
+  function Pager({ page, total, onPage }: { page: number; total: number; onPage: (p: number) => void }) {
+    if (total <= 1) return null;
+    return (
+      <div className="flex items-center justify-end gap-2 px-3 py-2 border-t border-border text-xs text-muted-foreground">
+        <span>{page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, (page === total - 1 ? page * PAGE_SIZE + PAGE_SIZE : total * PAGE_SIZE))} / {total * PAGE_SIZE > 0 ? "" : ""}</span>
+        <button onClick={() => onPage(page - 1)} disabled={page === 0} className="p-0.5 rounded hover:bg-muted disabled:opacity-30"><ChevronLeft className="h-3.5 w-3.5" /></button>
+        <span>{page + 1} / {total}</span>
+        <button onClick={() => onPage(page + 1)} disabled={page >= total - 1} className="p-0.5 rounded hover:bg-muted disabled:opacity-30"><ChevronRight className="h-3.5 w-3.5" /></button>
+      </div>
+    );
+  }
 
   const { data: officeData = [], isLoading: loadingOffice } = useQuery<OfficeReport[]>({
     queryKey: ["/api/listings/reports/office"],
@@ -159,6 +218,27 @@ export default function ListingReports() {
   const { data: dateReport = [], isLoading: loadingDateReport } = useQuery<DateReportRow[]>({
     queryKey: ["/api/listings/reports/date-report"],
     queryFn: () => fetch("/api/listings/reports/date-report", { credentials: "include" }).then((r) => r.json()),
+  });
+
+  const { data: over90Data = [], isLoading: loadingOver90 } = useQuery<Over90DayListing[]>({
+    queryKey: ["/api/listings/reports/over-90-days"],
+    queryFn: () => fetch("/api/listings/reports/over-90-days", { credentials: "include" }).then((r) => r.json()),
+  });
+
+  const sortedO90 = useMemo(() => [...over90Data].sort((a, b) => {
+    const key = o90Sort.key;
+    const av = key === "price" ? Number(a.price ?? 0) : key === "employeeName" ? (a.employeeName ?? a.advisorName ?? "") : (a as any)[key];
+    const bv = key === "price" ? Number(b.price ?? 0) : key === "employeeName" ? (b.employeeName ?? b.advisorName ?? "") : (b as any)[key];
+    const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+    return o90Sort.dir === "asc" ? cmp : -cmp;
+  }), [over90Data, o90Sort]);
+
+  const o90PageCount = Math.ceil(sortedO90.length / PAGE_SIZE);
+  const o90PageRows = sortedO90.slice(o90Page * PAGE_SIZE, (o90Page + 1) * PAGE_SIZE);
+
+  const { data: ageGroups = [], isLoading: loadingAgeGroups } = useQuery<AgeGroupRow[]>({
+    queryKey: ["/api/listings/reports/age-groups"],
+    queryFn: () => fetch("/api/listings/reports/age-groups", { credentials: "include" }).then((r) => r.json()),
   });
 
   const totalCloseReasons = closeReasonData.reduce((s, r) => s + r.count, 0);
@@ -210,7 +290,7 @@ export default function ListingReports() {
         <div className="rounded-xl border border-border bg-card overflow-hidden">
           <div className="flex items-center gap-2 px-4 py-3 border-b border-border bg-muted/30">
             <TrendingUp className="h-4 w-4 text-primary" />
-            <h2 className="text-sm font-semibold">Aylık Trend (Son 12 Ay)</h2>
+            <h2 className="text-sm font-semibold">Aylık Trend ({new Date().getFullYear()})</h2>
           </div>
           <div className="p-4">
             {loadingTrend ? (
@@ -345,7 +425,7 @@ export default function ListingReports() {
         </div>
 
         {/* Feature 1: Danışman bazlı rapor */}
-        <SectionCard title="Danışman Bazlı Rapor" icon={Users}>
+        <SectionCard title={`Danışman Bazlı Rapor (${sortedAdvisors.length})`} icon={Users}>
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-muted/40 text-left text-xs text-muted-foreground">
@@ -358,16 +438,16 @@ export default function ListingReports() {
                 <SortTh col="agreementPending"     label="Söz. Bekleyen" />
                 <SortTh col="closeReasonSubmitted" label="Sebep Girildi" />
                 <SortTh col="closeReasonPending"   label="Sebep Bekleyen" />
-                <SortTh col="closingCount"         label="İşlem Adedi" />
+                <SortTh col="closingCount"         label={`İşlem Adedi (${new Date().getFullYear()})`} />
                 <SortTh col="lastClosingDate"      label="Son İşlem" />
               </tr>
             </thead>
             <tbody>
               {loadingAdvisor ? (
                 <tr><td colSpan={9} className="px-3 py-8 text-center text-muted-foreground">Yükleniyor…</td></tr>
-              ) : sortedAdvisors.length === 0 ? (
+              ) : advisorPageRows.length === 0 ? (
                 <tr><td colSpan={9} className="px-3 py-8 text-center text-muted-foreground">Veri yok.</td></tr>
-              ) : sortedAdvisors.map((r, i) => (
+              ) : advisorPageRows.map((r, i) => (
                 <tr key={i} className="border-b border-border last:border-0 hover:bg-muted/30">
                   <td className="px-3 py-2.5">
                     <div className="font-medium text-sm">{r.employeeName ?? r.advisorName ?? "—"}</div>
@@ -392,6 +472,7 @@ export default function ListingReports() {
               ))}
             </tbody>
           </table>
+          <Pager page={advisorPage} total={advisorPageCount} onPage={setAdvisorPage} />
         </SectionCard>
 
         {/* Feature 2: Paket bazlı kırılım */}
@@ -551,6 +632,118 @@ export default function ListingReports() {
               ))}
             </tbody>
           </table>
+        </SectionCard>
+
+        {/* İlan Yaş Dağılımı Pie Charts */}
+        <div className="rounded-xl border border-border bg-card overflow-hidden">
+          <div className="flex items-center gap-2 px-4 py-3 border-b border-border bg-muted/30">
+            <BarChart2 className="h-4 w-4 text-primary" />
+            <h2 className="text-sm font-semibold">Aktif İlanların Yaş Dağılımı (30 Günlük Gruplar)</h2>
+          </div>
+          {loadingAgeGroups ? (
+            <div className="p-8 text-center text-sm text-muted-foreground">Yükleniyor…</div>
+          ) : ageGroups.every(g => g.count === 0) ? (
+            <div className="p-8 text-center text-sm text-muted-foreground">Veri yok.</div>
+          ) : (
+            <div className="p-4 space-y-6">
+              {/* 3 pie charts: Genel / Satılık / Kiralık */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {([
+                  { title: "Genel", countKey: "count" as const, volKey: "volume" as const },
+                  { title: "Satılık (≥1M ₺)", countKey: "satilikCount" as const, volKey: "satilikVolume" as const },
+                  { title: "Kiralık (<1M ₺)", countKey: "kiralikCount" as const, volKey: "kiralikVolume" as const },
+                ]).map(({ title, countKey, volKey }) => {
+                  const data = ageGroups.filter(g => g[countKey] > 0).map((g, i) => ({
+                    name: g.label, value: g[countKey], volume: g[volKey],
+                    color: AGE_COLORS[g.order],
+                  }));
+                  const total = data.reduce((s, d) => s + d.value, 0);
+                  if (total === 0) return null;
+                  return (
+                    <div key={title} className="space-y-3">
+                      <div className="text-sm font-medium text-center">{title}</div>
+                      <ResponsiveContainer width="100%" height={200}>
+                        <PieChart>
+                          <Pie data={data} cx="50%" cy="50%" innerRadius={50} outerRadius={80} dataKey="value" paddingAngle={2}>
+                            {data.map((d, i) => <Cell key={i} fill={d.color} />)}
+                          </Pie>
+                          <Tooltip
+                            formatter={(v: number, _n: string, props: any) => [
+                              `${v} ilan (${total > 0 ? Math.round((v / total) * 100) : 0}%) — ${fmtVol(props.payload.volume)}`,
+                              props.payload.name,
+                            ]}
+                            contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid hsl(var(--border))", background: "hsl(var(--card))" }}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                      {/* Legend + volume table */}
+                      <div className="space-y-1">
+                        {ageGroups.map((g, i) => {
+                          const cnt = g[countKey]; const vol = g[volKey];
+                          if (cnt === 0) return null;
+                          return (
+                            <div key={g.label} className="flex items-center gap-2 text-xs">
+                              <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: AGE_COLORS[g.order] }} />
+                              <span className="w-16 font-medium">{g.label} gün</span>
+                              <span className="font-semibold">{cnt}</span>
+                              <span className="text-muted-foreground ml-auto">{fmtVol(vol)}</span>
+                            </div>
+                          );
+                        })}
+                        <div className="flex justify-between text-xs font-semibold border-t border-border pt-1 mt-1">
+                          <span>Toplam</span>
+                          <span>{total} ilan — {fmtVol(ageGroups.reduce((s, g) => s + g[volKey], 0))}</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* 90+ gün aktif ilanlar */}
+        <SectionCard title={`90+ Gün Aktif İlanlar (${over90Data.length})`} icon={TrendingUp}>
+          {loadingOver90 ? (
+            <div className="p-6 text-center text-sm text-muted-foreground">Yükleniyor…</div>
+          ) : over90Data.length === 0 ? (
+            <div className="p-6 text-center text-sm text-muted-foreground">90 günden uzun süredir aktif ilan yok</div>
+          ) : (
+            <>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border bg-muted/30 text-muted-foreground">
+                    <O90Th col="listingNumber" label="İlan No"      align="left" />
+                    <O90Th col="employeeName"  label="Danışman"     align="left" />
+                    <O90Th col="office"        label="Ofis"         align="left" />
+                    <O90Th col="price"         label="Fiyat"        align="right" />
+                    <th className="px-3 py-2.5 font-medium text-right">Yayın Tarihi</th>
+                    <O90Th col="daysActive"    label="Gün"          align="right" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/50">
+                  {o90PageRows.map((r) => (
+                    <tr key={r.id} className="hover:bg-muted/20 transition-colors">
+                      <td className="px-3 py-2 font-mono text-[11px]">{r.listingNumber}</td>
+                      <td className="px-3 py-2">{r.employeeName ?? r.advisorName ?? "—"}</td>
+                      <td className="px-3 py-2 text-muted-foreground">{r.office ?? "—"}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">
+                        {r.price ? Number(r.price).toLocaleString("tr-TR") + " ₺" : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-right text-muted-foreground">{r.publishedDate ?? "—"}</td>
+                      <td className="px-3 py-2 text-right">
+                        <span className={`font-semibold ${r.daysActive > 180 ? "text-red-600" : r.daysActive > 120 ? "text-orange-500" : "text-yellow-600"}`}>
+                          {r.daysActive}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <Pager page={o90Page} total={o90PageCount} onPage={setO90Page} />
+            </>
+          )}
         </SectionCard>
 
         {/* Feature 5 & 6: Hatırlatma Ayarları */}
