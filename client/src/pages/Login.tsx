@@ -7,11 +7,19 @@ import { Label } from "@/components/ui/label";
 import { Briefcase, Lock, Mail, AlertCircle } from "lucide-react";
 import { SiGoogle } from "react-icons/si";
 
+const ERROR_MESSAGES: Record<string, string> = {
+  not_authorized: "Bu Google hesabı sisteme kayıtlı değil. Lütfen yöneticinizle iletişime geçin.",
+  google_failed: "Google ile giriş başarısız oldu. Tekrar deneyin.",
+  no_code: "Google doğrulama kodu alınamadı.",
+};
+
 export default function Login() {
   const [, navigate] = useLocation();
   const { mutate: login, isPending, error } = useLogin();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const googleError = new URLSearchParams(window.location.search).get("error");
+  const googleErrorMsg = googleError ? (ERROR_MESSAGES[googleError] ?? "Giriş başarısız.") : null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -97,6 +105,12 @@ export default function Login() {
               </div>
             </div>
 
+            {googleErrorMsg && (
+              <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                {googleErrorMsg}
+              </div>
+            )}
             {error && (
               <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2" data-testid="login-error">
                 <AlertCircle className="h-4 w-4 shrink-0" />

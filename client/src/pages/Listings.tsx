@@ -49,7 +49,7 @@ interface Summary {
   needsAgreement: number; needsReason: number; soldPassive: number;
 }
 
-type FilterTab = "all" | "needsAgreement" | "needsReason" | "passive";
+type FilterTab = "all" | "needsAgreement" | "needsReason" | "passive" | "unmatched";
 
 // ── CSV helpers ─────────────────────────────────────────────────────────────────
 
@@ -352,6 +352,10 @@ export default function Listings() {
   const [notify, setNotify] = useState(false);
   const [importing, setImporting] = useState(false);
   const [bulkSending, setBulkSending] = useState(false);
+  const [bulkStatus, setBulkStatus] = useState<{
+    active: boolean; total: number; sent: number; skipped: number;
+    failed: number; current: string | null; done: boolean;
+  } | null>(null);
   const [viewer, setViewer] = useState<Listing | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [page, setPage] = useState(0);
@@ -367,6 +371,7 @@ export default function Listings() {
     if (tab === "needsAgreement") { params.set("needsAgreement", "1"); params.set("onlyMatched", "1"); }
     else if (tab === "needsReason") { params.set("needsReason", "1"); params.set("onlyMatched", "1"); }
     else if (tab === "passive") params.set("status", "passive");
+    else if (tab === "unmatched") params.set("status", "active");
     else params.set("onlyMatched", "1");
     if (search.trim()) params.set("search", search.trim());
     return params.toString();
@@ -377,8 +382,9 @@ export default function Listings() {
     queryFn: () => fetch(`/api/listings?${listQuery}`, { credentials: "include" }).then((r) => r.json()),
   });
 
-  // Client-side date filter on publishedDate
+  // Client-side date filter on publishedDate + unmatched filter
   const filteredRows = rows.filter((l) => {
+    if (tab === "unmatched" && l.employeeId !== null) return false;
     if (!dateFrom && !dateTo) return true;
     if (!l.publishedDate) return false;
     const d = new Date(l.publishedDate);
@@ -390,6 +396,24 @@ export default function Listings() {
 
   // Reset to first page whenever the filter/search/date changes
   useEffect(() => { setPage(0); }, [tab, search, dateFrom, dateTo]);
+
+  // Poll bulk notify status while active
+  useEffect(() => {
+    if (!bulkSending && !bulkStatus?.active) return;
+    const iv = setInterval(async () => {
+      try {
+        const res = await fetch("/api/listings/notify-bulk/status", { credentials: "include" });
+        const data = await res.json();
+        setBulkStatus(data);
+        if (data.done && !data.active) {
+          clearInterval(iv);
+          setBulkSending(false);
+          refresh();
+        }
+      } catch {}
+    }, 3000);
+    return () => clearInterval(iv);
+  }, [bulkSending, bulkStatus?.active]);
 
   const pageCount = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
   const pageRows = filteredRows.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
@@ -455,6 +479,7 @@ export default function Listings() {
     if (!bulkNotifyCount || bulkSending) return;
     const ids = filteredRows.filter((l) => !!l.employeeId).map((l) => l.id);
     setBulkSending(true);
+    setBulkStatus({ active: true, total: ids.length, sent: 0, skipped: 0, failed: 0, current: null, done: false });
     try {
       const res = await fetch("/api/listings/notify-bulk", {
         method: "POST",
@@ -463,20 +488,27 @@ export default function Listings() {
         body: JSON.stringify({ ids }),
       });
       const data = await res.json();
-      if (!res.ok) { toast({ title: "Hata", description: data.message, variant: "destructive" }); return; }
-      toast({ title: "Bildirim kuyruğa alındı", description: `${data.queued} ilana sırayla gönderilecek (45–60 sn aralıkla).` });
+      if (!res.ok) {
+        toast({ title: "Hata", description: data.message, variant: "destructive" });
+        setBulkSending(false);
+        setBulkStatus(null);
+        return;
+      }
     } catch {
       toast({ title: "Hata", description: "İstek gönderilemedi.", variant: "destructive" });
-    } finally {
       setBulkSending(false);
+      setBulkStatus(null);
     }
   };
+
+  const unmatchedCount = tab === "unmatched" ? filteredRows.length : undefined;
 
   const tabs: { key: FilterTab; label: string; count?: number }[] = [
     { key: "needsAgreement", label: "Yetki Sözleşmesi Bekleyen", count: summary?.needsAgreement },
     { key: "needsReason", label: "Kalkış Sebebi Bekleyen", count: summary?.needsReason },
     { key: "passive", label: "Pasif İlanlar", count: summary?.totalPassive },
     { key: "all", label: "Tüm Eşleşen İlanlar", count: summary?.matchedActive },
+    { key: "unmatched", label: "Eşleşmeyenler", count: unmatchedCount },
   ];
 
   return (
@@ -589,6 +621,35 @@ export default function Listings() {
           </div>
         </div>
 
+        {/* Bulk notify progress */}
+        {bulkStatus && (bulkStatus.active || bulkStatus.done) && (
+          <div className="rounded-xl border border-border bg-card p-4 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium flex items-center gap-2">
+                {bulkStatus.active
+                  ? <><RefreshCw className="h-4 w-4 animate-spin text-primary" /> WhatsApp gönderimi devam ediyor…</>
+                  : <><CheckCircle2 className="h-4 w-4 text-emerald-600" /> Gönderim tamamlandı</>}
+              </span>
+              {bulkStatus.done && (
+                <button onClick={() => setBulkStatus(null)} className="text-xs text-muted-foreground hover:text-foreground">Kapat</button>
+              )}
+            </div>
+            <div className="w-full bg-muted rounded-full h-2">
+              <div
+                className="bg-primary h-2 rounded-full transition-all duration-500"
+                style={{ width: `${bulkStatus.total ? Math.round((bulkStatus.sent + bulkStatus.skipped + bulkStatus.failed) / bulkStatus.total * 100) : 0}%` }}
+              />
+            </div>
+            <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
+              <span>Toplam: <b>{bulkStatus.total}</b></span>
+              <span className="text-emerald-600">Gönderildi: <b>{bulkStatus.sent}</b></span>
+              <span>Atlandı: <b>{bulkStatus.skipped}</b></span>
+              {bulkStatus.failed > 0 && <span className="text-red-600">Hata: <b>{bulkStatus.failed}</b></span>}
+              {bulkStatus.current && <span className="text-primary">Şu an: <b>{bulkStatus.current}</b></span>}
+            </div>
+          </div>
+        )}
+
         {/* Table */}
         <div className="rounded-xl border border-border bg-card overflow-hidden">
           <div className="overflow-x-auto">
@@ -600,6 +661,7 @@ export default function Listings() {
                   <th className="px-3 py-2.5 font-medium">Telefon</th>
                   <th className="px-3 py-2.5 font-medium">Fiyat</th>
                   <th className="px-3 py-2.5 font-medium">Yayın</th>
+                  <th className="px-3 py-2.5 font-medium">Yaş</th>
                   <th className="px-3 py-2.5 font-medium">Durum</th>
                   <th className="px-3 py-2.5 font-medium">Yetki Sözleşmesi</th>
                   <th className="px-3 py-2.5 font-medium">Kalkış Sebebi</th>
@@ -609,9 +671,9 @@ export default function Listings() {
               </thead>
               <tbody>
                 {isLoading ? (
-                  <tr><td colSpan={9} className="px-3 py-10 text-center text-muted-foreground">Yükleniyor…</td></tr>
+                  <tr><td colSpan={11} className="px-3 py-10 text-center text-muted-foreground">Yükleniyor…</td></tr>
                 ) : filteredRows.length === 0 ? (
-                  <tr><td colSpan={9} className="px-3 py-10 text-center text-muted-foreground">Kayıt yok.</td></tr>
+                  <tr><td colSpan={11} className="px-3 py-10 text-center text-muted-foreground">Kayıt yok.</td></tr>
                 ) : pageRows.map((l) => (
                   <tr key={l.id} className="border-b border-border last:border-0 hover:bg-muted/30">
                     <td className="px-3 py-2.5 font-mono text-xs">{l.listingNumber}</td>
@@ -628,6 +690,19 @@ export default function Listings() {
                     </td>
                     <td className="px-3 py-2.5 whitespace-nowrap">{fmtPrice(l.price)}</td>
                     <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap">{l.publishedDate ?? "—"}</td>
+                    <td className="px-3 py-2.5 whitespace-nowrap">
+                      {l.status === "active" && !l.agreementUploadedAt && l.publishedDate ? (() => {
+                        const d = new Date(l.publishedDate);
+                        if (isNaN(d.getTime())) return <span className="text-xs text-muted-foreground">—</span>;
+                        const age = Math.floor((Date.now() - d.getTime()) / 86400000);
+                        const cls = age > 60
+                          ? "text-red-600 font-semibold"
+                          : age > 30
+                          ? "text-orange-500 font-medium"
+                          : "text-muted-foreground";
+                        return <span className={`text-xs ${cls}`}>{age}g</span>;
+                      })() : <span className="text-xs text-muted-foreground">—</span>}
+                    </td>
                     <td className="px-3 py-2.5">
                       {l.status === "active" ? (
                         <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Aktif</span>

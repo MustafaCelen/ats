@@ -185,8 +185,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
                  `🔢 İlan No: ${l.listingNumber}`, `💰 Fiyat: ${fmtPrice}`, "",
                  `Lütfen bu ilana ait *yetki sözleşmesini* sisteme yükleyin:`, link].join("\n")
               : [`Merhaba ${name} 👋`, "", `${l.listingNumber} numaralı ilanınız yayından kaldırılmış görünüyor.`, "",
-                 `Lütfen yayından kalkış sebebini girin:`, link, "",
-                 `İlan satıldıysa kapanış işlemleri için sizinle iletişime geçeceğiz.`].join("\n");
+                 `Lütfen yayından kalkış sebebini girin:`, link].join("\n");
             const msgId = await sendWhatsApp(phone, msg);
             await storage.markListingNotified(l.id, kind, msgId);
             console.log(`[listings notify] ${l.listingNumber} → ${phone} msgId=${msgId ?? "n/a"}`);
@@ -238,6 +237,17 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     } catch { res.status(500).json({ message: "Internal server error" }); }
   });
 
+  function buildListingMessage(kind: "new" | "passive", name: string, listingNumber: string, price: string | null, link: string): string {
+    const fmtPrice = price ? Number(price).toLocaleString("tr-TR") + " ₺" : "—";
+    if (kind === "new") {
+      return [`Merhaba ${name} 👋`, "", `Yeni bir ilanınız yayına alındı:`, "",
+        `🔢 İlan No: ${listingNumber}`, `💰 Fiyat: ${fmtPrice}`, "",
+        `Lütfen bu ilana ait *yetki sözleşmesini* sisteme yükleyin:`, link].join("\n");
+    }
+    return [`Merhaba ${name} 👋`, "", `${listingNumber} numaralı ilanınız yayından kaldırılmış görünüyor.`, "",
+      `Lütfen yayından kalkış sebebini girin:`, link].join("\n");
+  }
+
   // (Re)send the advisor self-service notification for one listing
   app.post("/api/listings/:id/notify", requireAuth, requireAdmin, async (req, res) => {
     try {
@@ -259,20 +269,46 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (!phone) return res.status(400).json({ message: "Danışmanın telefonu kayıtlı değil" });
       const name = emp?.candidate?.name ?? "Danışman";
       const link = `${publicBaseUrl()}/l/${l.publicToken}`;
-      const msg = kind === "new"
-        ? [`Merhaba ${name} 👋`, "", `${l.listingNumber} numaralı ilanınız için *yetki sözleşmesi* bekleniyor:`, link].join("\n")
-        : [`Merhaba ${name} 👋`, "", `${l.listingNumber} numaralı ilanınız yayından kalkmış. Lütfen sebebini girin:`, link].join("\n");
+      const msg = buildListingMessage(kind, name, l.listingNumber, l.price, link);
       const msgId = await sendWhatsApp(phone, msg);
       await storage.markListingNotified(l.id, kind, msgId);
       res.json({ ok: true });
     } catch { res.status(500).json({ message: "Internal server error" }); }
   });
 
+  // In-memory bulk notify progress state (single concurrent job)
+  const bulkNotifyState = {
+    active: false,
+    total: 0,
+    sent: 0,
+    skipped: 0,
+    failed: 0,
+    current: null as string | null,
+    done: false,
+    startedAt: null as Date | null,
+  };
+
+  app.get("/api/listings/notify-bulk/status", requireAuth, requireAdmin, (_req, res) => {
+    res.json({ ...bulkNotifyState });
+  });
+
   // Bulk WhatsApp notify for a set of listing IDs (fire-and-forget, random 45-60 s delay)
   app.post("/api/listings/notify-bulk", requireAuth, requireAdmin, async (req, res) => {
+    if (bulkNotifyState.active)
+      return res.status(409).json({ message: "Zaten bir gönderim devam ediyor. Bitmesini bekleyin." });
     const { ids } = req.body as { ids: number[] };
     if (!Array.isArray(ids) || ids.length === 0)
       return res.status(400).json({ message: "ids[] gerekli" });
+
+    bulkNotifyState.active = true;
+    bulkNotifyState.total = ids.length;
+    bulkNotifyState.sent = 0;
+    bulkNotifyState.skipped = 0;
+    bulkNotifyState.failed = 0;
+    bulkNotifyState.current = null;
+    bulkNotifyState.done = false;
+    bulkNotifyState.startedAt = new Date();
+
     res.json({ queued: ids.length });
 
     (async () => {
@@ -281,27 +317,35 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       for (let i = 0; i < ids.length; i++) {
         try {
           const l = await storage.getListing(ids[i]);
-          if (!l || !l.employeeId) continue;
+          if (!l || !l.employeeId) { bulkNotifyState.skipped++; continue; }
+          bulkNotifyState.current = l.listingNumber;
           const kind: "new" | "passive" = l.status === "active" ? "new" : "passive";
           const lastSent = kind === "new" ? (l as any).notifiedNewAt : (l as any).notifiedPassiveAt;
-          if (lastSent && Date.now() - new Date(lastSent).getTime() < COOLDOWN_MS) continue;
+          if (lastSent && Date.now() - new Date(lastSent).getTime() < COOLDOWN_MS) {
+            bulkNotifyState.skipped++; continue;
+          }
           const emp = await storage.getEmployee(l.employeeId);
           const phone = emp?.candidate?.phone;
           const name = emp?.candidate?.name ?? "Danışman";
-          if (!phone) continue;
+          if (!phone) { bulkNotifyState.skipped++; continue; }
           const link = `${base}/l/${l.publicToken}`;
-          const msg = kind === "new"
-            ? [`Merhaba ${name} 👋`, "", `${l.listingNumber} numaralı ilanınız için *yetki sözleşmesi* bekleniyor:`, link].join("\n")
-            : [`Merhaba ${name} 👋`, "", `${l.listingNumber} numaralı ilanınız yayından kalkmış. Lütfen sebebini girin:`, link].join("\n");
+          const msg = buildListingMessage(kind, name, l.listingNumber, l.price, link);
           const msgId = await sendWhatsApp(phone, msg);
           await storage.markListingNotified(l.id, kind, msgId);
+          bulkNotifyState.sent++;
           console.log(`[bulk notify] ${l.listingNumber} → ${phone} msgId=${msgId ?? "n/a"}`);
-        } catch (e) { console.warn("[bulk notify]", e); }
+        } catch (e) {
+          bulkNotifyState.failed++;
+          console.warn("[bulk notify]", e);
+        }
         if (i < ids.length - 1) {
           const delay = 45_000 + Math.floor(Math.random() * 15_001);
           await new Promise(r => setTimeout(r, delay));
         }
       }
+      bulkNotifyState.active = false;
+      bulkNotifyState.done = true;
+      bulkNotifyState.current = null;
     })();
   });
 
@@ -321,6 +365,164 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try { await storage.clearListings(); res.status(204).send(); }
     catch { res.status(500).json({ message: "Internal server error" }); }
   });
+
+  // ── Listing Reports ──────────────────────────────────────────────────────────
+
+  // Feature 1: Danışman bazlı rapor
+  app.get("/api/listings/reports/advisor", requireAuth, requireAdmin, async (_req, res) => {
+    try { res.json(await storage.getListingReportByAdvisor()); }
+    catch (err) { console.error("[GET /api/listings/reports/advisor]", err); res.status(500).json({ message: "Internal server error" }); }
+  });
+
+  // Feature 2: Ofis bazlı kırılım
+  app.get("/api/listings/reports/office", requireAuth, requireAdmin, async (_req, res) => {
+    try { res.json(await storage.getListingReportByOffice()); }
+    catch (err) { console.error("[GET /api/listings/reports/office]", err); res.status(500).json({ message: "Internal server error" }); }
+  });
+
+  // Feature 3: Kalkış sebebi analizi
+  app.get("/api/listings/reports/close-reasons", requireAuth, requireAdmin, async (_req, res) => {
+    try { res.json(await storage.getListingCloseReasonStats()); }
+    catch (err) { console.error("[GET /api/listings/reports/close-reasons]", err); res.status(500).json({ message: "Internal server error" }); }
+  });
+
+  // Feature 4: Aylık trend
+  app.get("/api/listings/reports/monthly-trend", requireAuth, requireAdmin, async (_req, res) => {
+    try { res.json(await storage.getListingMonthlyTrend()); }
+    catch (err) { console.error("[GET /api/listings/reports/monthly-trend]", err); res.status(500).json({ message: "Internal server error" }); }
+  });
+
+  // Feature 5 & 6: Otomatik hatırlatma (manual trigger)
+  app.post("/api/listings/reminders/run", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const agreementDays = Number(req.body?.agreementDays ?? 3);
+      const closeReasonDays = Number(req.body?.closeReasonDays ?? 3);
+      const { agreementListings, closeReasonListings } = await storage.runListingReminders(agreementDays, closeReasonDays);
+
+      res.json({
+        agreementQueued: agreementListings.length,
+        closeReasonQueued: closeReasonListings.length,
+      });
+
+      // Fire and forget — send reminders asynchronously
+      (async () => {
+        const base = publicBaseUrl();
+
+        for (const l of agreementListings) {
+          try {
+            if (!l.employeeId) continue;
+            const emp = await storage.getEmployee(l.employeeId);
+            const phone = emp?.candidate?.phone;
+            const name = emp?.candidate?.name ?? "Danışman";
+            if (!phone) continue;
+            const link = `${base}/l/${l.publicToken}`;
+            const fmtPrice = l.price ? Number(l.price).toLocaleString("tr-TR") + " ₺" : "—";
+            const msg = [
+              `Merhaba ${name} 👋`,
+              "",
+              `⏰ Hatırlatma: ${l.listingNumber} numaralı ilanınıza ait yetki sözleşmesi henüz yüklenmedi.`,
+              "",
+              `🔢 İlan No: ${l.listingNumber}`,
+              `💰 Fiyat: ${fmtPrice}`,
+              "",
+              `Lütfen bu ilana ait *yetki sözleşmesini* sisteme yükleyin:`,
+              link,
+            ].join("\n");
+            await sendWhatsApp(phone, msg);
+            await storage.markListingAgreementReminderSent(l.id);
+            console.log(`[listing reminder] agreement ${l.listingNumber} → ${phone}`);
+          } catch (e) { console.warn("[listing reminder agreement]", e); }
+        }
+
+        for (const l of closeReasonListings) {
+          try {
+            if (!l.employeeId) continue;
+            const emp = await storage.getEmployee(l.employeeId);
+            const phone = emp?.candidate?.phone;
+            const name = emp?.candidate?.name ?? "Danışman";
+            if (!phone) continue;
+            const link = `${base}/l/${l.publicToken}`;
+            const msg = [
+              `Merhaba ${name} 👋`,
+              "",
+              `⏰ Hatırlatma: ${l.listingNumber} numaralı ilanınız için kalkış sebebi henüz girilmedi.`,
+              "",
+              `Lütfen yayından kalkış sebebini girin:`,
+              link,
+            ].join("\n");
+            await sendWhatsApp(phone, msg);
+            await storage.markListingCloseReasonReminderSent(l.id);
+            console.log(`[listing reminder] close-reason ${l.listingNumber} → ${phone}`);
+          } catch (e) { console.warn("[listing reminder close-reason]", e); }
+        }
+      })();
+    } catch (err) {
+      console.error("[POST /api/listings/reminders/run]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Feature 8: Fiyat geçmişi
+  app.get("/api/listings/:id/price-history", requireAuth, requireAdmin, async (req, res) => {
+    try { res.json(await storage.getListingPriceHistory(Number(req.params.id))); }
+    catch (err) { console.error("[GET /api/listings/:id/price-history]", err); res.status(500).json({ message: "Internal server error" }); }
+  });
+
+  // Daily reminder scheduler (runs every 24 hours with defaults of 3 days each)
+  setInterval(async () => {
+    try {
+      const { agreementListings, closeReasonListings } = await storage.runListingReminders(3, 3);
+      const base = publicBaseUrl();
+
+      for (const l of agreementListings) {
+        try {
+          if (!l.employeeId) continue;
+          const emp = await storage.getEmployee(l.employeeId);
+          const phone = emp?.candidate?.phone;
+          const name = emp?.candidate?.name ?? "Danışman";
+          if (!phone) continue;
+          const link = `${base}/l/${l.publicToken}`;
+          const fmtPrice = l.price ? Number(l.price).toLocaleString("tr-TR") + " ₺" : "—";
+          const msg = [
+            `Merhaba ${name} 👋`,
+            "",
+            `⏰ Hatırlatma: ${l.listingNumber} numaralı ilanınıza ait yetki sözleşmesi henüz yüklenmedi.`,
+            "",
+            `🔢 İlan No: ${l.listingNumber}`,
+            `💰 Fiyat: ${fmtPrice}`,
+            "",
+            `Lütfen bu ilana ait *yetki sözleşmesini* sisteme yükleyin:`,
+            link,
+          ].join("\n");
+          await sendWhatsApp(phone, msg);
+          await storage.markListingAgreementReminderSent(l.id);
+          console.log(`[daily reminder] agreement ${l.listingNumber} → ${phone}`);
+        } catch (e) { console.warn("[daily reminder agreement]", e); }
+      }
+
+      for (const l of closeReasonListings) {
+        try {
+          if (!l.employeeId) continue;
+          const emp = await storage.getEmployee(l.employeeId);
+          const phone = emp?.candidate?.phone;
+          const name = emp?.candidate?.name ?? "Danışman";
+          if (!phone) continue;
+          const link = `${base}/l/${l.publicToken}`;
+          const msg = [
+            `Merhaba ${name} 👋`,
+            "",
+            `⏰ Hatırlatma: ${l.listingNumber} numaralı ilanınız için kalkış sebebi henüz girilmedi.`,
+            "",
+            `Lütfen yayından kalkış sebebini girin:`,
+            link,
+          ].join("\n");
+          await sendWhatsApp(phone, msg);
+          await storage.markListingCloseReasonReminderSent(l.id);
+          console.log(`[daily reminder] close-reason ${l.listingNumber} → ${phone}`);
+        } catch (e) { console.warn("[daily reminder close-reason]", e); }
+      }
+    } catch (e) { console.warn("[daily reminder scheduler]", e); }
+  }, 24 * 60 * 60 * 1000);
 
   // ── Public listing self-service (token, no auth) ────────────────────────────
 
@@ -418,6 +620,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         email: profile.email,
         name: profile.name ?? profile.email,
       });
+
+      if (!user) return htmlRedirect("/login?error=not_authorized");
 
       req.session.userId = user.id;
       await new Promise<void>((resolve, reject) => req.session.save((err) => err ? reject(err) : resolve()));

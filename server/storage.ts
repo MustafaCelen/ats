@@ -1395,13 +1395,11 @@ export class DatabaseStorage implements IStorage {
     googleId: string;
     email: string;
     name: string;
-  }): Promise<User> {
+  }): Promise<User | null> {
     const existing = await this.getUserByGoogleId(data.googleId);
+    if (existing) return existing;
 
-    if (existing) {
-      return existing;
-    }
-
+    // Link googleId to an existing account that shares the same email
     const byEmail = await this.getUserByEmailFull(data.email);
     if (byEmail) {
       const [updated] = await db
@@ -1412,18 +1410,8 @@ export class DatabaseStorage implements IStorage {
       return updated;
     }
 
-    const hash = await import("bcrypt").then((m) => m.default.hash(Math.random().toString(36), 10));
-    const [created] = await db
-      .insert(users)
-      .values({
-        googleId: data.googleId,
-        email: data.email,
-        name: data.name,
-        passwordHash: hash,
-        role: "hiring_manager",
-      })
-      .returning();
-    return created;
+    // No matching account — do not auto-create
+    return null;
   }
 
   async updateUserGoogleTokens(userId: number, tokens: {
@@ -3603,6 +3591,13 @@ export class DatabaseStorage implements IStorage {
           created++;
           if (empId) newActive.push(row); // only our own advisors get pinged
         } else {
+          // Feature 8: track price change
+          if (r.price !== null && r.price !== undefined && prev.price !== null && prev.price !== undefined && r.price !== prev.price) {
+            await db.execute(sql`
+              INSERT INTO listing_price_history (listing_id, old_price, new_price, changed_at)
+              VALUES (${prev.id}, ${prev.price}, ${r.price}, now())
+            `);
+          }
           await db.update(listings).set({
             price: r.price ?? prev.price,
             publishedDate: r.publishedDate ?? prev.publishedDate,
@@ -3684,6 +3679,228 @@ export class DatabaseStorage implements IStorage {
     }
 
     return { created, updated, newActive, newlyPassive };
+  }
+
+  // ── Feature 1: Danışman bazlı rapor ─────────────────────────────────────────
+
+  async getListingReportByAdvisor(): Promise<{
+    employeeId: number | null;
+    advisorName: string | null;
+    employeeName: string | null;
+    totalActive: number;
+    totalPassive: number;
+    agreementUploaded: number;
+    agreementPending: number;
+    closeReasonSubmitted: number;
+    closeReasonPending: number;
+  }[]> {
+    const rows = await db
+      .select({
+        employeeId: listings.employeeId,
+        advisorName: listings.advisorName,
+        empName: candidates.name,
+        totalActive:          sql<number>`count(*) filter (where ${listings.status} = 'active')`,
+        totalPassive:         sql<number>`count(*) filter (where ${listings.status} = 'passive')`,
+        agreementUploaded:    sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.agreementUploadedAt} is not null)`,
+        agreementPending:     sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.agreementUploadedAt} is null)`,
+        closeReasonSubmitted: sql<number>`count(*) filter (where ${listings.status} = 'passive' and ${listings.closeReasonSubmittedAt} is not null)`,
+        closeReasonPending:   sql<number>`count(*) filter (where ${listings.status} = 'passive' and ${listings.closeReasonSubmittedAt} is null)`,
+      })
+      .from(listings)
+      .leftJoin(employees, eq(listings.employeeId, employees.id))
+      .leftJoin(candidates, eq(employees.candidateId, candidates.id))
+      .groupBy(listings.employeeId, listings.advisorName, candidates.name)
+      .orderBy(sql`count(*) filter (where ${listings.status} = 'active') desc`);
+
+    return rows.map((r) => ({
+      employeeId: r.employeeId ?? null,
+      advisorName: r.advisorName ?? null,
+      employeeName: r.empName ?? null,
+      totalActive: Number(r.totalActive ?? 0),
+      totalPassive: Number(r.totalPassive ?? 0),
+      agreementUploaded: Number(r.agreementUploaded ?? 0),
+      agreementPending: Number(r.agreementPending ?? 0),
+      closeReasonSubmitted: Number(r.closeReasonSubmitted ?? 0),
+      closeReasonPending: Number(r.closeReasonPending ?? 0),
+    }));
+  }
+
+  // ── Feature 2: Ofis bazlı kırılım ───────────────────────────────────────────
+
+  async getListingReportByOffice(): Promise<{
+    office: string | null;
+    totalActive: number;
+    totalPassive: number;
+    agreementUploaded: number;
+    closeReasonSubmitted: number;
+  }[]> {
+    const rows = await db
+      .select({
+        office: listings.office,
+        totalActive:          sql<number>`count(*) filter (where ${listings.status} = 'active')`,
+        totalPassive:         sql<number>`count(*) filter (where ${listings.status} = 'passive')`,
+        agreementUploaded:    sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.agreementUploadedAt} is not null)`,
+        closeReasonSubmitted: sql<number>`count(*) filter (where ${listings.status} = 'passive' and ${listings.closeReasonSubmittedAt} is not null)`,
+      })
+      .from(listings)
+      .groupBy(listings.office)
+      .orderBy(sql`count(*) filter (where ${listings.status} = 'active') desc`);
+
+    return rows.map((r) => ({
+      office: r.office ?? null,
+      totalActive: Number(r.totalActive ?? 0),
+      totalPassive: Number(r.totalPassive ?? 0),
+      agreementUploaded: Number(r.agreementUploaded ?? 0),
+      closeReasonSubmitted: Number(r.closeReasonSubmitted ?? 0),
+    }));
+  }
+
+  // ── Feature 3: Kalkış sebebi analizi ────────────────────────────────────────
+
+  async getListingCloseReasonStats(): Promise<{ closeReason: string; count: number }[]> {
+    const rows = await db
+      .select({
+        closeReason: listings.closeReason,
+        count: sql<number>`count(*)`,
+      })
+      .from(listings)
+      .where(and(
+        eq(listings.status, "passive"),
+        isNotNull(listings.closeReasonSubmittedAt),
+        isNotNull(listings.closeReason),
+      ))
+      .groupBy(listings.closeReason)
+      .orderBy(sql`count(*) desc`);
+
+    return rows
+      .filter((r) => r.closeReason !== null)
+      .map((r) => ({ closeReason: r.closeReason!, count: Number(r.count ?? 0) }));
+  }
+
+  // ── Feature 4: Aylık trend ───────────────────────────────────────────────────
+
+  async getListingMonthlyTrend(): Promise<{ month: string; newActive: number; newPassive: number }[]> {
+    // publishedDate and removedDate are stored as text "Jun 8, 2026"
+    // Use to_date with 'Mon DD, YYYY' format for PostgreSQL
+    const activeRows = await db.execute(sql`
+      SELECT
+        to_char(to_date(published_date, 'Mon DD, YYYY'), 'YYYY-MM') AS month,
+        count(*) AS cnt
+      FROM listings
+      WHERE published_date IS NOT NULL
+        AND published_date ~ '^[A-Za-z]+ [0-9]+, [0-9]{4}$'
+        AND to_date(published_date, 'Mon DD, YYYY') >= (now() - interval '12 months')
+      GROUP BY 1
+      ORDER BY 1
+    `);
+
+    const passiveRows = await db.execute(sql`
+      SELECT
+        to_char(to_date(removed_date, 'Mon DD, YYYY'), 'YYYY-MM') AS month,
+        count(*) AS cnt
+      FROM listings
+      WHERE removed_date IS NOT NULL
+        AND removed_date ~ '^[A-Za-z]+ [0-9]+, [0-9]{4}$'
+        AND to_date(removed_date, 'Mon DD, YYYY') >= (now() - interval '12 months')
+      GROUP BY 1
+      ORDER BY 1
+    `);
+
+    const activeMap = new Map<string, number>();
+    for (const r of activeRows.rows as any[]) {
+      activeMap.set(r.month, Number(r.cnt));
+    }
+
+    const passiveMap = new Map<string, number>();
+    for (const r of passiveRows.rows as any[]) {
+      passiveMap.set(r.month, Number(r.cnt));
+    }
+
+    const allMonths = new Set<string>([...activeMap.keys(), ...passiveMap.keys()]);
+    const sorted = Array.from(allMonths).sort();
+
+    return sorted.map((month) => ({
+      month,
+      newActive: activeMap.get(month) ?? 0,
+      newPassive: passiveMap.get(month) ?? 0,
+    }));
+  }
+
+  // ── Feature 5 & 6: Otomatik hatırlatma ──────────────────────────────────────
+
+  async runListingReminders(agreementDays: number, closeReasonDays: number): Promise<{
+    agreementListings: Listing[];
+    closeReasonListings: Listing[];
+  }> {
+    const agreementThreshold = new Date(Date.now() - agreementDays * 24 * 60 * 60 * 1000);
+    const closeReasonThreshold = new Date(Date.now() - closeReasonDays * 24 * 60 * 60 * 1000);
+
+    const agreementRows = await db.select().from(listings).where(and(
+      eq(listings.status, "active"),
+      isNull(listings.agreementUploadedAt),
+      isNotNull(listings.notifiedNewAt),
+      isNotNull(listings.employeeId),
+      or(
+        isNull(sql`${listings}.agreement_reminder_sent_at`),
+        sql`${listings}.agreement_reminder_sent_at < ${agreementThreshold}`,
+      ),
+    ));
+
+    const closeReasonRows = await db.select().from(listings).where(and(
+      eq(listings.status, "passive"),
+      isNull(listings.closeReasonSubmittedAt),
+      isNotNull(listings.notifiedPassiveAt),
+      isNotNull(listings.employeeId),
+      or(
+        isNull(sql`${listings}.close_reason_reminder_sent_at`),
+        sql`${listings}.close_reason_reminder_sent_at < ${closeReasonThreshold}`,
+      ),
+    ));
+
+    return {
+      agreementListings: agreementRows,
+      closeReasonListings: closeReasonRows,
+    };
+  }
+
+  async markListingAgreementReminderSent(id: number): Promise<void> {
+    await db.execute(sql`
+      UPDATE listings SET agreement_reminder_sent_at = now(), updated_at = now()
+      WHERE id = ${id}
+    `);
+  }
+
+  async markListingCloseReasonReminderSent(id: number): Promise<void> {
+    await db.execute(sql`
+      UPDATE listings SET close_reason_reminder_sent_at = now(), updated_at = now()
+      WHERE id = ${id}
+    `);
+  }
+
+  // ── Feature 7: İlan yaşı — no storage needed (computed client-side) ──────────
+
+  // ── Feature 8: Fiyat değişim takibi ─────────────────────────────────────────
+
+  async getListingPriceHistory(listingId: number): Promise<{
+    id: number;
+    listingId: number;
+    oldPrice: string | null;
+    newPrice: string | null;
+    changedAt: Date;
+  }[]> {
+    const rows = await db.execute(sql`
+      SELECT id, listing_id, old_price, new_price, changed_at
+      FROM listing_price_history
+      WHERE listing_id = ${listingId}
+      ORDER BY changed_at DESC
+    `);
+    return (rows.rows as any[]).map((r) => ({
+      id: r.id,
+      listingId: r.listing_id,
+      oldPrice: r.old_price !== null ? String(r.old_price) : null,
+      newPrice: r.new_price !== null ? String(r.new_price) : null,
+      changedAt: r.changed_at,
+    }));
   }
 }
 

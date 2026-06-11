@@ -23,6 +23,7 @@ import Coaching from "@/pages/Coaching";
 import Expenses from "@/pages/Expenses";
 import PLReport from "@/pages/PLReport";
 import Listings from "@/pages/Listings";
+import ListingReports from "@/pages/ListingReports";
 import PublicListing from "@/pages/PublicListing";
 
 function ProtectedRoute({
@@ -68,6 +69,7 @@ function Router() {
       <Route path="/onboarding" component={() => <ProtectedRoute><OnboardingBoard /></ProtectedRoute>} />
       <Route path="/closings" component={() => <ProtectedRoute adminOnly><Closings /></ProtectedRoute>} />
       <Route path="/listings" component={() => <ProtectedRoute adminOnly><Listings /></ProtectedRoute>} />
+      <Route path="/listings/reports" component={() => <ProtectedRoute adminOnly><ListingReports /></ProtectedRoute>} />
       <Route path="/financial-reports" component={() => <ProtectedRoute adminOnly><FinancialReports /></ProtectedRoute>} />
       <Route path="/coaching" component={() => <ProtectedRoute noAssistant><Coaching /></ProtectedRoute>} />
       <Route path="/expenses" component={() => <ProtectedRoute adminOnly><Expenses /></ProtectedRoute>} />
