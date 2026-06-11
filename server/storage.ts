@@ -2799,16 +2799,26 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async getCoachingStats(startDate: Date, endDate: Date, coachUserId?: number) {
+  async getCoachingStats(startDate: Date, endDate: Date, coachUserId?: number, includePassive = false) {
     const end = new Date(endDate);
     end.setHours(23, 59, 59, 999);
+
+    const statusCondition = includePassive
+      ? or(
+          eq(employees.status, "active"),
+          and(
+            eq(employees.status, "passive"),
+            sql`${employees.passiveAt} >= ${startDate}`,
+          ),
+        )
+      : eq(employees.status, "active");
 
     const ukEmps = await db
       .select({ emp: employees, cand: candidates })
       .from(employees)
       .leftJoin(candidates, eq(employees.candidateId, candidates.id))
       .where(and(
-        eq(employees.status, "active"),
+        statusCondition,
         or(
           eq(employees.uretkenlikKoclugu, true),
           eq(employees.dua, true),
@@ -3019,10 +3029,16 @@ export class DatabaseStorage implements IStorage {
     const studentStats = activeUkEmps.map(e => {
       const empId = e.emp.id;
       const ukEndDateStr = (e.emp as any).ukEndDate as string | null | undefined;
+      const passiveAtDate = e.emp.status === "passive" && e.emp.passiveAt
+        ? new Date(e.emp.passiveAt)
+        : null;
+
       const empRows = rows.filter(r => {
         if (r.employeeId !== empId) return false;
-        if (ukEndDateStr && e.emp.uretkenlikKoclugu && r.closingDate) {
-          return new Date(r.closingDate) <= new Date(ukEndDateStr);
+        if (r.closingDate) {
+          const cd = new Date(r.closingDate);
+          if (ukEndDateStr && e.emp.uretkenlikKoclugu && cd > new Date(ukEndDateStr)) return false;
+          if (passiveAtDate && cd > passiveAtDate) return false;
         }
         return true;
       });
@@ -3693,36 +3709,159 @@ export class DatabaseStorage implements IStorage {
     agreementPending: number;
     closeReasonSubmitted: number;
     closeReasonPending: number;
+    closingCount: number;
+    lastClosingDate: Date | null;
   }[]> {
-    const rows = await db
-      .select({
-        employeeId: listings.employeeId,
-        advisorName: listings.advisorName,
-        empName: candidates.name,
-        totalActive:          sql<number>`count(*) filter (where ${listings.status} = 'active')`,
-        totalPassive:         sql<number>`count(*) filter (where ${listings.status} = 'passive')`,
-        agreementUploaded:    sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.agreementUploadedAt} is not null)`,
-        agreementPending:     sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.agreementUploadedAt} is null)`,
-        closeReasonSubmitted: sql<number>`count(*) filter (where ${listings.status} = 'passive' and ${listings.closeReasonSubmittedAt} is not null)`,
-        closeReasonPending:   sql<number>`count(*) filter (where ${listings.status} = 'passive' and ${listings.closeReasonSubmittedAt} is null)`,
-      })
-      .from(listings)
-      .leftJoin(employees, eq(listings.employeeId, employees.id))
-      .leftJoin(candidates, eq(employees.candidateId, candidates.id))
-      .groupBy(listings.employeeId, listings.advisorName, candidates.name)
-      .orderBy(sql`count(*) filter (where ${listings.status} = 'active') desc`);
+    const [listingRows, closingRows] = await Promise.all([
+      db
+        .select({
+          employeeId: listings.employeeId,
+          advisorName: listings.advisorName,
+          empName: candidates.name,
+          totalActive:          sql<number>`count(*) filter (where ${listings.status} = 'active')`,
+          totalPassive:         sql<number>`count(*) filter (where ${listings.status} = 'passive')`,
+          agreementUploaded:    sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.agreementUploadedAt} is not null)`,
+          agreementPending:     sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.agreementUploadedAt} is null)`,
+          closeReasonSubmitted: sql<number>`count(*) filter (where ${listings.status} = 'passive' and ${listings.closeReasonSubmittedAt} is not null)`,
+          closeReasonPending:   sql<number>`count(*) filter (where ${listings.status} = 'passive' and ${listings.closeReasonSubmittedAt} is null)`,
+        })
+        .from(listings)
+        .leftJoin(employees, eq(listings.employeeId, employees.id))
+        .leftJoin(candidates, eq(employees.candidateId, candidates.id))
+        .groupBy(listings.employeeId, listings.advisorName, candidates.name)
+        .orderBy(sql`count(*) filter (where ${listings.status} = 'active') desc`),
+      db
+        .select({
+          employeeId: closingAgents.employeeId,
+          closingCount: sql<number>`count(*)`,
+          lastClosingDate: sql<Date | null>`max(coalesce(${closingAgents.closingDate}, ${closings.closingDate}))`,
+        })
+        .from(closingAgents)
+        .innerJoin(closingSides, eq(closingAgents.closingSideId, closingSides.id))
+        .innerJoin(closings, eq(closingSides.closingId, closings.id))
+        .groupBy(closingAgents.employeeId),
+    ]);
 
-    return rows.map((r) => ({
-      employeeId: r.employeeId ?? null,
-      advisorName: r.advisorName ?? null,
-      employeeName: r.empName ?? null,
-      totalActive: Number(r.totalActive ?? 0),
-      totalPassive: Number(r.totalPassive ?? 0),
-      agreementUploaded: Number(r.agreementUploaded ?? 0),
-      agreementPending: Number(r.agreementPending ?? 0),
-      closeReasonSubmitted: Number(r.closeReasonSubmitted ?? 0),
-      closeReasonPending: Number(r.closeReasonPending ?? 0),
+    const closingMap = new Map(closingRows.map((r) => [r.employeeId, r]));
+
+    return listingRows.map((r) => {
+      const c = r.employeeId ? closingMap.get(r.employeeId) : undefined;
+      return {
+        employeeId: r.employeeId ?? null,
+        advisorName: r.advisorName ?? null,
+        employeeName: r.empName ?? null,
+        totalActive: Number(r.totalActive ?? 0),
+        totalPassive: Number(r.totalPassive ?? 0),
+        agreementUploaded: Number(r.agreementUploaded ?? 0),
+        agreementPending: Number(r.agreementPending ?? 0),
+        closeReasonSubmitted: Number(r.closeReasonSubmitted ?? 0),
+        closeReasonPending: Number(r.closeReasonPending ?? 0),
+        closingCount: Number(c?.closingCount ?? 0),
+        lastClosingDate: c?.lastClosingDate ?? null,
+      };
+    });
+  }
+
+  // ── Satılık / Kiralık type stats (price < 1M = kiralık, >= 1M = satılık) ────
+
+  async getListingTypeStats(): Promise<{
+    satilik: { active: number; passive: number; activeVolume: number; passiveVolume: number };
+    kiralik: { active: number; passive: number; activeVolume: number; passiveVolume: number };
+  }> {
+    const rows = await db.execute(sql`
+      SELECT
+        CASE WHEN price::numeric >= 1000000 THEN 'satilik' ELSE 'kiralik' END AS type,
+        status,
+        COUNT(*)::int AS count,
+        COALESCE(SUM(price::numeric), 0) AS total_volume
+      FROM listings
+      WHERE price IS NOT NULL AND price::numeric > 0
+      GROUP BY type, status
+    `);
+    const result = {
+      satilik: { active: 0, passive: 0, activeVolume: 0, passiveVolume: 0 },
+      kiralik: { active: 0, passive: 0, activeVolume: 0, passiveVolume: 0 },
+    };
+    for (const r of rows.rows as any[]) {
+      const key = r.type as "satilik" | "kiralik";
+      if (r.status === "active") {
+        result[key].active += Number(r.count);
+        result[key].activeVolume += Number(r.total_volume);
+      } else if (r.status === "passive") {
+        result[key].passive += Number(r.count);
+        result[key].passiveVolume += Number(r.total_volume);
+      }
+    }
+    return result;
+  }
+
+  async getUnmatchedAdvisors(): Promise<{ advisorName: string; count: number }[]> {
+    const rows = await db.execute(sql`
+      SELECT advisor_name, COUNT(*)::int AS count
+      FROM listings
+      WHERE employee_id IS NULL AND advisor_name IS NOT NULL AND advisor_name <> ''
+      GROUP BY advisor_name
+      ORDER BY COUNT(*) DESC
+    `);
+    return (rows.rows as any[]).map((r) => ({
+      advisorName: r.advisor_name as string,
+      count: Number(r.count),
     }));
+  }
+
+  async assignListingsByAdvisorName(advisorName: string, employeeId: number): Promise<number> {
+    const result = await db.execute(sql`
+      UPDATE listings
+      SET employee_id = ${employeeId}, updated_at = now()
+      WHERE employee_id IS NULL AND advisor_name = ${advisorName}
+    `);
+    return Number((result as any).rowCount ?? 0);
+  }
+
+  // ── Aylık ilan tarihi raporu (satılık/kiralık breakdown) ──────────────────
+
+  async getListingDateReport(): Promise<{
+    month: string;
+    satilikActive: number; satilikPassive: number; satilikVolume: number;
+    kiralikActive: number; kiralikPassive: number; kiralikVolume: number;
+  }[]> {
+    const rows = await db.execute(sql`
+      SELECT
+        to_char(to_date(published_date, 'Mon DD, YYYY'), 'YYYY-MM') AS month,
+        CASE WHEN price::numeric >= 1000000 THEN 'satilik' ELSE 'kiralik' END AS type,
+        status,
+        COUNT(*)::int AS count,
+        COALESCE(SUM(price::numeric), 0) AS total_volume
+      FROM listings
+      WHERE published_date IS NOT NULL
+        AND published_date NOT LIKE '%null%'
+        AND price IS NOT NULL
+        AND price::numeric > 0
+      GROUP BY month, type, status
+      ORDER BY month DESC
+      LIMIT 96
+    `);
+    const map = new Map<string, {
+      satilikActive: number; satilikPassive: number; satilikVolume: number;
+      kiralikActive: number; kiralikPassive: number; kiralikVolume: number;
+    }>();
+    for (const r of rows.rows as any[]) {
+      if (!map.has(r.month)) map.set(r.month, { satilikActive: 0, satilikPassive: 0, satilikVolume: 0, kiralikActive: 0, kiralikPassive: 0, kiralikVolume: 0 });
+      const entry = map.get(r.month)!;
+      const vol = Number(r.total_volume);
+      const cnt = Number(r.count);
+      if (r.type === "satilik") {
+        if (r.status === "active")  { entry.satilikActive  += cnt; entry.satilikVolume += vol; }
+        if (r.status === "passive") { entry.satilikPassive += cnt; entry.satilikVolume += vol; }
+      } else {
+        if (r.status === "active")  { entry.kiralikActive  += cnt; entry.kiralikVolume += vol; }
+        if (r.status === "passive") { entry.kiralikPassive += cnt; entry.kiralikVolume += vol; }
+      }
+    }
+    return Array.from(map.entries())
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .slice(0, 24)
+      .map(([month, v]) => ({ month, ...v }));
   }
 
   // ── Feature 2: Ofis bazlı kırılım ───────────────────────────────────────────
@@ -3901,6 +4040,129 @@ export class DatabaseStorage implements IStorage {
       newPrice: r.new_price !== null ? String(r.new_price) : null,
       changedAt: r.changed_at,
     }));
+  }
+
+  async getCapAchievementReport(): Promise<{
+    employeeId: number;
+    name: string;
+    kwuid: string | null;
+    status: string;
+    capAmount: number;
+    capUsed: number;
+    periodStart: string;
+    achievedAt: string | null;
+    achievementDays: number | null;
+    hasCapped: boolean;
+  }[]> {
+    const TR_MONTHS: Record<string, number> = {
+      "Ocak": 1, "Şubat": 2, "Mart": 3, "Nisan": 4, "Mayıs": 5, "Haziran": 6,
+      "Temmuz": 7, "Ağustos": 8, "Eylül": 9, "Ekim": 10, "Kasım": 11, "Aralık": 12,
+    };
+
+    const allEmps = await this.getEmployees();
+    const empsWithCap = allEmps.filter((e) => e.capMonth && e.status === "active");
+    const now = new Date();
+    const results: any[] = [];
+
+    for (const emp of empsWithCap) {
+      const trimmed = (emp.capMonth ?? "").trim();
+      let capMonthNum: number;
+      if (TR_MONTHS[trimmed]) {
+        capMonthNum = TR_MONTHS[trimmed];
+      } else {
+        const parts = trimmed.split("-");
+        capMonthNum = parseInt(parts[1] ?? parts[0], 10);
+      }
+      if (isNaN(capMonthNum) || capMonthNum < 1 || capMonthNum > 12) continue;
+
+      const currentMonth = now.getMonth() + 1;
+      const currentYear  = now.getFullYear();
+      const capYear = currentMonth >= capMonthNum ? currentYear : currentYear - 1;
+      const periodStart = new Date(capYear, capMonthNum - 1, 1);
+
+      const empCapValue = emp.capValue ? parseFloat(emp.capValue) : null;
+      let capAmount: number | null = empCapValue && empCapValue > 0 ? empCapValue : null;
+      if (capAmount === null) {
+        const [capRow] = await db.select().from(capSettings).where(eq(capSettings.year, capYear));
+        capAmount = capRow ? parseFloat(capRow.amount) : null;
+      }
+      if (!capAmount) continue;
+
+      const effDateExpr = sql<string>`COALESCE(${closingAgents.closingDate}, ${closings.closingDate})`;
+
+      const closingRows = await db
+        .select({
+          effDate: sql<string>`COALESCE(${closingAgents.closingDate}::text, ${closings.closingDate}::text)`,
+          bm: closingAgents.marketCenterActual,
+        })
+        .from(closingAgents)
+        .innerJoin(closingSides, eq(closingAgents.closingSideId, closingSides.id))
+        .innerJoin(closings, eq(closingSides.closingId, closings.id))
+        .where(
+          and(
+            eq(closingAgents.employeeId, emp.id),
+            sql`${effDateExpr} IS NOT NULL`,
+            sql`${effDateExpr} >= ${periodStart.toISOString().split("T")[0]}`,
+          )
+        )
+        .orderBy(effDateExpr);
+
+      const periodStartYMD = periodStart.toISOString().split("T")[0];
+      const prepayRows = await db
+        .select({ date: officeExpenses.date, amount: officeExpenses.amount })
+        .from(officeExpenses)
+        .where(
+          and(
+            eq(officeExpenses.type, "income"),
+            eq(officeExpenses.category, BM_PREPAYMENT_CATEGORY),
+            eq(officeExpenses.employeeId, emp.id),
+            gte(officeExpenses.date, periodStartYMD),
+          )
+        );
+
+      const allEntries: { date: Date; amount: number }[] = [
+        ...prepayRows.map((p) => ({ date: new Date(p.date), amount: parseFloat(p.amount ?? "0") })),
+        ...closingRows.map((r) => ({ date: new Date(r.effDate), amount: parseFloat(r.bm ?? "0") })),
+      ].sort((a, b) => a.date.getTime() - b.date.getTime());
+
+      const manualAdj = parseFloat((emp as any).capManualAdjustment ?? "0");
+      let running = manualAdj;
+      let achievedAt: Date | null = null;
+
+      for (const entry of allEntries) {
+        running += entry.amount;
+        if (running >= capAmount && !achievedAt) {
+          achievedAt = entry.date;
+          break;
+        }
+      }
+
+      const capUsed = allEntries.reduce((s, e) => s + e.amount, 0) + manualAdj;
+      const achievementDays = achievedAt
+        ? Math.round((achievedAt.getTime() - periodStart.getTime()) / (1000 * 60 * 60 * 24))
+        : null;
+
+      const empAny = emp as any;
+      results.push({
+        employeeId: emp.id,
+        name: empAny.candidate?.name ?? `#${emp.id}`,
+        kwuid: empAny.kwuid ?? null,
+        status: emp.status ?? "active",
+        capAmount,
+        capUsed,
+        periodStart: periodStartYMD,
+        achievedAt: achievedAt ? achievedAt.toISOString().split("T")[0] : null,
+        achievementDays,
+        hasCapped: capUsed >= capAmount,
+      });
+    }
+
+    return results.sort((a, b) => {
+      if (a.hasCapped && !b.hasCapped) return -1;
+      if (!a.hasCapped && b.hasCapped) return 1;
+      if (a.achievementDays !== null && b.achievementDays !== null) return a.achievementDays - b.achievementDays;
+      return b.capUsed / b.capAmount - a.capUsed / a.capAmount;
+    });
   }
 }
 

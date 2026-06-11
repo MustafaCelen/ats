@@ -2,14 +2,14 @@ import { useState, useMemo, useEffect } from "react";
 import { Layout } from "@/components/Layout";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip,
+  BarChart, Bar, XAxis, YAxis, Tooltip,
   ResponsiveContainer, CartesianGrid, Legend, Cell,
   ComposedChart, Line,
 } from "recharts";
 import {
   TrendingUp, DollarSign, Users, Handshake,
   ChevronLeft, ChevronRight, Calendar, BarChart2,
-  ChevronUp, ChevronDown, Sparkles, Trophy, Target, Save,
+  ChevronUp, ChevronDown, Sparkles, Trophy, Target, Save, Maximize2, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,8 +36,8 @@ function formatYMD(d: Date) {
 const COLORS = ["#3b82f6","#10b981","#f59e0b","#8b5cf6","#ef4444","#06b6d4","#f97316","#84cc16","#ec4899","#14b8a6"];
 
 // ── Sub-components ────────────────────────────────────────────────────────────
-function MetricCard({ icon: Icon, label, value, sub, color }: {
-  icon: React.ElementType; label: string; value: string | number; sub?: string; color: string;
+function MetricCard({ icon: Icon, label, value, sub, color, yoy }: {
+  icon: React.ElementType; label: string; value: string | number; sub?: string; color: string; yoy?: number | null;
 }) {
   return (
     <div className="rounded-xl border border-border bg-card p-4 flex items-center gap-4 shadow-sm">
@@ -45,7 +45,14 @@ function MetricCard({ icon: Icon, label, value, sub, color }: {
       <div className="min-w-0">
         <p className="text-xs text-muted-foreground font-medium">{label}</p>
         <p className="text-xl font-bold text-foreground truncate">{value}</p>
-        {sub && <p className="text-xs text-muted-foreground">{sub}</p>}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {sub && <p className="text-xs text-muted-foreground">{sub}</p>}
+          {yoy != null && (
+            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${yoy >= 0 ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-600"}`}>
+              {yoy >= 0 ? "↑" : "↓"}{Math.abs(yoy)}% YoY
+            </span>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -271,6 +278,59 @@ function TargetProgressCard({ label, actual, reelTarget, highTarget, color, form
   );
 }
 
+function ChartCard({ title, children, extra }: {
+  title: string;
+  children: (h: number) => React.ReactNode;
+  extra?: React.ReactNode;
+}) {
+  const [fs, setFs] = useState(false);
+  return (
+    <>
+      <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <h2 className="text-base font-semibold">{title}</h2>
+            {extra}
+          </div>
+          <button
+            onClick={() => setFs(true)}
+            className="ml-2 p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors shrink-0"
+            title="Tam ekran"
+          >
+            <Maximize2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
+        {children(260)}
+      </div>
+      {fs && (
+        <div
+          className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6"
+          onClick={() => setFs(false)}
+        >
+          <div
+            className="bg-card rounded-xl border border-border p-6 w-full max-w-5xl shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-5">
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-semibold">{title}</h2>
+                {extra}
+              </div>
+              <button
+                onClick={() => setFs(false)}
+                className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            {children(500)}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function FinancialReports() {
   const [viewDate, setViewDate] = useState(() => new Date());
@@ -286,6 +346,9 @@ export default function FinancialReports() {
   const [editorOffice, setEditorOffice] = useState<string>("Akatlar");
   const [draftTargets, setDraftTargets] = useState<Record<number, { bhb: string; bhbHigh: string; bm: string; bmHigh: string; satilik: string; satilikHigh: string; kiralik: string; kiralikHigh: string }>>({});
   const [savingMonth, setSavingMonth] = useState<number | null>(null);
+  const [showReelTarget,   setShowReelTarget]   = useState(true);
+  const [showYuksekTarget, setShowYuksekTarget] = useState(true);
+  const [showPrevYear, setShowPrevYear] = useState(true);
 
   const { data: currentUser } = useAuth();
   const isAdmin = currentUser?.role === "admin";
@@ -301,6 +364,17 @@ export default function FinancialReports() {
   const computedStart = useCustomRange ? fromDate : monthStart;
   const computedEnd   = useCustomRange ? toDate   : monthEnd;
   const { data: stats, isLoading } = useClosingStats(computedStart, computedEnd, officeFilter, categoryFilter, dealTypeFilter);
+
+  const prevYearStart = useMemo(() => {
+    const d = new Date(computedStart + "T00:00:00");
+    return formatYMD(new Date(d.getFullYear() - 1, d.getMonth(), d.getDate()));
+  }, [computedStart]);
+  const prevYearEnd = useMemo(() => {
+    const d = new Date(computedEnd + "T00:00:00");
+    return formatYMD(new Date(d.getFullYear() - 1, d.getMonth(), d.getDate()));
+  }, [computedEnd]);
+  const { data: prevStats } = useClosingStats(prevYearStart, prevYearEnd, officeFilter, categoryFilter, dealTypeFilter);
+
   const { data: capStatuses = {} } = useCapStatuses();
 
   const targetFetchYear = useCustomRange ? parseInt(fromDate.substring(0, 4)) : vy;
@@ -434,6 +508,10 @@ export default function FinancialReports() {
     () => (stats?.monthlyTrend ?? []).map((r: any) => ({ ...r, monthKey: r.month, month: fmtMonthKey(r.month) })),
     [stats?.monthlyTrend]
   );
+  const prevMonthlyData = useMemo(
+    () => (prevStats?.monthlyTrend ?? []).map((r: any) => ({ ...r, monthKey: r.month, month: fmtMonthKey(r.month) })),
+    [prevStats?.monthlyTrend]
+  );
 
   const targetsByMonthKey = useMemo(() => {
     const map = new Map<string, any>();
@@ -488,6 +566,36 @@ export default function FinancialReports() {
     }
     return { bhb, bhbHigh, bm, bmHigh, satilik, satilikHigh, kiralik, kiralikHigh, hasAny: count > 0 };
   }, [targets, computedStart, computedEnd, targetFetchYear]);
+  const mergedMonthlyData = useMemo(() => {
+    const prevByM = new Map(prevMonthlyData.map((r: any) => [parseInt(r.monthKey.split("-")[1]), r]));
+    const currByM = new Map(monthlyDataWithTargets.map((r: any) => [parseInt(r.monthKey.split("-")[1]), r]));
+    const allNums = [...new Set([...currByM.keys(), ...prevByM.keys()])].sort((a, b) => a - b);
+    return allNums.map(m => {
+      const curr = currByM.get(m) ?? {};
+      const prev = prevByM.get(m);
+      return {
+        ...curr,
+        month: MONTH_NAMES_TR[m - 1],
+        prevVolume: prev?.volume ?? null,
+        prevBhb: prev?.bhb ?? null,
+        prevBm: prev?.bm ?? null,
+        prevSatilikCount: prev?.satilikCount ?? null,
+        prevKiralikCount: prev?.kiralikCount ?? null,
+      };
+    });
+  }, [monthlyDataWithTargets, prevMonthlyData]);
+
+  const yoyDelta = useMemo(() => {
+    if (!prevStats || !stats) return null;
+    const pct = (curr: number, prev: number) => prev > 0 ? Math.round(((curr - prev) / prev) * 100) : null;
+    return {
+      count:  pct(stats.completedCount,  prevStats.completedCount),
+      volume: pct(stats.completedVolume, prevStats.completedVolume),
+      bhb:    pct(stats.completedBHB,    prevStats.completedBHB),
+      bm:     pct(stats.completedBM,     prevStats.completedBM),
+    };
+  }, [stats, prevStats]);
+
   const topAgents        = (stats?.byAgent ?? []).slice(0, 12);
   const byCategory       = stats?.byCategory ?? [];
   const byDealType       = (stats?.byDealType ?? []) as { dealType: string; count: number; volume: number; bhb: number }[];
@@ -586,6 +694,37 @@ export default function FinancialReports() {
                 <Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="w-[140px] h-7 text-xs" />
               </div>
             )}
+
+            {/* Chart overlay toggles */}
+            <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-1">
+              <Button
+                size="sm"
+                variant={showReelTarget ? "default" : "ghost"}
+                className={`h-7 text-xs px-3 gap-1 ${showReelTarget ? "bg-amber-500 hover:bg-amber-600 text-white border-amber-500" : ""}`}
+                onClick={() => setShowReelTarget(v => !v)}
+              >
+                <Target className="h-3 w-3" />
+                Reel Hedef
+              </Button>
+              <Button
+                size="sm"
+                variant={showYuksekTarget ? "default" : "ghost"}
+                className={`h-7 text-xs px-3 gap-1 ${showYuksekTarget ? "bg-orange-500 hover:bg-orange-600 text-white border-orange-500" : ""}`}
+                onClick={() => setShowYuksekTarget(v => !v)}
+              >
+                <Target className="h-3 w-3" />
+                Yüksek Hedef
+              </Button>
+              <Button
+                size="sm"
+                variant={showPrevYear ? "default" : "ghost"}
+                className={`h-7 text-xs px-3 gap-1 ${showPrevYear ? "bg-sky-500 hover:bg-sky-600 text-white border-sky-500" : ""}`}
+                onClick={() => setShowPrevYear(v => !v)}
+              >
+                <TrendingUp className="h-3 w-3" />
+                Geçen Yıl
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -596,24 +735,28 @@ export default function FinancialReports() {
             label="Tamamlanan Kapanış"
             value={stats?.completedCount ?? 0}
             sub={`${stats?.expectedCount ?? 0} beklenen`}
+            yoy={yoyDelta?.count}
           />
           <MetricCard
             icon={TrendingUp} color="bg-emerald-50 text-emerald-600"
             label="İşlem Hacmi"
             value={stats ? fmtTRY(stats.completedVolume) : "—"}
             sub={stats?.expectedVolume ? `+ ${fmtTRY(stats.expectedVolume)} beklenen` : undefined}
+            yoy={yoyDelta?.volume}
           />
           <MetricCard
             icon={DollarSign} color="bg-amber-50 text-amber-600"
             label="BHB Geliri"
             value={stats ? fmtTRY(stats.completedBHB) : "—"}
             sub={stats?.expectedBHB ? `+ ${fmtTRY(stats.expectedBHB)} beklenen` : undefined}
+            yoy={yoyDelta?.bhb}
           />
           <MetricCard
             icon={Users} color="bg-purple-50 text-purple-600"
             label="BM Geliri (Ofis)"
             value={stats ? fmtTRY(stats.completedBM) : "—"}
             sub={stats?.expectedBM ? `+ ${fmtTRY(stats.expectedBM)} beklenen` : undefined}
+            yoy={yoyDelta?.bm}
           />
         </div>
 
@@ -676,118 +819,110 @@ export default function FinancialReports() {
 
         {/* ── Monthly Trend ── */}
         <div className="grid lg:grid-cols-2 gap-6">
-          <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-            <h2 className="text-base font-semibold mb-4">Aylık İşlem Hacmi</h2>
-            {isLoading ? <Skeleton /> : monthlyDataWithTargets.length === 0 ? <Empty /> : (
-              <ResponsiveContainer width="100%" height={260}>
-                <AreaChart data={monthlyDataWithTargets} margin={{ top: 4, right: 8, bottom: 0, left: 8 }}>
-                  <defs>
-                    <linearGradient id="gVol" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.25} />
-                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
+          <ChartCard title="Aylık İşlem Hacmi">
+            {(h) => isLoading ? <Skeleton /> : mergedMonthlyData.length === 0 ? <Empty /> : (
+              <ResponsiveContainer width="100%" height={h}>
+                <ComposedChart data={mergedMonthlyData} margin={{ top: 4, right: 8, bottom: 0, left: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                   <XAxis dataKey="month" tick={{ fontSize: 11 }} />
                   <YAxis tickFormatter={fmtShort} tick={{ fontSize: 11 }} width={48} />
                   <Tooltip content={<TRYTooltip />} />
-                  <Area type="monotone" dataKey="volume" name="İşlem Hacmi" stroke="#3b82f6" fill="url(#gVol)" strokeWidth={2} />
-                </AreaChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-
-          <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-            <h2 className="text-base font-semibold mb-4">Aylık BHB Geliri</h2>
-            {isLoading ? <Skeleton /> : monthlyDataWithTargets.length === 0 ? <Empty /> : (
-              <ResponsiveContainer width="100%" height={260}>
-                <ComposedChart data={monthlyDataWithTargets} margin={{ top: 4, right: 8, bottom: 0, left: 8 }}>
-                  <defs>
-                    <linearGradient id="gBHB" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.25} />
-                      <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  <XAxis dataKey="month" tick={{ fontSize: 11 }} />
-                  <YAxis tickFormatter={fmtShort} tick={{ fontSize: 11 }} width={48} />
-                  <Tooltip content={<TRYTooltip />} />
-                  <Area type="monotone" dataKey="bhb" name="BHB" stroke="#10b981" fill="url(#gBHB)" strokeWidth={2} />
-                  <Line type="monotone" dataKey="bhbTarget" name="BHB Reel Hedef" stroke="#10b981" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#10b981" }} connectNulls={false} />
-                  <Line type="monotone" dataKey="bhbHighTarget" name="BHB Yüksek Hedef" stroke="#f59e0b" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#f59e0b" }} connectNulls={false} />
+                  <Legend iconSize={10} wrapperStyle={{ fontSize: 10 }} />
+                  {showPrevYear && <Bar dataKey="prevVolume" name="Geçen Yıl Hacim" fill="#93c5fd" fillOpacity={0.6} radius={[3, 3, 0, 0]} />}
+                  <Bar dataKey="volume" name="İşlem Hacmi" fill="#3b82f6" radius={[4, 4, 0, 0]} />
                 </ComposedChart>
               </ResponsiveContainer>
             )}
-          </div>
+          </ChartCard>
+
+          <ChartCard title="Aylık BHB Geliri">
+            {(h) => isLoading ? <Skeleton /> : mergedMonthlyData.length === 0 ? <Empty /> : (
+              <ResponsiveContainer width="100%" height={h}>
+                <ComposedChart data={mergedMonthlyData} margin={{ top: 4, right: 8, bottom: 0, left: 8 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+                  <YAxis tickFormatter={fmtShort} tick={{ fontSize: 11 }} width={48} />
+                  <Tooltip content={<TRYTooltip />} />
+                  <Legend iconSize={10} wrapperStyle={{ fontSize: 10 }} />
+                  {showPrevYear && <Bar dataKey="prevBhb" name="Geçen Yıl BHB" fill="#6ee7b7" fillOpacity={0.6} radius={[3, 3, 0, 0]} />}
+                  <Bar dataKey="bhb" name="BHB" fill="#10b981" radius={[4, 4, 0, 0]} />
+                  {showReelTarget   && <Line type="monotone" dataKey="bhbTarget"     name="BHB Reel Hedef"   stroke="#10b981" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#10b981" }} connectNulls={false} />}
+                  {showYuksekTarget && <Line type="monotone" dataKey="bhbHighTarget" name="BHB Yüksek Hedef" stroke="#f59e0b" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#f59e0b" }} connectNulls={false} />}
+                </ComposedChart>
+              </ResponsiveContainer>
+            )}
+          </ChartCard>
         </div>
 
         {/* ── BM Trend + Closing Count ── */}
         <div className="grid lg:grid-cols-2 gap-6">
-          <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-            <h2 className="text-base font-semibold mb-4">Aylık BM Geliri (Ofis)</h2>
-            {isLoading ? <Skeleton h="h-48" /> : monthlyDataWithTargets.length === 0 ? <Empty /> : (
-              <ResponsiveContainer width="100%" height={200}>
-                <ComposedChart data={monthlyDataWithTargets} margin={{ top: 4, right: 8, bottom: 0, left: 8 }}>
+          <ChartCard title="Aylık BM Geliri (Ofis)">
+            {(h) => isLoading ? <Skeleton h="h-48" /> : mergedMonthlyData.length === 0 ? <Empty /> : (
+              <ResponsiveContainer width="100%" height={h}>
+                <ComposedChart data={mergedMonthlyData} margin={{ top: 4, right: 8, bottom: 0, left: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                   <XAxis dataKey="month" tick={{ fontSize: 11 }} />
                   <YAxis tickFormatter={fmtShort} tick={{ fontSize: 11 }} width={48} />
                   <Tooltip content={<TRYTooltip />} />
+                  <Legend iconSize={10} wrapperStyle={{ fontSize: 10 }} />
+                  {showPrevYear && <Bar dataKey="prevBm" name="Geçen Yıl BM" fill="#c4b5fd" fillOpacity={0.6} radius={[3, 3, 0, 0]} />}
                   <Bar dataKey="bm" name="BM Geliri" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
-                  <Line type="monotone" dataKey="bmTarget" name="BM Reel Hedef" stroke="#8b5cf6" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#8b5cf6" }} connectNulls={false} />
-                  <Line type="monotone" dataKey="bmHighTarget" name="BM Yüksek Hedef" stroke="#f59e0b" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#f59e0b" }} connectNulls={false} />
+                  {showReelTarget   && <Line type="monotone" dataKey="bmTarget"     name="BM Reel Hedef"   stroke="#8b5cf6" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#8b5cf6" }} connectNulls={false} />}
+                  {showYuksekTarget && <Line type="monotone" dataKey="bmHighTarget" name="BM Yüksek Hedef" stroke="#f59e0b" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#f59e0b" }} connectNulls={false} />}
                 </ComposedChart>
               </ResponsiveContainer>
             )}
-          </div>
+          </ChartCard>
 
-          <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-            <h2 className="text-base font-semibold mb-4">Aylık İşlem Adedi (Satılık / Kiralık)</h2>
-            {isLoading ? <Skeleton h="h-48" /> : monthlyDataWithTargets.length === 0 ? <Empty /> : (
-              <ResponsiveContainer width="100%" height={200}>
-                <ComposedChart data={monthlyDataWithTargets} margin={{ top: 4, right: 8, bottom: 0, left: 8 }}>
+          <ChartCard title="Aylık İşlem Adedi (Satılık / Kiralık)">
+            {(h) => isLoading ? <Skeleton h="h-48" /> : mergedMonthlyData.length === 0 ? <Empty /> : (
+              <ResponsiveContainer width="100%" height={h}>
+                <ComposedChart data={mergedMonthlyData} margin={{ top: 4, right: 8, bottom: 0, left: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                   <XAxis dataKey="month" tick={{ fontSize: 11 }} />
                   <YAxis tick={{ fontSize: 11 }} width={32} allowDecimals={false} />
                   <Tooltip content={<CountTooltip />} />
                   <Legend iconSize={10} wrapperStyle={{ fontSize: 10 }} />
-                  <Bar dataKey="satilikCount" name="Satılık" fill="#3b82f6" barSize={10} radius={[3, 3, 0, 0]} />
-                  <Bar dataKey="kiralikCount" name="Kiralık" fill="#f97316" barSize={10} radius={[3, 3, 0, 0]} />
-                  <Line type="monotone" dataKey="satilikTarget" name="Satılık Reel" stroke="#3b82f6" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#3b82f6" }} connectNulls={false} />
-                  <Line type="monotone" dataKey="satilikHighTarget" name="Satılık Yüksek" stroke="#60a5fa" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#60a5fa" }} connectNulls={false} />
-                  <Line type="monotone" dataKey="kiralikTarget" name="Kiralık Reel" stroke="#f97316" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#f97316" }} connectNulls={false} />
-                  <Line type="monotone" dataKey="kiralikHighTarget" name="Kiralık Yüksek" stroke="#fb923c" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#fb923c" }} connectNulls={false} />
+                  {showPrevYear && <Bar dataKey="prevSatilikCount" name="Geçen Yıl Sat." fill="#93c5fd" fillOpacity={0.6} barSize={8} radius={[3, 3, 0, 0]} />}
+                  {showPrevYear && <Bar dataKey="prevKiralikCount" name="Geçen Yıl Kir." fill="#fed7aa" fillOpacity={0.6} barSize={8} radius={[3, 3, 0, 0]} />}
+                  <Bar dataKey="satilikCount" name="Satılık" fill="#3b82f6" barSize={8} radius={[3, 3, 0, 0]} />
+                  <Bar dataKey="kiralikCount" name="Kiralık" fill="#f97316" barSize={8} radius={[3, 3, 0, 0]} />
+                  {showReelTarget   && <Line type="monotone" dataKey="satilikTarget"     name="Satılık Reel"    stroke="#3b82f6" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#3b82f6" }} connectNulls={false} />}
+                  {showYuksekTarget && <Line type="monotone" dataKey="satilikHighTarget" name="Satılık Yüksek"  stroke="#60a5fa" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#60a5fa" }} connectNulls={false} />}
+                  {showReelTarget   && <Line type="monotone" dataKey="kiralikTarget"     name="Kiralık Reel"    stroke="#f97316" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#f97316" }} connectNulls={false} />}
+                  {showYuksekTarget && <Line type="monotone" dataKey="kiralikHighTarget" name="Kiralık Yüksek"  stroke="#fb923c" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#fb923c" }} connectNulls={false} />}
                 </ComposedChart>
               </ResponsiveContainer>
             )}
-          </div>
+          </ChartCard>
         </div>
 
         {/* ── BM/BHB Oranı + Danışman BHB ── */}
         {(() => {
-          const ratioData = monthlyData.map((r: any) => ({
+          const ratioData = mergedMonthlyData.map((r: any) => ({
             month: r.month,
             oran: r.bhb > 0 ? parseFloat(((r.bm / r.bhb) * 100).toFixed(1)) : 0,
+            prevOran: r.prevBhb > 0 ? parseFloat(((r.prevBm / r.prevBhb) * 100).toFixed(1)) : null,
             bhb: r.bhb,
             bm: r.bm,
           }));
-          const totalBHB = ratioData.reduce((s: number, r: any) => s + r.bhb, 0);
-          const totalBM  = ratioData.reduce((s: number, r: any) => s + r.bm, 0);
+          const totalBHB = ratioData.reduce((s: number, r: any) => s + (r.bhb ?? 0), 0);
+          const totalBM  = ratioData.reduce((s: number, r: any) => s + (r.bm ?? 0), 0);
           const overallRatio = totalBHB > 0 ? ((totalBM / totalBHB) * 100).toFixed(1) : "—";
           const top8 = topAgents.slice(0, 8);
           return (
             <div className="grid lg:grid-cols-2 gap-6">
-              <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-base font-semibold">Aylık BM/BHB Oranı</h2>
-                  {ratioData.length > 0 && (
-                    <span className="text-xs text-muted-foreground">
-                      Ort: <span className="font-semibold text-purple-600">%{overallRatio}</span>
-                    </span>
-                  )}
-                </div>
-                {isLoading ? <Skeleton h="h-56" /> : ratioData.length === 0 ? <Empty /> : (
-                  <ResponsiveContainer width="100%" height={220}>
-                    <BarChart data={ratioData} margin={{ top: 4, right: 8, bottom: 0, left: 4 }}>
+              <ChartCard
+                title="Aylık BM/BHB Oranı"
+                extra={ratioData.length > 0 ? (
+                  <span className="text-xs text-muted-foreground">
+                    Ort: <span className="font-semibold text-purple-600">%{overallRatio}</span>
+                  </span>
+                ) : undefined}
+              >
+                {(h) => isLoading ? <Skeleton h="h-56" /> : ratioData.length === 0 ? <Empty /> : (
+                  <ResponsiveContainer width="100%" height={h}>
+                    <ComposedChart data={ratioData} margin={{ top: 4, right: 8, bottom: 0, left: 4 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                       <XAxis dataKey="month" tick={{ fontSize: 10 }} />
                       <YAxis tickFormatter={(v) => `%${v}`} tick={{ fontSize: 10 }} width={40} domain={[0, "auto"]} />
@@ -799,22 +934,24 @@ export default function FinancialReports() {
                             <div className="bg-card border border-border rounded-lg shadow-lg p-3 text-xs space-y-0.5">
                               <p className="font-semibold mb-1">{label}</p>
                               <p className="text-purple-600">BM/BHB: %{d.oran}</p>
+                              {d.prevOran != null && <p className="text-purple-300">Geçen Yıl: %{d.prevOran}</p>}
                               <p className="text-muted-foreground">BHB: {fmtTRY(d.bhb)}</p>
                               <p className="text-muted-foreground">BM: {fmtTRY(d.bm)}</p>
                             </div>
                           );
                         }}
                       />
+                      <Legend iconSize={10} wrapperStyle={{ fontSize: 10 }} />
+                      {showPrevYear && <Bar dataKey="prevOran" name="Geçen Yıl %" fill="#c4b5fd" fillOpacity={0.6} radius={[3, 3, 0, 0]} />}
                       <Bar dataKey="oran" name="BM/BHB %" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
-                    </BarChart>
+                    </ComposedChart>
                   </ResponsiveContainer>
                 )}
-              </div>
+              </ChartCard>
 
-              <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-                <h2 className="text-base font-semibold mb-4">Danışman BHB Performansı (Top 8)</h2>
-                {isLoading ? <Skeleton h="h-56" /> : top8.length === 0 ? <Empty /> : (
-                  <ResponsiveContainer width="100%" height={220}>
+              <ChartCard title="Danışman BHB Performansı (Top 8)">
+                {(h) => isLoading ? <Skeleton h="h-56" /> : top8.length === 0 ? <Empty /> : (
+                  <ResponsiveContainer width="100%" height={h}>
                     <BarChart data={top8} layout="vertical" margin={{ top: 0, right: 8, bottom: 0, left: 4 }}>
                       <XAxis type="number" tickFormatter={fmtShort} tick={{ fontSize: 10 }} />
                       <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={120} interval={0} />
@@ -825,7 +962,7 @@ export default function FinancialReports() {
                     </BarChart>
                   </ResponsiveContainer>
                 )}
-              </div>
+              </ChartCard>
             </div>
           );
         })()}
@@ -833,10 +970,9 @@ export default function FinancialReports() {
         {/* ── Category + Deal Type + İl + İlçe ── */}
         <div className="grid lg:grid-cols-4 gap-6">
           {/* Deal category */}
-          <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-            <h2 className="text-base font-semibold mb-4">İşlem Kategorisi</h2>
-            {isLoading ? <Skeleton h="h-44" /> : byCategory.length === 0 ? <Empty /> : (
-              <ResponsiveContainer width="100%" height={180}>
+          <ChartCard title="İşlem Kategorisi">
+            {(h) => isLoading ? <Skeleton h="h-44" /> : byCategory.length === 0 ? <Empty /> : (
+              <ResponsiveContainer width="100%" height={h}>
                 <BarChart data={byCategory} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                   <XAxis dataKey="category" tick={{ fontSize: 11 }} />
                   <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
@@ -847,7 +983,7 @@ export default function FinancialReports() {
                 </BarChart>
               </ResponsiveContainer>
             )}
-          </div>
+          </ChartCard>
 
           {/* Deal type */}
           <div className="rounded-xl border border-border bg-card p-5 shadow-sm">

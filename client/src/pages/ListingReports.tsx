@@ -8,6 +8,10 @@ import { useToast } from "@/hooks/use-toast";
 import {
   BarChart2, Building2, Users, TrendingDown, TrendingUp, Bell, RefreshCw,
 } from "lucide-react";
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
+  PieChart, Pie, Cell,
+} from "recharts";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -21,7 +25,15 @@ interface AdvisorReport {
   agreementPending: number;
   closeReasonSubmitted: number;
   closeReasonPending: number;
+  closingCount: number;
+  lastClosingDate: string | null;
 }
+
+type AdvisorSortKey = keyof Pick<AdvisorReport,
+  "employeeName" | "totalActive" | "totalPassive" | "agreementUploaded" |
+  "agreementPending" | "closeReasonSubmitted" | "closeReasonPending" |
+  "closingCount" | "lastClosingDate"
+>;
 
 interface OfficeReport {
   office: string | null;
@@ -42,7 +54,25 @@ interface MonthlyTrend {
   newPassive: number;
 }
 
+interface TypeStats {
+  satilik: { active: number; passive: number; activeVolume: number; passiveVolume: number };
+  kiralik: { active: number; passive: number; activeVolume: number; passiveVolume: number };
+}
+
+interface DateReportRow {
+  month: string;
+  satilikActive: number; satilikPassive: number; satilikVolume: number;
+  kiralikActive: number; kiralikPassive: number; kiralikVolume: number;
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+function fmtVol(n: number): string {
+  if (n >= 1_000_000_000) return (n / 1_000_000_000).toFixed(1).replace(".", ",") + " Mr ₺";
+  if (n >= 1_000_000)     return (n / 1_000_000).toFixed(1).replace(".", ",") + " M ₺";
+  if (n >= 1_000)         return (n / 1_000).toFixed(0) + " K ₺";
+  return n.toLocaleString("tr-TR") + " ₺";
+}
 
 function fmtMonth(ym: string): string {
   const [year, month] = ym.split("-");
@@ -76,10 +106,35 @@ export default function ListingReports() {
   const [runningReminders, setRunningReminders] = useState(false);
   const [reminderResult, setReminderResult] = useState<{ agreementQueued: number; closeReasonQueued: number } | null>(null);
 
+  const [sortKey, setSortKey] = useState<AdvisorSortKey>("totalActive");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
   const { data: advisorData = [], isLoading: loadingAdvisor } = useQuery<AdvisorReport[]>({
     queryKey: ["/api/listings/reports/advisor"],
     queryFn: () => fetch("/api/listings/reports/advisor", { credentials: "include" }).then((r) => r.json()),
   });
+
+  const sortedAdvisors = [...advisorData].sort((a, b) => {
+    const av = a[sortKey], bv = b[sortKey];
+    if (av === null || av === undefined) return 1;
+    if (bv === null || bv === undefined) return -1;
+    const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+    return sortDir === "asc" ? cmp : -cmp;
+  });
+
+  const toggleSort = (key: AdvisorSortKey) => {
+    if (sortKey === key) setSortDir((d) => d === "asc" ? "desc" : "asc");
+    else { setSortKey(key); setSortDir("desc"); }
+  };
+
+  const SortTh = ({ col, label }: { col: AdvisorSortKey; label: string }) => (
+    <th
+      className="px-3 py-2.5 font-medium text-right cursor-pointer select-none hover:text-foreground whitespace-nowrap"
+      onClick={() => toggleSort(col)}
+    >
+      {label}{sortKey === col ? (sortDir === "desc" ? " ↓" : " ↑") : ""}
+    </th>
+  );
 
   const { data: officeData = [], isLoading: loadingOffice } = useQuery<OfficeReport[]>({
     queryKey: ["/api/listings/reports/office"],
@@ -94,6 +149,16 @@ export default function ListingReports() {
   const { data: trendData = [], isLoading: loadingTrend } = useQuery<MonthlyTrend[]>({
     queryKey: ["/api/listings/reports/monthly-trend"],
     queryFn: () => fetch("/api/listings/reports/monthly-trend", { credentials: "include" }).then((r) => r.json()),
+  });
+
+  const { data: typeStats, isLoading: loadingTypeStats } = useQuery<TypeStats>({
+    queryKey: ["/api/listings/reports/type-stats"],
+    queryFn: () => fetch("/api/listings/reports/type-stats", { credentials: "include" }).then((r) => r.json()),
+  });
+
+  const { data: dateReport = [], isLoading: loadingDateReport } = useQuery<DateReportRow[]>({
+    queryKey: ["/api/listings/reports/date-report"],
+    queryFn: () => fetch("/api/listings/reports/date-report", { credentials: "include" }).then((r) => r.json()),
   });
 
   const totalCloseReasons = closeReasonData.reduce((s, r) => s + r.count, 0);
@@ -139,26 +204,170 @@ export default function ListingReports() {
           </p>
         </div>
 
+        {/* ── Grafikler ─────────────────────────────────────────────────────── */}
+
+        {/* Grafik 1: Aylık Trend */}
+        <div className="rounded-xl border border-border bg-card overflow-hidden">
+          <div className="flex items-center gap-2 px-4 py-3 border-b border-border bg-muted/30">
+            <TrendingUp className="h-4 w-4 text-primary" />
+            <h2 className="text-sm font-semibold">Aylık Trend (Son 12 Ay)</h2>
+          </div>
+          <div className="p-4">
+            {loadingTrend ? (
+              <div className="h-56 flex items-center justify-center text-muted-foreground text-sm">Yükleniyor…</div>
+            ) : trendData.length === 0 ? (
+              <div className="h-56 flex items-center justify-center text-muted-foreground text-sm">Veri yok.</div>
+            ) : (
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={trendData.map(r => ({ ay: fmtMonth(r.month), "Yeni Aktif": r.newActive, "Yeni Pasif": r.newPassive }))} barCategoryGap="30%">
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                  <XAxis dataKey="ay" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+                  <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} allowDecimals={false} width={28} />
+                  <Tooltip
+                    contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid hsl(var(--border))", background: "hsl(var(--card))" }}
+                    cursor={{ fill: "hsl(var(--muted))" }}
+                  />
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  <Bar dataKey="Yeni Aktif" fill="#10b981" radius={[3, 3, 0, 0]} />
+                  <Bar dataKey="Yeni Pasif" fill="#94a3b8" radius={[3, 3, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        </div>
+
+        {/* Grafik 2 + 3: Yan yana */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+          {/* Grafik 2: Top 10 Danışman */}
+          <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="flex items-center gap-2 px-4 py-3 border-b border-border bg-muted/30">
+              <Users className="h-4 w-4 text-primary" />
+              <h2 className="text-sm font-semibold">En Çok Aktif İlan — Top 10 Danışman</h2>
+            </div>
+            <div className="p-4">
+              {loadingAdvisor ? (
+                <div className="h-64 flex items-center justify-center text-muted-foreground text-sm">Yükleniyor…</div>
+              ) : advisorData.length === 0 ? (
+                <div className="h-64 flex items-center justify-center text-muted-foreground text-sm">Veri yok.</div>
+              ) : (() => {
+                const chartData = [...advisorData]
+                  .sort((a, b) => b.totalActive - a.totalActive)
+                  .slice(0, 10)
+                  .map(r => ({ isim: (r.employeeName ?? r.advisorName ?? "—").split(" ").slice(0, 2).join(" "), "Aktif": r.totalActive }))
+                  .reverse();
+                return (
+                  <ResponsiveContainer width="100%" height={260}>
+                    <BarChart data={chartData} layout="vertical" barCategoryGap="25%">
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false} />
+                      <XAxis type="number" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} allowDecimals={false} />
+                      <YAxis type="category" dataKey="isim" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={90} />
+                      <Tooltip
+                        contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid hsl(var(--border))", background: "hsl(var(--card))" }}
+                        cursor={{ fill: "hsl(var(--muted))" }}
+                      />
+                      <Bar dataKey="Aktif" fill="#10b981" radius={[0, 3, 3, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                );
+              })()}
+            </div>
+          </div>
+
+          {/* Grafik 3: Satılık / Kiralık Donut */}
+          <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="flex items-center gap-2 px-4 py-3 border-b border-border bg-muted/30">
+              <BarChart2 className="h-4 w-4 text-primary" />
+              <h2 className="text-sm font-semibold">Aktif Portföy Dağılımı</h2>
+            </div>
+            <div className="p-4 flex flex-col items-center">
+              {loadingTypeStats ? (
+                <div className="h-64 flex items-center justify-center text-muted-foreground text-sm">Yükleniyor…</div>
+              ) : !typeStats ? (
+                <div className="h-64 flex items-center justify-center text-muted-foreground text-sm">Veri yok.</div>
+              ) : (() => {
+                const countData = [
+                  { name: "Satılık", value: typeStats.satilik.active, color: "#3b82f6" },
+                  { name: "Kiralık", value: typeStats.kiralik.active, color: "#7c3aed" },
+                ];
+                const volData = [
+                  { name: "Satılık", value: typeStats.satilik.activeVolume, color: "#3b82f6" },
+                  { name: "Kiralık", value: typeStats.kiralik.activeVolume, color: "#7c3aed" },
+                ];
+                const total = typeStats.satilik.active + typeStats.kiralik.active;
+                return (
+                  <div className="w-full space-y-3">
+                    <div className="grid grid-cols-2 gap-2 text-center text-xs">
+                      <div className="text-muted-foreground">İlan Adedi</div>
+                      <div className="text-muted-foreground">Hacim</div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <ResponsiveContainer width="100%" height={200}>
+                        <PieChart>
+                          <Pie data={countData} cx="50%" cy="50%" innerRadius={55} outerRadius={80} dataKey="value" paddingAngle={3}>
+                            {countData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
+                          </Pie>
+                          <Tooltip
+                            formatter={(v: number) => [v + " ilan", ""]}
+                            contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid hsl(var(--border))", background: "hsl(var(--card))" }}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                      <ResponsiveContainer width="100%" height={200}>
+                        <PieChart>
+                          <Pie data={volData} cx="50%" cy="50%" innerRadius={55} outerRadius={80} dataKey="value" paddingAngle={3}>
+                            {volData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
+                          </Pie>
+                          <Tooltip
+                            formatter={(v: number) => [fmtVol(v), ""]}
+                            contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid hsl(var(--border))", background: "hsl(var(--card))" }}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                    <div className="flex justify-center gap-6 text-xs">
+                      {countData.map((d) => (
+                        <div key={d.name} className="flex items-center gap-1.5">
+                          <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: d.color }} />
+                          <span className="font-medium">{d.name}</span>
+                          <span className="text-muted-foreground">
+                            {total > 0 ? Math.round((d.value / total) * 100) : 0}%
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+
+        </div>
+
         {/* Feature 1: Danışman bazlı rapor */}
         <SectionCard title="Danışman Bazlı Rapor" icon={Users}>
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-muted/40 text-left text-xs text-muted-foreground">
-                <th className="px-3 py-2.5 font-medium">Danışman</th>
-                <th className="px-3 py-2.5 font-medium text-right">Aktif</th>
-                <th className="px-3 py-2.5 font-medium text-right">Pasif</th>
-                <th className="px-3 py-2.5 font-medium text-right">Söz. Yüklendi</th>
-                <th className="px-3 py-2.5 font-medium text-right">Söz. Bekleyen</th>
-                <th className="px-3 py-2.5 font-medium text-right">Sebep Girildi</th>
-                <th className="px-3 py-2.5 font-medium text-right">Sebep Bekleyen</th>
+                <th className="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort("employeeName")}>
+                  Danışman{sortKey === "employeeName" ? (sortDir === "desc" ? " ↓" : " ↑") : ""}
+                </th>
+                <SortTh col="totalActive"          label="Aktif" />
+                <SortTh col="totalPassive"         label="Pasif" />
+                <SortTh col="agreementUploaded"    label="Söz. Yüklendi" />
+                <SortTh col="agreementPending"     label="Söz. Bekleyen" />
+                <SortTh col="closeReasonSubmitted" label="Sebep Girildi" />
+                <SortTh col="closeReasonPending"   label="Sebep Bekleyen" />
+                <SortTh col="closingCount"         label="İşlem Adedi" />
+                <SortTh col="lastClosingDate"      label="Son İşlem" />
               </tr>
             </thead>
             <tbody>
               {loadingAdvisor ? (
-                <tr><td colSpan={7} className="px-3 py-8 text-center text-muted-foreground">Yükleniyor…</td></tr>
-              ) : advisorData.length === 0 ? (
-                <tr><td colSpan={7} className="px-3 py-8 text-center text-muted-foreground">Veri yok.</td></tr>
-              ) : advisorData.map((r, i) => (
+                <tr><td colSpan={9} className="px-3 py-8 text-center text-muted-foreground">Yükleniyor…</td></tr>
+              ) : sortedAdvisors.length === 0 ? (
+                <tr><td colSpan={9} className="px-3 py-8 text-center text-muted-foreground">Veri yok.</td></tr>
+              ) : sortedAdvisors.map((r, i) => (
                 <tr key={i} className="border-b border-border last:border-0 hover:bg-muted/30">
                   <td className="px-3 py-2.5">
                     <div className="font-medium text-sm">{r.employeeName ?? r.advisorName ?? "—"}</div>
@@ -175,14 +384,18 @@ export default function ListingReports() {
                   <td className="px-3 py-2.5 text-right text-amber-600">{r.agreementPending}</td>
                   <td className="px-3 py-2.5 text-right text-emerald-700">{r.closeReasonSubmitted}</td>
                   <td className="px-3 py-2.5 text-right text-violet-600">{r.closeReasonPending}</td>
+                  <td className="px-3 py-2.5 text-right font-medium">{r.closingCount || "—"}</td>
+                  <td className="px-3 py-2.5 text-right text-xs text-muted-foreground whitespace-nowrap">
+                    {r.lastClosingDate ? new Date(r.lastClosingDate).toLocaleDateString("tr-TR") : "—"}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </SectionCard>
 
-        {/* Feature 2: Ofis bazlı kırılım */}
-        <SectionCard title="Ofis Bazlı Kırılım" icon={Building2}>
+        {/* Feature 2: Paket bazlı kırılım */}
+        <SectionCard title="Paket Bazlı Kırılım" icon={Building2}>
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-muted/40 text-left text-xs text-muted-foreground">
@@ -263,6 +476,77 @@ export default function ListingReports() {
                   <td className="px-3 py-2.5 font-medium">{fmtMonth(r.month)}</td>
                   <td className="px-3 py-2.5 text-right text-emerald-700 font-medium">{r.newActive}</td>
                   <td className="px-3 py-2.5 text-right text-slate-500">{r.newPassive}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </SectionCard>
+
+        {/* Satılık / Kiralık Özet */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {(["satilik", "kiralik"] as const).map((type) => {
+            const d = typeStats?.[type];
+            const label = type === "satilik" ? "Satılık" : "Kiralık";
+            const color = type === "satilik" ? "text-blue-700" : "text-violet-700";
+            const bg    = type === "satilik" ? "bg-blue-50 border-blue-200" : "bg-violet-50 border-violet-200";
+            return (
+              <div key={type} className={`rounded-xl border p-4 space-y-3 ${bg}`}>
+                <div className={`text-sm font-semibold ${color}`}>{label} İlanlar</div>
+                {loadingTypeStats ? (
+                  <div className="text-muted-foreground text-xs">Yükleniyor…</div>
+                ) : d ? (
+                  <div className="space-y-1 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Aktif İlan</span>
+                      <span className="font-medium">{d.active.toLocaleString("tr-TR")}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Pasif İlan</span>
+                      <span className="font-medium">{d.passive.toLocaleString("tr-TR")}</span>
+                    </div>
+                    <div className="flex justify-between border-t border-border/50 pt-1 mt-1">
+                      <span className="text-muted-foreground">Aktif Portföy Hacmi</span>
+                      <span className={`font-bold ${color}`}>{fmtVol(d.activeVolume)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Pasif Tarihsel Hacim</span>
+                      <span className="font-medium text-muted-foreground">{fmtVol(d.passiveVolume)}</span>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* İlan Tarihi Bazlı Rapor */}
+        <SectionCard title="İlan Tarihi Bazlı Rapor (Aylık)" icon={TrendingUp}>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border bg-muted/40 text-left text-xs text-muted-foreground">
+                <th className="px-3 py-2.5 font-medium">Ay</th>
+                <th className="px-3 py-2.5 font-medium text-right text-blue-700">Sat. Aktif</th>
+                <th className="px-3 py-2.5 font-medium text-right text-blue-400">Sat. Pasif</th>
+                <th className="px-3 py-2.5 font-medium text-right text-blue-700">Sat. Hacim</th>
+                <th className="px-3 py-2.5 font-medium text-right text-violet-700">Kir. Aktif</th>
+                <th className="px-3 py-2.5 font-medium text-right text-violet-400">Kir. Pasif</th>
+                <th className="px-3 py-2.5 font-medium text-right text-violet-700">Kir. Hacim</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loadingDateReport ? (
+                <tr><td colSpan={7} className="px-3 py-8 text-center text-muted-foreground">Yükleniyor…</td></tr>
+              ) : dateReport.length === 0 ? (
+                <tr><td colSpan={7} className="px-3 py-8 text-center text-muted-foreground">Veri yok.</td></tr>
+              ) : dateReport.map((r, i) => (
+                <tr key={i} className="border-b border-border last:border-0 hover:bg-muted/30">
+                  <td className="px-3 py-2.5 font-medium">{fmtMonth(r.month)}</td>
+                  <td className="px-3 py-2.5 text-right text-blue-700 font-medium">{r.satilikActive || "—"}</td>
+                  <td className="px-3 py-2.5 text-right text-blue-400">{r.satilikPassive || "—"}</td>
+                  <td className="px-3 py-2.5 text-right text-blue-700 font-medium whitespace-nowrap">{r.satilikVolume ? fmtVol(r.satilikVolume) : "—"}</td>
+                  <td className="px-3 py-2.5 text-right text-violet-700 font-medium">{r.kiralikActive || "—"}</td>
+                  <td className="px-3 py-2.5 text-right text-violet-400">{r.kiralikPassive || "—"}</td>
+                  <td className="px-3 py-2.5 text-right text-violet-700 font-medium whitespace-nowrap">{r.kiralikVolume ? fmtVol(r.kiralikVolume) : "—"}</td>
                 </tr>
               ))}
             </tbody>

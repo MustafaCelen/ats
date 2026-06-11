@@ -19,6 +19,7 @@ import Employees from "@/pages/Employees";
 import OnboardingBoard from "@/pages/OnboardingBoard";
 import Closings from "@/pages/Closings";
 import FinancialReports from "@/pages/FinancialReports";
+import CapReport from "@/pages/CapReport";
 import Coaching from "@/pages/Coaching";
 import Expenses from "@/pages/Expenses";
 import PLReport from "@/pages/PLReport";
@@ -71,6 +72,7 @@ function Router() {
       <Route path="/listings" component={() => <ProtectedRoute adminOnly><Listings /></ProtectedRoute>} />
       <Route path="/listings/reports" component={() => <ProtectedRoute adminOnly><ListingReports /></ProtectedRoute>} />
       <Route path="/financial-reports" component={() => <ProtectedRoute adminOnly><FinancialReports /></ProtectedRoute>} />
+      <Route path="/cap-report" component={() => <ProtectedRoute adminOnly><CapReport /></ProtectedRoute>} />
       <Route path="/coaching" component={() => <ProtectedRoute noAssistant><Coaching /></ProtectedRoute>} />
       <Route path="/expenses" component={() => <ProtectedRoute adminOnly><Expenses /></ProtectedRoute>} />
       <Route path="/pl-report" component={() => <ProtectedRoute adminOnly><PLReport /></ProtectedRoute>} />

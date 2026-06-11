@@ -352,6 +352,7 @@ export default function Listings() {
   const [notify, setNotify] = useState(false);
   const [importing, setImporting] = useState(false);
   const [bulkSending, setBulkSending] = useState(false);
+  const [assigningIds, setAssigningIds] = useState<Set<number>>(new Set());
   const [bulkStatus, setBulkStatus] = useState<{
     active: boolean; total: number; sent: number; skipped: number;
     failed: number; current: string | null; done: boolean;
@@ -360,6 +361,8 @@ export default function Listings() {
   const [addOpen, setAddOpen] = useState(false);
   const [page, setPage] = useState(0);
   const PAGE_SIZE = 50;
+  const [nameAssignments, setNameAssignments] = useState<Record<string, number>>({});
+  const [assigningNames, setAssigningNames] = useState<Set<string>>(new Set());
 
   const { data: summary } = useQuery<Summary>({
     queryKey: ["/api/listings/summary"],
@@ -381,6 +384,68 @@ export default function Listings() {
     queryKey: ["/api/listings", listQuery],
     queryFn: () => fetch(`/api/listings?${listQuery}`, { credentials: "include" }).then((r) => r.json()),
   });
+
+  const { data: employees = [] } = useQuery<any[]>({
+    queryKey: ["/api/employees"],
+    queryFn: () => fetch("/api/employees", { credentials: "include" }).then((r) => r.json()),
+  });
+  const activeEmployees = employees.filter((e: any) => e.status === "active");
+
+  const { data: unmatchedAdvisors = [], refetch: refetchUnmatched } = useQuery<{ advisorName: string; count: number }[]>({
+    queryKey: ["/api/listings/unmatched-advisors"],
+    queryFn: () => fetch("/api/listings/unmatched-advisors", { credentials: "include" }).then((r) => r.json()),
+    enabled: tab === "unmatched",
+  });
+
+  const assignByName = async (advisorName: string) => {
+    const employeeId = nameAssignments[advisorName];
+    if (!employeeId) return;
+    setAssigningNames((prev) => new Set(prev).add(advisorName));
+    try {
+      const res = await fetch("/api/listings/assign-by-name", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ advisorName, employeeId }),
+      });
+      if (!res.ok) {
+        const d = await res.json();
+        toast({ title: "Hata", description: d.message, variant: "destructive" });
+        return;
+      }
+      const { updated } = await res.json();
+      toast({ title: "Atandı", description: `${updated} ilan ${activeEmployees.find((e: any) => e.id === employeeId)?.candidate?.name ?? "danışman"}'a atandı.` });
+      setNameAssignments((prev) => { const n = { ...prev }; delete n[advisorName]; return n; });
+      refresh();
+      refetchUnmatched();
+    } catch {
+      toast({ title: "Hata", description: "Atama yapılamadı.", variant: "destructive" });
+    } finally {
+      setAssigningNames((prev) => { const s = new Set(prev); s.delete(advisorName); return s; });
+    }
+  };
+
+  const assignEmployee = async (listingId: number, employeeId: number | null) => {
+    setAssigningIds((prev) => new Set(prev).add(listingId));
+    try {
+      const res = await fetch(`/api/listings/${listingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ employeeId }),
+      });
+      if (!res.ok) {
+        const d = await res.json();
+        toast({ title: "Hata", description: d.message, variant: "destructive" });
+        return;
+      }
+      refresh();
+    } catch {
+      toast({ title: "Hata", description: "Atama yapılamadı.", variant: "destructive" });
+    } finally {
+      setAssigningIds((prev) => { const s = new Set(prev); s.delete(listingId); return s; });
+    }
+  };
 
   // Client-side date filter on publishedDate + unmatched filter
   const filteredRows = rows.filter((l) => {
@@ -650,6 +715,63 @@ export default function Listings() {
           </div>
         )}
 
+        {/* Bulk name assignment panel — only visible on unmatched tab */}
+        {tab === "unmatched" && unmatchedAdvisors.length > 0 && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-3">
+            <div className="text-sm font-semibold text-amber-800">İsim Bazlı Toplu Atama</div>
+            <p className="text-xs text-amber-700">Her danışman adı için bir çalışan seçip "Ata" butonuna basın — o isimdeki tüm ilanlar tek seferde atanır.</p>
+            <div className="rounded-lg border border-amber-200 bg-white overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-amber-100 bg-amber-50/60 text-left text-xs text-muted-foreground">
+                    <th className="px-3 py-2 font-medium">Danışman Adı (CSV)</th>
+                    <th className="px-3 py-2 font-medium text-center">İlan Sayısı</th>
+                    <th className="px-3 py-2 font-medium">Atanacak Çalışan</th>
+                    <th className="px-3 py-2 font-medium text-right">İşlem</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {unmatchedAdvisors.map((row) => (
+                    <tr key={row.advisorName} className="border-b border-amber-50 last:border-0">
+                      <td className="px-3 py-2 font-medium text-xs">{row.advisorName}</td>
+                      <td className="px-3 py-2 text-center">
+                        <span className="inline-flex items-center justify-center rounded-full bg-amber-100 text-amber-800 text-xs font-semibold px-2 py-0.5 min-w-[28px]">{row.count}</span>
+                      </td>
+                      <td className="px-3 py-2">
+                        <Select
+                          value={nameAssignments[row.advisorName] ? String(nameAssignments[row.advisorName]) : ""}
+                          onValueChange={(v) => setNameAssignments((prev) => ({ ...prev, [row.advisorName]: Number(v) }))}
+                        >
+                          <SelectTrigger className="h-7 text-xs w-48">
+                            <SelectValue placeholder="Çalışan seç…" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {activeEmployees.map((e: any) => (
+                              <SelectItem key={e.id} value={String(e.id)} className="text-xs">
+                                {e.candidate?.name ?? `#${e.id}`}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <Button
+                          size="sm"
+                          className="h-7 text-xs px-3"
+                          disabled={!nameAssignments[row.advisorName] || assigningNames.has(row.advisorName)}
+                          onClick={() => assignByName(row.advisorName)}
+                        >
+                          {assigningNames.has(row.advisorName) ? "Atanıyor…" : "Ata"}
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
         {/* Table */}
         <div className="rounded-xl border border-border bg-card overflow-hidden">
           <div className="overflow-x-auto">
@@ -678,8 +800,32 @@ export default function Listings() {
                   <tr key={l.id} className="border-b border-border last:border-0 hover:bg-muted/30">
                     <td className="px-3 py-2.5 font-mono text-xs">{l.listingNumber}</td>
                     <td className="px-3 py-2.5">
-                      <div className="font-medium">{l.employeeName ?? l.advisorName ?? "—"}</div>
-                      {l.office && <div className="text-[11px] text-muted-foreground truncate max-w-[160px]">{l.office}</div>}
+                      {l.employeeId ? (
+                        <>
+                          <div className="font-medium">{l.employeeName ?? l.advisorName ?? "—"}</div>
+                          {l.office && <div className="text-[11px] text-muted-foreground truncate max-w-[160px]">{l.office}</div>}
+                        </>
+                      ) : (
+                        <div className="space-y-1">
+                          {l.advisorName && <div className="text-[11px] text-muted-foreground">{l.advisorName}</div>}
+                          <Select
+                            value=""
+                            onValueChange={(v) => assignEmployee(l.id, v === "none" ? null : Number(v))}
+                            disabled={assigningIds.has(l.id)}
+                          >
+                            <SelectTrigger className="h-7 text-xs w-40">
+                              <SelectValue placeholder={assigningIds.has(l.id) ? "Atanıyor…" : "Danışman ata…"} />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {activeEmployees.map((e: any) => (
+                                <SelectItem key={e.id} value={String(e.id)} className="text-xs">
+                                  {e.candidate?.name ?? `#${e.id}`}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
                     </td>
                     <td className="px-3 py-2.5 whitespace-nowrap text-xs">
                       {l.employeePhone ? (

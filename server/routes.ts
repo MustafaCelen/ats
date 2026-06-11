@@ -392,6 +392,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     catch (err) { console.error("[GET /api/listings/reports/monthly-trend]", err); res.status(500).json({ message: "Internal server error" }); }
   });
 
+  // Satılık / Kiralık özet istatistikleri
+  app.get("/api/listings/reports/type-stats", requireAuth, requireAdmin, async (_req, res) => {
+    try { res.json(await storage.getListingTypeStats()); }
+    catch (err) { console.error("[GET /api/listings/reports/type-stats]", err); res.status(500).json({ message: "Internal server error" }); }
+  });
+
+  // İlan tarihi bazlı rapor
+  app.get("/api/listings/reports/date-report", requireAuth, requireAdmin, async (_req, res) => {
+    try { res.json(await storage.getListingDateReport()); }
+    catch (err) { console.error("[GET /api/listings/reports/date-report]", err); res.status(500).json({ message: "Internal server error" }); }
+  });
+
   // Feature 5 & 6: Otomatik hatırlatma (manual trigger)
   app.post("/api/listings/reminders/run", requireAuth, requireAdmin, async (req, res) => {
     try {
@@ -466,6 +478,22 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.get("/api/listings/:id/price-history", requireAuth, requireAdmin, async (req, res) => {
     try { res.json(await storage.getListingPriceHistory(Number(req.params.id))); }
     catch (err) { console.error("[GET /api/listings/:id/price-history]", err); res.status(500).json({ message: "Internal server error" }); }
+  });
+
+  // Unmatched advisors grouped by name
+  app.get("/api/listings/unmatched-advisors", requireAuth, requireAdmin, async (req, res) => {
+    try { res.json(await storage.getUnmatchedAdvisors()); }
+    catch (err) { console.error("[GET /api/listings/unmatched-advisors]", err); res.status(500).json({ message: "Internal server error" }); }
+  });
+
+  // Bulk assign all unmatched listings for a given advisor name
+  app.post("/api/listings/assign-by-name", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const { advisorName, employeeId } = req.body;
+      if (!advisorName || !employeeId) return res.status(400).json({ message: "advisorName and employeeId are required" });
+      const updated = await storage.assignListingsByAdvisorName(String(advisorName), Number(employeeId));
+      res.json({ updated });
+    } catch (err) { console.error("[POST /api/listings/assign-by-name]", err); res.status(500).json({ message: "Internal server error" }); }
   });
 
   // Daily reminder scheduler (runs every 24 hours with defaults of 3 days each)
@@ -2219,6 +2247,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  app.get("/api/employees/cap-achievement", requireAuth, requireAdmin, async (_req, res) => {
+    try {
+      res.json(await storage.getCapAchievementReport());
+    } catch (err) {
+      console.error("cap-achievement error:", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   // ── Coaching Stats ────────────────────────────────────────────────────────────
 
   app.get("/api/coaching/stats", requireAuth, async (req: Request, res: Response) => {
@@ -2231,7 +2268,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       // Admin + hiring_manager see all coaches; everyone else only sees their own students
       const seesAll = user.role === "admin" || user.role === "hiring_manager";
       const coachUserId = seesAll ? undefined : user.id;
-      res.json(await storage.getCoachingStats(start, end, coachUserId));
+      const includePassive = req.query.includePassive === "true";
+      res.json(await storage.getCoachingStats(start, end, coachUserId, includePassive));
     } catch (err) {
       console.error("[GET /api/coaching/stats]", err);
       res.status(500).json({ message: "Internal server error" });

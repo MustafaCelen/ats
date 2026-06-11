@@ -7,7 +7,7 @@ import {
 } from "recharts";
 import {
   Users, DollarSign, Handshake, ChevronDown, ChevronRight,
-  Award, Target, BarChart2, ChevronLeft,
+  Award, Target, BarChart2, ChevronLeft, UserMinus,
 } from "lucide-react";
 import { format } from "date-fns";
 import { tr } from "date-fns/locale";
@@ -296,23 +296,31 @@ function CoachSection({ coach, filteredStudents, defaultExpanded = false }: { co
 export default function Coaching() {
   const [viewDate, setViewDate] = useState(() => new Date(CURRENT_YEAR, new Date().getMonth(), 1));
   const [allYear, setAllYear] = useState(false);
+  const [customRange, setCustomRange] = useState(false);
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+  const [includePassive, setIncludePassive] = useState(false);
   const [selectedCoachId, setSelectedCoachId] = useState<number | null | "all">("all");
   const [typeFilter, setTypeFilter] = useState<"all" | "uk" | "dua">("all");
 
   const prevMonth = () => setViewDate(d => new Date(d.getFullYear(), d.getMonth() - 1, 1));
   const nextMonth = () => setViewDate(d => new Date(d.getFullYear(), d.getMonth() + 1, 1));
 
-  const startDate = allYear
-    ? formatYMD(new Date(viewDate.getFullYear(), 0, 1))
-    : formatYMD(new Date(viewDate.getFullYear(), viewDate.getMonth(), 1));
-  const endDate = allYear
-    ? formatYMD(new Date(viewDate.getFullYear(), 11, 31))
-    : formatYMD(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0));
+  const startDate = customRange && customFrom
+    ? customFrom
+    : allYear
+      ? formatYMD(new Date(viewDate.getFullYear(), 0, 1))
+      : formatYMD(new Date(viewDate.getFullYear(), viewDate.getMonth(), 1));
+  const endDate = customRange && customTo
+    ? customTo
+    : allYear
+      ? formatYMD(new Date(viewDate.getFullYear(), 11, 31))
+      : formatYMD(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0));
 
   const { data, isLoading, isFetching } = useQuery<{ coaches: any[] }>({
-    queryKey: ["/api/coaching/stats", startDate, endDate],
+    queryKey: ["/api/coaching/stats", startDate, endDate, includePassive],
     queryFn: () =>
-      fetch(`/api/coaching/stats?startDate=${startDate}&endDate=${endDate}`)
+      fetch(`/api/coaching/stats?startDate=${startDate}&endDate=${endDate}&includePassive=${includePassive}`)
         .then(r => r.json()),
     staleTime: 5 * 60 * 1000,
     placeholderData: (prev) => prev,
@@ -370,42 +378,87 @@ export default function Coaching() {
             <p className="text-sm text-muted-foreground mt-0.5">ÜK danışmanlarının analitik raporu</p>
           </div>
           <div className="flex flex-col items-end gap-2">
-            {/* Month navigator */}
-            <div className="flex items-center gap-1">
+            {/* Date mode row */}
+            <div className="flex items-center gap-1 flex-wrap justify-end">
+              {/* Özel Aralık toggle */}
               <button
-                onClick={() => setAllYear(v => !v)}
+                onClick={() => { setCustomRange(v => !v); }}
                 className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors
-                  ${allYear ? "bg-primary text-primary-foreground border-primary" : "bg-card text-muted-foreground border-border hover:text-foreground"}`}
+                  ${customRange ? "bg-primary text-primary-foreground border-primary" : "bg-card text-muted-foreground border-border hover:text-foreground"}`}
               >
-                Tüm Yıl
+                Özel Aralık
               </button>
-              <div className="flex items-center gap-1 bg-muted/60 rounded-xl p-1">
-                <button onClick={prevMonth} className="p-1 rounded hover:bg-muted transition-colors">
-                  <ChevronLeft className="h-4 w-4 text-muted-foreground" />
-                </button>
-                <span className="text-sm font-semibold w-32 text-center">
-                  {allYear
-                    ? viewDate.getFullYear()
-                    : format(viewDate, "MMMM yyyy", { locale: tr })}
-                </span>
-                <button onClick={nextMonth} className="p-1 rounded hover:bg-muted transition-colors">
-                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                </button>
-              </div>
+
+              {customRange ? (
+                /* Custom date inputs */
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="date"
+                    value={customFrom}
+                    onChange={e => setCustomFrom(e.target.value)}
+                    className="h-8 rounded-lg border border-border bg-card px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                  <span className="text-xs text-muted-foreground">—</span>
+                  <input
+                    type="date"
+                    value={customTo}
+                    onChange={e => setCustomTo(e.target.value)}
+                    className="h-8 rounded-lg border border-border bg-card px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+              ) : (
+                /* Standard month/year navigator */
+                <>
+                  <button
+                    onClick={() => setAllYear(v => !v)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors
+                      ${allYear ? "bg-primary text-primary-foreground border-primary" : "bg-card text-muted-foreground border-border hover:text-foreground"}`}
+                  >
+                    Tüm Yıl
+                  </button>
+                  <div className="flex items-center gap-1 bg-muted/60 rounded-xl p-1">
+                    <button onClick={prevMonth} className="p-1 rounded hover:bg-muted transition-colors">
+                      <ChevronLeft className="h-4 w-4 text-muted-foreground" />
+                    </button>
+                    <span className="text-sm font-semibold w-32 text-center">
+                      {allYear
+                        ? viewDate.getFullYear()
+                        : format(viewDate, "MMMM yyyy", { locale: tr })}
+                    </span>
+                    <button onClick={nextMonth} className="p-1 rounded hover:bg-muted transition-colors">
+                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
 
-            {/* Type filter */}
-            <div className="flex items-center gap-1 bg-muted/60 rounded-xl p-1">
-              {([["all", "Tümü"], ["uk", "Koçluk"], ["dua", "DÜA"]] as const).map(([val, label]) => (
-                <button
-                  key={val}
-                  onClick={() => setTypeFilter(val)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors
-                    ${typeFilter === val ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-                >
-                  {label}
-                </button>
-              ))}
+            {/* Type filter + include-passive flag row */}
+            <div className="flex items-center gap-2 flex-wrap justify-end">
+              <div className="flex items-center gap-1 bg-muted/60 rounded-xl p-1">
+                {([["all", "Tümü"], ["uk", "Koçluk"], ["dua", "DÜA"]] as const).map(([val, label]) => (
+                  <button
+                    key={val}
+                    onClick={() => setTypeFilter(val)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors
+                      ${typeFilter === val ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Include-passive toggle */}
+              <button
+                onClick={() => setIncludePassive(v => !v)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors
+                  ${includePassive
+                    ? "bg-amber-500 text-white border-amber-500"
+                    : "bg-card text-muted-foreground border-border hover:text-foreground"}`}
+              >
+                <UserMinus className="h-3.5 w-3.5" />
+                {includePassive ? "Çıkışlar Dahil" : "Sadece Aktifler"}
+              </button>
             </div>
 
             {/* Coach filter */}
