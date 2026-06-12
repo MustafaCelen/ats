@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Layout } from "@/components/Layout";
 import { Button } from "@/components/ui/button";
@@ -306,10 +306,11 @@ export default function Listings() {
   const [notify, setNotify] = useState(false);
   const [importing, setImporting] = useState(false);
   const [bulkSending, setBulkSending] = useState(false);
+  const stopBulkRef = useRef(false);
   const [assigningIds, setAssigningIds] = useState<Set<number>>(new Set());
   const [bulkStatus, setBulkStatus] = useState<{
     active: boolean; total: number; sent: number; skipped: number;
-    failed: number; current: string | null; done: boolean;
+    failed: number; current: string | null; done: boolean; stopped?: boolean;
   } | null>(null);
   const [viewer, setViewer] = useState<Listing | null>(null);
   const [addOpen, setAddOpen] = useState(false);
@@ -430,23 +431,6 @@ export default function Listings() {
   // Reset to first page whenever the filter/search/date changes
   useEffect(() => { setPage(0); }, [tab, search, dateFrom, dateTo]);
 
-  // Poll bulk notify status while active
-  useEffect(() => {
-    if (!bulkSending && !bulkStatus?.active) return;
-    const iv = setInterval(async () => {
-      try {
-        const res = await fetch("/api/listings/notify-bulk/status", { credentials: "include" });
-        const data = await res.json();
-        setBulkStatus(data);
-        if (data.done && !data.active) {
-          clearInterval(iv);
-          setBulkSending(false);
-          refresh();
-        }
-      } catch {}
-    }, 3000);
-    return () => clearInterval(iv);
-  }, [bulkSending, bulkStatus?.active]);
 
   const pageCount = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
   const pageRows = filteredRows.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
@@ -561,11 +545,13 @@ export default function Listings() {
 
   const handleBulkNotify = async () => {
     if (!bulkNotifyCount || bulkSending) return;
+    stopBulkRef.current = false;
     setBulkSending(true);
-    setBulkStatus({ active: true, total: bulkNotifyCount, sent: 0, skipped: 0, failed: 0, current: null, done: false });
+    setBulkStatus({ active: true, total: bulkNotifyCount, sent: 0, skipped: 0, failed: 0, current: null, done: false, stopped: false });
 
     let sent = 0, skipped = 0, failed = 0;
     for (let i = 0; i < uniqueAdvisorIds.length; i++) {
+      if (stopBulkRef.current) break;
       const empId = uniqueAdvisorIds[i];
       const name = filteredRows.find((l) => l.employeeId === empId)?.employeeName ?? String(empId);
       setBulkStatus((s) => s ? { ...s, current: name } : s);
@@ -584,10 +570,19 @@ export default function Listings() {
       }
       setBulkStatus((s) => s ? { ...s, sent, skipped, failed } : s);
     }
+    const wasStopped = stopBulkRef.current;
     setBulkSending(false);
-    setBulkStatus((s) => s ? { ...s, active: false, done: true, current: null } : s);
-    toast({ title: `Toplu bildirim tamamlandı`, description: `${sent} gönderildi, ${skipped} atlandı, ${failed} başarısız` });
+    setBulkStatus((s) => s ? { ...s, active: false, done: true, current: null, stopped: wasStopped } : s);
+    toast({
+      title: wasStopped ? "Toplu bildirim durduruldu" : "Toplu bildirim tamamlandı",
+      description: `${sent} gönderildi, ${skipped} atlandı, ${failed} başarısız`,
+    });
     refresh();
+  };
+
+  const stopBulkNotify = () => {
+    stopBulkRef.current = true;
+    setBulkStatus((s) => s ? { ...s, current: "Durduruluyor…" } : s);
   };
 
   const unmatchedCount = tab === "unmatched" ? filteredRows.length : undefined;
@@ -719,20 +714,35 @@ export default function Listings() {
 
         {/* Bulk notify progress */}
         {bulkStatus && (bulkStatus.active || bulkStatus.done) && (
-          <div className="rounded-xl border border-border bg-card p-4 space-y-2">
+          <div className={`rounded-xl border bg-card p-4 space-y-2 ${bulkStatus.stopped ? "border-orange-300" : "border-border"}`}>
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium flex items-center gap-2">
-                {bulkStatus.active
+                {bulkStatus.active && !stopBulkRef.current
                   ? <><RefreshCw className="h-4 w-4 animate-spin text-primary" /> WhatsApp gönderimi devam ediyor…</>
+                  : bulkStatus.active && stopBulkRef.current
+                  ? <><RefreshCw className="h-4 w-4 animate-spin text-orange-500" /> Durduruluyor, mevcut istek bekleniyor…</>
+                  : bulkStatus.stopped
+                  ? <><span className="h-4 w-4 text-orange-500">⏹</span> Gönderim durduruldu</>
                   : <><CheckCircle2 className="h-4 w-4 text-emerald-600" /> Gönderim tamamlandı</>}
               </span>
-              {bulkStatus.done && (
-                <button onClick={() => setBulkStatus(null)} className="text-xs text-muted-foreground hover:text-foreground">Kapat</button>
-              )}
+              <div className="flex items-center gap-2">
+                {bulkStatus.active && (
+                  <button
+                    onClick={stopBulkNotify}
+                    disabled={stopBulkRef.current}
+                    className="text-xs px-2 py-1 rounded bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                  >
+                    Durdur
+                  </button>
+                )}
+                {bulkStatus.done && (
+                  <button onClick={() => setBulkStatus(null)} className="text-xs text-muted-foreground hover:text-foreground">Kapat</button>
+                )}
+              </div>
             </div>
             <div className="w-full bg-muted rounded-full h-2">
               <div
-                className="bg-primary h-2 rounded-full transition-all duration-500"
+                className={`h-2 rounded-full transition-all duration-500 ${bulkStatus.stopped ? "bg-orange-400" : "bg-primary"}`}
                 style={{ width: `${bulkStatus.total ? Math.round((bulkStatus.sent + bulkStatus.skipped + bulkStatus.failed) / bulkStatus.total * 100) : 0}%` }}
               />
             </div>
