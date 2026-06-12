@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback, memo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Layout } from "@/components/Layout";
 import { Button } from "@/components/ui/button";
@@ -165,6 +165,80 @@ function fmtPrice(p: string | null): string {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
+
+// ── Unmatched advisor assignment row (isolated search state) ─────────────────
+const UnmatchedAssignRow = memo(function UnmatchedAssignRow({
+  advisorName, count, suggestions, selectedId, isAssigning, activeEmployees, onSelect, onAssign,
+}: {
+  advisorName: string;
+  count: number;
+  suggestions: { id: number; name: string; reason: string }[];
+  selectedId: number | undefined;
+  isAssigning: boolean;
+  activeEmployees: any[];
+  onSelect: (advisorName: string, empId: number) => void;
+  onAssign: (advisorName: string) => void;
+}) {
+  const [search, setSearch] = useState("");
+  const filtered = useMemo(
+    () => search.trim()
+      ? activeEmployees.filter((e: any) => (e.candidate?.name ?? "").toLowerCase().includes(search.toLowerCase()))
+      : [],
+    [search, activeEmployees],
+  );
+  const hasSuggestion = suggestions.length > 0;
+  return (
+    <tr className={`border-b border-amber-50 last:border-0 ${hasSuggestion ? "bg-yellow-50" : ""}`}>
+      <td className="px-3 py-2 text-xs">
+        <div className="font-medium">{advisorName}</div>
+        {hasSuggestion && (
+          <div className="flex flex-wrap gap-1 mt-1">
+            {suggestions.map((s) => (
+              <button key={s.id} onClick={() => onSelect(advisorName, s.id)} title={s.reason}
+                className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-200 text-yellow-800 hover:bg-yellow-300">
+                💡 {s.name}
+              </button>
+            ))}
+          </div>
+        )}
+      </td>
+      <td className="px-3 py-2 text-center">
+        <span className="inline-flex items-center justify-center rounded-full bg-amber-100 text-amber-800 text-xs font-semibold px-2 py-0.5 min-w-[24px]">{count}</span>
+      </td>
+      <td className="px-3 py-2">
+        <div className="relative w-52">
+          <input
+            type="text"
+            placeholder={selectedId ? (activeEmployees.find((e: any) => e.id === selectedId)?.candidate?.name ?? "Seçildi") : "Ara veya seç…"}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className={`w-full h-7 text-xs border rounded px-2 ${selectedId && !search ? "border-primary bg-primary/5" : "border-input bg-background"}`}
+          />
+          {search && (
+            <div className="absolute z-20 top-8 left-0 w-52 max-h-48 overflow-y-auto rounded-lg border border-border bg-white shadow-lg">
+              {filtered.length === 0
+                ? <div className="px-3 py-2 text-xs text-muted-foreground">Sonuç yok</div>
+                : filtered.map((e: any) => (
+                  <button key={e.id} className="w-full text-left px-3 py-1.5 text-xs hover:bg-muted"
+                    onClick={() => { onSelect(advisorName, e.id); setSearch(""); }}>
+                    {e.candidate?.name ?? `#${e.id}`}
+                  </button>
+                ))
+              }
+            </div>
+          )}
+        </div>
+      </td>
+      <td className="px-3 py-2 text-right">
+        <Button size="sm" className="h-7 text-xs px-3"
+          disabled={!selectedId || isAssigning}
+          onClick={() => onAssign(advisorName)}>
+          {isAssigning ? "Atanıyor…" : "Ata"}
+        </Button>
+      </td>
+    </tr>
+  );
+});
 
 // ── Manual add dialog ─────────────────────────────────────────────────────────
 
@@ -369,8 +443,9 @@ export default function Listings() {
     [fuzzySuggestions],
   );
 
-  // Per-row employee search state for the assignment combobox
-  const [empSearch, setEmpSearch] = useState<Record<string, string>>({});
+  const handleAdvisorSelect = useCallback((advisorName: string, empId: number) => {
+    setNameAssignments((prev) => ({ ...prev, [advisorName]: empId }));
+  }, []);
 
   const assignByName = async (advisorName: string) => {
     const employeeId = nameAssignments[advisorName];
@@ -824,79 +899,19 @@ export default function Listings() {
                   </tr>
                 </thead>
                 <tbody>
-                  {unmatchedAdvisors.map((row) => {
-                    const suggestions = fuzzyMap[row.advisorName] ?? [];
-                    const hasSuggestion = suggestions.length > 0;
-                    const selectedId = nameAssignments[row.advisorName];
-                    const search = empSearch[row.advisorName] ?? "";
-                    const filtered = activeEmployees.filter((e: any) => {
-                      const name: string = e.candidate?.name ?? "";
-                      return name.toLowerCase().includes(search.toLowerCase());
-                    });
-                    return (
-                      <tr key={row.advisorName} className={`border-b border-amber-50 last:border-0 ${hasSuggestion ? "bg-yellow-50" : ""}`}>
-                        <td className="px-3 py-2 text-xs">
-                          <div className="font-medium">{row.advisorName}</div>
-                          {hasSuggestion && (
-                            <div className="flex flex-wrap gap-1 mt-1">
-                              {suggestions.map((s) => (
-                                <button
-                                  key={s.id}
-                                  onClick={() => setNameAssignments((prev) => ({ ...prev, [row.advisorName]: s.id }))}
-                                  title={s.reason}
-                                  className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-200 text-yellow-800 hover:bg-yellow-300"
-                                >
-                                  💡 {s.name}
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                        </td>
-                        <td className="px-3 py-2 text-center">
-                          <span className="inline-flex items-center justify-center rounded-full bg-amber-100 text-amber-800 text-xs font-semibold px-2 py-0.5 min-w-[24px]">{row.count}</span>
-                        </td>
-                        <td className="px-3 py-2">
-                          <div className="relative w-52">
-                            <input
-                              type="text"
-                              placeholder={selectedId ? (activeEmployees.find((e: any) => e.id === selectedId)?.candidate?.name ?? "Seçildi") : "Ara veya seç…"}
-                              value={search}
-                              onChange={(e) => setEmpSearch((prev) => ({ ...prev, [row.advisorName]: e.target.value }))}
-                              className={`w-full h-7 text-xs border rounded px-2 ${selectedId && !search ? "border-primary bg-primary/5" : "border-input bg-background"}`}
-                            />
-                            {search && (
-                              <div className="absolute z-20 top-8 left-0 w-52 max-h-48 overflow-y-auto rounded-lg border border-border bg-white shadow-lg">
-                                {filtered.length === 0 ? (
-                                  <div className="px-3 py-2 text-xs text-muted-foreground">Sonuç yok</div>
-                                ) : filtered.map((e: any) => (
-                                  <button
-                                    key={e.id}
-                                    className="w-full text-left px-3 py-1.5 text-xs hover:bg-muted"
-                                    onClick={() => {
-                                      setNameAssignments((prev) => ({ ...prev, [row.advisorName]: e.id }));
-                                      setEmpSearch((prev) => ({ ...prev, [row.advisorName]: "" }));
-                                    }}
-                                  >
-                                    {e.candidate?.name ?? `#${e.id}`}
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-3 py-2 text-right">
-                          <Button
-                            size="sm"
-                            className="h-7 text-xs px-3"
-                            disabled={!selectedId || assigningNames.has(row.advisorName)}
-                            onClick={() => assignByName(row.advisorName)}
-                          >
-                            {assigningNames.has(row.advisorName) ? "Atanıyor…" : "Ata"}
-                          </Button>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {unmatchedAdvisors.map((row) => (
+                    <UnmatchedAssignRow
+                      key={row.advisorName}
+                      advisorName={row.advisorName}
+                      count={row.count}
+                      suggestions={fuzzyMap[row.advisorName] ?? []}
+                      selectedId={nameAssignments[row.advisorName]}
+                      isAssigning={assigningNames.has(row.advisorName)}
+                      activeEmployees={activeEmployees}
+                      onSelect={handleAdvisorSelect}
+                      onAssign={assignByName}
+                    />
+                  ))}
                 </tbody>
               </table>
             </div>
