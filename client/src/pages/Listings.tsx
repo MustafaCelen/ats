@@ -477,6 +477,10 @@ export default function Listings() {
   const [linkLoadingIds, setLinkLoadingIds] = useState<Set<number>>(new Set());
   const [wpCheckingIds, setWpCheckingIds] = useState<Set<number>>(new Set());
   const [wpStatuses, setWpStatuses] = useState<Record<number, string | null>>({});
+  const [notifyFilter, setNotifyFilter] = useState<"all" | "unsent">("unsent");
+
+  const NOTIFY_COOLDOWN_DAYS = 5;
+  const NOTIFY_COOLDOWN_MS = NOTIFY_COOLDOWN_DAYS * 24 * 60 * 60 * 1000;
 
   const { data: notifyStatusRows = [], refetch: refetchNotifyStatus } = useQuery<NotifyStatusRow[]>({
     queryKey: ["/api/employees/notify-status"],
@@ -509,6 +513,49 @@ export default function Listings() {
         await checkWpStatus(row.id, row.phone, row.notifyMsgId);
       }
     }
+  };
+
+  const filteredNotifyRows = notifyStatusRows.filter((r) => {
+    if (r.totalPending === 0) return false; // her zaman sadece bekleyen ilanı olanları göster
+    if (notifyFilter === "unsent") {
+      if (!r.lastNotifiedAt) return true; // hiç gönderilmemiş
+      return (Date.now() - new Date(r.lastNotifiedAt).getTime()) > NOTIFY_COOLDOWN_MS;
+    }
+    return true;
+  });
+
+  const handleNotifyBulkSend = async () => {
+    const toSend = filteredNotifyRows;
+    if (!toSend.length || bulkSending) return;
+    stopBulkRef.current = false;
+    setBulkSending(true);
+    setBulkStatus({ active: true, total: toSend.length, sent: 0, skipped: 0, failed: 0, current: null, done: false, stopped: false });
+    let sent = 0, skipped = 0, failed = 0;
+    for (let i = 0; i < toSend.length; i++) {
+      if (stopBulkRef.current) break;
+      const row = toSend[i];
+      setBulkStatus((s) => s ? { ...s, current: row.name } : s);
+      try {
+        const res = await fetch(`/api/listings/notify-advisor/${row.id}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({}),
+        });
+        if (res.ok) sent++;
+        else if (res.status === 400) skipped++;
+        else failed++;
+      } catch { failed++; }
+      setBulkStatus((s) => s ? { ...s, sent, skipped, failed } : s);
+    }
+    const wasStopped = stopBulkRef.current;
+    setBulkSending(false);
+    setBulkStatus((s) => s ? { ...s, active: false, done: true, current: null, stopped: wasStopped } : s);
+    toast({
+      title: wasStopped ? "Toplu bildirim durduruldu" : "Toplu bildirim tamamlandı",
+      description: `${sent} gönderildi, ${skipped} atlandı, ${failed} başarısız`,
+    });
+    refetchNotifyStatus();
   };
 
   const sendNotify = async (employeeId: number) => {
@@ -854,10 +901,27 @@ export default function Listings() {
         {/* Notification Status Panel */}
         {tab === "notifyStatus" && (
           <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-              <div>
-                <h2 className="text-sm font-semibold">WhatsApp Bildirim Durumu</h2>
-                <p className="text-xs text-muted-foreground mt-0.5">Bekleyen ilanı olan veya daha önce bildirim gönderilmiş danışmanlar</p>
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-wrap gap-3">
+              <div className="flex items-center gap-3 flex-wrap">
+                <div>
+                  <h2 className="text-sm font-semibold">WhatsApp Bildirim Durumu</h2>
+                  <p className="text-xs text-muted-foreground mt-0.5">Bekleyen ilanı olan danışmanlar</p>
+                </div>
+                {/* Filter toggle */}
+                <div className="flex items-center gap-0.5 bg-muted rounded-lg p-0.5">
+                  <button
+                    onClick={() => setNotifyFilter("unsent")}
+                    className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${notifyFilter === "unsent" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    Hiç / {NOTIFY_COOLDOWN_DAYS}+ gün önce ({notifyStatusRows.filter((r) => r.totalPending > 0 && (!r.lastNotifiedAt || (Date.now() - new Date(r.lastNotifiedAt).getTime()) > NOTIFY_COOLDOWN_MS)).length})
+                  </button>
+                  <button
+                    onClick={() => setNotifyFilter("all")}
+                    className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${notifyFilter === "all" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    Tümü ({notifyStatusRows.filter((r) => r.totalPending > 0).length})
+                  </button>
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 <Button
@@ -871,10 +935,13 @@ export default function Listings() {
                 <Button
                   size="sm"
                   className="h-7 text-xs gap-1.5"
-                  onClick={checkAllWpStatuses}
-                  disabled={notifyStatusRows.filter((r) => r.notifyMsgId).length === 0}
+                  onClick={handleNotifyBulkSend}
+                  disabled={bulkSending || filteredNotifyRows.length === 0}
                 >
-                  <MessageSquare className="h-3 w-3" /> Tüm WP Durumlarını Sorgula
+                  {bulkSending
+                    ? <RefreshCw className="h-3 w-3 animate-spin" />
+                    : <Send className="h-3 w-3" />}
+                  Toplu Gönder ({filteredNotifyRows.length} danışman)
                 </Button>
               </div>
             </div>
@@ -891,9 +958,11 @@ export default function Listings() {
                   </tr>
                 </thead>
                 <tbody>
-                  {notifyStatusRows.length === 0 ? (
-                    <tr><td colSpan={6} className="px-3 py-10 text-center text-muted-foreground">Bekleyen ilan veya bildirim geçmişi bulunamadı.</td></tr>
-                  ) : notifyStatusRows.map((row) => {
+                  {filteredNotifyRows.length === 0 ? (
+                    <tr><td colSpan={6} className="px-3 py-10 text-center text-muted-foreground">
+                      {notifyFilter === "unsent" ? `Son ${NOTIFY_COOLDOWN_DAYS} gün içinde bildirim gönderilmemiş danışman yok.` : "Bekleyen ilan bulunamadı."}
+                    </td></tr>
+                  ) : filteredNotifyRows.map((row) => {
                     const wpStatus = wpStatuses[row.id];
                     const isChecking = wpCheckingIds.has(row.id);
                     const notified = !!row.lastNotifiedAt;
