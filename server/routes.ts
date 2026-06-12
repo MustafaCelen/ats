@@ -747,25 +747,25 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // together with their last notification timestamp and WP message id.
   app.get("/api/employees/notify-status", requireAuth, requireAdmin, async (req, res) => {
     try {
-      const emps = await storage.getEmployees({ status: "active" });
-      const rows = await Promise.all(
-        emps.map(async (emp: any) => {
-          const pending = await storage.getAdvisorPendingListings(emp.id);
-          const totalPending = pending.active.length + pending.passive.length;
-          return {
-            id: emp.id,
-            name: emp.candidate?.name ?? `Danışman #${emp.id}`,
-            phone: emp.candidate?.phone ?? null,
-            totalPending,
-            activePending: pending.active.length,
-            passivePending: pending.passive.length,
-            lastNotifiedAt: emp.advisorLastNotifiedAt ?? null,
-            notifyMsgId: emp.advisorNotifyMsgId ?? null,
-          };
-        })
-      );
-      // Only return employees with pending items OR who were notified at some point
-      const filtered = rows.filter((r: any) => r.totalPending > 0 || r.lastNotifiedAt);
+      // 2 queries total instead of 1 + N*2
+      const [emps, pendingCounts] = await Promise.all([
+        storage.getEmployees({ status: "active" }),
+        storage.getAllAdvisorPendingCounts(),
+      ]);
+      const rows = (emps as any[]).map((emp) => {
+        const p = pendingCounts[emp.id] ?? { active: 0, passive: 0 };
+        return {
+          id: emp.id,
+          name: emp.candidate?.name ?? `Danışman #${emp.id}`,
+          phone: emp.candidate?.phone ?? null,
+          totalPending: p.active + p.passive,
+          activePending: p.active,
+          passivePending: p.passive,
+          lastNotifiedAt: emp.advisorLastNotifiedAt ?? null,
+          notifyMsgId: emp.advisorNotifyMsgId ?? null,
+        };
+      });
+      const filtered = rows.filter((r) => r.totalPending > 0 || r.lastNotifiedAt);
       res.json(filtered);
     } catch (err) {
       console.error("[GET /api/employees/notify-status]", err);

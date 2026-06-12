@@ -66,13 +66,14 @@ function Skeleton({ h = "h-64" }: { h?: string }) {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function CapReport() {
-  const { data = [], isLoading } = useQuery<CapRow[]>({
+  const { data = [], isLoading, refetch } = useQuery<CapRow[]>({
     queryKey: ["/api/employees/cap-achievement"],
     queryFn: async () => {
       const res = await fetch("/api/employees/cap-achievement", { credentials: "include" });
       if (!res.ok) throw new Error("Failed");
       return res.json();
     },
+    staleTime: 5 * 60 * 1000,
   });
 
   const capped = useMemo(() => data.filter((r) => r.hasCapped && r.achievementDays !== null), [data]);

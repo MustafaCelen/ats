@@ -4294,7 +4294,57 @@ export class DatabaseStorage implements IStorage {
 
     const allEmps = await this.getEmployees();
     const empsWithCap = allEmps.filter((e) => e.capMonth && e.status === "active");
+    if (empsWithCap.length === 0) return [];
+
     const now = new Date();
+    const empIds = empsWithCap.map((e) => e.id);
+
+    // Pre-load all cap settings in one query
+    const allCapSettings = await db.select().from(capSettings);
+    const capSettingsByYear: Record<number, number> = {};
+    for (const r of allCapSettings) capSettingsByYear[r.year] = parseFloat(r.amount);
+
+    // Batch query: all closing rows for all capped employees (filter by date in memory)
+    const allClosingRows = await db
+      .select({
+        employeeId: closingAgents.employeeId,
+        effDate: sql<string>`COALESCE(${closingAgents.closingDate}::text, ${closings.closingDate}::text)`,
+        bm: closingAgents.marketCenterActual,
+      })
+      .from(closingAgents)
+      .innerJoin(closingSides, eq(closingAgents.closingSideId, closingSides.id))
+      .innerJoin(closings, eq(closingSides.closingId, closings.id))
+      .where(
+        and(
+          inArray(closingAgents.employeeId, empIds),
+          sql`COALESCE(${closingAgents.closingDate}, ${closings.closingDate}) IS NOT NULL`,
+        )
+      );
+
+    // Batch query: all prepayments for all capped employees
+    const allPrepayRows = await db
+      .select({ employeeId: officeExpenses.employeeId, date: officeExpenses.date, amount: officeExpenses.amount })
+      .from(officeExpenses)
+      .where(
+        and(
+          eq(officeExpenses.type, "income"),
+          eq(officeExpenses.category, BM_PREPAYMENT_CATEGORY),
+          inArray(officeExpenses.employeeId, empIds),
+        )
+      );
+
+    // Group in memory by employeeId
+    const closingsByEmp: Record<number, { effDate: string; bm: string | null }[]> = {};
+    for (const row of allClosingRows) {
+      if (row.employeeId == null) continue;
+      (closingsByEmp[row.employeeId] ??= []).push(row);
+    }
+    const prepaysByEmp: Record<number, { date: string; amount: string | null }[]> = {};
+    for (const row of allPrepayRows) {
+      if (row.employeeId == null) continue;
+      (prepaysByEmp[row.employeeId] ??= []).push(row);
+    }
+
     const results: any[] = [];
 
     for (const emp of empsWithCap) {
@@ -4312,46 +4362,14 @@ export class DatabaseStorage implements IStorage {
       const currentYear  = now.getFullYear();
       const capYear = currentMonth >= capMonthNum ? currentYear : currentYear - 1;
       const periodStart = new Date(capYear, capMonthNum - 1, 1);
+      const periodStartYMD = periodStart.toISOString().split("T")[0];
 
       const empCapValue = emp.capValue ? parseFloat(emp.capValue) : null;
-      let capAmount: number | null = empCapValue && empCapValue > 0 ? empCapValue : null;
-      if (capAmount === null) {
-        const [capRow] = await db.select().from(capSettings).where(eq(capSettings.year, capYear));
-        capAmount = capRow ? parseFloat(capRow.amount) : null;
-      }
+      const capAmount: number | null = (empCapValue && empCapValue > 0) ? empCapValue : (capSettingsByYear[capYear] ?? null);
       if (!capAmount) continue;
 
-      const effDateExpr = sql<string>`COALESCE(${closingAgents.closingDate}, ${closings.closingDate})`;
-
-      const closingRows = await db
-        .select({
-          effDate: sql<string>`COALESCE(${closingAgents.closingDate}::text, ${closings.closingDate}::text)`,
-          bm: closingAgents.marketCenterActual,
-        })
-        .from(closingAgents)
-        .innerJoin(closingSides, eq(closingAgents.closingSideId, closingSides.id))
-        .innerJoin(closings, eq(closingSides.closingId, closings.id))
-        .where(
-          and(
-            eq(closingAgents.employeeId, emp.id),
-            sql`${effDateExpr} IS NOT NULL`,
-            sql`${effDateExpr} >= ${periodStart.toISOString().split("T")[0]}`,
-          )
-        )
-        .orderBy(effDateExpr);
-
-      const periodStartYMD = periodStart.toISOString().split("T")[0];
-      const prepayRows = await db
-        .select({ date: officeExpenses.date, amount: officeExpenses.amount })
-        .from(officeExpenses)
-        .where(
-          and(
-            eq(officeExpenses.type, "income"),
-            eq(officeExpenses.category, BM_PREPAYMENT_CATEGORY),
-            eq(officeExpenses.employeeId, emp.id),
-            gte(officeExpenses.date, periodStartYMD),
-          )
-        );
+      const closingRows = (closingsByEmp[emp.id] ?? []).filter((r) => r.effDate >= periodStartYMD);
+      const prepayRows  = (prepaysByEmp[emp.id]  ?? []).filter((r) => r.date  >= periodStartYMD);
 
       const allEntries: { date: Date; amount: number }[] = [
         ...prepayRows.map((p) => ({ date: new Date(p.date), amount: parseFloat(p.amount ?? "0") })),
@@ -4435,6 +4453,29 @@ export class DatabaseStorage implements IStorage {
       .where(eq(listings.id, listingId))
       .returning();
     return updated ?? null;
+  }
+
+  async getAllAdvisorPendingCounts(): Promise<Record<number, { active: number; passive: number }>> {
+    const rows = await db
+      .select({ employeeId: listings.employeeId, status: listings.status })
+      .from(listings)
+      .where(
+        and(
+          isNotNull(listings.employeeId),
+          or(
+            and(eq(listings.status, "active"), isNull(listings.agreementUploadedAt), isNull(listings.noAgreementAt)),
+            and(eq(listings.status, "passive"), isNull(listings.closeReasonSubmittedAt)),
+          )
+        )
+      );
+    const result: Record<number, { active: number; passive: number }> = {};
+    for (const row of rows) {
+      if (row.employeeId == null) continue;
+      result[row.employeeId] ??= { active: 0, passive: 0 };
+      if (row.status === "active") result[row.employeeId].active++;
+      else result[row.employeeId].passive++;
+    }
+    return result;
   }
 
   async markAdvisorNotified(employeeId: number, msgId?: string | null): Promise<void> {

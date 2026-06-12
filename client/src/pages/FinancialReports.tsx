@@ -174,6 +174,7 @@ function useCapStatuses() {
       if (!res.ok) throw new Error("Failed");
       return res.json();
     },
+    staleTime: 5 * 60 * 1000,
   });
 }
 
@@ -189,6 +190,7 @@ function useClosingStats(startDate: string, endDate: string, office?: string, de
       if (!res.ok) throw new Error("Failed");
       return res.json();
     },
+    staleTime: 3 * 60 * 1000,
   });
 }
 
@@ -225,6 +227,7 @@ function useFinancialTargets(year: number, office: string) {
       if (!res.ok) throw new Error("Failed");
       return res.json();
     },
+    staleTime: 5 * 60 * 1000,
   });
 }
 

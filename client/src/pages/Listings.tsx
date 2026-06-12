@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Layout } from "@/components/Layout";
 import { Button } from "@/components/ui/button";
@@ -354,15 +354,20 @@ export default function Listings() {
     queryKey: ["/api/listings/unmatched-advisors"],
     queryFn: () => fetch("/api/listings/unmatched-advisors", { credentials: "include" }).then((r) => r.json()),
     enabled: tab === "unmatched",
+    staleTime: 2 * 60 * 1000,
   });
 
   const { data: fuzzySuggestions = [] } = useQuery<{ advisorName: string; suggestions: { id: number; name: string; reason: string }[] }[]>({
     queryKey: ["/api/listings/fuzzy-suggestions"],
     queryFn: () => fetch("/api/listings/fuzzy-suggestions", { credentials: "include" }).then((r) => r.json()),
     enabled: tab === "unmatched",
+    staleTime: 5 * 60 * 1000,
   });
 
-  const fuzzyMap = Object.fromEntries(fuzzySuggestions.map((f) => [f.advisorName, f.suggestions]));
+  const fuzzyMap = useMemo(
+    () => Object.fromEntries(fuzzySuggestions.map((f) => [f.advisorName, f.suggestions])),
+    [fuzzySuggestions],
+  );
 
   // Per-row employee search state for the assignment combobox
   const [empSearch, setEmpSearch] = useState<Record<string, string>>({});
