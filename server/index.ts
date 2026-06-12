@@ -142,6 +142,7 @@ app.use((req, res, next) => {
     );
     ALTER TABLE "employees" ADD COLUMN IF NOT EXISTS "advisor_token" text UNIQUE;
     ALTER TABLE "employees" ADD COLUMN IF NOT EXISTS "advisor_last_notified_at" timestamp;
+    ALTER TABLE "employees" ADD COLUMN IF NOT EXISTS "advisor_notify_msg_id" text;
 
     ALTER TABLE "listings" ADD COLUMN IF NOT EXISTS "agreement_reminder_sent_at" timestamp;
     ALTER TABLE "listings" ADD COLUMN IF NOT EXISTS "close_reason_reminder_sent_at" timestamp;

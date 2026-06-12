@@ -4437,8 +4437,11 @@ export class DatabaseStorage implements IStorage {
     return updated ?? null;
   }
 
-  async markAdvisorNotified(employeeId: number): Promise<void> {
-    await db.update(employees).set({ advisorLastNotifiedAt: new Date() } as any).where(eq(employees.id, employeeId));
+  async markAdvisorNotified(employeeId: number, msgId?: string | null): Promise<void> {
+    await db.update(employees).set({
+      advisorLastNotifiedAt: new Date(),
+      ...(msgId !== undefined ? { advisorNotifyMsgId: msgId } : {}),
+    } as any).where(eq(employees.id, employeeId));
   }
 }
 

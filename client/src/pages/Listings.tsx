@@ -11,7 +11,7 @@ import { apiRequest } from "@/lib/queryClient";
 import {
   Building2, Upload, Search, FileCheck2, FileWarning, HelpCircle,
   CheckCircle2, Clock, Send, ExternalLink, ChevronLeft, ChevronRight, Download, Plus,
-  RefreshCw, MessageSquare, Link2,
+  RefreshCw, MessageSquare, Link2, Bell, BellOff,
 } from "lucide-react";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -50,7 +50,18 @@ interface Summary {
   needsAgreement: number; needsReason: number; soldPassive: number; noAgreement: number;
 }
 
-type FilterTab = "needsAll" | "needsAgreement" | "needsReason" | "hasAgreement" | "hasReason" | "unmatched" | "missingPhone";
+type FilterTab = "needsAll" | "needsAgreement" | "needsReason" | "hasAgreement" | "hasReason" | "unmatched" | "missingPhone" | "notifyStatus";
+
+interface NotifyStatusRow {
+  id: number;
+  name: string;
+  phone: string | null;
+  totalPending: number;
+  activePending: number;
+  passivePending: number;
+  lastNotifiedAt: string | null;
+  notifyMsgId: string | null;
+}
 
 // ── CSV helpers ─────────────────────────────────────────────────────────────────
 
@@ -480,6 +491,41 @@ export default function Listings() {
 
   const [sendingIds, setSendingIds] = useState<Set<number>>(new Set());
   const [linkLoadingIds, setLinkLoadingIds] = useState<Set<number>>(new Set());
+  const [wpCheckingIds, setWpCheckingIds] = useState<Set<number>>(new Set());
+  const [wpStatuses, setWpStatuses] = useState<Record<number, string | null>>({});
+
+  const { data: notifyStatusRows = [], refetch: refetchNotifyStatus } = useQuery<NotifyStatusRow[]>({
+    queryKey: ["/api/employees/notify-status"],
+    queryFn: () => fetch("/api/employees/notify-status", { credentials: "include" }).then((r) => r.ok ? r.json() : []),
+    enabled: tab === "notifyStatus",
+  });
+
+  const checkWpStatus = async (empId: number, phone: string | null, msgId: string | null) => {
+    if (!phone || !msgId || wpCheckingIds.has(empId)) return;
+    setWpCheckingIds((prev) => new Set(prev).add(empId));
+    try {
+      const res = await fetch(`/api/employees/${empId}/check-wp-status`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      setWpStatuses((prev) => ({ ...prev, [empId]: data.status ?? null }));
+    } catch {
+      setWpStatuses((prev) => ({ ...prev, [empId]: "failed" }));
+    } finally {
+      setWpCheckingIds((prev) => { const s = new Set(prev); s.delete(empId); return s; });
+    }
+  };
+
+  const checkAllWpStatuses = async () => {
+    for (const row of notifyStatusRows) {
+      if (row.lastNotifiedAt && row.notifyMsgId) {
+        await checkWpStatus(row.id, row.phone, row.notifyMsgId);
+      }
+    }
+  };
 
   const sendNotify = async (employeeId: number) => {
     if (sendingIds.has(employeeId)) return;
@@ -555,6 +601,7 @@ export default function Listings() {
     { key: "hasReason",      label: "Kapanış Sebebi Girilmiş" },
     { key: "unmatched",      label: "Eşleşmeyenler", count: unmatchedCount },
     { key: "missingPhone",   label: "Telefon Eksik", count: missingPhoneCount },
+    { key: "notifyStatus",   label: "Bildirim Durumu" },
   ];
 
   return (
@@ -794,8 +841,140 @@ export default function Listings() {
           </div>
         )}
 
+        {/* Notification Status Panel */}
+        {tab === "notifyStatus" && (
+          <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+              <div>
+                <h2 className="text-sm font-semibold">WhatsApp Bildirim Durumu</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">Bekleyen ilanı olan veya daha önce bildirim gönderilmiş danışmanlar</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs gap-1.5"
+                  onClick={() => { refetchNotifyStatus(); setWpStatuses({}); }}
+                >
+                  <RefreshCw className="h-3 w-3" /> Yenile
+                </Button>
+                <Button
+                  size="sm"
+                  className="h-7 text-xs gap-1.5"
+                  onClick={checkAllWpStatuses}
+                  disabled={notifyStatusRows.filter((r) => r.notifyMsgId).length === 0}
+                >
+                  <MessageSquare className="h-3 w-3" /> Tüm WP Durumlarını Sorgula
+                </Button>
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-muted/40 text-left text-xs text-muted-foreground">
+                    <th className="px-3 py-2.5 font-medium">Danışman</th>
+                    <th className="px-3 py-2.5 font-medium">Telefon</th>
+                    <th className="px-3 py-2.5 font-medium text-center">Bekleyen İlan</th>
+                    <th className="px-3 py-2.5 font-medium">Son Bildirim</th>
+                    <th className="px-3 py-2.5 font-medium">WP Durumu</th>
+                    <th className="px-3 py-2.5 font-medium text-right">İşlem</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {notifyStatusRows.length === 0 ? (
+                    <tr><td colSpan={6} className="px-3 py-10 text-center text-muted-foreground">Bekleyen ilan veya bildirim geçmişi bulunamadı.</td></tr>
+                  ) : notifyStatusRows.map((row) => {
+                    const wpStatus = wpStatuses[row.id];
+                    const isChecking = wpCheckingIds.has(row.id);
+                    const notified = !!row.lastNotifiedAt;
+                    const hasMsgId = !!row.notifyMsgId;
+
+                    const wpBadge = () => {
+                      if (isChecking) return <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground"><RefreshCw className="h-2.5 w-2.5 animate-spin" />Sorgulanıyor</span>;
+                      if (!hasMsgId) return <span className="text-[11px] text-muted-foreground">—</span>;
+                      if (wpStatus === null || wpStatus === undefined) return <span className="text-[11px] text-muted-foreground italic">Sorgulanmadı</span>;
+                      const map: Record<string, { label: string; cls: string }> = {
+                        pending:   { label: "Bekliyor",   cls: "bg-yellow-100 text-yellow-700" },
+                        sent:      { label: "Gönderildi", cls: "bg-blue-100 text-blue-700" },
+                        delivered: { label: "İletildi",   cls: "bg-emerald-100 text-emerald-700" },
+                        read:      { label: "Okundu",     cls: "bg-emerald-200 text-emerald-800" },
+                        played:    { label: "Oynatıldı",  cls: "bg-emerald-200 text-emerald-800" },
+                        failed:    { label: "Başarısız",  cls: "bg-red-100 text-red-700" },
+                      };
+                      const m = map[wpStatus] ?? { label: wpStatus, cls: "bg-slate-100 text-slate-600" };
+                      return <span className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full ${m.cls}`}>{m.label}</span>;
+                    };
+
+                    return (
+                      <tr key={row.id} className="border-b border-border last:border-0 hover:bg-muted/30">
+                        <td className="px-3 py-2.5">
+                          <div className="font-medium text-sm">{row.name}</div>
+                        </td>
+                        <td className="px-3 py-2.5 text-xs text-muted-foreground">{row.phone ?? "—"}</td>
+                        <td className="px-3 py-2.5 text-center">
+                          <div className="flex items-center justify-center gap-2">
+                            {row.activePending > 0 && (
+                              <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
+                                {row.activePending} sözleşme
+                              </span>
+                            )}
+                            {row.passivePending > 0 && (
+                              <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-violet-100 text-violet-700">
+                                {row.passivePending} kapanış
+                              </span>
+                            )}
+                            {row.totalPending === 0 && <span className="text-[11px] text-muted-foreground">—</span>}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2.5">
+                          {notified ? (
+                            <div className="flex items-center gap-1.5">
+                              <Bell className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                              <span className="text-xs">{new Date(row.lastNotifiedAt!).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1.5">
+                              <BellOff className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                              <span className="text-xs text-muted-foreground">Hiç gönderilmedi</span>
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-3 py-2.5">{wpBadge()}</td>
+                        <td className="px-3 py-2.5 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            {hasMsgId && (
+                              <button
+                                onClick={() => checkWpStatus(row.id, row.phone, row.notifyMsgId)}
+                                disabled={isChecking}
+                                className="inline-flex items-center gap-0.5 text-[10px] px-2 py-1 rounded bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-50"
+                              >
+                                {isChecking ? <RefreshCw className="h-2.5 w-2.5 animate-spin" /> : <RefreshCw className="h-2.5 w-2.5" />}
+                                Durumu Sorgula
+                              </button>
+                            )}
+                            {row.totalPending > 0 && (
+                              <button
+                                onClick={() => sendNotify(row.id)}
+                                disabled={sendingIds.has(row.id)}
+                                className="inline-flex items-center gap-0.5 text-[10px] px-2 py-1 rounded bg-green-50 text-green-700 hover:bg-green-100 disabled:opacity-50"
+                              >
+                                {sendingIds.has(row.id) ? <RefreshCw className="h-2.5 w-2.5 animate-spin" /> : <Send className="h-2.5 w-2.5" />}
+                                {notified ? "Tekrar Gönder" : "Bildir"}
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
         {/* Table */}
-        <div className="rounded-xl border border-border bg-card overflow-hidden">
+        {tab !== "notifyStatus" && <div className="rounded-xl border border-border bg-card overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -968,7 +1147,8 @@ export default function Listings() {
               </div>
             </div>
           )}
-        </div>
+        </div>}
+
       </div>
 
       <AddListingDialog open={addOpen} onOpenChange={setAddOpen} onSaved={refresh} />

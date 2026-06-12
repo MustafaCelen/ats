@@ -732,10 +732,62 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       lines.push(link);
 
       const msgId = await sendWhatsApp(phone, lines.join("\n"));
-      await storage.markAdvisorNotified(employeeId);
+      await storage.markAdvisorNotified(employeeId, msgId);
       res.json({ ok: true, msgId });
     } catch (err) {
       console.error("[POST /api/listings/notify-advisor]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Advisor notification status ──────────────────────────────────────────────
+
+  // GET /api/employees/notify-status
+  // Returns all active employees that have at least one pending listing,
+  // together with their last notification timestamp and WP message id.
+  app.get("/api/employees/notify-status", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const emps = await storage.getEmployees({ status: "active" });
+      const rows = await Promise.all(
+        emps.map(async (emp: any) => {
+          const pending = await storage.getAdvisorPendingListings(emp.id);
+          const totalPending = pending.active.length + pending.passive.length;
+          return {
+            id: emp.id,
+            name: emp.candidate?.name ?? `Danışman #${emp.id}`,
+            phone: emp.candidate?.phone ?? null,
+            totalPending,
+            activePending: pending.active.length,
+            passivePending: pending.passive.length,
+            lastNotifiedAt: emp.advisorLastNotifiedAt ?? null,
+            notifyMsgId: emp.advisorNotifyMsgId ?? null,
+          };
+        })
+      );
+      // Only return employees with pending items OR who were notified at some point
+      const filtered = rows.filter((r: any) => r.totalPending > 0 || r.lastNotifiedAt);
+      res.json(filtered);
+    } catch (err) {
+      console.error("[GET /api/employees/notify-status]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // POST /api/employees/:id/check-wp-status
+  // Checks the WP delivery status of the last advisor notification message.
+  app.post("/api/employees/:id/check-wp-status", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const employeeId = parseInt(req.params.id, 10);
+      if (isNaN(employeeId)) return res.status(400).json({ message: "Geçersiz ID" });
+      const emp = await storage.getEmployee(employeeId) as any;
+      if (!emp) return res.status(404).json({ message: "Danışman bulunamadı" });
+      const phone = emp.candidate?.phone;
+      const msgId = emp.advisorNotifyMsgId;
+      if (!phone || !msgId) return res.json({ status: null });
+      const status = await checkWhatsAppStatus(phone, msgId);
+      res.json({ status });
+    } catch (err) {
+      console.error("[POST /api/employees/:id/check-wp-status]", err);
       res.status(500).json({ message: "Internal server error" });
     }
   });
