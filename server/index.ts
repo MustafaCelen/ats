@@ -142,6 +142,14 @@ app.use((req, res, next) => {
     );
     ALTER TABLE "listings" ADD COLUMN IF NOT EXISTS "agreement_reminder_sent_at" timestamp;
     ALTER TABLE "listings" ADD COLUMN IF NOT EXISTS "close_reason_reminder_sent_at" timestamp;
+    ALTER TABLE "listings" ADD COLUMN IF NOT EXISTS "no_agreement_at" timestamp;
+    ALTER TABLE "listings" ADD COLUMN IF NOT EXISTS "notify_msg_id_new" text;
+    ALTER TABLE "listings" ADD COLUMN IF NOT EXISTS "notify_msg_id_passive" text;
+    ALTER TABLE "listings" ADD COLUMN IF NOT EXISTS "close_reason_requested_at" timestamp;
+    ALTER TABLE "listings" ADD COLUMN IF NOT EXISTS "close_reason" text;
+    ALTER TABLE "listings" ADD COLUMN IF NOT EXISTS "close_reason_note" text;
+    ALTER TABLE "listings" ADD COLUMN IF NOT EXISTS "close_reason_submitted_at" timestamp;
+    ALTER TABLE "listings" ADD COLUMN IF NOT EXISTS "agreement_uploaded_at" timestamp;
   `);
 
   await registerRoutes(httpServer, app);

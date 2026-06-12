@@ -325,15 +325,17 @@ export default function Listings() {
     return params.toString();
   })();
 
-  const { data: rows = [], isLoading } = useQuery<Listing[]>({
+  const { data: rowsRaw, isLoading } = useQuery<Listing[]>({
     queryKey: ["/api/listings", listQuery],
-    queryFn: () => fetch(`/api/listings?${listQuery}`, { credentials: "include" }).then((r) => r.json()),
+    queryFn: () => fetch(`/api/listings?${listQuery}`, { credentials: "include" }).then((r) => r.ok ? r.json() : []),
   });
+  const rows: Listing[] = Array.isArray(rowsRaw) ? rowsRaw : [];
 
-  const { data: employees = [] } = useQuery<any[]>({
+  const { data: employeesRaw } = useQuery<any[]>({
     queryKey: ["/api/employees"],
-    queryFn: () => fetch("/api/employees", { credentials: "include" }).then((r) => r.json()),
+    queryFn: () => fetch("/api/employees", { credentials: "include" }).then((r) => r.ok ? r.json() : []),
   });
+  const employees: any[] = Array.isArray(employeesRaw) ? employeesRaw : [];
   const activeEmployees = employees.filter((e: any) => e.status === "active");
 
   const { data: unmatchedAdvisors = [], refetch: refetchUnmatched } = useQuery<{ advisorName: string; count: number }[]>({
