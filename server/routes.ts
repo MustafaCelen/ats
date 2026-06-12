@@ -2174,7 +2174,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.get("/api/closings", requireAuth, requireAdmin, async (_req, res) => {
     try {
       res.json(await storage.getClosings());
-    } catch {
+    } catch (err) {
+      console.error("[GET /api/closings] error:", err);
       res.status(500).json({ message: "Internal server error" });
     }
   });
@@ -2385,7 +2386,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.get("/api/employees/cap-statuses", requireAuth, requireAdmin, async (_req, res) => {
     try {
       res.json(await storage.getAllEmployeesCapStatus());
-    } catch {
+    } catch (err) {
+      console.error("[GET /api/employees/cap-statuses] error:", err);
       res.status(500).json({ message: "Internal server error" });
     }
   });

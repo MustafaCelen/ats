@@ -140,6 +140,9 @@ app.use((req, res, next) => {
       "new_price" numeric(15,2),
       "changed_at" timestamp DEFAULT now()
     );
+    ALTER TABLE "employees" ADD COLUMN IF NOT EXISTS "advisor_token" text UNIQUE;
+    ALTER TABLE "employees" ADD COLUMN IF NOT EXISTS "advisor_last_notified_at" timestamp;
+
     ALTER TABLE "listings" ADD COLUMN IF NOT EXISTS "agreement_reminder_sent_at" timestamp;
     ALTER TABLE "listings" ADD COLUMN IF NOT EXISTS "close_reason_reminder_sent_at" timestamp;
     ALTER TABLE "listings" ADD COLUMN IF NOT EXISTS "no_agreement_at" timestamp;
