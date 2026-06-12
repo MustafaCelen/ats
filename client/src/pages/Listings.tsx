@@ -50,7 +50,7 @@ interface Summary {
   needsAgreement: number; needsReason: number; soldPassive: number; noAgreement: number;
 }
 
-type FilterTab = "needsAgreement" | "needsReason" | "hasAgreement" | "hasReason" | "unmatched" | "missingPhone";
+type FilterTab = "needsAll" | "needsAgreement" | "needsReason" | "hasAgreement" | "hasReason" | "unmatched" | "missingPhone";
 
 // ── CSV helpers ─────────────────────────────────────────────────────────────────
 
@@ -314,7 +314,8 @@ export default function Listings() {
 
   const listQuery = (() => {
     const params = new URLSearchParams();
-    if (tab === "needsAgreement") { params.set("needsAgreement", "1"); params.set("onlyMatched", "1"); }
+    if (tab === "needsAll") { params.set("needsAny", "1"); }
+    else if (tab === "needsAgreement") { params.set("needsAgreement", "1"); params.set("onlyMatched", "1"); }
     else if (tab === "needsReason") { params.set("needsReason", "1"); params.set("onlyMatched", "1"); }
     else if (tab === "hasAgreement") { params.set("hasAgreement", "1"); params.set("onlyMatched", "1"); }
     else if (tab === "hasReason") { params.set("hasReason", "1"); params.set("onlyMatched", "1"); }
@@ -545,6 +546,7 @@ export default function Listings() {
   const missingPhoneCount = tab === "missingPhone" ? filteredRows.length : undefined;
 
   const tabs: { key: FilterTab; label: string; count?: number }[] = [
+    { key: "needsAll",       label: "Tümü (Bekleyen)", count: (summary?.needsAgreement ?? 0) + (summary?.needsReason ?? 0) || undefined },
     { key: "needsAgreement", label: "Yetki Sözleşmesi Bekleyen", count: summary?.needsAgreement },
     { key: "hasAgreement",   label: "Yetki Sözleşmesi Girilmiş" },
     { key: "needsReason",    label: "Kalkış Sebebi Bekleyen", count: summary?.needsReason },

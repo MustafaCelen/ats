@@ -142,6 +142,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         status: q.status ? String(q.status) : undefined,
         needsAgreement: q.needsAgreement === "1",
         needsReason: q.needsReason === "1",
+        needsAny: q.needsAny === "1",
         hasAgreement: q.hasAgreement === "1",
         hasReason: q.hasReason === "1",
         onlyMatched: q.onlyMatched === "1",

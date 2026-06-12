@@ -3404,6 +3404,7 @@ export class DatabaseStorage implements IStorage {
     employeeId?: number;
     needsAgreement?: boolean;
     needsReason?: boolean;
+    needsAny?: boolean;
     hasAgreement?: boolean;
     hasReason?: boolean;
     onlyMatched?: boolean;
@@ -3419,6 +3420,13 @@ export class DatabaseStorage implements IStorage {
     if (filters?.missingPhone) conds.push(and(isNotNull(listings.employeeId), isNull(candidates.phone)));
     if (filters?.needsAgreement) conds.push(and(eq(listings.status, "active"), isNull(listings.agreementUploadedAt), isNull(listings.noAgreementAt)));
     if (filters?.needsReason) conds.push(and(eq(listings.status, "passive"), isNull(listings.closeReasonSubmittedAt)));
+    if (filters?.needsAny) conds.push(and(
+      isNotNull(listings.employeeId),
+      or(
+        and(eq(listings.status, "active"), isNull(listings.agreementUploadedAt), isNull(listings.noAgreementAt)),
+        and(eq(listings.status, "passive"), isNull(listings.closeReasonSubmittedAt)),
+      ),
+    ));
     if (filters?.hasAgreement) conds.push(and(eq(listings.status, "active"), isNotNull(listings.agreementUploadedAt)));
     if (filters?.hasReason) conds.push(and(eq(listings.status, "passive"), isNotNull(listings.closeReasonSubmittedAt)));
     if (filters?.search) conds.push(or(
