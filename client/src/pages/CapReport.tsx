@@ -64,20 +64,10 @@ function Skeleton({ h = "h-64" }: { h?: string }) {
   return <div className={`${h} rounded bg-muted/40 animate-pulse`} />;
 }
 
-// ── Page ──────────────────────────────────────────────────────────────────────
-export default function CapReport() {
-  const { data = [], isLoading, refetch } = useQuery<CapRow[]>({
-    queryKey: ["/api/employees/cap-achievement"],
-    queryFn: async () => {
-      const res = await fetch("/api/employees/cap-achievement", { credentials: "include" });
-      if (!res.ok) throw new Error("Failed");
-      return res.json();
-    },
-    staleTime: 5 * 60 * 1000,
-  });
-
-  const capped = useMemo(() => data.filter((r) => r.hasCapped && r.achievementDays !== null), [data]);
-  const notCapped = useMemo(() => data.filter((r) => !r.hasCapped), [data]);
+// ── Year section ──────────────────────────────────────────────────────────────
+function YearSection({ year, rows, isLoading }: { year: number; rows: CapRow[]; isLoading: boolean }) {
+  const capped = useMemo(() => rows.filter((r) => r.hasCapped && r.achievementDays !== null), [rows]);
+  const notCapped = useMemo(() => rows.filter((r) => !r.hasCapped), [rows]);
 
   const avgDays = useMemo(() => {
     if (!capped.length) return null;
@@ -89,7 +79,6 @@ export default function CapReport() {
     return capped.reduce((a, b) => a.achievementDays! < b.achievementDays! ? a : b);
   }, [capped]);
 
-  // Distribution: how many capped in each month (1–12)
   const distribution = useMemo(() => {
     const counts = Array.from({ length: 12 }, (_, i) => ({ label: MONTH_LABELS[i], month: i + 1, count: 0 }));
     for (const r of capped) {
@@ -103,187 +92,220 @@ export default function CapReport() {
   const avgMonths = avgDays !== null ? (avgDays / 30).toFixed(1) : null;
   const avgMonthIndex = avgDays !== null ? Math.round(avgDays / 30) : null;
 
+  if (!isLoading && rows.length === 0) return null;
+
+  return (
+    <div className="space-y-4">
+      {/* Year heading */}
+      <div className="flex items-center gap-3">
+        <h2 className="text-lg font-bold">{year} Cap Dönemi</h2>
+        <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full">{rows.length} danışman</span>
+      </div>
+
+      {/* Metric cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <MetricCard
+          icon={Clock} color="bg-emerald-50 text-emerald-600"
+          label="Ort. Cap Süresi"
+          value={avgDays !== null ? fmtDays(avgDays) : "—"}
+          sub={avgMonths ? `≈ ${avgMonths} ay` : undefined}
+        />
+        <MetricCard
+          icon={Trophy} color="bg-amber-50 text-amber-600"
+          label="Cap'e Ulaşan"
+          value={capped.length}
+          sub={`${rows.length} danışmandan`}
+        />
+        <MetricCard
+          icon={TrendingUp} color="bg-blue-50 text-blue-600"
+          label="En Hızlı Cap"
+          value={fastest ? fmtDays(fastest.achievementDays!) : "—"}
+          sub={fastest?.name ?? undefined}
+        />
+        <MetricCard
+          icon={Users} color="bg-purple-50 text-purple-600"
+          label="Devam Eden"
+          value={notCapped.length}
+          sub="henüz cap'e ulaşmadı"
+        />
+      </div>
+
+      {/* Distribution chart */}
+      <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
+        <h3 className="text-sm font-semibold mb-1">Cap'e Ulaşılan Ay Dağılımı</h3>
+        <p className="text-xs text-muted-foreground mb-4">Periyot başlangıcından kaçıncı ayda cap'e ulaşıldı</p>
+        {isLoading ? <Skeleton /> : (
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={distribution} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+              <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+              <YAxis tick={{ fontSize: 11 }} allowDecimals={false} width={28} />
+              <Tooltip
+                content={({ active, payload, label }: any) => {
+                  if (!active || !payload?.length) return null;
+                  return (
+                    <div className="bg-card border border-border rounded-lg shadow-lg p-3 text-xs">
+                      <p className="font-semibold mb-1">{label}</p>
+                      <p className="text-emerald-600">{payload[0].value} danışman</p>
+                    </div>
+                  );
+                }}
+              />
+              {avgMonthIndex !== null && (
+                <ReferenceLine
+                  x={MONTH_LABELS[avgMonthIndex - 1]}
+                  stroke="#f59e0b"
+                  strokeDasharray="5 3"
+                  strokeWidth={2}
+                  label={{ value: "Ort.", position: "top", fontSize: 10, fill: "#f59e0b" }}
+                />
+              )}
+              <Bar dataKey="count" name="Danışman" radius={[4, 4, 0, 0]} maxBarSize={64}>
+                {distribution.map((_, i) => (
+                  <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+
+      {/* Detail table */}
+      <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+        <div className="px-5 py-3 border-b border-border">
+          <h3 className="text-sm font-semibold">Detay Tablosu — {year}</h3>
+        </div>
+        {isLoading ? (
+          <div className="p-5 space-y-2">{[...Array(4)].map((_, i) => (
+            <div key={i} className="h-8 bg-muted/40 rounded animate-pulse" />
+          ))}</div>
+        ) : rows.length === 0 ? (
+          <div className="p-8 text-center text-sm text-muted-foreground">Veri yok</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-muted/40 border-b border-border">
+                  <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-left">#</th>
+                  <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-left">Danışman</th>
+                  <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-left">KWUID</th>
+                  <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-right">Cap Hedefi</th>
+                  <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-right">Kullanılan</th>
+                  <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-right">İlerleme</th>
+                  <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-left">Periyot Başlangıcı</th>
+                  <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-right">Cap Tarihi</th>
+                  <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-right">Süre</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r, i) => {
+                  const pct = r.capAmount > 0 ? Math.min(100, Math.round((r.capUsed / r.capAmount) * 100)) : 0;
+                  return (
+                    <tr key={r.employeeId} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
+                      <td className="py-2 px-4 text-xs text-muted-foreground">{i + 1}</td>
+                      <td className="py-2 px-4 font-medium">
+                        <div className="flex items-center gap-2">
+                          {r.hasCapped && <Trophy className="h-3 w-3 text-amber-500 shrink-0" />}
+                          {r.name}
+                          {r.status === "passive" && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">ayrıldı</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="py-2 px-4 text-xs text-muted-foreground">{r.kwuid || "—"}</td>
+                      <td className="py-2 px-4 text-right">{fmtTRY(r.capAmount)}</td>
+                      <td className="py-2 px-4 text-right font-medium">{fmtTRY(r.capUsed)}</td>
+                      <td className="py-2 px-4">
+                        <div className="flex items-center gap-2 justify-end">
+                          <div className="w-20 h-1.5 rounded-full bg-muted overflow-hidden">
+                            <div
+                              className="h-full rounded-full"
+                              style={{
+                                width: `${pct}%`,
+                                backgroundColor: r.hasCapped ? "#f59e0b" : pct >= 75 ? "#10b981" : "#3b82f6",
+                              }}
+                            />
+                          </div>
+                          <span className={`text-xs font-semibold w-9 text-right ${r.hasCapped ? "text-amber-600" : "text-foreground"}`}>
+                            %{pct}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="py-2 px-4 text-xs text-muted-foreground">
+                        {new Date(r.periodStart).toLocaleDateString("tr-TR", { month: "long", year: "numeric" })}
+                      </td>
+                      <td className="py-2 px-4 text-right text-xs">
+                        {r.achievedAt
+                          ? new Date(r.achievedAt).toLocaleDateString("tr-TR", { day: "numeric", month: "short", year: "numeric" })
+                          : <span className="text-muted-foreground">—</span>}
+                      </td>
+                      <td className="py-2 px-4 text-right">
+                        {r.achievementDays !== null ? (
+                          <span className={`text-xs font-semibold ${r.achievementDays <= (avgDays ?? Infinity) ? "text-emerald-600" : "text-blue-600"}`}>
+                            {fmtDays(r.achievementDays)}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              {capped.length > 0 && (
+                <tfoot>
+                  <tr className="bg-muted/30 border-t border-border font-semibold">
+                    <td colSpan={8} className="py-2.5 px-4 text-xs text-muted-foreground">
+                      Ortalama cap süresi ({capped.length} danışman)
+                    </td>
+                    <td className="py-2.5 px-4 text-right text-xs text-amber-600 font-bold">
+                      {avgDays !== null ? fmtDays(avgDays) : "—"}
+                    </td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Page ──────────────────────────────────────────────────────────────────────
+export default function CapReport() {
+  const { data = [], isLoading } = useQuery<CapRow[]>({
+    queryKey: ["/api/employees/cap-achievement"],
+    queryFn: async () => {
+      const res = await fetch("/api/employees/cap-achievement", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const rows2025 = useMemo(() => data.filter((r) => new Date(r.periodStart).getFullYear() === 2025), [data]);
+  const rows2026 = useMemo(() => data.filter((r) => new Date(r.periodStart).getFullYear() === 2026), [data]);
+
   return (
     <Layout>
-      <div className="space-y-6">
-
-        {/* Header */}
+      <div className="space-y-8">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
             <Trophy className="h-6 w-6 text-amber-500" />
             Cap Analizi
           </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Danışmanların mevcut cap periyodunda cap'e ulaşma süreleri</p>
+          <p className="text-sm text-muted-foreground mt-0.5">Danışmanların cap periyoduna göre cap'e ulaşma süreleri</p>
         </div>
 
-        {/* Metric cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <MetricCard
-            icon={Clock} color="bg-emerald-50 text-emerald-600"
-            label="Ort. Cap Süresi"
-            value={avgDays !== null ? fmtDays(avgDays) : "—"}
-            sub={avgMonths ? `≈ ${avgMonths} ay` : undefined}
-          />
-          <MetricCard
-            icon={Trophy} color="bg-amber-50 text-amber-600"
-            label="Bu Dönem Cap'e Ulaşan"
-            value={capped.length}
-            sub={`${data.length} danışmandan`}
-          />
-          <MetricCard
-            icon={TrendingUp} color="bg-blue-50 text-blue-600"
-            label="En Hızlı Cap"
-            value={fastest ? fmtDays(fastest.achievementDays!) : "—"}
-            sub={fastest?.name ?? undefined}
-          />
-          <MetricCard
-            icon={Users} color="bg-purple-50 text-purple-600"
-            label="Devam Eden"
-            value={notCapped.length}
-            sub="henüz cap'e ulaşmadı"
-          />
-        </div>
+        <YearSection year={2026} rows={rows2026} isLoading={isLoading} />
 
-        {/* Distribution chart — full width */}
-        <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-          <h2 className="text-base font-semibold mb-1">Cap'e Ulaşılan Ay Dağılımı</h2>
-          <p className="text-xs text-muted-foreground mb-4">Periyot başlangıcından kaçıncı ayda cap'e ulaşıldı</p>
-          {isLoading ? <Skeleton /> : (
-            <ResponsiveContainer width="100%" height={260}>
-              <BarChart data={distribution} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} allowDecimals={false} width={28} />
-                <Tooltip
-                  content={({ active, payload, label }: any) => {
-                    if (!active || !payload?.length) return null;
-                    return (
-                      <div className="bg-card border border-border rounded-lg shadow-lg p-3 text-xs">
-                        <p className="font-semibold mb-1">{label}</p>
-                        <p className="text-emerald-600">{payload[0].value} danışman</p>
-                      </div>
-                    );
-                  }}
-                />
-                {avgMonthIndex !== null && (
-                  <ReferenceLine
-                    x={MONTH_LABELS[avgMonthIndex - 1]}
-                    stroke="#f59e0b"
-                    strokeDasharray="5 3"
-                    strokeWidth={2}
-                    label={{ value: "Ort.", position: "top", fontSize: 10, fill: "#f59e0b" }}
-                  />
-                )}
-                <Bar dataKey="count" name="Danışman" radius={[4, 4, 0, 0]} maxBarSize={64}>
-                  {distribution.map((_, i) => (
-                    <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-
-        {/* Detail table */}
-        <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-          <div className="px-5 py-4 border-b border-border">
-            <h2 className="text-base font-semibold">Cap Detay Tablosu</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">Mevcut periyot — tüm danışmanlar</p>
-          </div>
-          {isLoading ? (
-            <div className="p-5 space-y-2">{[...Array(6)].map((_, i) => (
-              <div key={i} className="h-8 bg-muted/40 rounded animate-pulse" />
-            ))}</div>
-          ) : data.length === 0 ? (
-            <div className="p-10 text-center text-sm text-muted-foreground">Veri yok</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-muted/40 border-b border-border">
-                    <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-left">#</th>
-                    <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-left">Danışman</th>
-                    <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-left">KWUID</th>
-                    <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-right">Cap Hedefi</th>
-                    <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-right">Kullanılan</th>
-                    <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-right">İlerleme</th>
-                    <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-left">Periyot Başlangıcı</th>
-                    <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-right">Cap Tarihi</th>
-                    <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-right">Süre</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.map((r, i) => {
-                    const pct = r.capAmount > 0 ? Math.min(100, Math.round((r.capUsed / r.capAmount) * 100)) : 0;
-                    return (
-                      <tr key={r.employeeId} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
-                        <td className="py-2 px-4 text-xs text-muted-foreground">{i + 1}</td>
-                        <td className="py-2 px-4 font-medium">
-                          <div className="flex items-center gap-2">
-                            {r.hasCapped && <Trophy className="h-3 w-3 text-amber-500 shrink-0" />}
-                            {r.name}
-                            {r.status === "passive" && (
-                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">ayrıldı</span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="py-2 px-4 text-xs text-muted-foreground">{r.kwuid || "—"}</td>
-                        <td className="py-2 px-4 text-right">{fmtTRY(r.capAmount)}</td>
-                        <td className="py-2 px-4 text-right font-medium">{fmtTRY(r.capUsed)}</td>
-                        <td className="py-2 px-4">
-                          <div className="flex items-center gap-2 justify-end">
-                            <div className="w-20 h-1.5 rounded-full bg-muted overflow-hidden">
-                              <div
-                                className="h-full rounded-full"
-                                style={{
-                                  width: `${pct}%`,
-                                  backgroundColor: r.hasCapped ? "#f59e0b" : pct >= 75 ? "#10b981" : "#3b82f6",
-                                }}
-                              />
-                            </div>
-                            <span className={`text-xs font-semibold w-9 text-right ${r.hasCapped ? "text-amber-600" : "text-foreground"}`}>
-                              %{pct}
-                            </span>
-                          </div>
-                        </td>
-                        <td className="py-2 px-4 text-xs text-muted-foreground">
-                          {new Date(r.periodStart).toLocaleDateString("tr-TR", { month: "long", year: "numeric" })}
-                        </td>
-                        <td className="py-2 px-4 text-right text-xs">
-                          {r.achievedAt
-                            ? new Date(r.achievedAt).toLocaleDateString("tr-TR", { day: "numeric", month: "short", year: "numeric" })
-                            : <span className="text-muted-foreground">—</span>}
-                        </td>
-                        <td className="py-2 px-4 text-right">
-                          {r.achievementDays !== null ? (
-                            <span className={`text-xs font-semibold ${r.achievementDays <= (avgDays ?? Infinity) ? "text-emerald-600" : "text-blue-600"}`}>
-                              {fmtDays(r.achievementDays)}
-                            </span>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">—</span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-                {capped.length > 0 && (
-                  <tfoot>
-                    <tr className="bg-muted/30 border-t border-border font-semibold">
-                      <td colSpan={8} className="py-2.5 px-4 text-xs text-muted-foreground">
-                        Ortalama cap süresi ({capped.length} danışman)
-                      </td>
-                      <td className="py-2.5 px-4 text-right text-xs text-amber-600 font-bold">
-                        {avgDays !== null ? fmtDays(avgDays) : "—"}
-                      </td>
-                    </tr>
-                  </tfoot>
-                )}
-              </table>
-            </div>
-          )}
-        </div>
-
+        {rows2025.length > 0 && (
+          <>
+            <div className="border-t border-border pt-2" />
+            <YearSection year={2025} rows={rows2025} isLoading={isLoading} />
+          </>
+        )}
       </div>
     </Layout>
   );

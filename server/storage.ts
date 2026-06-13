@@ -153,6 +153,7 @@ export interface IStorage {
   getInterviews(applicationId?: number, jobIds?: number[]): Promise<InterviewWithRelations[]>;
   createInterview(interview: InsertInterview): Promise<Interview>;
   updateInterviewStatus(id: number, status: string): Promise<Interview | undefined>;
+  completeScheduledInterviews(candidateId: number): Promise<number>;
   updateInterview(id: number, data: { startTime: Date; endTime: Date }): Promise<Interview | undefined>;
   deleteInterview(id: number): Promise<void>;
   getOffers(applicationId?: number, jobIds?: number[]): Promise<OfferWithRelations[]>;
@@ -565,6 +566,14 @@ export class DatabaseStorage implements IStorage {
   async updateInterviewStatus(id: number, status: string): Promise<Interview | undefined> {
     const [iv] = await db.update(interviews).set({ status }).where(eq(interviews.id, id)).returning();
     return iv;
+  }
+  async completeScheduledInterviews(candidateId: number): Promise<number> {
+    const result = await db
+      .update(interviews)
+      .set({ status: "completed" })
+      .where(and(eq(interviews.candidateId, candidateId), eq(interviews.status, "scheduled")))
+      .returning({ id: interviews.id });
+    return result.length;
   }
   async updateInterview(id: number, data: { startTime: Date; endTime: Date }): Promise<Interview | undefined> {
     const [iv] = await db
@@ -3727,6 +3736,7 @@ export class DatabaseStorage implements IStorage {
     agreementPending: number;
     closeReasonSubmitted: number;
     closeReasonPending: number;
+    noAgreementCount: number;
     closingCount: number;
     lastClosingDate: Date | null;
   }[]> {
@@ -3740,6 +3750,7 @@ export class DatabaseStorage implements IStorage {
           totalPassive:         sql<number>`count(*) filter (where ${listings.status} = 'passive')`,
           agreementUploaded:    sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.agreementUploadedAt} is not null)`,
           agreementPending:     sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.agreementUploadedAt} is null)`,
+          noAgreementCount:     sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.noAgreementAt} is not null)`,
           closeReasonSubmitted: sql<number>`count(*) filter (where ${listings.status} = 'passive' and ${listings.closeReasonSubmittedAt} is not null)`,
           closeReasonPending:   sql<number>`count(*) filter (where ${listings.status} = 'passive' and ${listings.closeReasonSubmittedAt} is null)`,
         })
@@ -3775,6 +3786,7 @@ export class DatabaseStorage implements IStorage {
         agreementPending: Number(r.agreementPending ?? 0),
         closeReasonSubmitted: Number(r.closeReasonSubmitted ?? 0),
         closeReasonPending: Number(r.closeReasonPending ?? 0),
+        noAgreementCount: Number(r.noAgreementCount ?? 0),
         closingCount: Number(c?.closingCount ?? 0),
         lastClosingDate: c?.lastClosingDate ?? null,
       };
@@ -4360,52 +4372,68 @@ export class DatabaseStorage implements IStorage {
 
       const currentMonth = now.getMonth() + 1;
       const currentYear  = now.getFullYear();
-      const capYear = currentMonth >= capMonthNum ? currentYear : currentYear - 1;
-      const periodStart = new Date(capYear, capMonthNum - 1, 1);
-      const periodStartYMD = periodStart.toISOString().split("T")[0];
+      const currentCapYear = currentMonth >= capMonthNum ? currentYear : currentYear - 1;
 
-      const empCapValue = emp.capValue ? parseFloat(emp.capValue) : null;
-      const capAmount: number | null = (empCapValue && empCapValue > 0) ? empCapValue : (capSettingsByYear[capYear] ?? null);
-      if (!capAmount) continue;
-
-      const closingRows = (closingsByEmp[emp.id] ?? []).filter((r) => r.effDate >= periodStartYMD);
-      const prepayRows  = (prepaysByEmp[emp.id]  ?? []).filter((r) => r.date  >= periodStartYMD);
-
-      const allEntries: { date: Date; amount: number }[] = [
-        ...prepayRows.map((p) => ({ date: new Date(p.date), amount: parseFloat(p.amount ?? "0") })),
-        ...closingRows.map((r) => ({ date: new Date(r.effDate), amount: parseFloat(r.bm ?? "0") })),
-      ].sort((a, b) => a.date.getTime() - b.date.getTime());
-
-      const manualAdj = parseFloat((emp as any).capManualAdjustment ?? "0");
-      let running = manualAdj;
-      let achievedAt: Date | null = null;
-
-      for (const entry of allEntries) {
-        running += entry.amount;
-        if (running >= capAmount && !achievedAt) {
-          achievedAt = entry.date;
-          break;
-        }
-      }
-
-      const capUsed = allEntries.reduce((s, e) => s + e.amount, 0) + manualAdj;
-      const achievementDays = achievedAt
-        ? Math.round((achievedAt.getTime() - periodStart.getTime()) / (1000 * 60 * 60 * 24))
-        : null;
+      // compute both current and previous period
+      const periodsToCompute = [currentCapYear, currentCapYear - 1];
 
       const empAny = emp as any;
-      results.push({
-        employeeId: emp.id,
-        name: empAny.candidate?.name ?? `#${emp.id}`,
-        kwuid: empAny.kwuid ?? null,
-        status: emp.status ?? "active",
-        capAmount,
-        capUsed,
-        periodStart: periodStartYMD,
-        achievedAt: achievedAt ? achievedAt.toISOString().split("T")[0] : null,
-        achievementDays,
-        hasCapped: capUsed >= capAmount,
-      });
+      const empClosings = closingsByEmp[emp.id] ?? [];
+      const empPrepays  = prepaysByEmp[emp.id]  ?? [];
+      const manualAdj   = parseFloat(empAny.capManualAdjustment ?? "0");
+
+      for (const capYear of periodsToCompute) {
+        const periodStart    = new Date(capYear, capMonthNum - 1, 1);
+        const periodEnd      = new Date(capYear + 1, capMonthNum - 1, 1);
+        const periodStartYMD = periodStart.toISOString().split("T")[0];
+        const periodEndYMD   = periodEnd.toISOString().split("T")[0];
+
+        const empCapValue = emp.capValue ? parseFloat(emp.capValue) : null;
+        const capAmount: number | null = (empCapValue && empCapValue > 0) ? empCapValue : (capSettingsByYear[capYear] ?? null);
+        if (!capAmount) continue;
+
+        const closingRows = empClosings.filter((r) => r.effDate >= periodStartYMD && r.effDate < periodEndYMD);
+        const prepayRows  = empPrepays.filter((r)  => r.date   >= periodStartYMD && r.date   < periodEndYMD);
+
+        // skip previous period if no data at all (employee wasn't here yet)
+        if (capYear < currentCapYear && closingRows.length === 0 && prepayRows.length === 0) continue;
+
+        const allEntries: { date: Date; amount: number }[] = [
+          ...prepayRows.map((p) => ({ date: new Date(p.date), amount: parseFloat(p.amount ?? "0") })),
+          ...closingRows.map((r) => ({ date: new Date(r.effDate), amount: parseFloat(r.bm ?? "0") })),
+        ].sort((a, b) => a.date.getTime() - b.date.getTime());
+
+        // manual adj only applies to current period
+        const adj = capYear === currentCapYear ? manualAdj : 0;
+        let running = adj;
+        let achievedAt: Date | null = null;
+
+        for (const entry of allEntries) {
+          running += entry.amount;
+          if (running >= capAmount && !achievedAt) {
+            achievedAt = entry.date;
+            break;
+          }
+        }
+
+        const capUsed = allEntries.reduce((s, e) => s + e.amount, 0) + adj;
+        const achievementDays = achievedAt
+          ? Math.round((achievedAt.getTime() - periodStart.getTime()) / (1000 * 60 * 60 * 24))
+          : null;
+
+        results.push({
+          employeeId: emp.id,
+          name: empAny.candidate?.name ?? `#${emp.id}`,
+          kwuid: empAny.kwuid ?? null,
+          status: emp.status ?? "active",
+          capAmount,
+          capUsed,
+          periodStart: periodStartYMD,
+          achievedAt: achievedAt ? achievedAt.toISOString().split("T")[0] : null,
+          achievementDays,
+          hasCapped: capUsed >= capAmount,
+        });
+      }
     }
 
     return results.sort((a, b) => {

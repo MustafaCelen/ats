@@ -1245,6 +1245,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const application = await storage.updateApplicationStatus(Number(req.params.id), status);
       if (!application) return res.status(404).json({ message: "Not found" });
       await storage.addStageHistory({ applicationId: application.id, candidateId: application.candidateId, jobId: application.jobId, fromStatus, toStatus: status });
+      // Auto-complete scheduled interviews when candidate reaches hired or beyond
+      const AUTO_COMPLETE_STAGES = ["offer", "hired", "myk_training", "account_setup", "documents"];
+      if (AUTO_COMPLETE_STAGES.includes(status)) {
+        await storage.completeScheduledInterviews(application.candidateId);
+      }
       if (status === "documents") {
         // Entering documents → immediately become an active employee
         const existingEmp = await storage.getEmployeeByCandidateId(existing.candidateId);

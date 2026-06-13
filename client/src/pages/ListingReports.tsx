@@ -26,13 +26,14 @@ interface AdvisorReport {
   agreementPending: number;
   closeReasonSubmitted: number;
   closeReasonPending: number;
+  noAgreementCount: number;
   closingCount: number;
   lastClosingDate: string | null;
 }
 
 type AdvisorSortKey = keyof Pick<AdvisorReport,
   "employeeName" | "totalActive" | "totalPassive" | "agreementUploaded" |
-  "agreementPending" | "closeReasonSubmitted" | "closeReasonPending" |
+  "agreementPending" | "noAgreementCount" | "closeReasonSubmitted" | "closeReasonPending" |
   "closingCount" | "lastClosingDate"
 >;
 
@@ -436,6 +437,7 @@ export default function ListingReports() {
                 <SortTh col="totalPassive"         label="Pasif" />
                 <SortTh col="agreementUploaded"    label="Söz. Yüklendi" />
                 <SortTh col="agreementPending"     label="Söz. Bekleyen" />
+                <SortTh col="noAgreementCount"     label="Söz. Yok" />
                 <SortTh col="closeReasonSubmitted" label="Sebep Girildi" />
                 <SortTh col="closeReasonPending"   label="Sebep Bekleyen" />
                 <SortTh col="closingCount"         label={`İşlem Adedi (${new Date().getFullYear()})`} />
@@ -462,6 +464,11 @@ export default function ListingReports() {
                   <td className="px-3 py-2.5 text-right text-muted-foreground">{r.totalPassive}</td>
                   <td className="px-3 py-2.5 text-right text-emerald-700">{r.agreementUploaded}</td>
                   <td className="px-3 py-2.5 text-right text-amber-600">{r.agreementPending}</td>
+                  <td className="px-3 py-2.5 text-right">
+                    {r.noAgreementCount > 0
+                      ? <span className="font-semibold text-red-600">{r.noAgreementCount}</span>
+                      : <span className="text-muted-foreground">—</span>}
+                  </td>
                   <td className="px-3 py-2.5 text-right text-emerald-700">{r.closeReasonSubmitted}</td>
                   <td className="px-3 py-2.5 text-right text-violet-600">{r.closeReasonPending}</td>
                   <td className="px-3 py-2.5 text-right font-medium">{r.closingCount || "—"}</td>
