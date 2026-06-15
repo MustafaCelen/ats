@@ -8,6 +8,7 @@ import { z } from "zod";
 import { insertInterviewSchema, insertOfferSchema, type InsertTask, TASK_STATUSES } from "@shared/schema";
 import { getAuthUrl, createOAuth2Client, createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from "./google";
 import { sendWhatsApp, checkWhatsAppStatus, publicBaseUrl } from "./whatsapp";
+import { sendEmail } from "./email";
 
 // Scoping helper:
 //   admin      → undefined (all jobs)
@@ -697,19 +698,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post("/api/listings/notify-advisor/:employeeId", requireAuth, requireAdmin, async (req, res) => {
     try {
       const employeeId = Number(req.params.employeeId);
+      const channel: "wa" | "email" = req.body?.channel === "email" ? "email" : "wa";
       const emp = await storage.getEmployee(employeeId);
       if (!emp) return res.status(404).json({ message: "Danışman bulunamadı" });
-      const phone = (emp as any).candidate?.phone;
-      if (!phone) return res.status(400).json({ message: "Danışmanın telefonu kayıtlı değil" });
       const name = (emp as any).candidate?.name ?? "Danışman";
-
-      // Cooldown: same advisor can't be re-notified within 5 minutes
-      const COOLDOWN_MS = 5 * 60 * 1000;
-      const lastNotified = (emp as any).advisorLastNotifiedAt;
-      if (lastNotified && Date.now() - new Date(lastNotified).getTime() < COOLDOWN_MS) {
-        const remaining = Math.ceil((COOLDOWN_MS - (Date.now() - new Date(lastNotified).getTime())) / 1000);
-        return res.status(429).json({ message: `Son bildirimden ${remaining} saniye sonra tekrar gönderilebilir` });
-      }
 
       const pending = await storage.getAdvisorPendingListings(employeeId);
       if (pending.active.length === 0 && pending.passive.length === 0) {
@@ -718,22 +710,42 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       const advisorToken = await storage.ensureAdvisorToken(employeeId);
       const link = `${publicBaseUrl()}/a/${advisorToken}`;
-
       const activeCount = pending.active.length;
       const passiveCount = pending.passive.length;
 
-      const lines: string[] = [
-        `Merhaba ${name} 👋`,
-        "",
-      ];
-      if (activeCount > 0) lines.push(`📋 ${activeCount} aktif ilanınız için yetki sözleşmesi bekleniyor.`);
-      if (passiveCount > 0) lines.push(`📋 ${passiveCount} pasife düşen ilanınız için kapanış sebebi bekleniyor.`);
-      lines.push("", "Tüm ilanlarınızı aşağıdaki *size özel* link üzerinden görüntüleyip işlem yapabilirsiniz. Bu bağlantıyı lütfen başkalarıyla paylaşmayın:");
-      lines.push(link);
+      if (channel === "wa") {
+        const phone = (emp as any).candidate?.phone;
+        if (!phone) return res.status(400).json({ message: "Danışmanın telefonu kayıtlı değil" });
 
-      const msgId = await sendWhatsApp(phone, lines.join("\n"));
-      await storage.markAdvisorNotified(employeeId, msgId);
-      res.json({ ok: true, msgId });
+        const COOLDOWN_MS = 5 * 60 * 1000;
+        const lastNotified = (emp as any).advisorLastNotifiedAt;
+        if (lastNotified && Date.now() - new Date(lastNotified).getTime() < COOLDOWN_MS) {
+          const remaining = Math.ceil((COOLDOWN_MS - (Date.now() - new Date(lastNotified).getTime())) / 1000);
+          return res.status(429).json({ message: `Son bildirimden ${remaining} saniye sonra tekrar gönderilebilir` });
+        }
+
+        const lines: string[] = [`Merhaba ${name} 👋`, ""];
+        if (activeCount > 0) lines.push(`📋 ${activeCount} aktif ilanınız için yetki sözleşmesi bekleniyor.`);
+        if (passiveCount > 0) lines.push(`📋 ${passiveCount} pasife düşen ilanınız için kapanış sebebi bekleniyor.`);
+        lines.push("", "Tüm ilanlarınızı aşağıdaki *size özel* link üzerinden görüntüleyip işlem yapabilirsiniz. Bu bağlantıyı lütfen başkalarıyla paylaşmayın:");
+        lines.push(link);
+
+        const msgId = await sendWhatsApp(phone, lines.join("\n"));
+        await storage.markAdvisorNotified(employeeId, msgId);
+        return res.json({ ok: true, channel: "wa", msgId });
+      }
+
+      // email channel
+      const email = (emp as any).candidate?.email;
+      if (!email) return res.status(400).json({ message: "Danışmanın email adresi kayıtlı değil" });
+
+      const htmlLines: string[] = [`<p>Merhaba <b>${name}</b> 👋</p>`];
+      if (activeCount > 0) htmlLines.push(`<p>📋 <b>${activeCount}</b> aktif ilanınız için yetki sözleşmesi bekleniyor.</p>`);
+      if (passiveCount > 0) htmlLines.push(`<p>📋 <b>${passiveCount}</b> pasife düşen ilanınız için kapanış sebebi bekleniyor.</p>`);
+      htmlLines.push(`<p>Tüm ilanlarınızı aşağıdaki <b>size özel</b> link üzerinden görüntüleyip işlem yapabilirsiniz. Bu bağlantıyı lütfen başkalarıyla paylaşmayın:</p>`);
+      htmlLines.push(`<p><a href="${link}">${link}</a></p>`);
+      const sent = await sendEmail(email, "İlan Bildirimi — KW Platin & Karma", htmlLines.join(""));
+      return res.json({ ok: sent, channel: "email" });
     } catch (err) {
       console.error("[POST /api/listings/notify-advisor]", err);
       res.status(500).json({ message: "Internal server error" });

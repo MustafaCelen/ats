@@ -11,7 +11,7 @@ import { apiRequest } from "@/lib/queryClient";
 import {
   Building2, Upload, Search, FileCheck2, FileWarning, HelpCircle,
   CheckCircle2, Clock, Send, ExternalLink, ChevronLeft, ChevronRight, Download, Plus,
-  RefreshCw, MessageSquare, Link2, Bell, BellOff,
+  RefreshCw, MessageSquare, Link2, Bell, BellOff, Mail,
 } from "lucide-react";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -381,6 +381,12 @@ export default function Listings() {
   const [importing, setImporting] = useState(false);
   const [bulkSending, setBulkSending] = useState(false);
   const stopBulkRef = useRef(false);
+  const [bulkEmailSending, setBulkEmailSending] = useState(false);
+  const stopBulkEmailRef = useRef(false);
+  const [bulkEmailStatus, setBulkEmailStatus] = useState<{
+    active: boolean; total: number; sent: number; skipped: number;
+    failed: number; current: string | null; done: boolean; stopped?: boolean;
+  } | null>(null);
   const [assigningIds, setAssigningIds] = useState<Set<number>>(new Set());
   const [bulkStatus, setBulkStatus] = useState<{
     active: boolean; total: number; sent: number; skipped: number;
@@ -638,12 +644,27 @@ export default function Listings() {
     refetchNotifyStatus();
   };
 
-  const sendNotify = async (employeeId: number) => {
+  const [emailSendingIds, setEmailSendingIds] = useState<Set<number>>(new Set());
+
+  const sendNotify = async (employeeId: number, channel: "wa" | "email" = "wa") => {
+    if (channel === "email") {
+      if (emailSendingIds.has(employeeId)) return;
+      setEmailSendingIds(prev => new Set(prev).add(employeeId));
+      try {
+        await apiRequest("POST", `/api/listings/notify-advisor/${employeeId}`, { channel: "email" });
+        toast({ title: "Email gönderildi", description: "Danışmana email bildirimi iletildi." });
+      } catch (err: any) {
+        toast({ title: "Email gönderilemedi", description: err?.message, variant: "destructive" });
+      } finally {
+        setEmailSendingIds(prev => { const s = new Set(prev); s.delete(employeeId); return s; });
+      }
+      return;
+    }
     if (sendingIds.has(employeeId)) return;
     setSendingIds(prev => new Set(prev).add(employeeId));
     try {
-      await apiRequest("POST", `/api/listings/notify-advisor/${employeeId}`, {});
-      toast({ title: "Bildirim gönderildi", description: "Danışmana tüm bekleyen ilanları içeren tek mesaj gönderildi." });
+      await apiRequest("POST", `/api/listings/notify-advisor/${employeeId}`, { channel: "wa" });
+      toast({ title: "WhatsApp gönderildi", description: "Danışmana tüm bekleyen ilanları içeren tek mesaj gönderildi." });
       refresh();
     } catch (err: any) {
       toast({ title: "Gönderilemedi", description: err?.message, variant: "destructive" });
@@ -710,6 +731,51 @@ export default function Listings() {
   const stopBulkNotify = () => {
     stopBulkRef.current = true;
     setBulkStatus((s) => s ? { ...s, current: "Durduruluyor…" } : s);
+  };
+
+  const stopBulkEmailNotify = () => {
+    stopBulkEmailRef.current = true;
+    setBulkEmailStatus((s) => s ? { ...s, current: "Durduruluyor…" } : s);
+  };
+
+  const handleBulkEmailNotify = async () => {
+    if (!bulkNotifyCount || bulkEmailSending) return;
+    stopBulkEmailRef.current = false;
+    setBulkEmailSending(true);
+    setBulkEmailStatus({ active: true, total: bulkNotifyCount, sent: 0, skipped: 0, failed: 0, current: null, done: false, stopped: false });
+
+    let sent = 0, skipped = 0, failed = 0;
+    for (let i = 0; i < uniqueAdvisorIds.length; i++) {
+      if (stopBulkEmailRef.current) break;
+      const empId = uniqueAdvisorIds[i];
+      const name = filteredRows.find((l) => l.employeeId === empId)?.employeeName ?? String(empId);
+      setBulkEmailStatus((s) => s ? { ...s, current: name } : s);
+      try {
+        const res = await fetch(`/api/listings/notify-advisor/${empId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ channel: "email" }),
+        });
+        if (res.ok) sent++;
+        else if (res.status === 400) skipped++;
+        else failed++;
+      } catch {
+        failed++;
+      }
+      setBulkEmailStatus((s) => s ? { ...s, sent, skipped, failed } : s);
+      if (i < uniqueAdvisorIds.length - 1 && !stopBulkEmailRef.current) {
+        await new Promise((r) => setTimeout(r, 3500));
+      }
+    }
+    const wasStopped = stopBulkEmailRef.current;
+    setBulkEmailSending(false);
+    setBulkEmailStatus((s) => s ? { ...s, active: false, done: true, current: null, stopped: wasStopped } : s);
+    toast({
+      title: wasStopped ? "Toplu email durduruldu" : "Toplu email tamamlandı",
+      description: `${sent} gönderildi, ${skipped} atlandı, ${failed} başarısız`,
+    });
+    refresh();
   };
 
   const unmatchedCount = tab === "unmatched" ? filteredRows.length : undefined;
@@ -824,7 +890,7 @@ export default function Listings() {
               Temizle
             </button>
           )}
-          <div className="ml-auto">
+          <div className="ml-auto flex gap-2">
             <Button
               size="sm"
               className="h-8 text-xs gap-1.5"
@@ -834,7 +900,19 @@ export default function Listings() {
               {bulkSending
                 ? <RefreshCw className="h-3.5 w-3.5 animate-spin" />
                 : <MessageSquare className="h-3.5 w-3.5" />}
-              Toplu Bildirim ({bulkNotifyCount} danışman)
+              Toplu WA ({bulkNotifyCount} danışman)
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 text-xs gap-1.5 border-blue-300 text-blue-700 hover:bg-blue-50"
+              disabled={bulkEmailSending || bulkNotifyCount === 0}
+              onClick={handleBulkEmailNotify}
+            >
+              {bulkEmailSending
+                ? <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                : <Mail className="h-3.5 w-3.5" />}
+              Toplu Email ({bulkNotifyCount} danışman)
             </Button>
           </div>
         </div>
@@ -879,6 +957,50 @@ export default function Listings() {
               <span>Atlandı: <b>{bulkStatus.skipped}</b></span>
               {bulkStatus.failed > 0 && <span className="text-red-600">Hata: <b>{bulkStatus.failed}</b></span>}
               {bulkStatus.current && <span className="text-primary">Şu an: <b>{bulkStatus.current}</b></span>}
+            </div>
+          </div>
+        )}
+
+        {/* Bulk email notify progress */}
+        {bulkEmailStatus && (bulkEmailStatus.active || bulkEmailStatus.done) && (
+          <div className={`rounded-xl border bg-card p-4 space-y-2 ${bulkEmailStatus.stopped ? "border-orange-300" : "border-blue-200"}`}>
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium flex items-center gap-2">
+                {bulkEmailStatus.active && !stopBulkEmailRef.current
+                  ? <><RefreshCw className="h-4 w-4 animate-spin text-blue-600" /> Email gönderimi devam ediyor…</>
+                  : bulkEmailStatus.active && stopBulkEmailRef.current
+                  ? <><RefreshCw className="h-4 w-4 animate-spin text-orange-500" /> Durduruluyor, mevcut istek bekleniyor…</>
+                  : bulkEmailStatus.stopped
+                  ? <><span className="h-4 w-4 text-orange-500">⏹</span> Gönderim durduruldu</>
+                  : <><CheckCircle2 className="h-4 w-4 text-emerald-600" /> Email gönderimi tamamlandı</>}
+              </span>
+              <div className="flex items-center gap-2">
+                {bulkEmailStatus.active && (
+                  <button
+                    onClick={stopBulkEmailNotify}
+                    disabled={stopBulkEmailRef.current}
+                    className="text-xs px-2 py-1 rounded bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                  >
+                    Durdur
+                  </button>
+                )}
+                {bulkEmailStatus.done && (
+                  <button onClick={() => setBulkEmailStatus(null)} className="text-xs text-muted-foreground hover:text-foreground">Kapat</button>
+                )}
+              </div>
+            </div>
+            <div className="w-full bg-muted rounded-full h-2">
+              <div
+                className={`h-2 rounded-full transition-all duration-500 ${bulkEmailStatus.stopped ? "bg-orange-400" : "bg-blue-500"}`}
+                style={{ width: `${bulkEmailStatus.total ? Math.round((bulkEmailStatus.sent + bulkEmailStatus.skipped + bulkEmailStatus.failed) / bulkEmailStatus.total * 100) : 0}%` }}
+              />
+            </div>
+            <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
+              <span>Toplam: <b>{bulkEmailStatus.total}</b></span>
+              <span className="text-emerald-600">Gönderildi: <b>{bulkEmailStatus.sent}</b></span>
+              <span>Atlandı: <b>{bulkEmailStatus.skipped}</b></span>
+              {bulkEmailStatus.failed > 0 && <span className="text-red-600">Hata: <b>{bulkEmailStatus.failed}</b></span>}
+              {bulkEmailStatus.current && <span className="text-blue-600">Şu an: <b>{bulkEmailStatus.current}</b></span>}
             </div>
           </div>
         )}
@@ -1113,13 +1235,22 @@ export default function Listings() {
                               Linki Aç
                             </button>
                             <button
-                              onClick={() => sendNotify(l.employeeId!)}
+                              onClick={() => sendNotify(l.employeeId!, "wa")}
                               disabled={sendingIds.has(l.employeeId!)}
-                              title="Danışmana WhatsApp gönder (tüm bekleyen ilanları içeren tek mesaj)"
+                              title="WhatsApp gönder"
                               className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-green-50 text-green-700 hover:bg-green-100 disabled:opacity-50"
                             >
                               {sendingIds.has(l.employeeId!) ? <RefreshCw className="h-2.5 w-2.5 animate-spin" /> : <Send className="h-2.5 w-2.5" />}
-                              Bildir
+                              WA
+                            </button>
+                            <button
+                              onClick={() => sendNotify(l.employeeId!, "email")}
+                              disabled={emailSendingIds.has(l.employeeId!)}
+                              title="Email gönder"
+                              className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 hover:bg-blue-100 disabled:opacity-50"
+                            >
+                              {emailSendingIds.has(l.employeeId!) ? <RefreshCw className="h-2.5 w-2.5 animate-spin" /> : <Mail className="h-2.5 w-2.5" />}
+                              Mail
                             </button>
                           </div>
                         </>

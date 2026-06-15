@@ -25,6 +25,8 @@ services:
       GREEN_API_INSTANCE_ID: ${GREEN_API_INSTANCE_ID:-}
       GREEN_API_TOKEN: ${GREEN_API_TOKEN:-}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:5000}
+      GMAIL_USER: ${GMAIL_USER:-}
+      GMAIL_APP_PASSWORD: ${GMAIL_APP_PASSWORD:-}
     depends_on:
       postgres:
         condition: service_healthy
