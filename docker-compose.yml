@@ -22,8 +22,9 @@ services:
     environment:
       DATABASE_URL: postgresql://hireflow:hireflow_password@postgres:5432/hireflow
       SESSION_SECRET: local-dev-session-secret-change-in-production
-      GREEN_API_INSTANCE_ID: ${GREEN_API_INSTANCE_ID:-}
-      GREEN_API_TOKEN: ${GREEN_API_TOKEN:-}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+      TWILIO_WHATSAPP_FROM: ${TWILIO_WHATSAPP_FROM:-}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:5000}
       GMAIL_USER: ${GMAIL_USER:-}
       GMAIL_APP_PASSWORD: ${GMAIL_APP_PASSWORD:-}
