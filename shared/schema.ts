@@ -257,6 +257,7 @@ export const employees = pgTable("employees", {
   advisorToken: text("advisor_token").unique(),
   advisorLastNotifiedAt: timestamp("advisor_last_notified_at"),
   advisorNotifyMsgId: text("advisor_notify_msg_id"),
+  advisorLastEmailNotifiedAt: timestamp("advisor_last_email_notified_at"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

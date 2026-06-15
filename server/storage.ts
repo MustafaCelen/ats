@@ -3419,6 +3419,7 @@ export class DatabaseStorage implements IStorage {
     onlyMatched?: boolean;
     onlyUnmatched?: boolean;
     missingPhone?: boolean;
+    missingEmail?: boolean;
     search?: string;
   }): Promise<ListingWithEmployee[]> {
     const conds = [];
@@ -3427,6 +3428,7 @@ export class DatabaseStorage implements IStorage {
     if (filters?.onlyMatched) conds.push(isNotNull(listings.employeeId));
     if (filters?.onlyUnmatched) conds.push(and(isNull(listings.employeeId), eq(listings.status, "active")));
     if (filters?.missingPhone) conds.push(and(isNotNull(listings.employeeId), isNull(candidates.phone)));
+    if (filters?.missingEmail) conds.push(and(isNotNull(listings.employeeId), isNull(candidates.email)));
     if (filters?.needsAgreement) conds.push(and(eq(listings.status, "active"), isNull(listings.agreementUploadedAt), isNull(listings.noAgreementAt)));
     if (filters?.needsReason) conds.push(and(eq(listings.status, "passive"), isNull(listings.closeReasonSubmittedAt)));
     if (filters?.needsAny) conds.push(and(
@@ -4510,6 +4512,12 @@ export class DatabaseStorage implements IStorage {
     await db.update(employees).set({
       advisorLastNotifiedAt: new Date(),
       ...(msgId !== undefined ? { advisorNotifyMsgId: msgId } : {}),
+    } as any).where(eq(employees.id, employeeId));
+  }
+
+  async markAdvisorEmailNotified(employeeId: number): Promise<void> {
+    await db.update(employees).set({
+      advisorLastEmailNotifiedAt: new Date(),
     } as any).where(eq(employees.id, employeeId));
   }
 }

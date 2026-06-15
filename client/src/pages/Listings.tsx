@@ -50,17 +50,19 @@ interface Summary {
   needsAgreement: number; needsReason: number; soldPassive: number; noAgreement: number;
 }
 
-type FilterTab = "needsAll" | "needsAgreement" | "needsReason" | "hasAgreement" | "hasReason" | "unmatched" | "missingPhone" | "notifyStatus";
+type FilterTab = "needsAll" | "needsAgreement" | "needsReason" | "hasAgreement" | "hasReason" | "unmatched" | "missingPhone" | "missingEmail" | "notifyStatus";
 
 interface NotifyStatusRow {
   id: number;
   name: string;
   phone: string | null;
+  email: string | null;
   totalPending: number;
   activePending: number;
   passivePending: number;
   lastNotifiedAt: string | null;
   notifyMsgId: string | null;
+  lastEmailNotifiedAt: string | null;
 }
 
 // ── CSV helpers ─────────────────────────────────────────────────────────────────
@@ -413,6 +415,7 @@ export default function Listings() {
     else if (tab === "hasReason") { params.set("hasReason", "1"); params.set("onlyMatched", "1"); }
     else if (tab === "unmatched") params.set("onlyUnmatched", "1");
     else if (tab === "missingPhone") params.set("missingPhone", "1");
+    else if (tab === "missingEmail") params.set("missingEmail", "1");
     if (search.trim()) params.set("search", search.trim());
     return params.toString();
   })();
@@ -780,6 +783,7 @@ export default function Listings() {
 
   const unmatchedCount = tab === "unmatched" ? filteredRows.length : undefined;
   const missingPhoneCount = tab === "missingPhone" ? filteredRows.length : undefined;
+  const missingEmailCount = tab === "missingEmail" ? filteredRows.length : undefined;
 
   const tabs: { key: FilterTab; label: string; count?: number }[] = [
     { key: "needsAll",       label: "Tümü (Bekleyen)", count: (summary?.needsAgreement ?? 0) + (summary?.needsReason ?? 0) || undefined },
@@ -789,6 +793,7 @@ export default function Listings() {
     { key: "hasReason",      label: "Kapanış Sebebi Girilmiş" },
     { key: "unmatched",      label: "Eşleşmeyenler", count: unmatchedCount },
     { key: "missingPhone",   label: "Telefon Eksik", count: missingPhoneCount },
+    { key: "missingEmail",   label: "Email Eksik", count: missingEmailCount },
     { key: "notifyStatus",   label: "Bildirim Durumu" },
   ];
 
@@ -1093,15 +1098,17 @@ export default function Listings() {
                   <tr className="border-b border-border bg-muted/40 text-left text-xs text-muted-foreground">
                     <th className="px-3 py-2.5 font-medium">Danışman</th>
                     <th className="px-3 py-2.5 font-medium">Telefon</th>
+                    <th className="px-3 py-2.5 font-medium">Email</th>
                     <th className="px-3 py-2.5 font-medium text-center">Bekleyen İlan</th>
-                    <th className="px-3 py-2.5 font-medium">Son Bildirim</th>
+                    <th className="px-3 py-2.5 font-medium">Son WA Bildirimi</th>
+                    <th className="px-3 py-2.5 font-medium">Son Email Bildirimi</th>
                     <th className="px-3 py-2.5 font-medium">WP Durumu</th>
                     <th className="px-3 py-2.5 font-medium text-right">İşlem</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredNotifyRows.length === 0 ? (
-                    <tr><td colSpan={6} className="px-3 py-10 text-center text-muted-foreground">
+                    <tr><td colSpan={8} className="px-3 py-10 text-center text-muted-foreground">
                       {notifyFilter === "unsent" ? `Son ${NOTIFY_COOLDOWN_DAYS} gün içinde bildirim gönderilmemiş danışman yok.` : "Bekleyen ilan bulunamadı."}
                     </td></tr>
                   ) : filteredNotifyRows.map((row) => {
@@ -1131,7 +1138,16 @@ export default function Listings() {
                         <td className="px-3 py-2.5">
                           <div className="font-medium text-sm">{row.name}</div>
                         </td>
-                        <td className="px-3 py-2.5 text-xs text-muted-foreground">{row.phone ?? "—"}</td>
+                        <td className="px-3 py-2.5 text-xs text-muted-foreground">
+                          {row.phone
+                            ? row.phone
+                            : <span className="text-red-500 font-medium">Eksik</span>}
+                        </td>
+                        <td className="px-3 py-2.5 text-xs text-muted-foreground">
+                          {row.email
+                            ? <span className="truncate max-w-[160px] block">{row.email}</span>
+                            : <span className="text-red-500 font-medium">Eksik</span>}
+                        </td>
                         <td className="px-3 py-2.5 text-center">
                           <div className="flex items-center justify-center gap-2">
                             {row.activePending > 0 && (
@@ -1156,7 +1172,20 @@ export default function Listings() {
                           ) : (
                             <div className="flex items-center gap-1.5">
                               <BellOff className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                              <span className="text-xs text-muted-foreground">Hiç gönderilmedi</span>
+                              <span className="text-xs text-muted-foreground">—</span>
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-3 py-2.5">
+                          {row.lastEmailNotifiedAt ? (
+                            <div className="flex items-center gap-1.5">
+                              <Mail className="h-3.5 w-3.5 text-blue-600 shrink-0" />
+                              <span className="text-xs">{new Date(row.lastEmailNotifiedAt).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1.5">
+                              <BellOff className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                              <span className="text-xs text-muted-foreground">—</span>
                             </div>
                           )}
                         </td>

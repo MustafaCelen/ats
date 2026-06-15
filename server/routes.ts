@@ -149,6 +149,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         onlyMatched: q.onlyMatched === "1",
         onlyUnmatched: q.onlyUnmatched === "1",
         missingPhone: q.missingPhone === "1",
+        missingEmail: q.missingEmail === "1",
         search: q.search ? String(q.search) : undefined,
       }));
     } catch (err) {
@@ -745,6 +746,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       htmlLines.push(`<p>Tüm ilanlarınızı aşağıdaki <b>size özel</b> link üzerinden görüntüleyip işlem yapabilirsiniz. Bu bağlantıyı lütfen başkalarıyla paylaşmayın:</p>`);
       htmlLines.push(`<p><a href="${link}">${link}</a></p>`);
       const sent = await sendEmail(email, "İlan Bildirimi — KW Platin & Karma", htmlLines.join(""));
+      if (sent) await storage.markAdvisorEmailNotified(employeeId);
       return res.json({ ok: sent, channel: "email" });
     } catch (err) {
       console.error("[POST /api/listings/notify-advisor]", err);
@@ -770,11 +772,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           id: emp.id,
           name: emp.candidate?.name ?? `Danışman #${emp.id}`,
           phone: emp.candidate?.phone ?? null,
+          email: emp.candidate?.email ?? null,
           totalPending: p.active + p.passive,
           activePending: p.active,
           passivePending: p.passive,
           lastNotifiedAt: emp.advisorLastNotifiedAt ?? null,
           notifyMsgId: emp.advisorNotifyMsgId ?? null,
+          lastEmailNotifiedAt: (emp as any).advisorLastEmailNotifiedAt ?? null,
         };
       });
       const filtered = rows.filter((r) => r.totalPending > 0 || r.lastNotifiedAt);
