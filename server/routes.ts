@@ -1429,18 +1429,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.status(204).send();
   });
 
-  // ── TEMPORARY: Bulk-complete all scheduled interviews ─────────────────────
-  app.post("/api/admin/bulk-complete-interviews", requireAuth, requireAdmin, async (_req, res) => {
-    try {
-      const result = await db.execute(
-        sql`UPDATE interviews SET status = 'completed' WHERE status = 'scheduled'`
-      );
-      res.json({ ok: true, updated: result.rowCount });
-    } catch (err) {
-      console.error("[bulk-complete-interviews]", err);
-      res.status(500).json({ message: "Internal server error" });
-    }
-  });
 
   // ── Offers ─────────────────────────────────────────────────────────────────
 
