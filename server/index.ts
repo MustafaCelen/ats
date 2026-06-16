@@ -155,6 +155,15 @@ app.use((req, res, next) => {
     ALTER TABLE "listings" ADD COLUMN IF NOT EXISTS "close_reason_note" text;
     ALTER TABLE "listings" ADD COLUMN IF NOT EXISTS "close_reason_submitted_at" timestamp;
     ALTER TABLE "listings" ADD COLUMN IF NOT EXISTS "agreement_uploaded_at" timestamp;
+    CREATE TABLE IF NOT EXISTS "listing_agreement_files" (
+      "id" serial PRIMARY KEY NOT NULL,
+      "listing_id" integer NOT NULL,
+      "name" text NOT NULL,
+      "mime" text NOT NULL,
+      "data" text NOT NULL,
+      "uploaded_at" timestamp DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS "laf_listing_id_idx" ON "listing_agreement_files" ("listing_id");
   `);
 
   await registerRoutes(httpServer, app);

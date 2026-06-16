@@ -355,6 +355,30 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     })();
   });
 
+  app.get("/api/listings/:id/agreement-files", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const files = await storage.getListingAgreementFileMetas(Number(req.params.id));
+      res.json(files);
+    } catch { res.status(500).json({ message: "Internal server error" }); }
+  });
+
+  app.get("/api/listings/:id/agreement-files/:fileId", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const file = await storage.getListingAgreementFileById(Number(req.params.fileId));
+      if (!file) return res.status(404).json({ message: "Dosya yok" });
+      res.setHeader("Content-Type", file.mime);
+      res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(file.name)}"`);
+      res.send(Buffer.from(file.data, "base64"));
+    } catch { res.status(500).json({ message: "Internal server error" }); }
+  });
+
+  app.delete("/api/listings/:id/agreement-files/:fileId", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      await storage.deleteListingAgreementFile(Number(req.params.fileId), Number(req.params.id));
+      res.json({ ok: true });
+    } catch { res.status(500).json({ message: "Internal server error" }); }
+  });
+
   // Download the uploaded yetki sözleşmesi
   app.get("/api/listings/:id/agreement", requireAuth, requireAdmin, async (req, res) => {
     try {
@@ -492,13 +516,38 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/public/listings/:token/agreement", async (req, res) => {
     try {
-      const { fileName, mime, data } = req.body as { fileName?: string; mime?: string; data?: string };
-      if (!data) return res.status(400).json({ message: "Dosya gerekli" });
-      if (data.length > 9_500_000) return res.status(413).json({ message: "Dosya çok büyük (en fazla ~7MB)" });
-      const row = await storage.setListingAgreement(req.params.token, {
-        name: fileName || "yetki-sozlesmesi", mime: mime || "application/octet-stream", data,
-      });
-      if (!row) return res.status(404).json({ message: "Bağlantı geçersiz" });
+      const listing = await storage.getListingByToken(req.params.token);
+      if (!listing) return res.status(404).json({ message: "Bağlantı geçersiz" });
+      const body = req.body as { files?: { fileName?: string; mime?: string; data?: string }[]; fileName?: string; mime?: string; data?: string };
+      const rawFiles = body.files ?? (body.data ? [{ fileName: body.fileName, mime: body.mime, data: body.data }] : []);
+      if (!rawFiles.length) return res.status(400).json({ message: "Dosya gerekli" });
+      for (const f of rawFiles) {
+        if (!f.data) return res.status(400).json({ message: "Dosya gerekli" });
+        if (f.data.length > 9_500_000) return res.status(413).json({ message: "Dosya çok büyük (en fazla ~7MB)" });
+      }
+      const saved = await storage.addListingAgreementFiles(listing.id, rawFiles.map(f => ({
+        name: f.fileName || "yetki-sozlesmesi",
+        mime: f.mime || "application/octet-stream",
+        data: f.data!,
+      })));
+      res.json({ ok: true, files: saved });
+    } catch { res.status(500).json({ message: "Internal server error" }); }
+  });
+
+  app.get("/api/public/listings/:token/files", async (req, res) => {
+    try {
+      const listing = await storage.getListingByToken(req.params.token);
+      if (!listing) return res.status(404).json({ message: "Bağlantı geçersiz" });
+      const files = await storage.getListingAgreementFileMetas(listing.id);
+      res.json(files);
+    } catch { res.status(500).json({ message: "Internal server error" }); }
+  });
+
+  app.delete("/api/public/listings/:token/files/:fileId", async (req, res) => {
+    try {
+      const listing = await storage.getListingByToken(req.params.token);
+      if (!listing) return res.status(404).json({ message: "Bağlantı geçersiz" });
+      await storage.deleteListingAgreementFile(Number(req.params.fileId), listing.id);
       res.json({ ok: true });
     } catch { res.status(500).json({ message: "Internal server error" }); }
   });
@@ -543,13 +592,50 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (!emp) return res.status(404).json({ message: "Bağlantı geçersiz" });
       const listing = await storage.getListing(Number(req.params.listingId));
       if (!listing || listing.employeeId !== emp.id) return res.status(404).json({ message: "İlan bulunamadı" });
-      const { fileName, mime, data } = req.body as { fileName?: string; mime?: string; data?: string };
-      if (!data) return res.status(400).json({ message: "Dosya gerekli" });
-      if (data.length > 9_500_000) return res.status(413).json({ message: "Dosya çok büyük (en fazla ~7MB)" });
-      const row = await storage.setListingAgreement(listing.publicToken!, {
-        name: fileName || "yetki-sozlesmesi", mime: mime || "application/octet-stream", data,
-      });
-      if (!row) return res.status(404).json({ message: "İlan bulunamadı" });
+      const body = req.body as { files?: { fileName?: string; mime?: string; data?: string }[]; fileName?: string; mime?: string; data?: string };
+      const rawFiles = body.files ?? (body.data ? [{ fileName: body.fileName, mime: body.mime, data: body.data }] : []);
+      if (!rawFiles.length) return res.status(400).json({ message: "Dosya gerekli" });
+      for (const f of rawFiles) {
+        if (!f.data) return res.status(400).json({ message: "Dosya gerekli" });
+        if (f.data.length > 9_500_000) return res.status(413).json({ message: "Dosya çok büyük (en fazla ~7MB)" });
+      }
+      const saved = await storage.addListingAgreementFiles(listing.id, rawFiles.map(f => ({
+        name: f.fileName || "yetki-sozlesmesi",
+        mime: f.mime || "application/octet-stream",
+        data: f.data!,
+      })));
+      res.json({ ok: true, files: saved });
+    } catch { res.status(500).json({ message: "Internal server error" }); }
+  });
+
+  app.get("/api/public/advisor/:token/listings/:listingId/files", async (req, res) => {
+    try {
+      const emp = await storage.getAdvisorByToken(req.params.token);
+      if (!emp) return res.status(404).json({ message: "Bağlantı geçersiz" });
+      const listing = await storage.getListing(Number(req.params.listingId));
+      if (!listing || listing.employeeId !== emp.id) return res.status(404).json({ message: "İlan bulunamadı" });
+      const files = await storage.getListingAgreementFileMetas(listing.id);
+      res.json(files);
+    } catch { res.status(500).json({ message: "Internal server error" }); }
+  });
+
+  app.delete("/api/public/advisor/:token/listings/:listingId/files/:fileId", async (req, res) => {
+    try {
+      const emp = await storage.getAdvisorByToken(req.params.token);
+      if (!emp) return res.status(404).json({ message: "Bağlantı geçersiz" });
+      const listing = await storage.getListing(Number(req.params.listingId));
+      if (!listing || listing.employeeId !== emp.id) return res.status(404).json({ message: "İlan bulunamadı" });
+      await storage.deleteListingAgreementFile(Number(req.params.fileId), listing.id);
+      res.json({ ok: true });
+    } catch { res.status(500).json({ message: "Internal server error" }); }
+  });
+
+  app.post("/api/public/advisor/:token/listings/:listingId/to-passive", async (req, res) => {
+    try {
+      const emp = await storage.getAdvisorByToken(req.params.token);
+      if (!emp) return res.status(404).json({ message: "Bağlantı geçersiz" });
+      const ok = await storage.setListingToPassive(Number(req.params.listingId), emp.id);
+      if (!ok) return res.status(404).json({ message: "İlan bulunamadı veya zaten pasif" });
       res.json({ ok: true });
     } catch { res.status(500).json({ message: "Internal server error" }); }
   });

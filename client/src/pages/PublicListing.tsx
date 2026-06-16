@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "wouter";
 import { LISTING_CLOSE_REASONS } from "@shared/schema";
 import {
-  Building2, UploadCloud, CheckCircle2, Loader2, AlertCircle,
+  Building2, UploadCloud, CheckCircle2, Loader2, AlertCircle, Trash2,
 } from "lucide-react";
 
 interface PublicListing {
@@ -18,6 +18,8 @@ interface PublicListing {
   closeReason: string | null;
   closeReasonSubmitted: boolean;
 }
+
+interface UploadedFile { id: number; name: string; mime: string; }
 
 function fmtPrice(p: string | null): string {
   if (!p) return "—";
@@ -51,14 +53,18 @@ export default function PublicListing() {
   const [data, setData] = useState<PublicListing | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
 
-  // agreement
-  const [file, setFile] = useState<File | null>(null);
-  // reason
+  // Agreement upload state
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+
+  // Reason state
   const [reason, setReason] = useState("");
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [done, setDone] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -70,28 +76,58 @@ export default function PublicListing() {
   };
   useEffect(load, [token]);
 
+  // Load existing files when data arrives (active listing with agreement)
+  useEffect(() => {
+    if (data?.status === "active") {
+      fetch(`/api/public/listings/${token}/files`)
+        .then((r) => r.ok ? r.json() : [])
+        .then((files) => setUploadedFiles(files))
+        .catch(() => {});
+    }
+  }, [data?.status, token]);
+
+  const readFileAsBase64 = (file: File): Promise<{ data: string; mime: string; fileName: string }> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = String(reader.result);
+        resolve({ data: dataUrl.split(",")[1] ?? "", mime: file.type, fileName: file.name });
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
   const submitAgreement = async () => {
-    if (!file) return;
-    setSubmitting(true);
+    if (!selectedFiles.length) return;
+    setUploading(true);
+    setError(null);
     try {
-      const dataUrl: string = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result));
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
-      const base64 = dataUrl.split(",")[1] ?? "";
+      const files = await Promise.all(selectedFiles.map(readFileAsBase64));
       const res = await fetch(`/api/public/listings/${token}/agreement`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fileName: file.name, mime: file.type, data: base64 }),
+        body: JSON.stringify({ files }),
       });
       if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.message); }
-      setDone(true);
+      const result = await res.json();
+      setUploadedFiles((prev) => [...prev, ...(result.files ?? [])]);
+      setSelectedFiles([]);
     } catch (e: any) {
       setError(e?.message || "Yükleme başarısız.");
     } finally {
-      setSubmitting(false);
+      setUploading(false);
+    }
+  };
+
+  const deleteFile = async (fileId: number) => {
+    setDeletingId(fileId);
+    try {
+      await fetch(`/api/public/listings/${token}/files/${fileId}`, { method: "DELETE" });
+      setUploadedFiles((prev) => prev.filter((f) => f.id !== fileId));
+    } catch {
+      setError("Silme başarısız.");
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -145,51 +181,74 @@ export default function PublicListing() {
     );
   }
 
-  // Active listing → request agreement
+  // Active listing → agreement upload/management
   if (data.status === "active") {
-    if (data.agreementUploaded) {
-      return (
-        <Shell>
-          <ListingHeader />
-          <div className="text-center py-4">
-            <CheckCircle2 className="h-9 w-9 text-emerald-500 mx-auto mb-2" />
-            <p className="text-sm text-muted-foreground">Bu ilan için yetki sözleşmesi zaten yüklenmiş.</p>
-          </div>
-        </Shell>
-      );
-    }
+    const hasFiles = uploadedFiles.length > 0;
     return (
       <Shell>
         <ListingHeader />
-        <h2 className="font-semibold mb-1">Yetki Sözleşmesi Yükle</h2>
-        <p className="text-sm text-muted-foreground mb-4">
-          Bu ilana ait imzalı yetki sözleşmesini (PDF veya fotoğraf) yükleyin.
-        </p>
+        <h2 className="font-semibold mb-1">Yetki Sözleşmesi</h2>
+
+        {/* Uploaded files */}
+        {hasFiles && (
+          <div className="mb-4 space-y-2">
+            <p className="text-xs font-medium text-muted-foreground">Yüklenen Dosyalar</p>
+            {uploadedFiles.map((f) => (
+              <div key={f.id} className="flex items-center gap-2 p-2.5 rounded-lg border border-border bg-muted/30">
+                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                <span className="flex-1 text-xs truncate font-medium">{f.name}</span>
+                <button
+                  disabled={deletingId === f.id}
+                  onClick={() => deleteFile(f.id)}
+                  className="shrink-0 text-destructive hover:text-destructive/80 disabled:opacity-40"
+                  title="Sil"
+                >
+                  {deletingId === f.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Upload form */}
+        {!hasFiles && (
+          <p className="text-sm text-muted-foreground mb-4">
+            Bu ilana ait imzalı yetki sözleşmesini (PDF veya fotoğraf) yükleyin.
+          </p>
+        )}
+        {hasFiles && <p className="text-xs font-medium text-muted-foreground mb-2">Ek Dosya Ekle</p>}
         <label className="block border-2 border-dashed border-border rounded-xl p-6 text-center cursor-pointer hover:border-primary transition-colors">
           <input
             type="file"
             accept=".pdf,image/*"
+            multiple
             className="hidden"
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            onChange={(e) => setSelectedFiles(Array.from(e.target.files ?? []))}
           />
           <UploadCloud className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
-          <span className="text-sm font-medium">{file ? file.name : "Dosya seçmek için dokunun"}</span>
-          {file && <span className="block text-[11px] text-muted-foreground mt-1">{(file.size / 1024 / 1024).toFixed(2)} MB</span>}
+          {selectedFiles.length === 0 ? (
+            <span className="text-sm font-medium">Dosya seçmek için dokunun</span>
+          ) : (
+            <>
+              <span className="text-sm font-medium">{selectedFiles.length} dosya seçildi</span>
+              <span className="block text-[11px] text-muted-foreground mt-1">{selectedFiles.map((f) => f.name).join(", ")}</span>
+            </>
+          )}
         </label>
         {error && <p className="text-xs text-destructive mt-2">{error}</p>}
         <button
-          disabled={!file || submitting}
+          disabled={!selectedFiles.length || uploading}
           onClick={submitAgreement}
           className="w-full mt-4 h-10 rounded-lg bg-primary text-primary-foreground font-medium text-sm disabled:opacity-50 flex items-center justify-center gap-2"
         >
-          {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
+          {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
           Yükle
         </button>
       </Shell>
     );
   }
 
-  // Passive listing → request close reason
+  // Passive listing → close reason
   if (data.closeReasonSubmitted) {
     return (
       <Shell>

@@ -628,6 +628,18 @@ export const listings = pgTable("listings", {
   tokenIdx: index("listings_token_idx").on(t.publicToken),
 }));
 
+export const listingAgreementFiles = pgTable("listing_agreement_files", {
+  id: serial("id").primaryKey(),
+  listingId: integer("listing_id").notNull(),
+  name: text("name").notNull(),
+  mime: text("mime").notNull(),
+  data: text("data").notNull(), // base64
+  uploadedAt: timestamp("uploaded_at").defaultNow(),
+}, (t) => ({
+  listingIdIdx: index("laf_listing_id_idx").on(t.listingId),
+}));
+export type ListingAgreementFile = typeof listingAgreementFiles.$inferSelect;
+
 export type Listing = typeof listings.$inferSelect;
 export type ListingWithEmployee = Listing & { employeeName?: string; employeePhone?: string };
 

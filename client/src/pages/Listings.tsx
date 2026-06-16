@@ -11,7 +11,7 @@ import { apiRequest } from "@/lib/queryClient";
 import {
   Building2, Upload, Search, FileCheck2, FileWarning, HelpCircle,
   CheckCircle2, Clock, Send, ExternalLink, ChevronLeft, ChevronRight, Download, Plus,
-  RefreshCw, MessageSquare, Link2, Bell, BellOff, Mail,
+  RefreshCw, MessageSquare, Link2, Bell, BellOff, Mail, Trash2,
 } from "lucide-react";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -395,11 +395,43 @@ export default function Listings() {
     failed: number; current: string | null; done: boolean; stopped?: boolean;
   } | null>(null);
   const [viewer, setViewer] = useState<Listing | null>(null);
+  const [viewerFiles, setViewerFiles] = useState<{ id: number; name: string; mime: string }[]>([]);
+  const [viewerFilesLoading, setViewerFilesLoading] = useState(false);
+  const [previewFile, setPreviewFile] = useState<{ id: number; name: string; mime: string } | null>(null);
+  const [deletingFileId, setDeletingFileId] = useState<number | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [page, setPage] = useState(0);
   const PAGE_SIZE = 50;
   const [nameAssignments, setNameAssignments] = useState<Record<string, number>>({});
   const [assigningNames, setAssigningNames] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!viewer) { setViewerFiles([]); setPreviewFile(null); return; }
+    setViewerFilesLoading(true);
+    fetch(`/api/listings/${viewer.id}/agreement-files`, { credentials: "include" })
+      .then((r) => r.ok ? r.json() : [])
+      .then((files) => { setViewerFiles(files); setPreviewFile(files[0] ?? null); })
+      .catch(() => {})
+      .finally(() => setViewerFilesLoading(false));
+  }, [viewer]);
+
+  const deleteViewerFile = async (fileId: number) => {
+    if (!viewer) return;
+    setDeletingFileId(fileId);
+    try {
+      await fetch(`/api/listings/${viewer.id}/agreement-files/${fileId}`, { method: "DELETE", credentials: "include" });
+      setViewerFiles((prev) => {
+        const next = prev.filter((f) => f.id !== fileId);
+        setPreviewFile(next[0] ?? null);
+        if (next.length === 0) {
+          refresh();
+        }
+        return next;
+      });
+    } finally {
+      setDeletingFileId(null);
+    }
+  };
 
   const { data: summary } = useQuery<Summary>({
     queryKey: ["/api/listings/summary"],
@@ -1423,33 +1455,59 @@ export default function Listings() {
           </DialogHeader>
           {viewer && (
             <div className="space-y-3">
-              <div className="rounded-lg border border-border bg-muted/30 overflow-hidden">
-                {(viewer.agreementFileMime ?? "").startsWith("image/") ? (
-                  <img
-                    src={`/api/listings/${viewer.id}/agreement`}
-                    alt="Yetki Sözleşmesi"
-                    className="max-h-[70vh] w-full object-contain bg-black/5"
-                  />
-                ) : (
-                  <iframe
-                    src={`/api/listings/${viewer.id}/agreement`}
-                    title="Yetki Sözleşmesi"
-                    className="w-full h-[70vh]"
-                  />
-                )}
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-muted-foreground truncate max-w-[60%]">
-                  {viewer.agreementFileName ?? "yetki-sozlesmesi"}
-                </span>
-                <a
-                  href={`/api/listings/${viewer.id}/agreement`}
-                  download={viewer.agreementFileName ?? "yetki-sozlesmesi"}
-                  className="inline-flex items-center gap-1.5 text-xs h-8 px-3 rounded-md border border-input bg-background hover:bg-muted font-medium"
-                >
-                  <Download className="h-3.5 w-3.5" /> İndir
-                </a>
-              </div>
+              {viewerFilesLoading && (
+                <div className="flex justify-center py-6"><div className="h-5 w-5 rounded-full border-2 border-primary border-t-transparent animate-spin" /></div>
+              )}
+              {!viewerFilesLoading && viewerFiles.length === 0 && (
+                <p className="text-sm text-muted-foreground text-center py-4">Dosya bulunamadı.</p>
+              )}
+              {!viewerFilesLoading && viewerFiles.length > 0 && (
+                <>
+                  {/* File list */}
+                  <div className="flex flex-wrap gap-2">
+                    {viewerFiles.map((f) => (
+                      <div key={f.id} className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs cursor-pointer transition-colors ${previewFile?.id === f.id ? "border-primary bg-primary/5 text-primary font-medium" : "border-border bg-muted/30 hover:bg-muted"}`}>
+                        <span onClick={() => setPreviewFile(f)} className="truncate max-w-[140px]">{f.name}</span>
+                        <a
+                          href={`/api/listings/${viewer.id}/agreement-files/${f.id}`}
+                          download={f.name}
+                          onClick={(e) => e.stopPropagation()}
+                          className="text-muted-foreground hover:text-foreground ml-0.5"
+                          title="İndir"
+                        >
+                          <Download className="h-3 w-3" />
+                        </a>
+                        <button
+                          disabled={deletingFileId === f.id}
+                          onClick={(e) => { e.stopPropagation(); deleteViewerFile(f.id); }}
+                          className="text-destructive hover:text-destructive/80 disabled:opacity-40"
+                          title="Sil"
+                        >
+                          {deletingFileId === f.id ? <div className="h-3 w-3 rounded-full border border-destructive border-t-transparent animate-spin" /> : <Trash2 className="h-3 w-3" />}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  {/* Preview */}
+                  {previewFile && (
+                    <div className="rounded-lg border border-border bg-muted/30 overflow-hidden">
+                      {previewFile.mime.startsWith("image/") ? (
+                        <img
+                          src={`/api/listings/${viewer.id}/agreement-files/${previewFile.id}`}
+                          alt={previewFile.name}
+                          className="max-h-[65vh] w-full object-contain bg-black/5"
+                        />
+                      ) : (
+                        <iframe
+                          src={`/api/listings/${viewer.id}/agreement-files/${previewFile.id}`}
+                          title={previewFile.name}
+                          className="w-full h-[65vh]"
+                        />
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           )}
         </DialogContent>

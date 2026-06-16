@@ -3,7 +3,7 @@ import {
   jobs, candidates, applications, stageHistory, interviews, offers, candidateNotes,
   users, jobAssignments, applicationDocuments, tasks, employees,
   capSettings, closings, closingSides, closingAgents, interviewTargets,
-  officeExpenses, listings, financialTargets,
+  officeExpenses, listings, financialTargets, listingAgreementFiles,
   APPLICATION_STAGES, BM_PREPAYMENT_CATEGORY,
   type Job, type InsertJob,
   type Candidate, type InsertCandidate,
@@ -21,6 +21,7 @@ import {
   type OfficeExpense, type InsertOfficeExpense,
   type Listing, type ListingWithEmployee,
   type FinancialTarget,
+  type ListingAgreementFile,
 } from "@shared/schema";
 import { eq, desc, asc, count, sql, gte, lte, lt, and, or, isNull, isNotNull, inArray, notInArray } from "drizzle-orm";
 import { differenceInDays } from "date-fns";
@@ -3536,6 +3537,53 @@ export class DatabaseStorage implements IStorage {
       .from(listings).where(eq(listings.id, id));
     if (!row?.data) return null;
     return { data: row.data, mime: row.mime ?? "application/octet-stream", name: row.name ?? "yetki-sozlesmesi" };
+  }
+
+  async addListingAgreementFiles(listingId: number, files: { name: string; mime: string; data: string }[]): Promise<{ id: number; name: string; mime: string }[]> {
+    const result: { id: number; name: string; mime: string }[] = [];
+    for (const file of files) {
+      const [row] = await db.insert(listingAgreementFiles).values({
+        listingId,
+        name: file.name,
+        mime: file.mime,
+        data: file.data,
+      }).returning({ id: listingAgreementFiles.id, name: listingAgreementFiles.name, mime: listingAgreementFiles.mime });
+      result.push(row);
+    }
+    await db.update(listings).set({ agreementUploadedAt: new Date(), updatedAt: new Date() }).where(eq(listings.id, listingId));
+    return result;
+  }
+
+  async getListingAgreementFileMetas(listingId: number): Promise<{ id: number; name: string; mime: string; uploadedAt: Date | null }[]> {
+    return db.select({ id: listingAgreementFiles.id, name: listingAgreementFiles.name, mime: listingAgreementFiles.mime, uploadedAt: listingAgreementFiles.uploadedAt })
+      .from(listingAgreementFiles)
+      .where(eq(listingAgreementFiles.listingId, listingId))
+      .orderBy(listingAgreementFiles.uploadedAt);
+  }
+
+  async getListingAgreementFileById(fileId: number): Promise<ListingAgreementFile | null> {
+    const [row] = await db.select().from(listingAgreementFiles).where(eq(listingAgreementFiles.id, fileId));
+    return row ?? null;
+  }
+
+  async deleteListingAgreementFile(fileId: number, listingId: number): Promise<void> {
+    await db.delete(listingAgreementFiles).where(and(eq(listingAgreementFiles.id, fileId), eq(listingAgreementFiles.listingId, listingId)));
+    const [{ cnt }] = await db.select({ cnt: sql<number>`count(*)` }).from(listingAgreementFiles).where(eq(listingAgreementFiles.listingId, listingId));
+    if (Number(cnt) === 0) {
+      const [listing] = await db.select({ data: listings.agreementFileData }).from(listings).where(eq(listings.id, listingId));
+      if (!listing?.data) {
+        await db.update(listings).set({ agreementUploadedAt: null, updatedAt: new Date() } as any).where(eq(listings.id, listingId));
+      }
+    }
+  }
+
+  async setListingToPassive(listingId: number, employeeId: number): Promise<boolean> {
+    const today = new Date().toISOString().split("T")[0];
+    const [row] = await db.update(listings)
+      .set({ status: "passive", removedDate: today, updatedAt: new Date() })
+      .where(and(eq(listings.id, listingId), eq(listings.employeeId, employeeId), eq(listings.status, "active")))
+      .returning({ id: listings.id });
+    return !!row;
   }
 
   async updateListing(id: number, patch: Partial<Listing>): Promise<Listing> {

@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams } from "wouter";
 import { LISTING_CLOSE_REASONS } from "@shared/schema";
 import {
-  Building2, UploadCloud, CheckCircle2, Loader2, AlertCircle, ChevronDown, ChevronUp, XCircle,
+  Building2, UploadCloud, CheckCircle2, Loader2, AlertCircle, ChevronDown, ChevronUp, XCircle, Trash2, ArrowDownToLine,
 } from "lucide-react";
 
 interface PendingListing {
@@ -22,6 +22,8 @@ interface AdvisorData {
   active: PendingListing[];
   passive: PendingListing[];
 }
+
+interface UploadedFile { id: number; name: string; mime: string; }
 
 function fmtPrice(p: string | null): string {
   if (!p) return "—";
@@ -58,38 +60,71 @@ function Card({ children, className = "" }: { children: React.ReactNode; classNa
   );
 }
 
-function ActiveCard({ listing, token }: { listing: PendingListing; token: string }) {
+function ActiveCard({ listing, token, onRefresh }: { listing: PendingListing; token: string; onRefresh: () => void }) {
   const [open, setOpen] = useState(false);
-  const [file, setFile] = useState<File | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [done, setDone] = useState(false);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [noAgreement, setNoAgreement] = useState(!!listing.noAgreementAt);
   const [togglingNoAgreement, setTogglingNoAgreement] = useState(false);
+  const [confirmPassive, setConfirmPassive] = useState(false);
+  const [movingToPassive, setMovingToPassive] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const submit = async () => {
-    if (!file) return;
-    setSubmitting(true);
+  const hasFiles = uploadedFiles.length > 0;
+
+  const loadFiles = useCallback(async () => {
     try {
-      const dataUrl: string = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result));
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
-      const base64 = dataUrl.split(",")[1] ?? "";
+      const res = await fetch(`/api/public/advisor/${token}/listings/${listing.id}/files`);
+      if (res.ok) setUploadedFiles(await res.json());
+    } catch { /* silent */ }
+  }, [token, listing.id]);
+
+  useEffect(() => { if (open) loadFiles(); }, [open, loadFiles]);
+
+  const readFileAsBase64 = (file: File): Promise<{ data: string; mime: string; fileName: string }> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = String(reader.result);
+        resolve({ data: dataUrl.split(",")[1] ?? "", mime: file.type, fileName: file.name });
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
+  const submit = async () => {
+    if (!selectedFiles.length) return;
+    setUploading(true);
+    setError(null);
+    try {
+      const files = await Promise.all(selectedFiles.map(readFileAsBase64));
       const res = await fetch(`/api/public/advisor/${token}/listings/${listing.id}/agreement`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fileName: file.name, mime: file.type, data: base64 }),
+        body: JSON.stringify({ files }),
       });
       if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.message); }
-      setDone(true);
-      setOpen(false);
+      const data = await res.json();
+      setUploadedFiles((prev) => [...prev, ...(data.files ?? [])]);
+      setSelectedFiles([]);
     } catch (e: any) {
       setError(e?.message || "Yükleme başarısız.");
     } finally {
-      setSubmitting(false);
+      setUploading(false);
+    }
+  };
+
+  const deleteFile = async (fileId: number) => {
+    setDeletingId(fileId);
+    try {
+      await fetch(`/api/public/advisor/${token}/listings/${listing.id}/files/${fileId}`, { method: "DELETE" });
+      setUploadedFiles((prev) => prev.filter((f) => f.id !== fileId));
+    } catch {
+      setError("Silme başarısız.");
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -111,15 +146,30 @@ function ActiveCard({ listing, token }: { listing: PendingListing; token: string
     }
   };
 
+  const moveToPassive = async () => {
+    setMovingToPassive(true);
+    try {
+      const res = await fetch(`/api/public/advisor/${token}/listings/${listing.id}/to-passive`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!res.ok) throw new Error();
+      onRefresh();
+    } catch {
+      setError("İşlem başarısız.");
+      setMovingToPassive(false);
+    }
+  };
+
   return (
     <Card className={noAgreement ? "opacity-70" : ""}>
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-mono font-semibold text-sm">{listing.listingNumber}</span>
-            {done && <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600 bg-emerald-50 rounded-full px-2 py-0.5"><CheckCircle2 className="h-3 w-3" />Yüklendi</span>}
-            {noAgreement && !done && <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 bg-slate-100 rounded-full px-2 py-0.5"><XCircle className="h-3 w-3" />Sözleşme Yok</span>}
-            {!done && !noAgreement && <span className="inline-flex text-[11px] font-medium text-amber-600 bg-amber-50 rounded-full px-2 py-0.5">Sözleşme Bekleniyor</span>}
+            {hasFiles && <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600 bg-emerald-50 rounded-full px-2 py-0.5"><CheckCircle2 className="h-3 w-3" />Yüklendi ({uploadedFiles.length})</span>}
+            {noAgreement && !hasFiles && <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 bg-slate-100 rounded-full px-2 py-0.5"><XCircle className="h-3 w-3" />Sözleşme Yok</span>}
+            {!hasFiles && !noAgreement && <span className="inline-flex text-[11px] font-medium text-amber-600 bg-amber-50 rounded-full px-2 py-0.5">Sözleşme Bekleniyor</span>}
           </div>
           <div className="text-sm font-bold mt-0.5">{fmtPrice(listing.price)}</div>
           <div className="text-[11px] text-muted-foreground mt-0.5 space-x-2">
@@ -127,45 +177,102 @@ function ActiveCard({ listing, token }: { listing: PendingListing; token: string
             {listing.office && <span>{listing.office}</span>}
           </div>
         </div>
-        {!done && (
+        <div className="flex items-center gap-2 shrink-0">
+          {!confirmPassive ? (
+            <button
+              onClick={() => setConfirmPassive(true)}
+              className="text-xs font-medium text-slate-500 hover:text-orange-600 border border-slate-200 hover:border-orange-300 rounded-lg px-2 py-1 transition-colors"
+            >
+              Pasife Çek
+            </button>
+          ) : (
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setConfirmPassive(false)}
+                className="text-xs text-muted-foreground hover:text-foreground px-1.5 py-1"
+              >İptal</button>
+              <button
+                disabled={movingToPassive}
+                onClick={moveToPassive}
+                className="text-xs font-medium text-white bg-orange-500 hover:bg-orange-600 rounded-lg px-2 py-1 flex items-center gap-1 disabled:opacity-50"
+              >
+                {movingToPassive ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                Onayla
+              </button>
+            </div>
+          )}
           <button
             onClick={() => setOpen((v) => !v)}
-            className="shrink-0 flex items-center gap-1 text-xs font-medium text-primary"
+            className="flex items-center gap-1 text-xs font-medium text-primary"
           >
-            {open ? <><ChevronUp className="h-4 w-4" />Kapat</> : <><ChevronDown className="h-4 w-4" />Yükle</>}
+            {open ? <><ChevronUp className="h-4 w-4" />Kapat</> : <><ChevronDown className="h-4 w-4" />{hasFiles ? "Yönet" : "Yükle"}</>}
           </button>
-        )}
+        </div>
       </div>
 
-      {open && !done && (
+      {open && (
         <div className="mt-4 border-t border-border pt-4 space-y-3">
+          {/* Uploaded files list */}
+          {hasFiles && (
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-muted-foreground">Yüklenen Dosyalar</p>
+              {uploadedFiles.map((f) => (
+                <div key={f.id} className="flex items-center gap-2 p-2.5 rounded-lg border border-border bg-muted/30">
+                  <span className="flex-1 text-xs truncate font-medium">{f.name}</span>
+                  <button
+                    disabled={deletingId === f.id}
+                    onClick={() => deleteFile(f.id)}
+                    className="shrink-0 text-destructive hover:text-destructive/80 disabled:opacity-40"
+                    title="Sil"
+                  >
+                    {deletingId === f.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Upload section */}
           {!noAgreement && (
-            <>
-              <p className="text-sm text-muted-foreground">
-                Bu ilana ait imzalı yetki sözleşmesini (PDF veya fotoğraf) yükleyin.
-              </p>
+            <div className="space-y-2">
+              {hasFiles && <p className="text-xs font-medium text-muted-foreground">Ek Dosya Ekle</p>}
+              {!hasFiles && (
+                <p className="text-sm text-muted-foreground">
+                  Bu ilana ait imzalı yetki sözleşmesini (PDF veya fotoğraf) yükleyin.
+                </p>
+              )}
               <label className="block border-2 border-dashed border-border rounded-xl p-5 text-center cursor-pointer hover:border-primary transition-colors">
                 <input
                   type="file"
                   accept=".pdf,image/*"
+                  multiple
                   className="hidden"
-                  onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                  onChange={(e) => setSelectedFiles(Array.from(e.target.files ?? []))}
                 />
                 <UploadCloud className="h-7 w-7 text-muted-foreground mx-auto mb-2" />
-                <span className="text-sm font-medium">{file ? file.name : "Dosya seçmek için dokunun"}</span>
-                {file && <span className="block text-[11px] text-muted-foreground mt-1">{(file.size / 1024 / 1024).toFixed(2)} MB</span>}
+                {selectedFiles.length === 0 ? (
+                  <span className="text-sm font-medium">Dosya seçmek için dokunun</span>
+                ) : (
+                  <span className="text-sm font-medium">{selectedFiles.length} dosya seçildi</span>
+                )}
+                {selectedFiles.length > 0 && (
+                  <span className="block text-[11px] text-muted-foreground mt-1">
+                    {selectedFiles.map((f) => f.name).join(", ")}
+                  </span>
+                )}
               </label>
               {error && <p className="text-xs text-destructive">{error}</p>}
               <button
-                disabled={!file || submitting}
+                disabled={!selectedFiles.length || uploading}
                 onClick={submit}
                 className="w-full h-10 rounded-lg bg-primary text-primary-foreground font-medium text-sm disabled:opacity-50 flex items-center justify-center gap-2"
               >
-                {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
+                {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
                 Yükle
               </button>
-            </>
+            </div>
           )}
+
           <button
             disabled={togglingNoAgreement}
             onClick={toggleNoAgreement}
@@ -295,13 +402,16 @@ export default function AdvisorSelfService() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const loadData = useCallback(() => {
+    setLoading(true);
     fetch(`/api/public/advisor/${token}`)
       .then((r) => r.ok ? r.json() : Promise.reject(r))
       .then((d) => { setData(d); setError(null); })
       .catch(() => setError("Bağlantı geçersiz veya bir hata oluştu."))
       .finally(() => setLoading(false));
   }, [token]);
+
+  useEffect(() => { loadData(); }, [loadData]);
 
   if (loading) {
     return (
@@ -359,7 +469,7 @@ export default function AdvisorSelfService() {
             Aktif İlanlar — Yetki Sözleşmesi ({data.active.length})
           </div>
           {data.active.map((l) => (
-            <ActiveCard key={l.id} listing={l} token={token} />
+            <ActiveCard key={l.id} listing={l} token={token} onRefresh={loadData} />
           ))}
         </>
       )}
