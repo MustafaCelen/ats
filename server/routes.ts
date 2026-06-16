@@ -1706,6 +1706,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.get("/api/employees/:id/closings", requireAuth, async (req: any, res: any) => {
     try {
       const id = Number(req.params.id);
+      const { role, id: userId } = req.user!;
+      if (role === "hiring_manager") {
+        const emp = await storage.getEmployee(id);
+        const isAssigned = emp &&
+          (emp.uretkenlikKocluguManagerId === userId || emp.duaManagerId === userId);
+        if (!isAssigned) return res.status(403).json({ message: "Forbidden" });
+      }
       const rows = await storage.getClosingsByEmployee(id);
       res.json(rows);
     } catch {

@@ -237,6 +237,11 @@ export default function CandidateDetail() {
   const candidateInterviews = (allInterviews ?? []).filter((iv) => iv.candidateId === candidateId);
 
   const { data: user } = useAuth();
+  const canSeeIslemler = !!employeeRecord && (
+    user?.role !== "hiring_manager" ||
+    employeeRecord.uretkenlikKocluguManagerId === user.id ||
+    employeeRecord.duaManagerId === user.id
+  );
   const [, navigate] = useLocation();
   const { mutate: deleteCandidate, isPending: isDeleting } = useDeleteCandidate();
   const { mutate: updateHistoryDate } = useUpdateStageHistoryDate(candidateId);
@@ -389,7 +394,7 @@ export default function CandidateDetail() {
 
         {/* ── Tabs ── */}
         <div className="flex gap-1 border-b border-border flex-wrap">
-          {(["overview", "applications", "interviews", "notes", ...(employeeRecord ? ["islemler"] : []), "history"] as const).map((tab) => (
+          {(["overview", "applications", "interviews", "notes", ...(canSeeIslemler ? ["islemler"] : []), "history"] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab as any)}
