@@ -43,6 +43,7 @@ interface Listing {
   notifyMsgIdNew: string | null;
   notifyMsgIdPassive: string | null;
   noAgreementAt: string | null;
+  passiveAt: string | null;
 }
 
 interface Summary {
@@ -1268,15 +1269,16 @@ export default function Listings() {
                   <th className="px-3 py-2.5 font-medium">Yayın</th>
                   <th className="px-3 py-2.5 font-medium">Yaş</th>
                   <th className="px-3 py-2.5 font-medium">Durum</th>
+                  <th className="px-3 py-2.5 font-medium">Pasife Geçiş</th>
                   <th className="px-3 py-2.5 font-medium">Yetki Sözleşmesi</th>
                   <th className="px-3 py-2.5 font-medium">Kalkış Sebebi</th>
                 </tr>
               </thead>
               <tbody>
                 {isLoading ? (
-                  <tr><td colSpan={9} className="px-3 py-10 text-center text-muted-foreground">Yükleniyor…</td></tr>
+                  <tr><td colSpan={10} className="px-3 py-10 text-center text-muted-foreground">Yükleniyor…</td></tr>
                 ) : filteredRows.length === 0 ? (
-                  <tr><td colSpan={9} className="px-3 py-10 text-center text-muted-foreground">Kayıt yok.</td></tr>
+                  <tr><td colSpan={10} className="px-3 py-10 text-center text-muted-foreground">Kayıt yok.</td></tr>
                 ) : pageRows.map((l) => (
                   <tr key={l.id} className="border-b border-border last:border-0 hover:bg-muted/30">
                     <td className="px-3 py-2.5 font-mono text-xs">{l.listingNumber}</td>
@@ -1370,6 +1372,9 @@ export default function Listings() {
                       ) : (
                         <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-slate-200 text-slate-600">Pasif</span>
                       )}
+                    </td>
+                    <td className="px-3 py-2.5 whitespace-nowrap text-xs text-muted-foreground">
+                      {l.passiveAt ? new Date(l.passiveAt).toLocaleDateString("tr-TR") : "—"}
                     </td>
                     <td className="px-3 py-2.5">
                       {l.agreementUploadedAt ? (

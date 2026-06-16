@@ -155,6 +155,7 @@ app.use((req, res, next) => {
     ALTER TABLE "listings" ADD COLUMN IF NOT EXISTS "close_reason_note" text;
     ALTER TABLE "listings" ADD COLUMN IF NOT EXISTS "close_reason_submitted_at" timestamp;
     ALTER TABLE "listings" ADD COLUMN IF NOT EXISTS "agreement_uploaded_at" timestamp;
+    ALTER TABLE "listings" ADD COLUMN IF NOT EXISTS "passive_at" timestamp;
     CREATE TABLE IF NOT EXISTS "listing_agreement_files" (
       "id" serial PRIMARY KEY NOT NULL,
       "listing_id" integer NOT NULL,

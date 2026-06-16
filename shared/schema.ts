@@ -619,6 +619,7 @@ export const listings = pgTable("listings", {
   notifyMsgIdNew: text("notify_msg_id_new"),                    // Green API idMessage (yeni)
   notifyMsgIdPassive: text("notify_msg_id_passive"),            // Green API idMessage (kalkış)
 
+  passiveAt: timestamp("passive_at"),                             // aktif→pasif geçiş tarihi
   firstSeenAt: timestamp("first_seen_at").defaultNow(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),

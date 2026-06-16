@@ -3580,7 +3580,7 @@ export class DatabaseStorage implements IStorage {
   async setListingToPassive(listingId: number, employeeId: number): Promise<boolean> {
     const today = new Date().toISOString().split("T")[0];
     const [row] = await db.update(listings)
-      .set({ status: "passive", removedDate: today, updatedAt: new Date() })
+      .set({ status: "passive", removedDate: today, passiveAt: new Date(), updatedAt: new Date() })
       .where(and(eq(listings.id, listingId), eq(listings.employeeId, employeeId), eq(listings.status, "active")))
       .returning({ id: listings.id });
     return !!row;
@@ -3699,6 +3699,7 @@ export class DatabaseStorage implements IStorage {
             office: r.office ?? prev.office,
             store: r.store ?? prev.store,
             status: "active",          // revived if it had gone passive
+            passiveAt: null,
             updatedAt: new Date(),
           }).where(eq(listings.id, prev.id));
           updated++;
@@ -3765,7 +3766,7 @@ export class DatabaseStorage implements IStorage {
       const stillActiveInDb = await db.select().from(listings).where(eq(listings.status, "active"));
       const toFlip = stillActiveInDb.filter((l) => !importedNumbers.has(l.listingNumber));
       for (const l of toFlip) {
-        await db.update(listings).set({ status: "passive", updatedAt: new Date() }).where(eq(listings.id, l.id));
+        await db.update(listings).set({ status: "passive", passiveAt: new Date(), updatedAt: new Date() }).where(eq(listings.id, l.id));
         updated++;
         if (l.employeeId && !l.closeReasonSubmittedAt) newlyPassive.push(l);
       }
