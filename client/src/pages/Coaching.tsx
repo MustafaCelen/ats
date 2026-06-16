@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { Layout } from "@/components/Layout";
 import { useQuery } from "@tanstack/react-query";
+import { useAuth } from "@/hooks/use-auth";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   CartesianGrid, AreaChart, Area,
@@ -294,6 +295,9 @@ function CoachSection({ coach, filteredStudents, defaultExpanded = false }: { co
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function Coaching() {
+  const { data: currentUser } = useAuth();
+  const isHM = currentUser?.role === "hiring_manager";
+
   const [viewDate, setViewDate] = useState(() => new Date(CURRENT_YEAR, new Date().getMonth(), 1));
   const [allYear, setAllYear] = useState(false);
   const [customRange, setCustomRange] = useState(false);
@@ -330,9 +334,15 @@ export default function Coaching() {
 
   // Filtered coaches based on selection
   const coaches = useMemo(() => {
-    if (selectedCoachId === "all") return allCoaches;
-    return allCoaches.filter(c => c.coachId === selectedCoachId);
-  }, [allCoaches, selectedCoachId]);
+    let list: any[] = selectedCoachId === "all" ? allCoaches : allCoaches.filter((c: any) => c.coachId === selectedCoachId);
+    if (isHM && currentUser) {
+      list = list.map((c: any) => ({
+        ...c,
+        students: c.students.filter((s: any) => s.isUK || c.coachId === currentUser.id),
+      })).filter((c: any) => c.students.length > 0);
+    }
+    return list;
+  }, [allCoaches, selectedCoachId, isHM, currentUser]);
 
   // Flatten filtered students for summary and rankings
   const allStudents = useMemo(() => {
