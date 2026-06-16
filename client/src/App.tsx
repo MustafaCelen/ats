@@ -72,7 +72,7 @@ function Router() {
       <Route path="/onboarding" component={() => <ProtectedRoute><OnboardingBoard /></ProtectedRoute>} />
       <Route path="/closings" component={() => <ProtectedRoute adminOnly><Closings /></ProtectedRoute>} />
       <Route path="/listings" component={() => <ProtectedRoute adminOnly><Listings /></ProtectedRoute>} />
-      <Route path="/listings/reports" component={() => <ProtectedRoute adminOnly><ListingReports /></ProtectedRoute>} />
+      <Route path="/listings/reports" component={() => <ProtectedRoute noAssistant><ListingReports /></ProtectedRoute>} />
       <Route path="/financial-reports" component={() => <ProtectedRoute adminOnly><FinancialReports /></ProtectedRoute>} />
       <Route path="/cap-report" component={() => <ProtectedRoute adminOnly><CapReport /></ProtectedRoute>} />
       <Route path="/coaching" component={() => <ProtectedRoute noAssistant><Coaching /></ProtectedRoute>} />

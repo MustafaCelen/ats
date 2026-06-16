@@ -30,8 +30,9 @@ const reportsGroupHM: NavGroup = {
   icon: BarChart2,
   label: "Raporlar",
   children: [
-    { icon: BarChart2,     label: "Üretim Bandı Raporları", href: "/reports"   },
-    { icon: GraduationCap, label: "ÜK & DÜA Raporları",    href: "/coaching"  },
+    { icon: BarChart2,     label: "Üretim Bandı Raporları", href: "/reports"           },
+    { icon: GraduationCap, label: "ÜK & DÜA Raporları",    href: "/coaching"          },
+    { icon: Building2,     label: "İlan Raporları",         href: "/listings/reports"  },
   ],
 };
 
