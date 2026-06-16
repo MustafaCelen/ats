@@ -399,47 +399,47 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ── Listing Reports ──────────────────────────────────────────────────────────
 
   // Feature 1: Danışman bazlı rapor
-  app.get("/api/listings/reports/advisor", requireAuth, requireAdmin, async (_req, res) => {
+  app.get("/api/listings/reports/advisor", requireAuth, requireHiringManagerOrAdmin, async (_req, res) => {
     try { res.json(await storage.getListingReportByAdvisor()); }
     catch (err) { console.error("[GET /api/listings/reports/advisor]", err); res.status(500).json({ message: "Internal server error" }); }
   });
 
   // Feature 2: Ofis bazlı kırılım
-  app.get("/api/listings/reports/office", requireAuth, requireAdmin, async (_req, res) => {
+  app.get("/api/listings/reports/office", requireAuth, requireHiringManagerOrAdmin, async (_req, res) => {
     try { res.json(await storage.getListingReportByOffice()); }
     catch (err) { console.error("[GET /api/listings/reports/office]", err); res.status(500).json({ message: "Internal server error" }); }
   });
 
   // Feature 3: Kalkış sebebi analizi
-  app.get("/api/listings/reports/close-reasons", requireAuth, requireAdmin, async (_req, res) => {
+  app.get("/api/listings/reports/close-reasons", requireAuth, requireHiringManagerOrAdmin, async (_req, res) => {
     try { res.json(await storage.getListingCloseReasonStats()); }
     catch (err) { console.error("[GET /api/listings/reports/close-reasons]", err); res.status(500).json({ message: "Internal server error" }); }
   });
 
   // Feature 4: Aylık trend
-  app.get("/api/listings/reports/monthly-trend", requireAuth, requireAdmin, async (_req, res) => {
+  app.get("/api/listings/reports/monthly-trend", requireAuth, requireHiringManagerOrAdmin, async (_req, res) => {
     try { res.json(await storage.getListingMonthlyTrend()); }
     catch (err) { console.error("[GET /api/listings/reports/monthly-trend]", err); res.status(500).json({ message: "Internal server error" }); }
   });
 
   // Satılık / Kiralık özet istatistikleri
-  app.get("/api/listings/reports/type-stats", requireAuth, requireAdmin, async (_req, res) => {
+  app.get("/api/listings/reports/type-stats", requireAuth, requireHiringManagerOrAdmin, async (_req, res) => {
     try { res.json(await storage.getListingTypeStats()); }
     catch (err) { console.error("[GET /api/listings/reports/type-stats]", err); res.status(500).json({ message: "Internal server error" }); }
   });
 
   // İlan tarihi bazlı rapor
-  app.get("/api/listings/reports/date-report", requireAuth, requireAdmin, async (_req, res) => {
+  app.get("/api/listings/reports/date-report", requireAuth, requireHiringManagerOrAdmin, async (_req, res) => {
     try { res.json(await storage.getListingDateReport()); }
     catch (err) { console.error("[GET /api/listings/reports/date-report]", err); res.status(500).json({ message: "Internal server error" }); }
   });
 
-  app.get("/api/listings/reports/age-groups", requireAuth, requireAdmin, async (_req, res) => {
+  app.get("/api/listings/reports/age-groups", requireAuth, requireHiringManagerOrAdmin, async (_req, res) => {
     try { res.json(await storage.getListingAgeGroups()); }
     catch (err) { console.error("[GET /api/listings/reports/age-groups]", err); res.status(500).json({ message: "Internal server error" }); }
   });
 
-  app.get("/api/listings/reports/over-90-days", requireAuth, requireAdmin, async (_req, res) => {
+  app.get("/api/listings/reports/over-90-days", requireAuth, requireHiringManagerOrAdmin, async (_req, res) => {
     try { res.json(await storage.getListingsOver90Days()); }
     catch (err) { console.error("[GET /api/listings/reports/over-90-days]", err); res.status(500).json({ message: "Internal server error" }); }
   });
