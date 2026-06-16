@@ -22,9 +22,11 @@ function jobFilter(req: Request): number[] | undefined {
 }
 
 // Send each agent of a closing a WhatsApp breakdown of their side. Returns delivery counts.
-async function sendClosingNotifications(closingId: number, agentIdFilter?: number): Promise<{ sent: number; skipped: number }> {
+async function sendClosingNotifications(_closingId: number, _agentIdFilter?: number): Promise<{ sent: number; skipped: number }> {
+  return { sent: 0, skipped: 0 };
+  // WhatsApp closing notifications disabled
   let sent = 0, skipped = 0;
-  const details = await storage.getClosing(closingId) as any;
+  const details = await storage.getClosing(_closingId) as any;
   if (!details) return { sent, skipped };
 
   const sideLabel: Record<string, string> = { buyer: "Alıcı", seller: "Satıcı", referral: "Referans" };
@@ -430,58 +432,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         closeReasonQueued: closeReasonListings.length,
       });
 
-      // Fire and forget — send reminders asynchronously
-      (async () => {
-        const base = publicBaseUrl();
-
-        for (const l of agreementListings) {
-          try {
-            if (!l.employeeId) continue;
-            const emp = await storage.getEmployee(l.employeeId);
-            const phone = emp?.candidate?.phone;
-            const name = emp?.candidate?.name ?? "Danışman";
-            if (!phone) continue;
-            const link = `${base}/l/${l.publicToken}`;
-            const fmtPrice = l.price ? Number(l.price).toLocaleString("tr-TR") + " ₺" : "—";
-            const msg = [
-              `Merhaba ${name} 👋`,
-              "",
-              `⏰ Hatırlatma: ${l.listingNumber} numaralı ilanınıza ait yetki sözleşmesi henüz yüklenmedi.`,
-              "",
-              `🔢 İlan No: ${l.listingNumber}`,
-              `💰 Fiyat: ${fmtPrice}`,
-              "",
-              `Lütfen bu ilana ait *yetki sözleşmesini* sisteme yükleyin:`,
-              link,
-            ].join("\n");
-            await sendWhatsApp(phone, msg);
-            await storage.markListingAgreementReminderSent(l.id);
-            console.log(`[listing reminder] agreement ${l.listingNumber} → ${phone}`);
-          } catch (e) { console.warn("[listing reminder agreement]", e); }
-        }
-
-        for (const l of closeReasonListings) {
-          try {
-            if (!l.employeeId) continue;
-            const emp = await storage.getEmployee(l.employeeId);
-            const phone = emp?.candidate?.phone;
-            const name = emp?.candidate?.name ?? "Danışman";
-            if (!phone) continue;
-            const link = `${base}/l/${l.publicToken}`;
-            const msg = [
-              `Merhaba ${name} 👋`,
-              "",
-              `⏰ Hatırlatma: ${l.listingNumber} numaralı ilanınız için kalkış sebebi henüz girilmedi.`,
-              "",
-              `Lütfen yayından kalkış sebebini girin:`,
-              link,
-            ].join("\n");
-            await sendWhatsApp(phone, msg);
-            await storage.markListingCloseReasonReminderSent(l.id);
-            console.log(`[listing reminder] close-reason ${l.listingNumber} → ${phone}`);
-          } catch (e) { console.warn("[listing reminder close-reason]", e); }
-        }
-      })();
+      // WhatsApp listing reminders disabled
     } catch (err) {
       console.error("[POST /api/listings/reminders/run]", err);
       res.status(500).json({ message: "Internal server error" });
@@ -515,61 +466,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     } catch (err) { console.error("[POST /api/listings/assign-by-name]", err); res.status(500).json({ message: "Internal server error" }); }
   });
 
-  // Daily reminder scheduler (runs every 24 hours with defaults of 3 days each)
-  setInterval(async () => {
-    try {
-      const { agreementListings, closeReasonListings } = await storage.runListingReminders(3, 3);
-      const base = publicBaseUrl();
-
-      for (const l of agreementListings) {
-        try {
-          if (!l.employeeId) continue;
-          const emp = await storage.getEmployee(l.employeeId);
-          const phone = emp?.candidate?.phone;
-          const name = emp?.candidate?.name ?? "Danışman";
-          if (!phone) continue;
-          const link = `${base}/l/${l.publicToken}`;
-          const fmtPrice = l.price ? Number(l.price).toLocaleString("tr-TR") + " ₺" : "—";
-          const msg = [
-            `Merhaba ${name} 👋`,
-            "",
-            `⏰ Hatırlatma: ${l.listingNumber} numaralı ilanınıza ait yetki sözleşmesi henüz yüklenmedi.`,
-            "",
-            `🔢 İlan No: ${l.listingNumber}`,
-            `💰 Fiyat: ${fmtPrice}`,
-            "",
-            `Lütfen bu ilana ait *yetki sözleşmesini* sisteme yükleyin:`,
-            link,
-          ].join("\n");
-          await sendWhatsApp(phone, msg);
-          await storage.markListingAgreementReminderSent(l.id);
-          console.log(`[daily reminder] agreement ${l.listingNumber} → ${phone}`);
-        } catch (e) { console.warn("[daily reminder agreement]", e); }
-      }
-
-      for (const l of closeReasonListings) {
-        try {
-          if (!l.employeeId) continue;
-          const emp = await storage.getEmployee(l.employeeId);
-          const phone = emp?.candidate?.phone;
-          const name = emp?.candidate?.name ?? "Danışman";
-          if (!phone) continue;
-          const link = `${base}/l/${l.publicToken}`;
-          const msg = [
-            `Merhaba ${name} 👋`,
-            "",
-            `⏰ Hatırlatma: ${l.listingNumber} numaralı ilanınız için kalkış sebebi henüz girilmedi.`,
-            "",
-            `Lütfen yayından kalkış sebebini girin:`,
-            link,
-          ].join("\n");
-          await sendWhatsApp(phone, msg);
-          await storage.markListingCloseReasonReminderSent(l.id);
-          console.log(`[daily reminder] close-reason ${l.listingNumber} → ${phone}`);
-        } catch (e) { console.warn("[daily reminder close-reason]", e); }
-      }
-    } catch (e) { console.warn("[daily reminder scheduler]", e); }
-  }, 24 * 60 * 60 * 1000);
+  // Daily reminder scheduler disabled (WhatsApp listing reminders turned off)
 
   // ── Public listing self-service (token, no auth) ────────────────────────────
 
