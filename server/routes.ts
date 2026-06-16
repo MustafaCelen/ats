@@ -2,6 +2,8 @@ import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import bcrypt from "bcrypt";
 import { storage } from "./storage";
+import { db } from "./db";
+import { sql } from "drizzle-orm";
 import { requireAuth, requireAdmin, requireHiringManagerOrAdmin } from "./auth";
 import { api } from "@shared/routes";
 import { z } from "zod";
@@ -1425,6 +1427,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.delete(api.interviews.delete.path, requireAuth, requireAdmin, async (req, res) => {
     await storage.deleteInterview(Number(req.params.id));
     res.status(204).send();
+  });
+
+  // ── TEMPORARY: Bulk-complete all scheduled interviews ─────────────────────
+  app.post("/api/admin/bulk-complete-interviews", requireAuth, requireAdmin, async (_req, res) => {
+    try {
+      const result = await db.execute(
+        sql`UPDATE interviews SET status = 'completed' WHERE status = 'scheduled'`
+      );
+      res.json({ ok: true, updated: result.rowCount });
+    } catch (err) {
+      console.error("[bulk-complete-interviews]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
   });
 
   // ── Offers ─────────────────────────────────────────────────────────────────
