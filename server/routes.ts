@@ -1473,6 +1473,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json(await storage.getAssistants());
   });
 
+  // ── All assignable users (for task assignment) ──────────────────────────────
+
+  app.get("/api/assignable-users", requireAuth, requireHiringManagerOrAdmin, async (_req, res) => {
+    res.json(await storage.getAllUsers());
+  });
+
   app.get("/api/hiring-managers", requireAuth, async (_req, res) => {
     res.json(await storage.getHiringManagers());
   });
@@ -1499,8 +1505,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
       const assigneeId = Number(assignedToUserId);
       const assignee = await storage.getUserById(assigneeId);
-      if (!assignee || assignee.role !== "assistant") {
-        return res.status(400).json({ message: "assignedToUserId must be a user with role 'assistant'" });
+      if (!assignee) {
+        return res.status(400).json({ message: "Geçersiz kullanıcı" });
       }
       const task = await storage.createTask({
         title,
@@ -1511,6 +1517,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         createdByUserId: req.user!.id,
         jobId: jobId ? Number(jobId) : null,
       });
+      // Email notification to assignee
+      if (assignee.email) {
+        const creator = await storage.getUserById(req.user!.id);
+        const dueDateStr = dueDate ? new Date(dueDate as string).toLocaleDateString("tr-TR") : null;
+        await sendEmail(
+          assignee.email,
+          `Yeni Görev: ${title}`,
+          `<p>Merhaba ${assignee.name},</p>
+           <p><strong>${creator?.name ?? "Bir yönetici"}</strong> size yeni bir görev atadı:</p>
+           <p><strong>${title}</strong>${description ? `<br/>${description}` : ""}</p>
+           ${dueDateStr ? `<p>Son tarih: <strong>${dueDateStr}</strong></p>` : ""}
+           <p style="color:#6b7280;font-size:12px;">KW Platin &amp; Karma</p>`
+        );
+      }
       res.status(201).json(task);
     } catch (err) {
       res.status(500).json({ message: "Internal server error" });
@@ -1549,8 +1569,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (assignedToUserId !== undefined) {
         const newAssigneeId = Number(assignedToUserId);
         const newAssignee = await storage.getUserById(newAssigneeId);
-        if (!newAssignee || newAssignee.role !== "assistant") {
-          return res.status(400).json({ message: "assignedToUserId must be a user with role 'assistant'" });
+        if (!newAssignee) {
+          return res.status(400).json({ message: "Geçersiz kullanıcı" });
         }
         update.assignedToUserId = newAssigneeId;
       }

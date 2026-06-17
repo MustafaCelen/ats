@@ -1476,6 +1476,10 @@ export class DatabaseStorage implements IStorage {
     const all = await db.select().from(users).where(inArray(users.role, ["hiring_manager", "admin"])).orderBy(users.name);
     return all.map(toPublicUser);
   }
+  async getAllUsers(): Promise<PublicUser[]> {
+    const all = await db.select().from(users).orderBy(users.name);
+    return all.map(toPublicUser);
+  }
 
   async getEmployees(): Promise<EmployeeWithRelations[]> {
     const rows = await db

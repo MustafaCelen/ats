@@ -60,11 +60,11 @@ function useTasks() {
   });
 }
 
-function useAssistants(enabled = true) {
+function useAssignableUsers(enabled = true) {
   return useQuery<PublicUser[]>({
-    queryKey: ["/api/assistants"],
+    queryKey: ["/api/assignable-users"],
     queryFn: async () => {
-      const res = await fetch("/api/assistants", { credentials: "include" });
+      const res = await fetch("/api/assignable-users", { credentials: "include" });
       if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
       return res.json();
     },
@@ -82,7 +82,7 @@ export default function Tasks() {
   const isHiringManager = user?.role === "hiring_manager";
   const canCreate = isAdmin || isHiringManager;
 
-  const { data: assistants, isLoading: assistantsLoading } = useAssistants(canCreate);
+  const { data: assignableUsers, isLoading: usersLoading } = useAssignableUsers(canCreate);
   const [addOpen, setAddOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<TaskWithRelations | null>(null);
 
@@ -104,8 +104,8 @@ export default function Tasks() {
             <NewTaskDialog
               open={addOpen}
               onOpenChange={setAddOpen}
-              assistants={assistants}
-              assistantsLoading={assistantsLoading}
+              assignableUsers={assignableUsers}
+              usersLoading={usersLoading}
             />
           )}
         </div>
@@ -127,7 +127,7 @@ export default function Tasks() {
               <ClipboardList className="h-8 w-8 opacity-30" />
               <p>Henüz görev yok.</p>
               {canCreate && (
-                <p className="text-xs">Yeni bir görev oluşturun ve bir asistana atayın.</p>
+                <p className="text-xs">Yeni bir görev oluşturun ve bir kullanıcıya atayın.</p>
               )}
             </div>
           ) : (
@@ -274,13 +274,13 @@ function TaskRow({
 function NewTaskDialog({
   open,
   onOpenChange,
-  assistants,
-  assistantsLoading,
+  assignableUsers,
+  usersLoading,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  assistants?: PublicUser[];
-  assistantsLoading?: boolean;
+  assignableUsers?: PublicUser[];
+  usersLoading?: boolean;
 }) {
   const qc = useQueryClient();
   const { toast } = useToast();
@@ -329,7 +329,7 @@ function NewTaskDialog({
       <DialogContent aria-describedby="new-task-desc">
         <DialogHeader>
           <DialogTitle>Yeni Görev Oluştur</DialogTitle>
-          <p id="new-task-desc" className="text-sm text-muted-foreground">Bir asistana görev atayın.</p>
+          <p id="new-task-desc" className="text-sm text-muted-foreground">Bir kullanıcıya görev atayın.</p>
         </DialogHeader>
         <div className="space-y-4 pt-2">
           <Field label="Başlık *">
@@ -357,22 +357,22 @@ function NewTaskDialog({
               data-testid="input-task-due-date"
             />
           </Field>
-          <Field label="Asistan *">
+          <Field label="Atanacak Kişi *">
             <Select value={form.assignedToUserId} onValueChange={(v) => f("assignedToUserId", v)}>
               <SelectTrigger data-testid="select-task-assignee">
-                <SelectValue placeholder="Asistan seçin..." />
+                <SelectValue placeholder="Kullanıcı seçin..." />
               </SelectTrigger>
               <SelectContent>
-                {assistantsLoading ? (
+                {usersLoading ? (
                   <div className="px-3 py-2 text-sm text-muted-foreground">Yükleniyor...</div>
-                ) : assistants && assistants.length > 0 ? (
-                  assistants.map((a) => (
-                    <SelectItem key={a.id} value={String(a.id)}>
-                      {a.name}
+                ) : assignableUsers && assignableUsers.length > 0 ? (
+                  assignableUsers.map((u) => (
+                    <SelectItem key={u.id} value={String(u.id)}>
+                      {u.name}{u.role === "assistant" ? " (Asistan)" : u.role === "hiring_manager" ? " (HM)" : u.role === "admin" ? " (Admin)" : ""}
                     </SelectItem>
                   ))
                 ) : (
-                  <div className="px-3 py-2 text-sm text-muted-foreground">Asistan bulunamadı</div>
+                  <div className="px-3 py-2 text-sm text-muted-foreground">Kullanıcı bulunamadı</div>
                 )}
               </SelectContent>
             </Select>
