@@ -238,11 +238,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.patch("/api/listings/:id", requireAuth, requireAdmin, async (req, res) => {
     try {
-      const { employeeId, status } = req.body;
+      const { employeeId, status, clearAgreement } = req.body;
+      const id = Number(req.params.id);
+      if (clearAgreement) {
+        await storage.clearListingAgreement(id);
+        return res.json({ ok: true });
+      }
       const patch: any = {};
       if (employeeId !== undefined) patch.employeeId = employeeId === null ? null : Number(employeeId);
       if (status) patch.status = status;
-      res.json(await storage.updateListing(Number(req.params.id), patch));
+      res.json(await storage.updateListing(id, patch));
     } catch { res.status(500).json({ message: "Internal server error" }); }
   });
 

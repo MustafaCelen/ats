@@ -3627,6 +3627,19 @@ export class DatabaseStorage implements IStorage {
     return row;
   }
 
+  async clearListingAgreement(id: number): Promise<void> {
+    await db.delete(listingAgreementFiles).where(eq(listingAgreementFiles.listingId, id));
+    await db.update(listings).set({
+      agreementUploadedAt: null,
+      agreementRequestedAt: null,
+      agreementFileData: null,
+      agreementFileName: null,
+      agreementFileMime: null,
+      noAgreementAt: null,
+      updatedAt: new Date(),
+    } as any).where(eq(listings.id, id));
+  }
+
   async setListingAgreement(token: string, file: { name: string; mime: string; data: string }): Promise<Listing | null> {
     const [row] = await db.update(listings).set({
       agreementFileName: file.name,

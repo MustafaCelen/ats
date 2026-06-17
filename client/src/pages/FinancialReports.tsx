@@ -384,6 +384,42 @@ export default function FinancialReports() {
 
   const { data: capStatuses = {} } = useCapStatuses();
 
+  // ── Randevu (interview) queries ─────────────────────────────────────────────
+  const { data: allInterviews = [] } = useQuery<any[]>({
+    queryKey: ["/api/interviews?all=true"],
+    queryFn: () => fetch("/api/interviews?all=true", { credentials: "include" }).then(r => r.ok ? r.json() : []),
+    staleTime: 5 * 60 * 1000,
+  });
+  const { data: apptTargets = [] } = useQuery<any[]>({
+    queryKey: ["/api/interview-targets", vy, vm + 1],
+    queryFn: () => fetch(`/api/interview-targets?year=${vy}&month=${vm + 1}`, { credentials: "include" }).then(r => r.ok ? r.json() : []),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const APPT_CATS = ["K0", "K1", "K2"] as const;
+
+  const apptActuals = useMemo(() => {
+    const from = new Date(computedStart + "T00:00:00");
+    const to = new Date(computedEnd + "T23:59:59");
+    const counts: Record<string, number> = { K0: 0, K1: 0, K2: 0 };
+    for (const iv of allInterviews) {
+      if (!iv.startTime) continue;
+      const d = new Date(iv.startTime);
+      if (d < from || d > to) continue;
+      const cat: string = iv.candidate?.category ?? "K0";
+      if (cat in counts) counts[cat]++;
+    }
+    return counts;
+  }, [allInterviews, computedStart, computedEnd]);
+
+  const apptTargetTotals = useMemo(() => {
+    const totals: Record<string, number> = { K0: 0, K1: 0, K2: 0 };
+    for (const t of apptTargets) {
+      if (t.category in totals) totals[t.category] += t.target ?? 0;
+    }
+    return totals;
+  }, [apptTargets]);
+
   const targetFetchYear = useCustomRange ? parseInt(fromDate.substring(0, 4)) : vy;
   const { data: targetsAk = [] } = useFinancialTargets(targetFetchYear, "Akatlar");
   const { data: targetsZk = [] } = useFinancialTargets(targetFetchYear, "Zekeriyaköy");
@@ -732,6 +768,60 @@ export default function FinancialReports() {
                 Geçen Yıl
               </Button>
             </div>
+          </div>
+        </div>
+
+        {/* ── Randevu Hedef Takibi ── */}
+        <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+          <div className="px-5 py-3 border-b border-border flex items-center gap-2">
+            <Users className="h-4 w-4 text-primary" />
+            <h2 className="text-base font-semibold">Randevu Hedef Takibi</h2>
+            {officeFilter && (
+              <span className="text-xs font-medium bg-primary/10 text-primary px-2 py-0.5 rounded-full">{officeFilter}</span>
+            )}
+            <span className="text-xs text-muted-foreground ml-1">
+              {useCustomRange ? `${fromDate} – ${toDate}` : format(viewDate, "MMMM yyyy", { locale: tr })}
+            </span>
+          </div>
+          <div className="p-4 grid grid-cols-2 lg:grid-cols-4 gap-4">
+            {(["K0", "K1", "K2", "Toplam"] as const).map((cat) => {
+              const actual = cat === "Toplam"
+                ? APPT_CATS.reduce((s, c) => s + apptActuals[c], 0)
+                : apptActuals[cat] ?? 0;
+              const target = cat === "Toplam"
+                ? APPT_CATS.reduce((s, c) => s + apptTargetTotals[c], 0)
+                : apptTargetTotals[cat] ?? 0;
+              const pct = target > 0 ? Math.round((actual / target) * 100) : null;
+              const done = target > 0 && actual >= target;
+              const styles: Record<string, { badge: string; text: string; bar: string }> = {
+                K0:     { badge: "bg-blue-100 text-blue-700",    text: "text-blue-600",    bar: "#3b82f6" },
+                K1:     { badge: "bg-amber-100 text-amber-700",  text: "text-amber-600",   bar: "#f59e0b" },
+                K2:     { badge: "bg-emerald-100 text-emerald-700", text: "text-emerald-600", bar: "#10b981" },
+                Toplam: { badge: "bg-purple-100 text-purple-700", text: "text-purple-600", bar: "#8b5cf6" },
+              };
+              const s = styles[cat];
+              return (
+                <div key={cat} className="rounded-xl border border-border bg-background p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className={`rounded-md px-2 py-0.5 text-xs font-bold ${s.badge}`}>{cat}</span>
+                    {done && <span className="text-[10px] text-emerald-600 font-medium">✓ Hedef tamam</span>}
+                  </div>
+                  <p className={`text-2xl font-bold ${s.text}`}>{actual}</p>
+                  {target > 0 ? (
+                    <>
+                      <div className="mt-2 h-1.5 rounded-full bg-muted overflow-hidden">
+                        <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(100, pct ?? 0)}%`, backgroundColor: s.bar }} />
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {target} hedefin <span className="font-medium">{pct}%</span>'i
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-xs text-muted-foreground mt-1">Hedef tanımlı değil</p>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
 

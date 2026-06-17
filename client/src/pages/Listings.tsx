@@ -399,6 +399,7 @@ export default function Listings() {
   const [viewerFilesLoading, setViewerFilesLoading] = useState(false);
   const [previewFile, setPreviewFile] = useState<{ id: number; name: string; mime: string } | null>(null);
   const [deletingFileId, setDeletingFileId] = useState<number | null>(null);
+  const [clearingAgreementId, setClearingAgreementId] = useState<number | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [page, setPage] = useState(0);
   const PAGE_SIZE = 50;
@@ -547,6 +548,27 @@ export default function Listings() {
       });
     } finally {
       setDeletingFileId(null);
+    }
+  };
+
+  const clearAgreement = async (listingId: number) => {
+    if (!window.confirm("Bu ilanın sözleşmesi silinecek ve 'Sözleşme Bekleyen' statüsüne dönecek. Emin misiniz?")) return;
+    setClearingAgreementId(listingId);
+    try {
+      const res = await fetch(`/api/listings/${listingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ clearAgreement: true }),
+      });
+      if (!res.ok) { toast({ title: "Hata", description: "Sözleşme silinemedi.", variant: "destructive" }); return; }
+      toast({ title: "Sıfırlandı", description: "Sözleşme silindi, ilan sözleşme bekleniyor statüsüne alındı." });
+      if (viewer?.id === listingId) setViewer(null);
+      refresh();
+    } catch {
+      toast({ title: "Hata", description: "Sözleşme silinemedi.", variant: "destructive" });
+    } finally {
+      setClearingAgreementId(null);
     }
   };
 
@@ -1152,11 +1174,31 @@ export default function Listings() {
                         </td>
                         <td className="px-3 py-2.5">
                           {l.agreementUploadedAt ? (
-                            <button onClick={() => setViewer(l)} className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 hover:bg-emerald-200">
-                              <FileCheck2 className="h-3 w-3" /> Görüntüle
-                            </button>
+                            <div className="flex items-center gap-1">
+                              <button onClick={() => setViewer(l)} className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 hover:bg-emerald-200">
+                                <FileCheck2 className="h-3 w-3" /> Görüntüle
+                              </button>
+                              <button
+                                onClick={() => clearAgreement(l.id)}
+                                disabled={clearingAgreementId === l.id}
+                                title="Sözleşmeyi sil ve sözleşme bekleniyor'a al"
+                                className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-red-50 text-red-600 hover:bg-red-100 disabled:opacity-50"
+                              >
+                                {clearingAgreementId === l.id ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+                              </button>
+                            </div>
                           ) : l.noAgreementAt ? (
-                            <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-slate-200 text-slate-600">Sözleşme Yok</span>
+                            <div className="flex items-center gap-1">
+                              <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-slate-200 text-slate-600">Sözleşme Yok</span>
+                              <button
+                                onClick={() => clearAgreement(l.id)}
+                                disabled={clearingAgreementId === l.id}
+                                title="Sıfırla ve sözleşme bekleniyor'a al"
+                                className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-red-50 text-red-600 hover:bg-red-100 disabled:opacity-50"
+                              >
+                                {clearingAgreementId === l.id ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+                              </button>
+                            </div>
                           ) : l.agreementRequestedAt ? (
                             <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700"><Clock className="h-3 w-3" /> İstendi</span>
                           ) : (
