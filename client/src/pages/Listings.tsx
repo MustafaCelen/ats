@@ -51,7 +51,8 @@ interface Summary {
   needsAgreement: number; needsReason: number; soldPassive: number; noAgreement: number;
 }
 
-type FilterTab = "needsAll" | "needsAgreement" | "needsReason" | "hasAgreement" | "hasReason" | "unmatched" | "missingPhone" | "missingEmail" | "notifyStatus";
+type MainTab = "listings" | "unmatched" | "notifications";
+type ListFilter = "needsAgreement" | "hasAgreement" | "needsReason" | "hasReason" | "missingPhone" | "missingEmail" | "all";
 
 interface NotifyStatusRow {
   id: number;
@@ -165,9 +166,6 @@ function fmtPrice(p: string | null): string {
   if (!p) return "—";
   return Number(p).toLocaleString("tr-TR") + " ₺";
 }
-
-// ── Page ──────────────────────────────────────────────────────────────────────
-
 
 // ── Unmatched advisor assignment row (isolated search state) ─────────────────
 const UnmatchedAssignRow = memo(function UnmatchedAssignRow({
@@ -376,7 +374,8 @@ function AddListingDialog({ open, onOpenChange, onSaved }: {
 export default function Listings() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<FilterTab>("needsAgreement");
+  const [mainTab, setMainTab] = useState<MainTab>("listings");
+  const [listFilter, setListFilter] = useState<ListFilter>("needsAgreement");
   const [search, setSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -405,7 +404,18 @@ export default function Listings() {
   const PAGE_SIZE = 50;
   const [nameAssignments, setNameAssignments] = useState<Record<string, number>>({});
   const [assigningNames, setAssigningNames] = useState<Set<string>>(new Set());
+  const [sendingIds, setSendingIds] = useState<Set<number>>(new Set());
+  const [linkLoadingIds, setLinkLoadingIds] = useState<Set<number>>(new Set());
+  const [wpCheckingIds, setWpCheckingIds] = useState<Set<number>>(new Set());
+  const [wpStatuses, setWpStatuses] = useState<Record<number, string | null>>({});
+  const [notifyFilter, setNotifyFilter] = useState<"overdue" | "all">("overdue");
+  const [cooldownDays, setCooldownDays] = useState(5);
+  const [notifyChannelFilter, setNotifyChannelFilter] = useState<"wa" | "email" | "both">("both");
+  const [emailSendingIds, setEmailSendingIds] = useState<Set<number>>(new Set());
 
+  const NOTIFY_COOLDOWN_MS = cooldownDays * 24 * 60 * 60 * 1000;
+
+  // ── Viewer files effect ──────────────────────────────────────────────────────
   useEffect(() => {
     if (!viewer) { setViewerFiles([]); setPreviewFile(null); return; }
     setViewerFilesLoading(true);
@@ -416,23 +426,7 @@ export default function Listings() {
       .finally(() => setViewerFilesLoading(false));
   }, [viewer]);
 
-  const deleteViewerFile = async (fileId: number) => {
-    if (!viewer) return;
-    setDeletingFileId(fileId);
-    try {
-      await fetch(`/api/listings/${viewer.id}/agreement-files/${fileId}`, { method: "DELETE", credentials: "include" });
-      setViewerFiles((prev) => {
-        const next = prev.filter((f) => f.id !== fileId);
-        setPreviewFile(next[0] ?? null);
-        if (next.length === 0) {
-          refresh();
-        }
-        return next;
-      });
-    } finally {
-      setDeletingFileId(null);
-    }
-  };
+  // ── Queries ──────────────────────────────────────────────────────────────────
 
   const { data: summary } = useQuery<Summary>({
     queryKey: ["/api/listings/summary"],
@@ -441,14 +435,16 @@ export default function Listings() {
 
   const listQuery = (() => {
     const params = new URLSearchParams();
-    if (tab === "needsAll") { params.set("needsAny", "1"); }
-    else if (tab === "needsAgreement") { params.set("needsAgreement", "1"); params.set("onlyMatched", "1"); }
-    else if (tab === "needsReason") { params.set("needsReason", "1"); params.set("onlyMatched", "1"); }
-    else if (tab === "hasAgreement") { params.set("hasAgreement", "1"); params.set("onlyMatched", "1"); }
-    else if (tab === "hasReason") { params.set("hasReason", "1"); params.set("onlyMatched", "1"); }
-    else if (tab === "unmatched") params.set("onlyUnmatched", "1");
-    else if (tab === "missingPhone") params.set("missingPhone", "1");
-    else if (tab === "missingEmail") params.set("missingEmail", "1");
+    if (mainTab === "unmatched") {
+      params.set("onlyUnmatched", "1");
+    } else {
+      if (listFilter === "needsAgreement") { params.set("needsAgreement", "1"); params.set("onlyMatched", "1"); }
+      else if (listFilter === "hasAgreement") { params.set("hasAgreement", "1"); params.set("onlyMatched", "1"); }
+      else if (listFilter === "needsReason") { params.set("needsReason", "1"); params.set("onlyMatched", "1"); }
+      else if (listFilter === "hasReason") { params.set("hasReason", "1"); params.set("onlyMatched", "1"); }
+      else if (listFilter === "missingPhone") params.set("missingPhone", "1");
+      else if (listFilter === "missingEmail") params.set("missingEmail", "1");
+    }
     if (search.trim()) params.set("search", search.trim());
     return params.toString();
   })();
@@ -469,14 +465,14 @@ export default function Listings() {
   const { data: unmatchedAdvisors = [], refetch: refetchUnmatched } = useQuery<{ advisorName: string; count: number }[]>({
     queryKey: ["/api/listings/unmatched-advisors"],
     queryFn: () => fetch("/api/listings/unmatched-advisors", { credentials: "include" }).then((r) => r.json()),
-    enabled: tab === "unmatched",
+    enabled: mainTab === "unmatched",
     staleTime: 2 * 60 * 1000,
   });
 
   const { data: fuzzySuggestions = [] } = useQuery<{ advisorName: string; suggestions: { id: number; name: string; reason: string }[] }[]>({
     queryKey: ["/api/listings/fuzzy-suggestions"],
     queryFn: () => fetch("/api/listings/fuzzy-suggestions", { credentials: "include" }).then((r) => r.json()),
-    enabled: tab === "unmatched",
+    enabled: mainTab === "unmatched",
     staleTime: 5 * 60 * 1000,
   });
 
@@ -484,6 +480,72 @@ export default function Listings() {
     () => Object.fromEntries(fuzzySuggestions.map((f) => [f.advisorName, f.suggestions])),
     [fuzzySuggestions],
   );
+
+  const { data: notifyStatusRows = [], refetch: refetchNotifyStatus } = useQuery<NotifyStatusRow[]>({
+    queryKey: ["/api/employees/notify-status"],
+    queryFn: () => fetch("/api/employees/notify-status", { credentials: "include" }).then((r) => r.ok ? r.json() : []),
+    enabled: mainTab === "notifications",
+  });
+
+  // ── Derived ──────────────────────────────────────────────────────────────────
+
+  // Client-side date filter
+  const filteredRows = rows.filter((l) => {
+    if (!dateFrom && !dateTo) return true;
+    if (!l.publishedDate) return false;
+    const d = new Date(l.publishedDate);
+    if (isNaN(d.getTime())) return false;
+    if (dateFrom && d < new Date(dateFrom)) return false;
+    if (dateTo && d > new Date(dateTo + "T23:59:59")) return false;
+    return true;
+  });
+
+  // Reset to first page whenever the filter/search/date changes
+  useEffect(() => { setPage(0); }, [mainTab, listFilter, search, dateFrom, dateTo]);
+
+  const pageCount = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
+  const pageRows = filteredRows.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
+
+  const filteredNotifyRows = notifyStatusRows.filter((r) => {
+    if (r.totalPending === 0) return false;
+    if (notifyFilter === "overdue") {
+      const waOverdue = !r.lastNotifiedAt || (Date.now() - new Date(r.lastNotifiedAt).getTime()) > NOTIFY_COOLDOWN_MS;
+      const emailOverdue = !r.lastEmailNotifiedAt || (Date.now() - new Date(r.lastEmailNotifiedAt).getTime()) > NOTIFY_COOLDOWN_MS;
+      if (notifyChannelFilter === "wa") return waOverdue;
+      if (notifyChannelFilter === "email") return emailOverdue;
+      return waOverdue || emailOverdue;
+    }
+    return true;
+  });
+
+  const uniqueAdvisorIds = [...new Set(filteredRows.filter((l) => !!l.employeeId).map((l) => l.employeeId!))];
+  const bulkNotifyCount = uniqueAdvisorIds.length;
+  const unmatchedBadge = unmatchedAdvisors.length;
+
+  // ── Helpers ──────────────────────────────────────────────────────────────────
+
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ["/api/listings"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/listings/summary"] });
+  };
+
+  const deleteViewerFile = async (fileId: number) => {
+    if (!viewer) return;
+    setDeletingFileId(fileId);
+    try {
+      await fetch(`/api/listings/${viewer.id}/agreement-files/${fileId}`, { method: "DELETE", credentials: "include" });
+      setViewerFiles((prev) => {
+        const next = prev.filter((f) => f.id !== fileId);
+        setPreviewFile(next[0] ?? null);
+        if (next.length === 0) {
+          refresh();
+        }
+        return next;
+      });
+    } finally {
+      setDeletingFileId(null);
+    }
+  };
 
   const handleAdvisorSelect = useCallback((advisorName: string, empId: number) => {
     setNameAssignments((prev) => ({ ...prev, [advisorName]: empId }));
@@ -539,29 +601,6 @@ export default function Listings() {
     }
   };
 
-  // Client-side date filter
-  const filteredRows = rows.filter((l) => {
-    if (!dateFrom && !dateTo) return true;
-    if (!l.publishedDate) return false;
-    const d = new Date(l.publishedDate);
-    if (isNaN(d.getTime())) return false;
-    if (dateFrom && d < new Date(dateFrom)) return false;
-    if (dateTo && d > new Date(dateTo + "T23:59:59")) return false;
-    return true;
-  });
-
-  // Reset to first page whenever the filter/search/date changes
-  useEffect(() => { setPage(0); }, [tab, search, dateFrom, dateTo]);
-
-
-  const pageCount = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
-  const pageRows = filteredRows.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
-
-  const refresh = () => {
-    queryClient.invalidateQueries({ queryKey: ["/api/listings"] });
-    queryClient.invalidateQueries({ queryKey: ["/api/listings/summary"] });
-  };
-
   const handleImport = (type: "active" | "passive") => async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -595,21 +634,6 @@ export default function Listings() {
     }
   };
 
-  const [sendingIds, setSendingIds] = useState<Set<number>>(new Set());
-  const [linkLoadingIds, setLinkLoadingIds] = useState<Set<number>>(new Set());
-  const [wpCheckingIds, setWpCheckingIds] = useState<Set<number>>(new Set());
-  const [wpStatuses, setWpStatuses] = useState<Record<number, string | null>>({});
-  const [notifyFilter, setNotifyFilter] = useState<"all" | "unsent">("unsent");
-
-  const NOTIFY_COOLDOWN_DAYS = 5;
-  const NOTIFY_COOLDOWN_MS = NOTIFY_COOLDOWN_DAYS * 24 * 60 * 60 * 1000;
-
-  const { data: notifyStatusRows = [], refetch: refetchNotifyStatus } = useQuery<NotifyStatusRow[]>({
-    queryKey: ["/api/employees/notify-status"],
-    queryFn: () => fetch("/api/employees/notify-status", { credentials: "include" }).then((r) => r.ok ? r.json() : []),
-    enabled: tab === "notifyStatus",
-  });
-
   const checkWpStatus = async (empId: number, phone: string | null, msgId: string | null) => {
     if (!phone || !msgId || wpCheckingIds.has(empId)) return;
     setWpCheckingIds((prev) => new Set(prev).add(empId));
@@ -628,23 +652,6 @@ export default function Listings() {
       setWpCheckingIds((prev) => { const s = new Set(prev); s.delete(empId); return s; });
     }
   };
-
-  const checkAllWpStatuses = async () => {
-    for (const row of notifyStatusRows) {
-      if (row.lastNotifiedAt && row.notifyMsgId) {
-        await checkWpStatus(row.id, row.phone, row.notifyMsgId);
-      }
-    }
-  };
-
-  const filteredNotifyRows = notifyStatusRows.filter((r) => {
-    if (r.totalPending === 0) return false; // her zaman sadece bekleyen ilanı olanları göster
-    if (notifyFilter === "unsent") {
-      if (!r.lastNotifiedAt) return true; // hiç gönderilmemiş
-      return (Date.now() - new Date(r.lastNotifiedAt).getTime()) > NOTIFY_COOLDOWN_MS;
-    }
-    return true;
-  });
 
   const handleNotifyBulkSend = async () => {
     const toSend = filteredNotifyRows;
@@ -680,53 +687,6 @@ export default function Listings() {
     refetchNotifyStatus();
   };
 
-  const [emailSendingIds, setEmailSendingIds] = useState<Set<number>>(new Set());
-
-  const sendNotify = async (employeeId: number, channel: "wa" | "email" = "wa") => {
-    if (channel === "email") {
-      if (emailSendingIds.has(employeeId)) return;
-      setEmailSendingIds(prev => new Set(prev).add(employeeId));
-      try {
-        await apiRequest("POST", `/api/listings/notify-advisor/${employeeId}`, { channel: "email" });
-        toast({ title: "Email gönderildi", description: "Danışmana email bildirimi iletildi." });
-      } catch (err: any) {
-        toast({ title: "Email gönderilemedi", description: err?.message, variant: "destructive" });
-      } finally {
-        setEmailSendingIds(prev => { const s = new Set(prev); s.delete(employeeId); return s; });
-      }
-      return;
-    }
-    if (sendingIds.has(employeeId)) return;
-    setSendingIds(prev => new Set(prev).add(employeeId));
-    try {
-      await apiRequest("POST", `/api/listings/notify-advisor/${employeeId}`, { channel: "wa" });
-      toast({ title: "WhatsApp gönderildi", description: "Danışmana tüm bekleyen ilanları içeren tek mesaj gönderildi." });
-      refresh();
-    } catch (err: any) {
-      toast({ title: "Gönderilemedi", description: err?.message, variant: "destructive" });
-    } finally {
-      setSendingIds(prev => { const s = new Set(prev); s.delete(employeeId); return s; });
-    }
-  };
-
-  const openAdvisorLink = async (employeeId: number) => {
-    if (linkLoadingIds.has(employeeId)) return;
-    setLinkLoadingIds(prev => new Set(prev).add(employeeId));
-    try {
-      const res = await fetch(`/api/listings/advisor-link/${employeeId}`, { credentials: "include" });
-      const data = await res.json();
-      if (data.link) window.open(data.link, "_blank", "noreferrer");
-    } catch {
-      toast({ title: "Link alınamadı", variant: "destructive" });
-    } finally {
-      setLinkLoadingIds(prev => { const s = new Set(prev); s.delete(employeeId); return s; });
-    }
-  };
-
-
-  const uniqueAdvisorIds = [...new Set(filteredRows.filter((l) => !!l.employeeId).map((l) => l.employeeId!))];
-  const bulkNotifyCount = uniqueAdvisorIds.length;
-
   const handleBulkNotify = async () => {
     if (!bulkNotifyCount || bulkSending) return;
     stopBulkRef.current = false;
@@ -747,7 +707,7 @@ export default function Listings() {
           body: JSON.stringify({}),
         });
         if (res.ok) sent++;
-        else if (res.status === 400) skipped++; // no pending listings
+        else if (res.status === 400) skipped++;
         else failed++;
       } catch {
         failed++;
@@ -814,25 +774,53 @@ export default function Listings() {
     refresh();
   };
 
-  const unmatchedCount = tab === "unmatched" ? filteredRows.length : undefined;
-  const missingPhoneCount = tab === "missingPhone" ? filteredRows.length : undefined;
-  const missingEmailCount = tab === "missingEmail" ? filteredRows.length : undefined;
+  const sendNotify = async (employeeId: number, channel: "wa" | "email" = "wa") => {
+    if (channel === "email") {
+      if (emailSendingIds.has(employeeId)) return;
+      setEmailSendingIds(prev => new Set(prev).add(employeeId));
+      try {
+        await apiRequest("POST", `/api/listings/notify-advisor/${employeeId}`, { channel: "email" });
+        toast({ title: "Email gönderildi", description: "Danışmana email bildirimi iletildi." });
+      } catch (err: any) {
+        toast({ title: "Email gönderilemedi", description: err?.message, variant: "destructive" });
+      } finally {
+        setEmailSendingIds(prev => { const s = new Set(prev); s.delete(employeeId); return s; });
+      }
+      return;
+    }
+    if (sendingIds.has(employeeId)) return;
+    setSendingIds(prev => new Set(prev).add(employeeId));
+    try {
+      await apiRequest("POST", `/api/listings/notify-advisor/${employeeId}`, { channel: "wa" });
+      toast({ title: "WhatsApp gönderildi", description: "Danışmana tüm bekleyen ilanları içeren tek mesaj gönderildi." });
+      refresh();
+    } catch (err: any) {
+      toast({ title: "Gönderilemedi", description: err?.message, variant: "destructive" });
+    } finally {
+      setSendingIds(prev => { const s = new Set(prev); s.delete(employeeId); return s; });
+    }
+  };
 
-  const tabs: { key: FilterTab; label: string; count?: number }[] = [
-    { key: "needsAll",       label: "Tümü (Bekleyen)", count: (summary?.needsAgreement ?? 0) + (summary?.needsReason ?? 0) || undefined },
-    { key: "needsAgreement", label: "Yetki Sözleşmesi Bekleyen", count: summary?.needsAgreement },
-    { key: "hasAgreement",   label: "Yetki Sözleşmesi Girilmiş" },
-    { key: "needsReason",    label: "Kalkış Sebebi Bekleyen", count: summary?.needsReason },
-    { key: "hasReason",      label: "Kapanış Sebebi Girilmiş" },
-    { key: "unmatched",      label: "Eşleşmeyenler", count: unmatchedCount },
-    { key: "missingPhone",   label: "Telefon Eksik", count: missingPhoneCount },
-    { key: "missingEmail",   label: "Email Eksik", count: missingEmailCount },
-    { key: "notifyStatus",   label: "Bildirim Durumu" },
-  ];
+  const openAdvisorLink = async (employeeId: number) => {
+    if (linkLoadingIds.has(employeeId)) return;
+    setLinkLoadingIds(prev => new Set(prev).add(employeeId));
+    try {
+      const res = await fetch(`/api/listings/advisor-link/${employeeId}`, { credentials: "include" });
+      const data = await res.json();
+      if (data.link) window.open(data.link, "_blank", "noreferrer");
+    } catch {
+      toast({ title: "Link alınamadı", variant: "destructive" });
+    } finally {
+      setLinkLoadingIds(prev => { const s = new Set(prev); s.delete(employeeId); return s; });
+    }
+  };
+
+  // ── Render ───────────────────────────────────────────────────────────────────
 
   return (
     <Layout>
       <div className="space-y-6">
+
         {/* Header */}
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
@@ -878,572 +866,532 @@ export default function Listings() {
           )}
         </div>
 
-        {/* Tabs + search */}
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex items-center gap-1 bg-muted rounded-lg p-0.5 flex-wrap">
-            {tabs.map((t) => (
-              <button
-                key={t.key}
-                onClick={() => setTab(t.key)}
-                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                  tab === t.key ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                {t.label}{t.count !== undefined ? ` (${t.count})` : ""}
-              </button>
-            ))}
-          </div>
-          <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="İlan no / danışman ara..."
-              className="h-8 pl-8 w-56 text-xs"
-            />
-          </div>
-        </div>
-
-        {/* Date filter + bulk notify */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs text-muted-foreground">Yayın tarihi:</span>
-          <Input
-            type="date"
-            value={dateFrom}
-            onChange={(e) => setDateFrom(e.target.value)}
-            className="h-8 w-36 text-xs"
-          />
-          <span className="text-xs text-muted-foreground">—</span>
-          <Input
-            type="date"
-            value={dateTo}
-            onChange={(e) => setDateTo(e.target.value)}
-            className="h-8 w-36 text-xs"
-          />
-          {(dateFrom || dateTo) && (
+        {/* Main Tab Bar */}
+        <div className="flex items-center gap-1 border-b border-border">
+          {([
+            { key: "listings" as const, label: "İlanlar" },
+            { key: "unmatched" as const, label: "Eşleşme", badge: unmatchedBadge },
+            { key: "notifications" as const, label: "Bildirimler" },
+          ]).map((t) => (
             <button
-              onClick={() => { setDateFrom(""); setDateTo(""); }}
-              className="text-xs text-muted-foreground hover:text-foreground underline"
+              key={t.key}
+              onClick={() => setMainTab(t.key)}
+              className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
+                mainTab === t.key
+                  ? "border-primary text-primary"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
             >
-              Temizle
+              {t.label}
+              {"badge" in t && t.badge > 0 && (
+                <span className="inline-flex items-center justify-center rounded-full bg-amber-100 text-amber-700 text-[10px] font-bold px-1.5 min-w-[18px] h-[18px]">
+                  {t.badge}
+                </span>
+              )}
             </button>
-          )}
-          <div className="ml-auto flex gap-2">
-            <Button
-              size="sm"
-              className="h-8 text-xs gap-1.5"
-              disabled={bulkSending || bulkNotifyCount === 0}
-              onClick={handleBulkNotify}
-            >
-              {bulkSending
-                ? <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                : <MessageSquare className="h-3.5 w-3.5" />}
-              Toplu WA ({bulkNotifyCount} danışman)
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-8 text-xs gap-1.5 border-blue-300 text-blue-700 hover:bg-blue-50"
-              disabled={bulkEmailSending || bulkNotifyCount === 0}
-              onClick={handleBulkEmailNotify}
-            >
-              {bulkEmailSending
-                ? <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                : <Mail className="h-3.5 w-3.5" />}
-              Toplu Email ({bulkNotifyCount} danışman)
-            </Button>
-          </div>
+          ))}
         </div>
 
-        {/* Bulk notify progress */}
-        {bulkStatus && (bulkStatus.active || bulkStatus.done) && (
-          <div className={`rounded-xl border bg-card p-4 space-y-2 ${bulkStatus.stopped ? "border-orange-300" : "border-border"}`}>
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium flex items-center gap-2">
-                {bulkStatus.active && !stopBulkRef.current
-                  ? <><RefreshCw className="h-4 w-4 animate-spin text-primary" /> WhatsApp gönderimi devam ediyor…</>
-                  : bulkStatus.active && stopBulkRef.current
-                  ? <><RefreshCw className="h-4 w-4 animate-spin text-orange-500" /> Durduruluyor, mevcut istek bekleniyor…</>
-                  : bulkStatus.stopped
-                  ? <><span className="h-4 w-4 text-orange-500">⏹</span> Gönderim durduruldu</>
-                  : <><CheckCircle2 className="h-4 w-4 text-emerald-600" /> Gönderim tamamlandı</>}
-              </span>
-              <div className="flex items-center gap-2">
-                {bulkStatus.active && (
+        {/* ── Tab: İlanlar ─────────────────────────────────────── */}
+        {mainTab === "listings" && (
+          <div className="space-y-4">
+
+            {/* Filter chips + search */}
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {([
+                  { key: "needsAgreement" as const, label: "Sözleşme Bekleyen", count: summary?.needsAgreement },
+                  { key: "hasAgreement" as const, label: "Sözleşme Girilmiş", count: undefined as number | undefined },
+                  { key: "needsReason" as const, label: "Kalkış Bekleyen", count: summary?.needsReason },
+                  { key: "hasReason" as const, label: "Kalkış Girilmiş", count: undefined as number | undefined },
+                  { key: "missingPhone" as const, label: "Telefon Eksik", count: undefined as number | undefined },
+                  { key: "missingEmail" as const, label: "Email Eksik", count: undefined as number | undefined },
+                  { key: "all" as const, label: "Tümü", count: undefined as number | undefined },
+                ]).map((f) => (
                   <button
-                    onClick={stopBulkNotify}
-                    disabled={stopBulkRef.current}
-                    className="text-xs px-2 py-1 rounded bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                    key={f.key}
+                    onClick={() => setListFilter(f.key)}
+                    className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                      listFilter === f.key
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted text-muted-foreground hover:text-foreground"
+                    }`}
                   >
-                    Durdur
+                    {f.label}{f.count !== undefined ? ` (${f.count})` : ""}
                   </button>
-                )}
-                {bulkStatus.done && (
-                  <button onClick={() => setBulkStatus(null)} className="text-xs text-muted-foreground hover:text-foreground">Kapat</button>
-                )}
+                ))}
+              </div>
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="İlan no / danışman ara..." className="h-8 pl-8 w-56 text-xs" />
               </div>
             </div>
-            <div className="w-full bg-muted rounded-full h-2">
-              <div
-                className={`h-2 rounded-full transition-all duration-500 ${bulkStatus.stopped ? "bg-orange-400" : "bg-primary"}`}
-                style={{ width: `${bulkStatus.total ? Math.round((bulkStatus.sent + bulkStatus.skipped + bulkStatus.failed) / bulkStatus.total * 100) : 0}%` }}
-              />
-            </div>
-            <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
-              <span>Toplam: <b>{bulkStatus.total}</b></span>
-              <span className="text-emerald-600">Gönderildi: <b>{bulkStatus.sent}</b></span>
-              <span>Atlandı: <b>{bulkStatus.skipped}</b></span>
-              {bulkStatus.failed > 0 && <span className="text-red-600">Hata: <b>{bulkStatus.failed}</b></span>}
-              {bulkStatus.current && <span className="text-primary">Şu an: <b>{bulkStatus.current}</b></span>}
-            </div>
-          </div>
-        )}
 
-        {/* Bulk email notify progress */}
-        {bulkEmailStatus && (bulkEmailStatus.active || bulkEmailStatus.done) && (
-          <div className={`rounded-xl border bg-card p-4 space-y-2 ${bulkEmailStatus.stopped ? "border-orange-300" : "border-blue-200"}`}>
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium flex items-center gap-2">
-                {bulkEmailStatus.active && !stopBulkEmailRef.current
-                  ? <><RefreshCw className="h-4 w-4 animate-spin text-blue-600" /> Email gönderimi devam ediyor…</>
-                  : bulkEmailStatus.active && stopBulkEmailRef.current
-                  ? <><RefreshCw className="h-4 w-4 animate-spin text-orange-500" /> Durduruluyor, mevcut istek bekleniyor…</>
-                  : bulkEmailStatus.stopped
-                  ? <><span className="h-4 w-4 text-orange-500">⏹</span> Gönderim durduruldu</>
-                  : <><CheckCircle2 className="h-4 w-4 text-emerald-600" /> Email gönderimi tamamlandı</>}
-              </span>
-              <div className="flex items-center gap-2">
-                {bulkEmailStatus.active && (
-                  <button
-                    onClick={stopBulkEmailNotify}
-                    disabled={stopBulkEmailRef.current}
-                    className="text-xs px-2 py-1 rounded bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
-                  >
-                    Durdur
-                  </button>
-                )}
-                {bulkEmailStatus.done && (
-                  <button onClick={() => setBulkEmailStatus(null)} className="text-xs text-muted-foreground hover:text-foreground">Kapat</button>
-                )}
-              </div>
-            </div>
-            <div className="w-full bg-muted rounded-full h-2">
-              <div
-                className={`h-2 rounded-full transition-all duration-500 ${bulkEmailStatus.stopped ? "bg-orange-400" : "bg-blue-500"}`}
-                style={{ width: `${bulkEmailStatus.total ? Math.round((bulkEmailStatus.sent + bulkEmailStatus.skipped + bulkEmailStatus.failed) / bulkEmailStatus.total * 100) : 0}%` }}
-              />
-            </div>
-            <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
-              <span>Toplam: <b>{bulkEmailStatus.total}</b></span>
-              <span className="text-emerald-600">Gönderildi: <b>{bulkEmailStatus.sent}</b></span>
-              <span>Atlandı: <b>{bulkEmailStatus.skipped}</b></span>
-              {bulkEmailStatus.failed > 0 && <span className="text-red-600">Hata: <b>{bulkEmailStatus.failed}</b></span>}
-              {bulkEmailStatus.current && <span className="text-blue-600">Şu an: <b>{bulkEmailStatus.current}</b></span>}
-            </div>
-          </div>
-        )}
-
-        {/* Bulk name assignment panel — only visible on unmatched tab */}
-        {tab === "unmatched" && unmatchedAdvisors.length > 0 && (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-3">
-            <div className="text-sm font-semibold text-amber-800">İsim Bazlı Toplu Atama</div>
-            <p className="text-xs text-amber-700">Her danışman adı için bir çalışan seçip "Ata" butonuna basın. Sarı öneri satırları fuzzy eşleşme bulunanları gösterir.</p>
-            <div className="rounded-lg border border-amber-200 bg-white overflow-hidden">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-amber-100 bg-amber-50/60 text-left text-xs text-muted-foreground">
-                    <th className="px-3 py-2 font-medium">Danışman Adı (CSV)</th>
-                    <th className="px-3 py-2 font-medium text-center">İlan</th>
-                    <th className="px-3 py-2 font-medium">Atanacak Çalışan</th>
-                    <th className="px-3 py-2 font-medium text-right">İşlem</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {unmatchedAdvisors.map((row) => (
-                    <UnmatchedAssignRow
-                      key={row.advisorName}
-                      advisorName={row.advisorName}
-                      count={row.count}
-                      suggestions={fuzzyMap[row.advisorName] ?? []}
-                      selectedId={nameAssignments[row.advisorName]}
-                      isAssigning={assigningNames.has(row.advisorName)}
-                      activeEmployees={activeEmployees}
-                      onSelect={handleAdvisorSelect}
-                      onAssign={assignByName}
-                    />
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* Notification Status Panel */}
-        {tab === "notifyStatus" && (
-          <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-wrap gap-3">
-              <div className="flex items-center gap-3 flex-wrap">
-                <div>
-                  <h2 className="text-sm font-semibold">WhatsApp Bildirim Durumu</h2>
-                  <p className="text-xs text-muted-foreground mt-0.5">Bekleyen ilanı olan danışmanlar</p>
-                </div>
-                {/* Filter toggle */}
-                <div className="flex items-center gap-0.5 bg-muted rounded-lg p-0.5">
-                  <button
-                    onClick={() => setNotifyFilter("unsent")}
-                    className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${notifyFilter === "unsent" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-                  >
-                    Hiç / {NOTIFY_COOLDOWN_DAYS}+ gün önce ({notifyStatusRows.filter((r) => r.totalPending > 0 && (!r.lastNotifiedAt || (Date.now() - new Date(r.lastNotifiedAt).getTime()) > NOTIFY_COOLDOWN_MS)).length})
-                  </button>
-                  <button
-                    onClick={() => setNotifyFilter("all")}
-                    className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${notifyFilter === "all" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-                  >
-                    Tümü ({notifyStatusRows.filter((r) => r.totalPending > 0).length})
-                  </button>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-xs gap-1.5"
-                  onClick={() => { refetchNotifyStatus(); setWpStatuses({}); }}
-                >
-                  <RefreshCw className="h-3 w-3" /> Yenile
+            {/* Date filter + bulk notify buttons */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-muted-foreground">Yayın tarihi:</span>
+              <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="h-8 w-36 text-xs" />
+              <span className="text-xs text-muted-foreground">—</span>
+              <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="h-8 w-36 text-xs" />
+              {(dateFrom || dateTo) && (
+                <button onClick={() => { setDateFrom(""); setDateTo(""); }} className="text-xs text-muted-foreground hover:text-foreground underline">Temizle</button>
+              )}
+              <div className="ml-auto flex gap-2">
+                <Button size="sm" className="h-8 text-xs gap-1.5" disabled={bulkSending || bulkNotifyCount === 0} onClick={handleBulkNotify}>
+                  {bulkSending ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <MessageSquare className="h-3.5 w-3.5" />}
+                  Toplu WA ({bulkNotifyCount} danışman)
                 </Button>
-                <Button
-                  size="sm"
-                  className="h-7 text-xs gap-1.5"
-                  onClick={handleNotifyBulkSend}
-                  disabled={bulkSending || filteredNotifyRows.length === 0}
-                >
-                  {bulkSending
-                    ? <RefreshCw className="h-3 w-3 animate-spin" />
-                    : <Send className="h-3 w-3" />}
-                  Toplu Gönder ({filteredNotifyRows.length} danışman)
+                <Button size="sm" variant="outline" className="h-8 text-xs gap-1.5 border-blue-300 text-blue-700 hover:bg-blue-50" disabled={bulkEmailSending || bulkNotifyCount === 0} onClick={handleBulkEmailNotify}>
+                  {bulkEmailSending ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Mail className="h-3.5 w-3.5" />}
+                  Toplu Email ({bulkNotifyCount} danışman)
                 </Button>
               </div>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border bg-muted/40 text-left text-xs text-muted-foreground">
-                    <th className="px-3 py-2.5 font-medium">Danışman</th>
-                    <th className="px-3 py-2.5 font-medium">Telefon</th>
-                    <th className="px-3 py-2.5 font-medium">Email</th>
-                    <th className="px-3 py-2.5 font-medium text-center">Bekleyen İlan</th>
-                    <th className="px-3 py-2.5 font-medium">Son WA Bildirimi</th>
-                    <th className="px-3 py-2.5 font-medium">Son Email Bildirimi</th>
-                    <th className="px-3 py-2.5 font-medium">WP Durumu</th>
-                    <th className="px-3 py-2.5 font-medium text-right">İşlem</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredNotifyRows.length === 0 ? (
-                    <tr><td colSpan={8} className="px-3 py-10 text-center text-muted-foreground">
-                      {notifyFilter === "unsent" ? `Son ${NOTIFY_COOLDOWN_DAYS} gün içinde bildirim gönderilmemiş danışman yok.` : "Bekleyen ilan bulunamadı."}
-                    </td></tr>
-                  ) : filteredNotifyRows.map((row) => {
-                    const wpStatus = wpStatuses[row.id];
-                    const isChecking = wpCheckingIds.has(row.id);
-                    const notified = !!row.lastNotifiedAt;
-                    const hasMsgId = !!row.notifyMsgId;
 
-                    const wpBadge = () => {
-                      if (isChecking) return <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground"><RefreshCw className="h-2.5 w-2.5 animate-spin" />Sorgulanıyor</span>;
-                      if (!hasMsgId) return <span className="text-[11px] text-muted-foreground">—</span>;
-                      if (wpStatus === null || wpStatus === undefined) return <span className="text-[11px] text-muted-foreground italic">Sorgulanmadı</span>;
-                      const map: Record<string, { label: string; cls: string }> = {
-                        pending:   { label: "Bekliyor",   cls: "bg-yellow-100 text-yellow-700" },
-                        sent:      { label: "Gönderildi", cls: "bg-blue-100 text-blue-700" },
-                        delivered: { label: "İletildi",   cls: "bg-emerald-100 text-emerald-700" },
-                        read:      { label: "Okundu",     cls: "bg-emerald-200 text-emerald-800" },
-                        played:    { label: "Oynatıldı",  cls: "bg-emerald-200 text-emerald-800" },
-                        failed:    { label: "Başarısız",  cls: "bg-red-100 text-red-700" },
-                      };
-                      const m = map[wpStatus] ?? { label: wpStatus, cls: "bg-slate-100 text-slate-600" };
-                      return <span className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full ${m.cls}`}>{m.label}</span>;
-                    };
+            {/* Bulk WA progress */}
+            {bulkStatus && (bulkStatus.active || bulkStatus.done) && (
+              <div className={`rounded-xl border bg-card p-4 space-y-2 ${bulkStatus.stopped ? "border-orange-300" : "border-border"}`}>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium flex items-center gap-2">
+                    {bulkStatus.active && !stopBulkRef.current
+                      ? <><RefreshCw className="h-4 w-4 animate-spin text-primary" /> WhatsApp gönderimi devam ediyor…</>
+                      : bulkStatus.active && stopBulkRef.current
+                      ? <><RefreshCw className="h-4 w-4 animate-spin text-orange-500" /> Durduruluyor…</>
+                      : bulkStatus.stopped
+                      ? <><span className="text-orange-500">⏹</span> Gönderim durduruldu</>
+                      : <><CheckCircle2 className="h-4 w-4 text-emerald-600" /> Gönderim tamamlandı</>}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    {bulkStatus.active && (
+                      <button onClick={stopBulkNotify} disabled={stopBulkRef.current} className="text-xs px-2 py-1 rounded bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-50 font-medium">Durdur</button>
+                    )}
+                    {bulkStatus.done && (
+                      <button onClick={() => setBulkStatus(null)} className="text-xs text-muted-foreground hover:text-foreground">Kapat</button>
+                    )}
+                  </div>
+                </div>
+                <div className="w-full bg-muted rounded-full h-2">
+                  <div
+                    className={`h-2 rounded-full transition-all duration-500 ${bulkStatus.stopped ? "bg-orange-400" : "bg-primary"}`}
+                    style={{ width: `${bulkStatus.total ? Math.round((bulkStatus.sent + bulkStatus.skipped + bulkStatus.failed) / bulkStatus.total * 100) : 0}%` }}
+                  />
+                </div>
+                <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
+                  <span>Toplam: <b>{bulkStatus.total}</b></span>
+                  <span className="text-emerald-600">Gönderildi: <b>{bulkStatus.sent}</b></span>
+                  <span>Atlandı: <b>{bulkStatus.skipped}</b></span>
+                  {bulkStatus.failed > 0 && <span className="text-red-600">Hata: <b>{bulkStatus.failed}</b></span>}
+                  {bulkStatus.current && <span className="text-primary">Şu an: <b>{bulkStatus.current}</b></span>}
+                </div>
+              </div>
+            )}
 
-                    return (
-                      <tr key={row.id} className="border-b border-border last:border-0 hover:bg-muted/30">
+            {/* Bulk email progress */}
+            {bulkEmailStatus && (bulkEmailStatus.active || bulkEmailStatus.done) && (
+              <div className={`rounded-xl border bg-card p-4 space-y-2 ${bulkEmailStatus.stopped ? "border-orange-300" : "border-blue-200"}`}>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium flex items-center gap-2">
+                    {bulkEmailStatus.active && !stopBulkEmailRef.current
+                      ? <><RefreshCw className="h-4 w-4 animate-spin text-blue-600" /> Email gönderimi devam ediyor…</>
+                      : bulkEmailStatus.active && stopBulkEmailRef.current
+                      ? <><RefreshCw className="h-4 w-4 animate-spin text-orange-500" /> Durduruluyor…</>
+                      : bulkEmailStatus.stopped
+                      ? <><span className="text-orange-500">⏹</span> Gönderim durduruldu</>
+                      : <><CheckCircle2 className="h-4 w-4 text-emerald-600" /> Email gönderimi tamamlandı</>}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    {bulkEmailStatus.active && (
+                      <button onClick={stopBulkEmailNotify} disabled={stopBulkEmailRef.current} className="text-xs px-2 py-1 rounded bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-50 font-medium">Durdur</button>
+                    )}
+                    {bulkEmailStatus.done && (
+                      <button onClick={() => setBulkEmailStatus(null)} className="text-xs text-muted-foreground hover:text-foreground">Kapat</button>
+                    )}
+                  </div>
+                </div>
+                <div className="w-full bg-muted rounded-full h-2">
+                  <div
+                    className={`h-2 rounded-full transition-all duration-500 ${bulkEmailStatus.stopped ? "bg-orange-400" : "bg-blue-500"}`}
+                    style={{ width: `${bulkEmailStatus.total ? Math.round((bulkEmailStatus.sent + bulkEmailStatus.skipped + bulkEmailStatus.failed) / bulkEmailStatus.total * 100) : 0}%` }}
+                  />
+                </div>
+                <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
+                  <span>Toplam: <b>{bulkEmailStatus.total}</b></span>
+                  <span className="text-emerald-600">Gönderildi: <b>{bulkEmailStatus.sent}</b></span>
+                  <span>Atlandı: <b>{bulkEmailStatus.skipped}</b></span>
+                  {bulkEmailStatus.failed > 0 && <span className="text-red-600">Hata: <b>{bulkEmailStatus.failed}</b></span>}
+                  {bulkEmailStatus.current && <span className="text-blue-600">Şu an: <b>{bulkEmailStatus.current}</b></span>}
+                </div>
+              </div>
+            )}
+
+            {/* Main listings table */}
+            <div className="rounded-xl border border-border bg-card overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/40 text-left text-xs text-muted-foreground">
+                      <th className="px-3 py-2.5 font-medium">İlan No</th>
+                      <th className="px-3 py-2.5 font-medium">Danışman</th>
+                      <th className="px-3 py-2.5 font-medium">Telefon</th>
+                      <th className="px-3 py-2.5 font-medium">Fiyat</th>
+                      <th className="px-3 py-2.5 font-medium">Yayın</th>
+                      <th className="px-3 py-2.5 font-medium">Yaş</th>
+                      <th className="px-3 py-2.5 font-medium">Durum</th>
+                      <th className="px-3 py-2.5 font-medium">Pasife Geçiş</th>
+                      <th className="px-3 py-2.5 font-medium">Yetki Sözleşmesi</th>
+                      <th className="px-3 py-2.5 font-medium">Kalkış Sebebi</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {isLoading ? (
+                      <tr><td colSpan={10} className="px-3 py-10 text-center text-muted-foreground">Yükleniyor…</td></tr>
+                    ) : filteredRows.length === 0 ? (
+                      <tr><td colSpan={10} className="px-3 py-10 text-center text-muted-foreground">Kayıt yok.</td></tr>
+                    ) : pageRows.map((l) => (
+                      <tr key={l.id} className="border-b border-border last:border-0 hover:bg-muted/30">
+                        <td className="px-3 py-2.5 font-mono text-xs">{l.listingNumber}</td>
                         <td className="px-3 py-2.5">
-                          <div className="font-medium text-sm">{row.name}</div>
-                        </td>
-                        <td className="px-3 py-2.5 text-xs text-muted-foreground">
-                          {row.phone
-                            ? row.phone
-                            : <span className="text-red-500 font-medium">Eksik</span>}
-                        </td>
-                        <td className="px-3 py-2.5 text-xs text-muted-foreground">
-                          {row.email
-                            ? <span className="truncate max-w-[160px] block">{row.email}</span>
-                            : <span className="text-red-500 font-medium">Eksik</span>}
-                        </td>
-                        <td className="px-3 py-2.5 text-center">
-                          <div className="flex items-center justify-center gap-2">
-                            {row.activePending > 0 && (
-                              <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
-                                {row.activePending} sözleşme
-                              </span>
-                            )}
-                            {row.passivePending > 0 && (
-                              <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-violet-100 text-violet-700">
-                                {row.passivePending} kapanış
-                              </span>
-                            )}
-                            {row.totalPending === 0 && <span className="text-[11px] text-muted-foreground">—</span>}
-                          </div>
-                        </td>
-                        <td className="px-3 py-2.5">
-                          {notified ? (
-                            <div className="flex items-center gap-1.5">
-                              <Bell className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
-                              <span className="text-xs">{new Date(row.lastNotifiedAt!).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
-                            </div>
+                          {l.employeeId ? (
+                            <>
+                              <div className="font-medium">{l.employeeName ?? l.advisorName ?? "—"}</div>
+                              {l.office && <div className="text-[11px] text-muted-foreground truncate max-w-[160px]">{l.office}</div>}
+                              <div className="flex items-center gap-1 mt-1">
+                                <button onClick={() => openAdvisorLink(l.employeeId!)} disabled={linkLoadingIds.has(l.employeeId!)} title="Danışman toplu sayfasını aç (/a/token)" className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-50">
+                                  {linkLoadingIds.has(l.employeeId!) ? <RefreshCw className="h-2.5 w-2.5 animate-spin" /> : <Link2 className="h-2.5 w-2.5" />} Linki Aç
+                                </button>
+                                <button onClick={() => sendNotify(l.employeeId!, "wa")} disabled={sendingIds.has(l.employeeId!)} title="WhatsApp gönder" className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-green-50 text-green-700 hover:bg-green-100 disabled:opacity-50">
+                                  {sendingIds.has(l.employeeId!) ? <RefreshCw className="h-2.5 w-2.5 animate-spin" /> : <Send className="h-2.5 w-2.5" />} WA
+                                </button>
+                                <button onClick={() => sendNotify(l.employeeId!, "email")} disabled={emailSendingIds.has(l.employeeId!)} title="Email gönder" className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 hover:bg-blue-100 disabled:opacity-50">
+                                  {emailSendingIds.has(l.employeeId!) ? <RefreshCw className="h-2.5 w-2.5 animate-spin" /> : <Mail className="h-2.5 w-2.5" />} Mail
+                                </button>
+                              </div>
+                            </>
                           ) : (
-                            <div className="flex items-center gap-1.5">
-                              <BellOff className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                              <span className="text-xs text-muted-foreground">—</span>
+                            <div className="space-y-1">
+                              {l.advisorName && <div className="text-[11px] text-muted-foreground">{l.advisorName}</div>}
+                              <Select value="" onValueChange={(v) => assignEmployee(l.id, v === "none" ? null : Number(v))} disabled={assigningIds.has(l.id)}>
+                                <SelectTrigger className="h-7 text-xs w-40">
+                                  <SelectValue placeholder={assigningIds.has(l.id) ? "Atanıyor…" : "Danışman ata…"} />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {activeEmployees.map((e: any) => (
+                                    <SelectItem key={e.id} value={String(e.id)} className="text-xs">{e.candidate?.name ?? `#${e.id}`}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
                             </div>
                           )}
                         </td>
+                        <td className="px-3 py-2.5 whitespace-nowrap text-xs">
+                          {l.employeePhone ? <a href={`tel:${l.employeePhone}`} className="text-primary hover:underline">{l.employeePhone}</a> : <span className="text-muted-foreground">—</span>}
+                        </td>
+                        <td className="px-3 py-2.5 whitespace-nowrap">{fmtPrice(l.price)}</td>
+                        <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap">{l.publishedDate ?? "—"}</td>
+                        <td className="px-3 py-2.5 whitespace-nowrap">
+                          {l.publishedDate ? (() => {
+                            const d = new Date(l.publishedDate);
+                            if (isNaN(d.getTime())) return <span className="text-xs text-muted-foreground">—</span>;
+                            const age = Math.floor((Date.now() - d.getTime()) / 86400000);
+                            if (age < 0) return <span className="text-xs text-muted-foreground">—</span>;
+                            const cls = age > 90 ? "text-red-600 font-bold" : age > 60 ? "text-red-500 font-semibold" : age > 30 ? "text-orange-500 font-medium" : "text-muted-foreground";
+                            return <span className={`text-xs ${cls}`}>{age}g</span>;
+                          })() : <span className="text-xs text-muted-foreground">—</span>}
+                        </td>
                         <td className="px-3 py-2.5">
-                          {row.lastEmailNotifiedAt ? (
-                            <div className="flex items-center gap-1.5">
-                              <Mail className="h-3.5 w-3.5 text-blue-600 shrink-0" />
-                              <span className="text-xs">{new Date(row.lastEmailNotifiedAt).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
-                            </div>
+                          {l.status === "active"
+                            ? <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Aktif</span>
+                            : <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-slate-200 text-slate-600">Pasif</span>}
+                        </td>
+                        <td className="px-3 py-2.5 whitespace-nowrap text-xs text-muted-foreground">
+                          {l.passiveAt ? new Date(l.passiveAt).toLocaleDateString("tr-TR") : "—"}
+                        </td>
+                        <td className="px-3 py-2.5">
+                          {l.agreementUploadedAt ? (
+                            <button onClick={() => setViewer(l)} className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 hover:bg-emerald-200">
+                              <FileCheck2 className="h-3 w-3" /> Görüntüle
+                            </button>
+                          ) : l.noAgreementAt ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-slate-200 text-slate-600">Sözleşme Yok</span>
+                          ) : l.agreementRequestedAt ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700"><Clock className="h-3 w-3" /> İstendi</span>
                           ) : (
-                            <div className="flex items-center gap-1.5">
-                              <BellOff className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                              <span className="text-xs text-muted-foreground">—</span>
-                            </div>
+                            <span className="text-[11px] text-muted-foreground">—</span>
                           )}
                         </td>
-                        <td className="px-3 py-2.5">{wpBadge()}</td>
-                        <td className="px-3 py-2.5 text-right">
-                          <div className="flex items-center justify-end gap-1.5">
-                            {hasMsgId && (
-                              <button
-                                onClick={() => checkWpStatus(row.id, row.phone, row.notifyMsgId)}
-                                disabled={isChecking}
-                                className="inline-flex items-center gap-0.5 text-[10px] px-2 py-1 rounded bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-50"
-                              >
-                                {isChecking ? <RefreshCw className="h-2.5 w-2.5 animate-spin" /> : <RefreshCw className="h-2.5 w-2.5" />}
-                                Durumu Sorgula
-                              </button>
-                            )}
-                            {row.totalPending > 0 && (
-                              <button
-                                onClick={() => sendNotify(row.id)}
-                                disabled={sendingIds.has(row.id)}
-                                className="inline-flex items-center gap-0.5 text-[10px] px-2 py-1 rounded bg-green-50 text-green-700 hover:bg-green-100 disabled:opacity-50"
-                              >
-                                {sendingIds.has(row.id) ? <RefreshCw className="h-2.5 w-2.5 animate-spin" /> : <Send className="h-2.5 w-2.5" />}
-                                {notified ? "Tekrar Gönder" : "Bildir"}
-                              </button>
-                            )}
-                          </div>
+                        <td className="px-3 py-2.5">
+                          {l.closeReasonSubmittedAt ? (
+                            <div>
+                              <span className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full ${l.closeReason === "Satıldı" || l.closeReason === "Kiralandı" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{l.closeReason}</span>
+                              {l.closeReasonNote && <div className="text-[11px] text-muted-foreground mt-0.5 max-w-[180px] truncate">{l.closeReasonNote}</div>}
+                            </div>
+                          ) : l.status === "passive" ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-violet-100 text-violet-700"><Clock className="h-3 w-3" /> Bekliyor</span>
+                          ) : (
+                            <span className="text-[11px] text-muted-foreground">—</span>
+                          )}
                         </td>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {filteredRows.length > PAGE_SIZE && (
+                <div className="flex items-center justify-between px-3 py-2.5 border-t border-border text-xs text-muted-foreground">
+                  <span>{page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, filteredRows.length)} / {filteredRows.length}</span>
+                  <div className="flex items-center gap-1">
+                    <button disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))} className="p-1.5 rounded-md hover:bg-muted disabled:opacity-40"><ChevronLeft className="h-4 w-4" /></button>
+                    <span className="px-2">{page + 1} / {pageCount}</span>
+                    <button disabled={page >= pageCount - 1} onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))} className="p-1.5 rounded-md hover:bg-muted disabled:opacity-40"><ChevronRight className="h-4 w-4" /></button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
 
-        {/* Table */}
-        {tab !== "notifyStatus" && <div className="rounded-xl border border-border bg-card overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border bg-muted/40 text-left text-xs text-muted-foreground">
-                  <th className="px-3 py-2.5 font-medium">İlan No</th>
-                  <th className="px-3 py-2.5 font-medium">Danışman</th>
-                  <th className="px-3 py-2.5 font-medium">Telefon</th>
-                  <th className="px-3 py-2.5 font-medium">Fiyat</th>
-                  <th className="px-3 py-2.5 font-medium">Yayın</th>
-                  <th className="px-3 py-2.5 font-medium">Yaş</th>
-                  <th className="px-3 py-2.5 font-medium">Durum</th>
-                  <th className="px-3 py-2.5 font-medium">Pasife Geçiş</th>
-                  <th className="px-3 py-2.5 font-medium">Yetki Sözleşmesi</th>
-                  <th className="px-3 py-2.5 font-medium">Kalkış Sebebi</th>
-                </tr>
-              </thead>
-              <tbody>
-                {isLoading ? (
-                  <tr><td colSpan={10} className="px-3 py-10 text-center text-muted-foreground">Yükleniyor…</td></tr>
-                ) : filteredRows.length === 0 ? (
-                  <tr><td colSpan={10} className="px-3 py-10 text-center text-muted-foreground">Kayıt yok.</td></tr>
-                ) : pageRows.map((l) => (
-                  <tr key={l.id} className="border-b border-border last:border-0 hover:bg-muted/30">
-                    <td className="px-3 py-2.5 font-mono text-xs">{l.listingNumber}</td>
-                    <td className="px-3 py-2.5">
-                      {l.employeeId ? (
-                        <>
-                          <div className="font-medium">{l.employeeName ?? l.advisorName ?? "—"}</div>
-                          {l.office && <div className="text-[11px] text-muted-foreground truncate max-w-[160px]">{l.office}</div>}
-                          <div className="flex items-center gap-1 mt-1">
-                            <button
-                              onClick={() => openAdvisorLink(l.employeeId!)}
-                              disabled={linkLoadingIds.has(l.employeeId!)}
-                              title="Danışman toplu sayfasını aç (/a/token)"
-                              className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-50"
-                            >
-                              {linkLoadingIds.has(l.employeeId!) ? <RefreshCw className="h-2.5 w-2.5 animate-spin" /> : <Link2 className="h-2.5 w-2.5" />}
-                              Linki Aç
-                            </button>
-                            <button
-                              onClick={() => sendNotify(l.employeeId!, "wa")}
-                              disabled={sendingIds.has(l.employeeId!)}
-                              title="WhatsApp gönder"
-                              className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-green-50 text-green-700 hover:bg-green-100 disabled:opacity-50"
-                            >
-                              {sendingIds.has(l.employeeId!) ? <RefreshCw className="h-2.5 w-2.5 animate-spin" /> : <Send className="h-2.5 w-2.5" />}
-                              WA
-                            </button>
-                            <button
-                              onClick={() => sendNotify(l.employeeId!, "email")}
-                              disabled={emailSendingIds.has(l.employeeId!)}
-                              title="Email gönder"
-                              className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 hover:bg-blue-100 disabled:opacity-50"
-                            >
-                              {emailSendingIds.has(l.employeeId!) ? <RefreshCw className="h-2.5 w-2.5 animate-spin" /> : <Mail className="h-2.5 w-2.5" />}
-                              Mail
-                            </button>
-                          </div>
-                        </>
-                      ) : (
-                        <div className="space-y-1">
-                          {l.advisorName && <div className="text-[11px] text-muted-foreground">{l.advisorName}</div>}
-                          <Select
-                            value=""
-                            onValueChange={(v) => assignEmployee(l.id, v === "none" ? null : Number(v))}
-                            disabled={assigningIds.has(l.id)}
-                          >
+        {/* ── Tab: Eşleşme ──────────────────────────────────── */}
+        {mainTab === "unmatched" && (
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">CSV'den gelen ama sisteme eşleşemeyen danışman isimleri. Sarı satırlar fuzzy eşleşme öneren danışmanları gösterir.</p>
+            {unmatchedAdvisors.length > 0 ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-3">
+                <div className="text-sm font-semibold text-amber-800">İsim Bazlı Toplu Atama</div>
+                <p className="text-xs text-amber-700">Her danışman adı için bir çalışan seçip "Ata" butonuna basın. Sarı öneri satırları fuzzy eşleşme bulunanları gösterir.</p>
+                <div className="rounded-lg border border-amber-200 bg-white overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-amber-100 bg-amber-50/60 text-left text-xs text-muted-foreground">
+                        <th className="px-3 py-2 font-medium">Danışman Adı (CSV)</th>
+                        <th className="px-3 py-2 font-medium text-center">İlan</th>
+                        <th className="px-3 py-2 font-medium">Atanacak Çalışan</th>
+                        <th className="px-3 py-2 font-medium text-right">İşlem</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {unmatchedAdvisors.map((row) => (
+                        <UnmatchedAssignRow
+                          key={row.advisorName}
+                          advisorName={row.advisorName}
+                          count={row.count}
+                          suggestions={fuzzyMap[row.advisorName] ?? []}
+                          selectedId={nameAssignments[row.advisorName]}
+                          isAssigning={assigningNames.has(row.advisorName)}
+                          activeEmployees={activeEmployees}
+                          onSelect={handleAdvisorSelect}
+                          onAssign={assignByName}
+                        />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-border bg-muted/20 p-6 text-center text-sm text-muted-foreground">
+                Eşleşmeyen danışman yok.
+              </div>
+            )}
+            {/* Unmatched listings table */}
+            <div className="rounded-xl border border-border bg-card overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/40 text-left text-xs text-muted-foreground">
+                      <th className="px-3 py-2.5 font-medium">İlan No</th>
+                      <th className="px-3 py-2.5 font-medium">Danışman (CSV)</th>
+                      <th className="px-3 py-2.5 font-medium">Fiyat</th>
+                      <th className="px-3 py-2.5 font-medium">Yayın</th>
+                      <th className="px-3 py-2.5 font-medium">Durum</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {isLoading ? (
+                      <tr><td colSpan={5} className="px-3 py-10 text-center text-muted-foreground">Yükleniyor…</td></tr>
+                    ) : filteredRows.length === 0 ? (
+                      <tr><td colSpan={5} className="px-3 py-10 text-center text-muted-foreground">Eşleşmeyen ilan yok.</td></tr>
+                    ) : pageRows.map((l) => (
+                      <tr key={l.id} className="border-b border-border last:border-0 hover:bg-muted/30">
+                        <td className="px-3 py-2.5 font-mono text-xs">{l.listingNumber}</td>
+                        <td className="px-3 py-2.5">
+                          {l.advisorName && <div className="text-xs text-muted-foreground mb-1">{l.advisorName}</div>}
+                          <Select value="" onValueChange={(v) => assignEmployee(l.id, Number(v))} disabled={assigningIds.has(l.id)}>
                             <SelectTrigger className="h-7 text-xs w-40">
                               <SelectValue placeholder={assigningIds.has(l.id) ? "Atanıyor…" : "Danışman ata…"} />
                             </SelectTrigger>
                             <SelectContent>
                               {activeEmployees.map((e: any) => (
-                                <SelectItem key={e.id} value={String(e.id)} className="text-xs">
-                                  {e.candidate?.name ?? `#${e.id}`}
-                                </SelectItem>
+                                <SelectItem key={e.id} value={String(e.id)} className="text-xs">{e.candidate?.name ?? `#${e.id}`}</SelectItem>
                               ))}
                             </SelectContent>
                           </Select>
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-3 py-2.5 whitespace-nowrap text-xs">
-                      {l.employeePhone ? (
-                        <a href={`tel:${l.employeePhone}`} className="text-primary hover:underline">{l.employeePhone}</a>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2.5 whitespace-nowrap">{fmtPrice(l.price)}</td>
-                    <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap">{l.publishedDate ?? "—"}</td>
-                    <td className="px-3 py-2.5 whitespace-nowrap">
-                      {l.publishedDate ? (() => {
-                        const raw = l.publishedDate;
-                        // handle both "M/D/YYYY" and "Mon DD, YYYY"
-                        const d = new Date(raw);
-                        if (isNaN(d.getTime())) return <span className="text-xs text-muted-foreground">—</span>;
-                        const age = Math.floor((Date.now() - d.getTime()) / 86400000);
-                        if (age < 0) return <span className="text-xs text-muted-foreground">—</span>;
-                        const cls = age > 90
-                          ? "text-red-600 font-bold"
-                          : age > 60
-                          ? "text-red-500 font-semibold"
-                          : age > 30
-                          ? "text-orange-500 font-medium"
-                          : "text-muted-foreground";
-                        return <span className={`text-xs ${cls}`}>{age}g</span>;
-                      })() : <span className="text-xs text-muted-foreground">—</span>}
-                    </td>
-                    <td className="px-3 py-2.5">
-                      {l.status === "active" ? (
-                        <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Aktif</span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-slate-200 text-slate-600">Pasif</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2.5 whitespace-nowrap text-xs text-muted-foreground">
-                      {l.passiveAt ? new Date(l.passiveAt).toLocaleDateString("tr-TR") : "—"}
-                    </td>
-                    <td className="px-3 py-2.5">
-                      {l.agreementUploadedAt ? (
-                        <button
-                          onClick={() => setViewer(l)}
-                          className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
-                        >
-                          <FileCheck2 className="h-3 w-3" /> Görüntüle
-                        </button>
-                      ) : l.noAgreementAt ? (
-                        <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-slate-200 text-slate-600">
-                          Sözleşme Yok
-                        </span>
-                      ) : l.agreementRequestedAt ? (
-                        <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
-                          <Clock className="h-3 w-3" /> İstendi
-                        </span>
-                      ) : (
-                        <span className="text-[11px] text-muted-foreground">—</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2.5">
-                      {l.closeReasonSubmittedAt ? (
-                        <div>
-                          <span className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full ${
-                            l.closeReason === "Satıldı" || l.closeReason === "Kiralandı"
-                              ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"
-                          }`}>{l.closeReason}</span>
-                          {l.closeReasonNote && <div className="text-[11px] text-muted-foreground mt-0.5 max-w-[180px] truncate">{l.closeReasonNote}</div>}
-                        </div>
-                      ) : l.status === "passive" ? (
-                        <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-violet-100 text-violet-700">
-                          <Clock className="h-3 w-3" /> Bekliyor
-                        </span>
-                      ) : (
-                        <span className="text-[11px] text-muted-foreground">—</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                        </td>
+                        <td className="px-3 py-2.5 whitespace-nowrap">{fmtPrice(l.price)}</td>
+                        <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap">{l.publishedDate ?? "—"}</td>
+                        <td className="px-3 py-2.5">
+                          {l.status === "active"
+                            ? <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Aktif</span>
+                            : <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-slate-200 text-slate-600">Pasif</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {filteredRows.length > PAGE_SIZE && (
+                <div className="flex items-center justify-between px-3 py-2.5 border-t border-border text-xs text-muted-foreground">
+                  <span>{page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, filteredRows.length)} / {filteredRows.length}</span>
+                  <div className="flex items-center gap-1">
+                    <button disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))} className="p-1.5 rounded-md hover:bg-muted disabled:opacity-40"><ChevronLeft className="h-4 w-4" /></button>
+                    <span className="px-2">{page + 1} / {pageCount}</span>
+                    <button disabled={page >= pageCount - 1} onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))} className="p-1.5 rounded-md hover:bg-muted disabled:opacity-40"><ChevronRight className="h-4 w-4" /></button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
-          {/* Pager */}
-          {filteredRows.length > PAGE_SIZE && (
-            <div className="flex items-center justify-between px-3 py-2.5 border-t border-border text-xs text-muted-foreground">
-              <span>
-                {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, filteredRows.length)} / {filteredRows.length}
-              </span>
-              <div className="flex items-center gap-1">
-                <button
-                  disabled={page === 0}
-                  onClick={() => setPage((p) => Math.max(0, p - 1))}
-                  className="p-1.5 rounded-md hover:bg-muted disabled:opacity-40"
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </button>
-                <span className="px-2">{page + 1} / {pageCount}</span>
-                <button
-                  disabled={page >= pageCount - 1}
-                  onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
-                  className="p-1.5 rounded-md hover:bg-muted disabled:opacity-40"
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </button>
+        )}
+
+        {/* ── Tab: Bildirimler ──────────────────────────────── */}
+        {mainTab === "notifications" && (
+          <div className="space-y-4">
+            <div className="rounded-xl border border-border bg-card overflow-hidden">
+              <div className="px-4 py-3 border-b border-border space-y-3">
+                <div className="flex items-center justify-between flex-wrap gap-3">
+                  <div className="flex items-center gap-3 flex-wrap">
+                    {/* Channel filter */}
+                    <div className="flex items-center gap-0.5 bg-muted rounded-lg p-0.5">
+                      {([
+                        { key: "both" as const, label: "WA & Email" },
+                        { key: "wa" as const, label: "WhatsApp" },
+                        { key: "email" as const, label: "Email" },
+                      ]).map((c) => (
+                        <button key={c.key} onClick={() => setNotifyChannelFilter(c.key)}
+                          className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${notifyChannelFilter === c.key ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+                          {c.label}
+                        </button>
+                      ))}
+                    </div>
+                    {/* Cooldown days */}
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-muted-foreground">Son</span>
+                      <input
+                        type="number" min={1} max={90} value={cooldownDays}
+                        onChange={(e) => setCooldownDays(Math.max(1, Math.min(90, Number(e.target.value))))}
+                        className="w-14 h-7 text-xs border border-input rounded px-2 text-center bg-background"
+                      />
+                      <span className="text-xs text-muted-foreground">günde bildirim gitmeyenler</span>
+                    </div>
+                    {/* Overdue/All toggle */}
+                    <div className="flex items-center gap-0.5 bg-muted rounded-lg p-0.5">
+                      <button onClick={() => setNotifyFilter("overdue")}
+                        className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${notifyFilter === "overdue" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+                        Gecikmiş ({filteredNotifyRows.length})
+                      </button>
+                      <button onClick={() => setNotifyFilter("all")}
+                        className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${notifyFilter === "all" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+                        Tümü ({notifyStatusRows.filter((r) => r.totalPending > 0).length})
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5" onClick={() => { refetchNotifyStatus(); setWpStatuses({}); }}>
+                      <RefreshCw className="h-3 w-3" /> Yenile
+                    </Button>
+                    <Button size="sm" className="h-7 text-xs gap-1.5" onClick={handleNotifyBulkSend} disabled={bulkSending || filteredNotifyRows.length === 0}>
+                      {bulkSending ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+                      Toplu Gönder ({filteredNotifyRows.length} danışman)
+                    </Button>
+                  </div>
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/40 text-left text-xs text-muted-foreground">
+                      <th className="px-3 py-2.5 font-medium">Danışman</th>
+                      <th className="px-3 py-2.5 font-medium">Telefon</th>
+                      <th className="px-3 py-2.5 font-medium">Email</th>
+                      <th className="px-3 py-2.5 font-medium text-center">Bekleyen İlan</th>
+                      <th className="px-3 py-2.5 font-medium">Son WA Bildirimi</th>
+                      <th className="px-3 py-2.5 font-medium">Son Email Bildirimi</th>
+                      <th className="px-3 py-2.5 font-medium">WP Durumu</th>
+                      <th className="px-3 py-2.5 font-medium text-right">İşlem</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredNotifyRows.length === 0 ? (
+                      <tr><td colSpan={8} className="px-3 py-10 text-center text-muted-foreground">
+                        {notifyFilter === "overdue" ? `Son ${cooldownDays} gün içinde bildirim gönderilmemiş danışman yok.` : "Bekleyen ilan bulunamadı."}
+                      </td></tr>
+                    ) : filteredNotifyRows.map((row) => {
+                      const wpStatus = wpStatuses[row.id];
+                      const isChecking = wpCheckingIds.has(row.id);
+                      const notified = !!row.lastNotifiedAt;
+                      const hasMsgId = !!row.notifyMsgId;
+                      const wpBadge = () => {
+                        if (isChecking) return <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground"><RefreshCw className="h-2.5 w-2.5 animate-spin" />Sorgulanıyor</span>;
+                        if (!hasMsgId) return <span className="text-[11px] text-muted-foreground">—</span>;
+                        if (wpStatus === null || wpStatus === undefined) return <span className="text-[11px] text-muted-foreground italic">Sorgulanmadı</span>;
+                        const wpMap: Record<string, { label: string; cls: string }> = {
+                          pending: { label: "Bekliyor", cls: "bg-yellow-100 text-yellow-700" },
+                          sent: { label: "Gönderildi", cls: "bg-blue-100 text-blue-700" },
+                          delivered: { label: "İletildi", cls: "bg-emerald-100 text-emerald-700" },
+                          read: { label: "Okundu", cls: "bg-emerald-200 text-emerald-800" },
+                          played: { label: "Oynatıldı", cls: "bg-emerald-200 text-emerald-800" },
+                          failed: { label: "Başarısız", cls: "bg-red-100 text-red-700" },
+                        };
+                        const m = wpMap[wpStatus] ?? { label: wpStatus, cls: "bg-slate-100 text-slate-600" };
+                        return <span className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full ${m.cls}`}>{m.label}</span>;
+                      };
+                      return (
+                        <tr key={row.id} className="border-b border-border last:border-0 hover:bg-muted/30">
+                          <td className="px-3 py-2.5"><div className="font-medium text-sm">{row.name}</div></td>
+                          <td className="px-3 py-2.5 text-xs text-muted-foreground">{row.phone ?? <span className="text-red-500 font-medium">Eksik</span>}</td>
+                          <td className="px-3 py-2.5 text-xs text-muted-foreground">{row.email ? <span className="truncate max-w-[160px] block">{row.email}</span> : <span className="text-red-500 font-medium">Eksik</span>}</td>
+                          <td className="px-3 py-2.5 text-center">
+                            <div className="flex items-center justify-center gap-2">
+                              {row.activePending > 0 && <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">{row.activePending} sözleşme</span>}
+                              {row.passivePending > 0 && <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-violet-100 text-violet-700">{row.passivePending} kapanış</span>}
+                              {row.totalPending === 0 && <span className="text-[11px] text-muted-foreground">—</span>}
+                            </div>
+                          </td>
+                          <td className="px-3 py-2.5">
+                            {notified
+                              ? <div className="flex items-center gap-1.5"><Bell className="h-3.5 w-3.5 text-emerald-600 shrink-0" /><span className="text-xs">{new Date(row.lastNotifiedAt!).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span></div>
+                              : <div className="flex items-center gap-1.5"><BellOff className="h-3.5 w-3.5 text-muted-foreground shrink-0" /><span className="text-xs text-muted-foreground">—</span></div>}
+                          </td>
+                          <td className="px-3 py-2.5">
+                            {row.lastEmailNotifiedAt
+                              ? <div className="flex items-center gap-1.5"><Mail className="h-3.5 w-3.5 text-blue-600 shrink-0" /><span className="text-xs">{new Date(row.lastEmailNotifiedAt).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span></div>
+                              : <div className="flex items-center gap-1.5"><BellOff className="h-3.5 w-3.5 text-muted-foreground shrink-0" /><span className="text-xs text-muted-foreground">—</span></div>}
+                          </td>
+                          <td className="px-3 py-2.5">{wpBadge()}</td>
+                          <td className="px-3 py-2.5 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              {hasMsgId && (
+                                <button onClick={() => checkWpStatus(row.id, row.phone, row.notifyMsgId)} disabled={isChecking}
+                                  className="inline-flex items-center gap-0.5 text-[10px] px-2 py-1 rounded bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-50">
+                                  {isChecking ? <RefreshCw className="h-2.5 w-2.5 animate-spin" /> : <RefreshCw className="h-2.5 w-2.5" />} Durumu Sorgula
+                                </button>
+                              )}
+                              {row.totalPending > 0 && (
+                                <button onClick={() => sendNotify(row.id)} disabled={sendingIds.has(row.id)}
+                                  className="inline-flex items-center gap-0.5 text-[10px] px-2 py-1 rounded bg-green-50 text-green-700 hover:bg-green-100 disabled:opacity-50">
+                                  {sendingIds.has(row.id) ? <RefreshCw className="h-2.5 w-2.5 animate-spin" /> : <Send className="h-2.5 w-2.5" />}
+                                  {notified ? "Tekrar Gönder" : "Bildir"}
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             </div>
-          )}
-        </div>}
+          </div>
+        )}
 
       </div>
 
@@ -1468,7 +1416,6 @@ export default function Listings() {
               )}
               {!viewerFilesLoading && viewerFiles.length > 0 && (
                 <>
-                  {/* File list */}
                   <div className="flex flex-wrap gap-2">
                     {viewerFiles.map((f) => (
                       <div key={f.id} className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs cursor-pointer transition-colors ${previewFile?.id === f.id ? "border-primary bg-primary/5 text-primary font-medium" : "border-border bg-muted/30 hover:bg-muted"}`}>
@@ -1493,7 +1440,6 @@ export default function Listings() {
                       </div>
                     ))}
                   </div>
-                  {/* Preview */}
                   {previewFile && (
                     <div className="rounded-lg border border-border bg-muted/30 overflow-hidden">
                       {previewFile.mime.startsWith("image/") ? (
