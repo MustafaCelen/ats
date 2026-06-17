@@ -1054,6 +1054,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (candidate.createdByUserId === req.user!.id) {
         return res.json(candidate);
       }
+      // Allow if the candidate is an active employee (danışman profili)
+      const emp = await storage.getEmployeeByCandidateId(candidate.id);
+      if (emp) return res.json(candidate);
       // Or if candidate has applied to one of HM's assigned jobs
       const filter = jobFilter(req);
       if (filter !== undefined) {
