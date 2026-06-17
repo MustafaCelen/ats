@@ -248,16 +248,16 @@ function TargetProgressCard({ label, actual, reelTarget, highTarget, color, form
   const barColor = meetsHigh ? "#f59e0b" : meetsReel ? "#10b981" : color;
 
   const badge = (pct: number, over: boolean, lbl: string) => (
-    <span className={`text-sm font-bold px-2 py-0.5 rounded-full ${over ? (lbl === "RF" ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700") : "bg-muted text-muted-foreground"}`}>
+    <span className={`text-sm font-bold px-2.5 py-1 rounded-full ${over ? (lbl === "RF" ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700") : "bg-muted text-muted-foreground"}`}>
       {lbl} %{Math.round(Math.min(100, pct))}
     </span>
   );
 
   return (
     <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-2">
-      <div className="flex items-center justify-between gap-1 flex-wrap">
-        <span className="text-xs font-medium text-muted-foreground">{label}</span>
-        <div className="flex gap-1.5">
+      <div className="flex items-start justify-between gap-2">
+        <span className="text-sm font-medium text-muted-foreground">{label}</span>
+        <div className="flex flex-col items-end gap-1 shrink-0">
           {effReel > 0 && badge(actual / effReel * 100, meetsReel, "F")}
           {effHigh > 0 && badge(actual / effHigh * 100, meetsHigh, "RF")}
         </div>
@@ -271,7 +271,7 @@ function TargetProgressCard({ label, actual, reelTarget, highTarget, color, form
             )}
             <div className="h-full rounded-full transition-all" style={{ width: `${barFill}%`, backgroundColor: barColor }} />
           </div>
-          <div className="flex justify-between text-xs text-muted-foreground">
+          <div className="flex flex-col gap-0.5 text-xs text-muted-foreground">
             {effReel > 0 && <span>Forecast: <span className="font-semibold text-foreground">{fmt(effReel)}</span></span>}
             {effHigh > 0 && <span>Re-Forecast: <span className="font-semibold text-foreground">{fmt(effHigh)}</span></span>}
           </div>
