@@ -3487,7 +3487,7 @@ export class DatabaseStorage implements IStorage {
       .leftJoin(candidates, eq(employees.candidateId, candidates.id))
       .where(conds.length ? and(...conds) : undefined)
       .orderBy(desc(listings.updatedAt))
-      .limit(2000);
+      .limit(10000);
 
     return rows.map((r) => ({
       ...r.l,

@@ -403,6 +403,7 @@ export default function Listings() {
   const [page, setPage] = useState(0);
   const PAGE_SIZE = 50;
   const [nameAssignments, setNameAssignments] = useState<Record<string, number>>({});
+  const nameAssignmentsRef = useRef<Record<string, number>>({});
   const [assigningNames, setAssigningNames] = useState<Set<string>>(new Set());
   const [sendingIds, setSendingIds] = useState<Set<number>>(new Set());
   const [linkLoadingIds, setLinkLoadingIds] = useState<Set<number>>(new Set());
@@ -476,6 +477,8 @@ export default function Listings() {
     staleTime: 5 * 60 * 1000,
   });
 
+  const EMPTY_SUGGESTIONS: { id: number; name: string; reason: string }[] = useMemo(() => [], []);
+
   const fuzzyMap = useMemo(
     () => Object.fromEntries(fuzzySuggestions.map((f) => [f.advisorName, f.suggestions])),
     [fuzzySuggestions],
@@ -548,11 +551,12 @@ export default function Listings() {
   };
 
   const handleAdvisorSelect = useCallback((advisorName: string, empId: number) => {
-    setNameAssignments((prev) => ({ ...prev, [advisorName]: empId }));
+    nameAssignmentsRef.current = { ...nameAssignmentsRef.current, [advisorName]: empId };
+    setNameAssignments(nameAssignmentsRef.current);
   }, []);
 
-  const assignByName = async (advisorName: string) => {
-    const employeeId = nameAssignments[advisorName];
+  const assignByName = useCallback(async (advisorName: string) => {
+    const employeeId = nameAssignmentsRef.current[advisorName];
     if (!employeeId) return;
     setAssigningNames((prev) => new Set(prev).add(advisorName));
     try {
@@ -568,8 +572,11 @@ export default function Listings() {
         return;
       }
       const { updated } = await res.json();
-      toast({ title: "Atandı", description: `${updated} ilan ${activeEmployees.find((e: any) => e.id === employeeId)?.candidate?.name ?? "danışman"}'a atandı.` });
-      setNameAssignments((prev) => { const n = { ...prev }; delete n[advisorName]; return n; });
+      const empName = (employees as any[]).find((e: any) => e.id === employeeId)?.candidate?.name ?? "danışman";
+      toast({ title: "Atandı", description: `${updated} ilan ${empName}'a atandı.` });
+      nameAssignmentsRef.current = { ...nameAssignmentsRef.current };
+      delete nameAssignmentsRef.current[advisorName];
+      setNameAssignments(nameAssignmentsRef.current);
       refresh();
       refetchUnmatched();
     } catch {
@@ -577,7 +584,7 @@ export default function Listings() {
     } finally {
       setAssigningNames((prev) => { const s = new Set(prev); s.delete(advisorName); return s; });
     }
-  };
+  }, [toast, refresh, refetchUnmatched, employees]);
 
   const assignEmployee = async (listingId: number, employeeId: number | null) => {
     setAssigningIds((prev) => new Set(prev).add(listingId));
@@ -682,6 +689,43 @@ export default function Listings() {
     setBulkStatus((s) => s ? { ...s, active: false, done: true, current: null, stopped: wasStopped } : s);
     toast({
       title: wasStopped ? "Toplu bildirim durduruldu" : "Toplu bildirim tamamlandı",
+      description: `${sent} gönderildi, ${skipped} atlandı, ${failed} başarısız`,
+    });
+    refetchNotifyStatus();
+  };
+
+  const handleNotifyBulkEmailSend = async () => {
+    const toSend = filteredNotifyRows;
+    if (!toSend.length || bulkEmailSending) return;
+    stopBulkEmailRef.current = false;
+    setBulkEmailSending(true);
+    setBulkEmailStatus({ active: true, total: toSend.length, sent: 0, skipped: 0, failed: 0, current: null, done: false, stopped: false });
+    let sent = 0, skipped = 0, failed = 0;
+    for (let i = 0; i < toSend.length; i++) {
+      if (stopBulkEmailRef.current) break;
+      const row = toSend[i];
+      setBulkEmailStatus((s) => s ? { ...s, current: row.name } : s);
+      try {
+        const res = await fetch(`/api/listings/notify-advisor/${row.id}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ channel: "email" }),
+        });
+        if (res.ok) sent++;
+        else if (res.status === 400) skipped++;
+        else failed++;
+      } catch { failed++; }
+      setBulkEmailStatus((s) => s ? { ...s, sent, skipped, failed } : s);
+      if (i < toSend.length - 1 && !stopBulkEmailRef.current) {
+        await new Promise((r) => setTimeout(r, 3500));
+      }
+    }
+    const wasStopped = stopBulkEmailRef.current;
+    setBulkEmailSending(false);
+    setBulkEmailStatus((s) => s ? { ...s, active: false, done: true, current: null, stopped: wasStopped } : s);
+    toast({
+      title: wasStopped ? "Toplu email durduruldu" : "Toplu email tamamlandı",
       description: `${sent} gönderildi, ${skipped} atlandı, ${failed} başarısız`,
     });
     refetchNotifyStatus();
@@ -1174,7 +1218,7 @@ export default function Listings() {
                           key={row.advisorName}
                           advisorName={row.advisorName}
                           count={row.count}
-                          suggestions={fuzzyMap[row.advisorName] ?? []}
+                          suggestions={fuzzyMap[row.advisorName] ?? EMPTY_SUGGESTIONS}
                           selectedId={nameAssignments[row.advisorName]}
                           isAssigning={assigningNames.has(row.advisorName)}
                           activeEmployees={activeEmployees}
@@ -1212,19 +1256,7 @@ export default function Listings() {
                     ) : pageRows.map((l) => (
                       <tr key={l.id} className="border-b border-border last:border-0 hover:bg-muted/30">
                         <td className="px-3 py-2.5 font-mono text-xs">{l.listingNumber}</td>
-                        <td className="px-3 py-2.5">
-                          {l.advisorName && <div className="text-xs text-muted-foreground mb-1">{l.advisorName}</div>}
-                          <Select value="" onValueChange={(v) => assignEmployee(l.id, Number(v))} disabled={assigningIds.has(l.id)}>
-                            <SelectTrigger className="h-7 text-xs w-40">
-                              <SelectValue placeholder={assigningIds.has(l.id) ? "Atanıyor…" : "Danışman ata…"} />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {activeEmployees.map((e: any) => (
-                                <SelectItem key={e.id} value={String(e.id)} className="text-xs">{e.candidate?.name ?? `#${e.id}`}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </td>
+                        <td className="px-3 py-2.5 text-xs text-muted-foreground">{l.advisorName ?? "—"}</td>
                         <td className="px-3 py-2.5 whitespace-nowrap">{fmtPrice(l.price)}</td>
                         <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap">{l.publishedDate ?? "—"}</td>
                         <td className="px-3 py-2.5">
@@ -1298,8 +1330,12 @@ export default function Listings() {
                       <RefreshCw className="h-3 w-3" /> Yenile
                     </Button>
                     <Button size="sm" className="h-7 text-xs gap-1.5" onClick={handleNotifyBulkSend} disabled={bulkSending || filteredNotifyRows.length === 0}>
-                      {bulkSending ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
-                      Toplu Gönder ({filteredNotifyRows.length} danışman)
+                      {bulkSending ? <RefreshCw className="h-3 w-3 animate-spin" /> : <MessageSquare className="h-3 w-3" />}
+                      Toplu WA ({filteredNotifyRows.length})
+                    </Button>
+                    <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5 border-blue-300 text-blue-700 hover:bg-blue-50" onClick={handleNotifyBulkEmailSend} disabled={bulkEmailSending || filteredNotifyRows.length === 0}>
+                      {bulkEmailSending ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Mail className="h-3 w-3" />}
+                      Toplu Email ({filteredNotifyRows.length})
                     </Button>
                   </div>
                 </div>
