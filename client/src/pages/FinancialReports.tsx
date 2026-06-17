@@ -231,21 +231,25 @@ function useFinancialTargets(year: number, office: string) {
   });
 }
 
-function TargetProgressCard({ label, actual, reelTarget, highTarget, color, format: fmt }: {
+function TargetProgressCard({ label, actual, reelTarget, highTarget, color, format: fmt, showForecast, showReForecast }: {
   label: string; actual: number; reelTarget: number; highTarget: number; color: string;
-  format: (n: number) => string;
+  format: (n: number) => string; showForecast: boolean; showReForecast: boolean;
 }) {
-  const maxT = Math.max(reelTarget, highTarget, 0);
-  const meetsHigh = highTarget > 0 && actual >= highTarget;
-  const meetsReel = reelTarget > 0 && actual >= reelTarget;
+  const showBoth = !showForecast && !showReForecast;
+  const effReel = (showForecast || showBoth) ? reelTarget : 0;
+  const effHigh = (showReForecast || showBoth) ? highTarget : 0;
+
+  const maxT = Math.max(effReel, effHigh, 0);
+  const meetsHigh = effHigh > 0 && actual >= effHigh;
+  const meetsReel = effReel > 0 && actual >= effReel;
   const barFill  = maxT > 0 ? Math.min(100, (actual / maxT) * 100) : 0;
-  const reelMark = maxT > 0 && highTarget > reelTarget && reelTarget > 0
-    ? (reelTarget / maxT) * 100 : null;
+  const reelMark = maxT > 0 && effHigh > effReel && effReel > 0
+    ? (effReel / maxT) * 100 : null;
   const barColor = meetsHigh ? "#f59e0b" : meetsReel ? "#10b981" : color;
 
-  const badge = (pct: number, over: boolean, label: string) => (
-    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${over ? (label === "Y" ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700") : "bg-muted text-muted-foreground"}`}>
-      {label} %{Math.round(Math.min(100, pct))}
+  const badge = (pct: number, over: boolean, lbl: string) => (
+    <span className={`text-sm font-bold px-2 py-0.5 rounded-full ${over ? (lbl === "RF" ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700") : "bg-muted text-muted-foreground"}`}>
+      {lbl} %{Math.round(Math.min(100, pct))}
     </span>
   );
 
@@ -253,26 +257,26 @@ function TargetProgressCard({ label, actual, reelTarget, highTarget, color, form
     <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-2">
       <div className="flex items-center justify-between gap-1 flex-wrap">
         <span className="text-xs font-medium text-muted-foreground">{label}</span>
-        <div className="flex gap-1">
-          {reelTarget > 0 && badge(actual / reelTarget * 100, meetsReel, "R")}
-          {highTarget > 0 && badge(actual / highTarget * 100, meetsHigh, "Y")}
+        <div className="flex gap-1.5">
+          {effReel > 0 && badge(actual / effReel * 100, meetsReel, "F")}
+          {effHigh > 0 && badge(actual / effHigh * 100, meetsHigh, "RF")}
         </div>
       </div>
-      <div className="text-xl font-bold text-foreground">{fmt(actual)}</div>
+      <div className="text-2xl font-bold text-foreground">{fmt(actual)}</div>
       {maxT > 0 ? (
         <>
-          <div className="relative h-2 rounded-full bg-muted overflow-hidden">
+          <div className="relative h-2.5 rounded-full bg-muted overflow-hidden">
             {reelMark !== null && (
               <div className="absolute top-0 bottom-0 w-px bg-white/80 z-10" style={{ left: `${reelMark}%` }} />
             )}
             <div className="h-full rounded-full transition-all" style={{ width: `${barFill}%`, backgroundColor: barColor }} />
           </div>
-          <div className="flex justify-between text-[10px] text-muted-foreground">
-            {reelTarget > 0 && <span>Reel: <span className="font-medium text-foreground">{fmt(reelTarget)}</span></span>}
-            {highTarget > 0 && <span>Yüksek: <span className="font-medium text-foreground">{fmt(highTarget)}</span></span>}
+          <div className="flex justify-between text-xs text-muted-foreground">
+            {effReel > 0 && <span>Forecast: <span className="font-semibold text-foreground">{fmt(effReel)}</span></span>}
+            {effHigh > 0 && <span>Re-Forecast: <span className="font-semibold text-foreground">{fmt(effHigh)}</span></span>}
           </div>
-          {meetsHigh && <p className="text-[10px] text-amber-600 font-semibold">Yüksek hedef aşıldı!</p>}
-          {!meetsHigh && meetsReel && <p className="text-[10px] text-emerald-600 font-semibold">Reel hedef aşıldı!</p>}
+          {meetsHigh && <p className="text-xs text-amber-600 font-semibold">Re-Forecast aşıldı!</p>}
+          {!meetsHigh && meetsReel && <p className="text-xs text-emerald-600 font-semibold">Forecast aşıldı!</p>}
         </>
       ) : (
         <div className="text-xs text-muted-foreground/50 italic">Hedef belirlenmedi</div>
@@ -707,7 +711,7 @@ export default function FinancialReports() {
                 onClick={() => setShowReelTarget(v => !v)}
               >
                 <Target className="h-3 w-3" />
-                Reel Hedef
+                Forecast
               </Button>
               <Button
                 size="sm"
@@ -716,7 +720,7 @@ export default function FinancialReports() {
                 onClick={() => setShowYuksekTarget(v => !v)}
               >
                 <Target className="h-3 w-3" />
-                Yüksek Hedef
+                Re-Forecast
               </Button>
               <Button
                 size="sm"
@@ -730,6 +734,38 @@ export default function FinancialReports() {
             </div>
           </div>
         </div>
+
+        {/* ── Target Progress ── */}
+        {(periodTargets.hasAny || isAdmin) && (
+          <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+            <div className="px-5 py-3 border-b border-border flex items-center gap-2">
+              <Target className="h-4 w-4 text-primary" />
+              <h2 className="text-base font-semibold">Hedef Takibi</h2>
+              {officeFilter && (
+                <span className="text-xs font-medium bg-primary/10 text-primary px-2 py-0.5 rounded-full">{officeFilter}</span>
+              )}
+              <span className="text-xs text-muted-foreground ml-1">
+                {useCustomRange ? `${fromDate} – ${toDate}` : format(viewDate, "MMMM yyyy", { locale: tr })}
+              </span>
+              {isAdmin && (
+                <Button
+                  size="sm" variant="ghost"
+                  className="ml-auto h-7 text-xs gap-1"
+                  onClick={() => setShowEditor(v => !v)}
+                >
+                  <Save className="h-3.5 w-3.5" />
+                  Hedef Düzenle
+                </Button>
+              )}
+            </div>
+            <div className="p-4 grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <TargetProgressCard label="BHB Hedefi" actual={stats?.completedBHB ?? 0} reelTarget={periodTargets.bhb} highTarget={periodTargets.bhbHigh} color="#10b981" format={fmtTRY} showForecast={showReelTarget} showReForecast={showYuksekTarget} />
+              <TargetProgressCard label="BM Payı Hedefi" actual={stats?.completedBM ?? 0} reelTarget={periodTargets.bm} highTarget={periodTargets.bmHigh} color="#8b5cf6" format={fmtTRY} showForecast={showReelTarget} showReForecast={showYuksekTarget} />
+              <TargetProgressCard label="Satılık Adet Hedefi" actual={stats?.completedSatilikCount ?? 0} reelTarget={periodTargets.satilik} highTarget={periodTargets.satilikHigh} color="#3b82f6" format={(n) => String(Math.round(n))} showForecast={showReelTarget} showReForecast={showYuksekTarget} />
+              <TargetProgressCard label="Kiralık Adet Hedefi" actual={stats?.completedKiralikCount ?? 0} reelTarget={periodTargets.kiralik} highTarget={periodTargets.kiralikHigh} color="#f97316" format={(n) => String(Math.round(n))} showForecast={showReelTarget} showReForecast={showYuksekTarget} />
+            </div>
+          </div>
+        )}
 
         {/* ── Metric Cards ── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -762,38 +798,6 @@ export default function FinancialReports() {
             yoy={yoyDelta?.bm}
           />
         </div>
-
-        {/* ── Target Progress ── */}
-        {(periodTargets.hasAny || isAdmin) && (
-          <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-            <div className="px-5 py-3 border-b border-border flex items-center gap-2">
-              <Target className="h-4 w-4 text-primary" />
-              <h2 className="text-base font-semibold">Hedef Takibi</h2>
-              {officeFilter && (
-                <span className="text-xs font-medium bg-primary/10 text-primary px-2 py-0.5 rounded-full">{officeFilter}</span>
-              )}
-              <span className="text-xs text-muted-foreground ml-1">
-                {useCustomRange ? `${fromDate} – ${toDate}` : format(viewDate, "MMMM yyyy", { locale: tr })}
-              </span>
-              {isAdmin && (
-                <Button
-                  size="sm" variant="ghost"
-                  className="ml-auto h-7 text-xs gap-1"
-                  onClick={() => setShowEditor(v => !v)}
-                >
-                  <Save className="h-3.5 w-3.5" />
-                  Hedef Düzenle
-                </Button>
-              )}
-            </div>
-            <div className="p-4 grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <TargetProgressCard label="BHB Hedefi" actual={stats?.completedBHB ?? 0} reelTarget={periodTargets.bhb} highTarget={periodTargets.bhbHigh} color="#10b981" format={fmtTRY} />
-              <TargetProgressCard label="BM Payı Hedefi" actual={stats?.completedBM ?? 0} reelTarget={periodTargets.bm} highTarget={periodTargets.bmHigh} color="#8b5cf6" format={fmtTRY} />
-              <TargetProgressCard label="Satılık Adet Hedefi" actual={stats?.completedSatilikCount ?? 0} reelTarget={periodTargets.satilik} highTarget={periodTargets.satilikHigh} color="#3b82f6" format={(n) => String(Math.round(n))} />
-              <TargetProgressCard label="Kiralık Adet Hedefi" actual={stats?.completedKiralikCount ?? 0} reelTarget={periodTargets.kiralik} highTarget={periodTargets.kiralikHigh} color="#f97316" format={(n) => String(Math.round(n))} />
-            </div>
-          </div>
-        )}
 
         {/* ── Side Type Breakdown ── */}
         <div className="grid grid-cols-3 gap-4">
@@ -849,8 +853,8 @@ export default function FinancialReports() {
                   <Legend iconSize={10} wrapperStyle={{ fontSize: 10 }} />
                   {showPrevYear && <Bar dataKey="prevBhb" name="Geçen Yıl BHB" fill="#6ee7b7" fillOpacity={0.6} radius={[3, 3, 0, 0]} />}
                   <Bar dataKey="bhb" name="BHB" fill="#10b981" radius={[4, 4, 0, 0]} />
-                  {showReelTarget   && <Line type="monotone" dataKey="bhbTarget"     name="BHB Reel Hedef"   stroke="#10b981" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#10b981" }} connectNulls={false} />}
-                  {showYuksekTarget && <Line type="monotone" dataKey="bhbHighTarget" name="BHB Yüksek Hedef" stroke="#f59e0b" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#f59e0b" }} connectNulls={false} />}
+                  {showReelTarget   && <Line type="monotone" dataKey="bhbTarget"     name="BHB Forecast"    stroke="#10b981" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#10b981" }} connectNulls={false} />}
+                  {showYuksekTarget && <Line type="monotone" dataKey="bhbHighTarget" name="BHB Re-Forecast"  stroke="#f59e0b" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#f59e0b" }} connectNulls={false} />}
                 </ComposedChart>
               </ResponsiveContainer>
             )}
@@ -870,8 +874,8 @@ export default function FinancialReports() {
                   <Legend iconSize={10} wrapperStyle={{ fontSize: 10 }} />
                   {showPrevYear && <Bar dataKey="prevBm" name="Geçen Yıl BM" fill="#c4b5fd" fillOpacity={0.6} radius={[3, 3, 0, 0]} />}
                   <Bar dataKey="bm" name="BM Geliri" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
-                  {showReelTarget   && <Line type="monotone" dataKey="bmTarget"     name="BM Reel Hedef"   stroke="#8b5cf6" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#8b5cf6" }} connectNulls={false} />}
-                  {showYuksekTarget && <Line type="monotone" dataKey="bmHighTarget" name="BM Yüksek Hedef" stroke="#f59e0b" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#f59e0b" }} connectNulls={false} />}
+                  {showReelTarget   && <Line type="monotone" dataKey="bmTarget"     name="BM Forecast"    stroke="#8b5cf6" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#8b5cf6" }} connectNulls={false} />}
+                  {showYuksekTarget && <Line type="monotone" dataKey="bmHighTarget" name="BM Re-Forecast"  stroke="#f59e0b" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#f59e0b" }} connectNulls={false} />}
                 </ComposedChart>
               </ResponsiveContainer>
             )}
@@ -890,10 +894,10 @@ export default function FinancialReports() {
                   {showPrevYear && <Bar dataKey="prevKiralikCount" name="Geçen Yıl Kir." fill="#fed7aa" fillOpacity={0.6} barSize={8} radius={[3, 3, 0, 0]} />}
                   <Bar dataKey="satilikCount" name="Satılık" fill="#3b82f6" barSize={8} radius={[3, 3, 0, 0]} />
                   <Bar dataKey="kiralikCount" name="Kiralık" fill="#f97316" barSize={8} radius={[3, 3, 0, 0]} />
-                  {showReelTarget   && <Line type="monotone" dataKey="satilikTarget"     name="Satılık Reel"    stroke="#3b82f6" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#3b82f6" }} connectNulls={false} />}
-                  {showYuksekTarget && <Line type="monotone" dataKey="satilikHighTarget" name="Satılık Yüksek"  stroke="#60a5fa" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#60a5fa" }} connectNulls={false} />}
-                  {showReelTarget   && <Line type="monotone" dataKey="kiralikTarget"     name="Kiralık Reel"    stroke="#f97316" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#f97316" }} connectNulls={false} />}
-                  {showYuksekTarget && <Line type="monotone" dataKey="kiralikHighTarget" name="Kiralık Yüksek"  stroke="#fb923c" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#fb923c" }} connectNulls={false} />}
+                  {showReelTarget   && <Line type="monotone" dataKey="satilikTarget"     name="Satılık Forecast"    stroke="#3b82f6" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#3b82f6" }} connectNulls={false} />}
+                  {showYuksekTarget && <Line type="monotone" dataKey="satilikHighTarget" name="Satılık Re-Forecast"   stroke="#60a5fa" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#60a5fa" }} connectNulls={false} />}
+                  {showReelTarget   && <Line type="monotone" dataKey="kiralikTarget"     name="Kiralık Forecast"    stroke="#f97316" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#f97316" }} connectNulls={false} />}
+                  {showYuksekTarget && <Line type="monotone" dataKey="kiralikHighTarget" name="Kiralık Re-Forecast"   stroke="#fb923c" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#fb923c" }} connectNulls={false} />}
                 </ComposedChart>
               </ResponsiveContainer>
             )}
@@ -1406,7 +1410,7 @@ export default function FinancialReports() {
                       <th className="w-8" rowSpan={2}></th>
                     </tr>
                     <tr className="bg-muted/30 border-b border-border">
-                      {["Reel","Yüksek","Reel","Yüksek","Reel","Yüksek","Reel","Yüksek"].map((lbl, i) => (
+                      {["Forecast","Re-Forecast","Forecast","Re-Forecast","Forecast","Re-Forecast","Forecast","Re-Forecast"].map((lbl, i) => (
                         <th key={i} className={`text-[10px] font-medium text-muted-foreground py-1 px-2 text-right ${i % 2 === 0 ? "border-l border-border" : ""}`}>{lbl}</th>
                       ))}
                     </tr>

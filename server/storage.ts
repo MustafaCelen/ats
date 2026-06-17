@@ -55,6 +55,8 @@ export interface RejectionDropoff { fromStage: string; count: number; }
 
 export interface PassiveEmployee {
   id: number; name: string; passiveAt: Date | null; title: string | null; jobTitle: string | null;
+  startDate: Date | null;
+  bhbByYear: { year: number; bhb: number }[];
 }
 
 export interface NewEmployee {
@@ -1252,6 +1254,7 @@ export class DatabaseStorage implements IStorage {
             id: employees.id,
             title: employees.title,
             passiveAt: employees.passiveAt,
+            startDate: employees.startDate,
             candidateName: candidates.name,
             jobTitle: jobs.title,
           })
@@ -1261,12 +1264,37 @@ export class DatabaseStorage implements IStorage {
           .where(and(...passiveCondsArr))
           .orderBy(desc(employees.passiveAt));
 
+    // BHB by year for passive employees
+    const passiveIds = passiveRaw.map((r) => r.id);
+    const bhbByYearRaw = passiveIds.length > 0
+      ? await db
+          .select({
+            employeeId: closingAgents.employeeId,
+            year: sql<number>`extract(year from coalesce(${closingAgents.closingDate}, ${closings.closingDate}))::int`,
+            bhb: sql<string>`sum(${closingAgents.bhbShare})`,
+          })
+          .from(closingAgents)
+          .innerJoin(closingSides, eq(closingAgents.closingSideId, closingSides.id))
+          .innerJoin(closings, eq(closingSides.closingId, closings.id))
+          .where(inArray(closingAgents.employeeId, passiveIds))
+          .groupBy(closingAgents.employeeId, sql`extract(year from coalesce(${closingAgents.closingDate}, ${closings.closingDate}))`)
+          .orderBy(closingAgents.employeeId, sql`extract(year from coalesce(${closingAgents.closingDate}, ${closings.closingDate}))`)
+      : [];
+
+    const bhbMap = new Map<number, { year: number; bhb: number }[]>();
+    for (const r of bhbByYearRaw) {
+      if (!bhbMap.has(r.employeeId)) bhbMap.set(r.employeeId, []);
+      bhbMap.get(r.employeeId)!.push({ year: r.year, bhb: parseFloat(r.bhb ?? "0") });
+    }
+
     const passiveEmployees: PassiveEmployee[] = passiveRaw.map((r) => ({
       id: r.id,
       name: r.candidateName ?? "—",
       passiveAt: r.passiveAt,
+      startDate: r.startDate ?? null,
       title: r.title,
       jobTitle: r.jobTitle ?? null,
+      bhbByYear: bhbMap.get(r.id) ?? [],
     }));
 
     // ── New employees who started in the selected period ──

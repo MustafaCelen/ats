@@ -536,32 +536,74 @@ export default function Reports() {
             </div>
           ) : !stats?.passiveEmployees?.length ? (
             <div className="px-5 py-8 text-sm text-muted-foreground text-center">Bu dönemde pasife düşen çalışan bulunmuyor.</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/30 text-muted-foreground uppercase text-xs">
-                  <tr>
-                    <th className="text-left p-4">Çalışan</th>
-                    <th className="text-left p-4">Ünvan</th>
-                    <th className="text-left p-4">İlan</th>
-                    <th className="text-left p-4">Pasife Alınma Tarihi</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {stats.passiveEmployees.map((emp: any) => (
-                    <tr key={emp.id} className="border-t border-border" data-testid={`passive-employee-row-${emp.id}`}>
-                      <td className="p-4 font-medium text-foreground">{emp.name}</td>
-                      <td className="p-4 text-muted-foreground">{emp.title ?? "—"}</td>
-                      <td className="p-4 text-muted-foreground">{emp.jobTitle ?? "—"}</td>
-                      <td className="p-4 text-muted-foreground">
-                        {emp.passiveAt ? new Date(emp.passiveAt).toLocaleDateString("tr-TR") : "—"}
-                      </td>
+          ) : (() => {
+            // Collect all unique years across all passive employees
+            const allYears = Array.from(
+              new Set(
+                (stats.passiveEmployees as any[]).flatMap((e: any) =>
+                  (e.bhbByYear ?? []).map((b: any) => b.year)
+                )
+              )
+            ).sort((a, b) => a - b);
+
+            const fmtDuration = (startDate: string | null, endDate: string | null) => {
+              if (!startDate) return "—";
+              const s = new Date(startDate);
+              const e = endDate ? new Date(endDate) : new Date();
+              const totalMonths = (e.getFullYear() - s.getFullYear()) * 12 + (e.getMonth() - s.getMonth());
+              const years = Math.floor(totalMonths / 12);
+              const months = totalMonths % 12;
+              if (years === 0) return `${months} ay`;
+              if (months === 0) return `${years} yıl`;
+              return `${years} yıl ${months} ay`;
+            };
+
+            return (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/30 text-muted-foreground uppercase text-xs">
+                    <tr>
+                      <th className="text-left p-4">Çalışan</th>
+                      <th className="text-left p-4">Ünvan</th>
+                      <th className="text-left p-4">Giriş Tarihi</th>
+                      <th className="text-left p-4">Şirkette Süre</th>
+                      {allYears.map((y) => (
+                        <th key={y} className="text-right p-4">{y} BHB</th>
+                      ))}
+                      <th className="text-left p-4">Pasife Alınma Tarihi</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                  </thead>
+                  <tbody>
+                    {(stats.passiveEmployees as any[]).map((emp: any) => {
+                      const bhbMap = new Map((emp.bhbByYear ?? []).map((b: any) => [b.year, b.bhb]));
+                      return (
+                        <tr key={emp.id} className="border-t border-border" data-testid={`passive-employee-row-${emp.id}`}>
+                          <td className="p-4 font-medium text-foreground">{emp.name}</td>
+                          <td className="p-4 text-muted-foreground">{emp.title ?? "—"}</td>
+                          <td className="p-4 text-muted-foreground whitespace-nowrap">
+                            {emp.startDate ? new Date(emp.startDate).toLocaleDateString("tr-TR") : "—"}
+                          </td>
+                          <td className="p-4 text-muted-foreground whitespace-nowrap">
+                            {fmtDuration(emp.startDate, emp.passiveAt)}
+                          </td>
+                          {allYears.map((y) => (
+                            <td key={y} className="p-4 text-right font-mono text-foreground whitespace-nowrap">
+                              {bhbMap.has(y)
+                                ? new Intl.NumberFormat("tr-TR", { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(bhbMap.get(y) as number) + " ₺"
+                                : "—"}
+                            </td>
+                          ))}
+                          <td className="p-4 text-muted-foreground whitespace-nowrap">
+                            {emp.passiveAt ? new Date(emp.passiveAt).toLocaleDateString("tr-TR") : "—"}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })()}
         </div>
 
         {/* ── New Employees ─────────────────────────────────────────────────── */}
