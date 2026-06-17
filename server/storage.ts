@@ -76,6 +76,7 @@ export interface EmployeeClosingRow {
   dealCategory: string;
   dealType: string;
   saleValue: string;
+  bhbShare: string;
   employeeNet: string;
   closingDate: Date | null;
   sideType: string;
@@ -1845,6 +1846,7 @@ export class DatabaseStorage implements IStorage {
         dealCategory: closings.dealCategory,
         dealType: closings.dealType,
         saleValue: closings.saleValue,
+        bhbShare: closingAgents.bhbShare,
         employeeNet: closingAgents.employeeNet,
         closingDate: effDate,
         sideType: closingSides.sideType,

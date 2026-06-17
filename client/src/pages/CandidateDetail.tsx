@@ -882,7 +882,7 @@ export default function CandidateDetail() {
             ) : (
               <>
                 {/* Summary cards */}
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
                     <p className="text-xs text-muted-foreground font-medium mb-1">Toplam İşlem</p>
                     <p className="text-2xl font-bold">{employeeClosings.length}</p>
@@ -891,12 +891,6 @@ export default function CandidateDetail() {
                     <p className="text-xs text-purple-700 font-medium mb-1">Toplam BHB</p>
                     <p className="text-xl font-bold text-purple-700">
                       {employeeClosings.reduce((s: number, c: any) => s + parseFloat(c.bhbShare || "0"), 0).toLocaleString("tr-TR")} ₺
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
-                    <p className="text-xs text-emerald-700 font-medium mb-1">Toplam Net Kazanç</p>
-                    <p className="text-xl font-bold text-emerald-700">
-                      {employeeClosings.reduce((s: number, c: any) => s + parseFloat(c.employeeNet || "0"), 0).toLocaleString("tr-TR")} ₺
                     </p>
                   </div>
                   <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 shadow-sm">
@@ -928,7 +922,6 @@ export default function CandidateDetail() {
                           <th className="text-left px-4 py-3">Tür</th>
                           <th className="text-right px-4 py-3">Satış Bedeli</th>
                           <th className="text-right px-4 py-3">BHB</th>
-                          <th className="text-right px-4 py-3">Net Kazanç</th>
                           <th className="text-left px-4 py-3">Taraf</th>
                           <th className="text-left px-4 py-3">Durum</th>
                           <th className="text-left px-4 py-3">Kapanış Tarihi</th>
@@ -951,9 +944,6 @@ export default function CandidateDetail() {
                             </td>
                             <td className="px-4 py-3 text-right font-mono font-semibold text-purple-700">
                               {parseFloat(c.bhbShare || "0").toLocaleString("tr-TR")} ₺
-                            </td>
-                            <td className="px-4 py-3 text-right font-mono font-semibold text-emerald-700">
-                              {parseFloat(c.employeeNet).toLocaleString("tr-TR")} ₺
                             </td>
                             <td className="px-4 py-3">
                               <span className={`text-xs font-semibold px-2 py-0.5 rounded-full flex items-center gap-1 w-fit ${c.sideType === "buyer" ? "bg-violet-50 text-violet-700" : "bg-orange-50 text-orange-700"}`}>
@@ -980,9 +970,6 @@ export default function CandidateDetail() {
                           </td>
                           <td className="px-4 py-3 text-right font-mono text-purple-700">
                             {employeeClosings.reduce((s: number, c: any) => s + parseFloat(c.bhbShare || "0"), 0).toLocaleString("tr-TR")} ₺
-                          </td>
-                          <td className="px-4 py-3 text-right font-mono text-emerald-700">
-                            {employeeClosings.reduce((s: number, c: any) => s + parseFloat(c.employeeNet || "0"), 0).toLocaleString("tr-TR")} ₺
                           </td>
                           <td colSpan={3} />
                         </tr>
