@@ -198,11 +198,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             await storage.markListingNotified(l.id, kind, msgId);
             console.log(`[listings notify] ${l.listingNumber} → ${phone} msgId=${msgId ?? "n/a"}`);
           } catch (e) { console.warn("[listings notify]", e); }
-          // Random 45–60 s gap between sends to avoid Green API rate-limit bans
-          if (i < targets.length - 1) {
-            const delay = 45_000 + Math.floor(Math.random() * 15_001);
-            await new Promise(r => setTimeout(r, delay));
-          }
+          if (i < targets.length - 1) await new Promise(r => setTimeout(r, 300));
         }
       })();
     } catch (err) {
@@ -348,7 +344,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           bulkNotifyState.failed++;
           console.warn("[bulk notify]", e);
         }
-        // delay is handled globally inside sendWhatsApp (45-60 s between sends)
+        if (i < ids.length - 1) await new Promise(r => setTimeout(r, 300));
       }
       bulkNotifyState.active = false;
       bulkNotifyState.done = true;
