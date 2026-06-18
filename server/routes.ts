@@ -7,7 +7,7 @@ import { api } from "@shared/routes";
 import { z } from "zod";
 import { insertInterviewSchema, insertOfferSchema, type InsertTask, TASK_STATUSES } from "@shared/schema";
 import { getAuthUrl, createOAuth2Client, createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from "./google";
-import { sendWhatsApp, checkWhatsAppStatus, publicBaseUrl } from "./whatsapp";
+import { sendWhatsApp, sendWhatsAppTemplate, checkWhatsAppStatus, publicBaseUrl } from "./whatsapp";
 import { sendEmail } from "./email";
 
 // Scoping helper:
@@ -188,14 +188,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             const name = emp?.candidate?.name ?? "Danışman";
             if (!phone) continue;
             const link = `${base}/l/${l.publicToken}`;
-            const fmtPrice = l.price ? Number(l.price).toLocaleString("tr-TR") + " ₺" : "—";
-            const msg = type === "active"
-              ? [`Merhaba ${name} 👋`, "", `Yeni bir ilanınız yayına alındı:`, "",
-                 `🔢 İlan No: ${l.listingNumber}`, `💰 Fiyat: ${fmtPrice}`, "",
-                 `Lütfen bu ilana ait *yetki sözleşmesini* sisteme yükleyin:`, link].join("\n")
-              : [`Merhaba ${name} 👋`, "", `${l.listingNumber} numaralı ilanınız yayından kaldırılmış görünüyor.`, "",
-                 `Lütfen yayından kalkış sebebini girin:`, link].join("\n");
-            const msgId = await sendWhatsApp(phone, msg);
+            const isActive = type === "active";
+            const msgId = await sendWhatsAppTemplate(phone, {
+              "1": name,
+              "2": isActive ? "1" : "0",
+              "3": isActive ? "0" : "1",
+              "4": link,
+            });
             await storage.markListingNotified(l.id, kind, msgId);
             console.log(`[listings notify] ${l.listingNumber} → ${phone} msgId=${msgId ?? "n/a"}`);
           } catch (e) { console.warn("[listings notify]", e); }
@@ -251,17 +250,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     } catch { res.status(500).json({ message: "Internal server error" }); }
   });
 
-  function buildListingMessage(kind: "new" | "passive", name: string, listingNumber: string, price: string | null, link: string): string {
-    const fmtPrice = price ? Number(price).toLocaleString("tr-TR") + " ₺" : "—";
-    if (kind === "new") {
-      return [`Merhaba ${name} 👋`, "",
-        `🔢 İlan No: ${listingNumber}`, `💰 Fiyat: ${fmtPrice}`, "",
-        `Lütfen bu ilana ait *yetki sözleşmesini* sisteme yükleyin:`, link].join("\n");
-    }
-    return [`Merhaba ${name} 👋`, "", `${listingNumber} numaralı ilanınız yayından kaldırılmış görünüyor.`, "",
-      `Lütfen yayından kalkış sebebini girin:`, link].join("\n");
-  }
-
   // (Re)send the advisor self-service notification for one listing
   app.post("/api/listings/:id/notify", requireAuth, requireAdmin, async (req, res) => {
     try {
@@ -283,8 +271,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (!phone) return res.status(400).json({ message: "Danışmanın telefonu kayıtlı değil" });
       const name = emp?.candidate?.name ?? "Danışman";
       const link = `${publicBaseUrl()}/l/${l.publicToken}`;
-      const msg = buildListingMessage(kind, name, l.listingNumber, l.price, link);
-      const msgId = await sendWhatsApp(phone, msg);
+      const msgId = await sendWhatsAppTemplate(phone, {
+        "1": name,
+        "2": kind === "new" ? "1" : "0",
+        "3": kind === "new" ? "0" : "1",
+        "4": link,
+      });
       await storage.markListingNotified(l.id, kind, msgId);
       res.json({ ok: true });
     } catch { res.status(500).json({ message: "Internal server error" }); }
@@ -343,8 +335,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           const name = emp?.candidate?.name ?? "Danışman";
           if (!phone) { bulkNotifyState.skipped++; continue; }
           const link = `${base}/l/${l.publicToken}`;
-          const msg = buildListingMessage(kind, name, l.listingNumber, l.price, link);
-          const msgId = await sendWhatsApp(phone, msg);
+          const msgId = await sendWhatsAppTemplate(phone, {
+            "1": name,
+            "2": kind === "new" ? "1" : "0",
+            "3": kind === "new" ? "0" : "1",
+            "4": link,
+          });
           await storage.markListingNotified(l.id, kind, msgId);
           bulkNotifyState.sent++;
           console.log(`[bulk notify] ${l.listingNumber} → ${phone} msgId=${msgId ?? "n/a"}`);
@@ -713,13 +709,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           return res.status(429).json({ message: `Son bildirimden ${remaining} saniye sonra tekrar gönderilebilir` });
         }
 
-        const lines: string[] = [`Merhaba ${name} 👋`, ""];
-        if (activeCount > 0) lines.push(`📋 ${activeCount} aktif ilanınız için yetki sözleşmesi bekleniyor.`);
-        if (passiveCount > 0) lines.push(`📋 ${passiveCount} pasife düşen ilanınız için kapanış sebebi bekleniyor.`);
-        lines.push("", "Tüm ilanlarınızı aşağıdaki *size özel* link üzerinden görüntüleyip işlem yapabilirsiniz. Bu bağlantıyı lütfen başkalarıyla paylaşmayın:");
-        lines.push(link);
-
-        const msgId = await sendWhatsApp(phone, lines.join("\n"));
+        const msgId = await sendWhatsAppTemplate(phone, {
+          "1": name,
+          "2": String(activeCount),
+          "3": String(passiveCount),
+          "4": link,
+        });
         await storage.markAdvisorNotified(employeeId, msgId);
         return res.json({ ok: true, channel: "wa", msgId });
       }
