@@ -165,6 +165,20 @@ app.use((req, res, next) => {
       "uploaded_at" timestamp DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS "laf_listing_id_idx" ON "listing_agreement_files" ("listing_id");
+
+    -- Migrate old single-file agreement data into the new multi-file table
+    INSERT INTO listing_agreement_files (listing_id, name, mime, data, uploaded_at)
+    SELECT
+      l.id,
+      COALESCE(l.agreement_file_name, 'sozlesme'),
+      COALESCE(l.agreement_file_mime, 'application/octet-stream'),
+      l.agreement_file_data,
+      COALESCE(l.agreement_uploaded_at, NOW())
+    FROM listings l
+    WHERE l.agreement_file_data IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM listing_agreement_files laf WHERE laf.listing_id = l.id
+      );
   `);
 
   await registerRoutes(httpServer, app);
