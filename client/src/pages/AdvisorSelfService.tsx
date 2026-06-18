@@ -71,6 +71,8 @@ function ActiveCard({ listing, token, onRefresh }: { listing: PendingListing; to
   const [movingToPassive, setMovingToPassive] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [confirmHandDelivery, setConfirmHandDelivery] = useState(false);
+  const [submittingHandDelivery, setSubmittingHandDelivery] = useState(false);
 
   const hasFiles = uploadedFiles.length > 0;
 
@@ -143,6 +145,21 @@ function ActiveCard({ listing, token, onRefresh }: { listing: PendingListing; to
       setError("İşlem başarısız.");
     } finally {
       setTogglingNoAgreement(false);
+    }
+  };
+
+  const handDeliver = async () => {
+    setSubmittingHandDelivery(true);
+    try {
+      const res = await fetch(`/api/public/advisor/${token}/listings/${listing.id}/hand-delivered`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!res.ok) throw new Error();
+      onRefresh();
+    } catch {
+      setError("İşlem başarısız.");
+      setSubmittingHandDelivery(false);
     }
   };
 
@@ -270,6 +287,38 @@ function ActiveCard({ listing, token, onRefresh }: { listing: PendingListing; to
                 {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
                 Yükle
               </button>
+            </div>
+          )}
+
+          {!noAgreement && !hasFiles && (
+            <div className="space-y-2">
+              {!confirmHandDelivery ? (
+                <button
+                  onClick={() => setConfirmHandDelivery(true)}
+                  className="w-full h-9 rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50 font-medium text-sm flex items-center justify-center gap-2 transition-colors"
+                >
+                  <ArrowDownToLine className="h-4 w-4" />
+                  Sözleşmeyi elden teslim ettim
+                </button>
+              ) : (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 space-y-2">
+                  <p className="text-xs text-emerald-800 font-medium">Sözleşmeyi fiziksel olarak ofise teslim ettiğinizi onaylıyor musunuz?</p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setConfirmHandDelivery(false)}
+                      className="flex-1 h-8 rounded-lg border border-slate-300 text-slate-600 text-xs font-medium hover:bg-slate-50"
+                    >İptal</button>
+                    <button
+                      disabled={submittingHandDelivery}
+                      onClick={handDeliver}
+                      className="flex-1 h-8 rounded-lg bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 disabled:opacity-50 flex items-center justify-center gap-1"
+                    >
+                      {submittingHandDelivery ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                      Evet, teslim ettim
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

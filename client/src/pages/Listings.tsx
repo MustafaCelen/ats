@@ -1175,9 +1175,15 @@ export default function Listings() {
                         <td className="px-3 py-2.5">
                           {l.agreementUploadedAt ? (
                             <div className="flex items-center gap-1">
-                              <button onClick={() => setViewer(l)} className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 hover:bg-emerald-200">
-                                <FileCheck2 className="h-3 w-3" /> Görüntüle
-                              </button>
+                              {l.agreementFileName === "elden-teslim" ? (
+                                <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">
+                                  <FileCheck2 className="h-3 w-3" /> Elden Teslim
+                                </span>
+                              ) : (
+                                <button onClick={() => setViewer(l)} className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 hover:bg-emerald-200">
+                                  <FileCheck2 className="h-3 w-3" /> Görüntüle
+                                </button>
+                              )}
                               <button
                                 onClick={() => clearAgreement(l.id)}
                                 disabled={clearingAgreementId === l.id}

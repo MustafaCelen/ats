@@ -4581,6 +4581,17 @@ export class DatabaseStorage implements IStorage {
     return updated ?? null;
   }
 
+  async setListingHandDelivered(listingId: number, employeeId: number): Promise<boolean> {
+    const [row] = await db.select({ id: listings.id }).from(listings).where(
+      and(eq(listings.id, listingId), eq(listings.employeeId, employeeId), eq(listings.status, "active"))
+    );
+    if (!row) return false;
+    await db.update(listings)
+      .set({ agreementUploadedAt: new Date(), agreementFileName: "elden-teslim", updatedAt: new Date() } as any)
+      .where(eq(listings.id, listingId));
+    return true;
+  }
+
   async getAllAdvisorPendingCounts(): Promise<Record<number, { active: number; passive: number }>> {
     const rows = await db
       .select({ employeeId: listings.employeeId, status: listings.status })

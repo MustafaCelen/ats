@@ -647,6 +647,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     } catch { res.status(500).json({ message: "Internal server error" }); }
   });
 
+  app.post("/api/public/advisor/:token/listings/:listingId/hand-delivered", async (req, res) => {
+    try {
+      const emp = await storage.getAdvisorByToken(req.params.token);
+      if (!emp) return res.status(404).json({ message: "Bağlantı geçersiz" });
+      const ok = await storage.setListingHandDelivered(Number(req.params.listingId), emp.id);
+      if (!ok) return res.status(404).json({ message: "İlan bulunamadı" });
+      res.json({ ok: true });
+    } catch { res.status(500).json({ message: "Internal server error" }); }
+  });
+
   app.post("/api/public/advisor/:token/listings/:listingId/reason", async (req, res) => {
     try {
       const emp = await storage.getAdvisorByToken(req.params.token);
