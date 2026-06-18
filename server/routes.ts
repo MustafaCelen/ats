@@ -2624,22 +2624,5 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  // TEMP: Delete all listings with "-" in listing_number and their related data
-  app.delete("/api/admin/temp-delete-dash-listings", requireAuth, requireAdmin, async (req, res) => {
-    try {
-      const ids = await db.execute(sql`SELECT id FROM listings WHERE listing_number LIKE '%-%'`);
-      const listingIds = (ids.rows as any[]).map((r) => r.id);
-      if (listingIds.length === 0) return res.json({ deleted: 0, files: 0, history: 0 });
-      const idList = sql.join(listingIds.map((id) => sql`${id}`), sql`, `);
-      const files = await db.execute(sql`DELETE FROM listing_agreement_files WHERE listing_id IN (${idList}) RETURNING id`);
-      const history = await db.execute(sql`DELETE FROM listing_price_history WHERE listing_id IN (${idList}) RETURNING id`);
-      const listings = await db.execute(sql`DELETE FROM listings WHERE id IN (${idList}) RETURNING id`);
-      res.json({ deleted: listings.rows.length, files: files.rows.length, history: history.rows.length });
-    } catch (err) {
-      console.error("[TEMP DELETE DASH]", err);
-      res.status(500).json({ message: String(err) });
-    }
-  });
-
   return httpServer;
 }
