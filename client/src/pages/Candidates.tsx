@@ -301,6 +301,8 @@ export default function Candidates() {
 
 function CreateCandidateDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const { mutate, isPending } = useCreateCandidate();
+  const { mutate: createApplication } = useCreateApplication();
+  const { data: allJobs } = useAllJobs();
   const { toast } = useToast();
 
   const [form, setForm] = useState({
@@ -312,7 +314,19 @@ function CreateCandidateDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   });
   const [specialization, setSpecialization] = useState<string[]>([]);
   const [languages, setLanguages] = useState<string[]>(["Türkçe"]);
+  const [selectedJobId, setSelectedJobId] = useState<string>("none");
+  const [ivDate, setIvDate] = useState("");
+  const [ivStart, setIvStart] = useState("");
+  const [ivEnd, setIvEnd] = useState("");
   const f = (k: string, v: string) => setForm((p) => ({ ...p, [k]: v }));
+
+  const hasJobSelected = selectedJobId !== "none";
+
+  const resetForm = () => {
+    setForm({ name: "", email: "", phone: "", category: "", currentBrand: "", licenseStatus: "unlicensed", licenseNumber: "", city: "", district: "", experience: "0", referredBy: "", socialMedia: "", resumeText: "", office: "" });
+    setSpecialization([]); setLanguages(["Türkçe"]); setSelectedJobId("none");
+    setIvDate(""); setIvStart(""); setIvEnd("");
+  };
 
   const handleSubmit = () => {
     if (!form.name.trim()) { toast({ title: "Ad zorunludur", variant: "destructive" }); return; }
@@ -322,6 +336,9 @@ function CreateCandidateDialog({ open, onOpenChange }: { open: boolean; onOpenCh
       toast({ title: "Geçersiz telefon formatı", description: "05xxxxxxxxx formatında giriniz (11 haneli)", variant: "destructive" }); return;
     }
     if (!form.office) { toast({ title: "KW Ofis seçimi zorunludur", variant: "destructive" }); return; }
+    if (hasJobSelected && ivDate && (!ivStart || !ivEnd)) {
+      toast({ title: "Randevu saatlerini giriniz", variant: "destructive" }); return;
+    }
 
     mutate({
       name: form.name.trim(),
@@ -342,11 +359,42 @@ function CreateCandidateDialog({ open, onOpenChange }: { open: boolean; onOpenCh
       resumeText: form.resumeText || undefined,
       tags: [],
     } as InsertCandidate, {
-      onSuccess: () => {
+      onSuccess: (newCandidate) => {
+        if (hasJobSelected) {
+          const jobId = Number(selectedJobId);
+          const job = allJobs?.find((j) => j.id === jobId);
+          createApplication({ jobId, candidateId: newCandidate.id, status: "applied", notes: "Added via admin panel" }, {
+            onSuccess: (newApp) => {
+              const desc = job?.title ?? "üretim bandına atandı";
+              if (ivDate && ivStart && ivEnd) {
+                const startTime = new Date(`${ivDate}T${ivStart}`);
+                const endTime = new Date(`${ivDate}T${ivEnd}`);
+                fetch("/api/interviews", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  credentials: "include",
+                  body: JSON.stringify({
+                    applicationId: newApp.id,
+                    jobId,
+                    candidateId: newCandidate.id,
+                    title: `Randevu: ${newCandidate.name}`,
+                    startTime: startTime.toISOString(),
+                    endTime: endTime.toISOString(),
+                    status: "scheduled",
+                  }),
+                }).then(() => toast({ title: "Aday eklendi", description: `${desc} — randevu oluşturuldu` }))
+                  .catch(() => toast({ title: "Aday eklendi", description: `${desc} — randevu oluşturulamadı`, variant: "destructive" }));
+              } else {
+                toast({ title: "Aday eklendi", description: desc });
+              }
+            },
+            onError: () => toast({ title: "Aday eklendi", description: "Üretim bandına atama başarısız oldu.", variant: "destructive" }),
+          });
+        } else {
+          toast({ title: "Aday eklendi" });
+        }
         onOpenChange(false);
-        setForm({ name: "", email: "", phone: "", category: "", currentBrand: "", licenseStatus: "unlicensed", licenseNumber: "", city: "", district: "", experience: "0", referredBy: "", socialMedia: "", resumeText: "", office: "" });
-        setSpecialization([]); setLanguages(["Türkçe"]);
-        toast({ title: "Aday eklendi" });
+        resetForm();
       },
       onError: (err: any) => toast({ title: "Hata", description: err?.message, variant: "destructive" }),
     });
@@ -366,6 +414,54 @@ function CreateCandidateDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         </DialogHeader>
 
         <div className="space-y-5 mt-2">
+          {/* Üretim Bandı — OPTIONAL, TOP */}
+          <Section title="Üretim Bandı (Opsiyonel)">
+            <Select value={selectedJobId} onValueChange={setSelectedJobId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Üretim bandı seçin..." />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">— Atama yok —</SelectItem>
+                {(allJobs ?? []).filter((j) => j.status === "open").map((j) => (
+                  <SelectItem key={j.id} value={String(j.id)}>{j.title}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {hasJobSelected && (
+              <div className="mt-3 space-y-2 rounded-lg border border-border bg-muted/30 p-3">
+                <p className="text-xs font-medium text-muted-foreground">Randevu Oluştur (opsiyonel)</p>
+                <Field label="Tarih">
+                  <input
+                    type="date"
+                    value={ivDate}
+                    onChange={(e) => setIvDate(e.target.value)}
+                    className="w-full border border-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  />
+                </Field>
+                {ivDate && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <Field label="Başlangıç">
+                      <input
+                        type="time"
+                        value={ivStart}
+                        onChange={(e) => setIvStart(e.target.value)}
+                        className="w-full border border-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                      />
+                    </Field>
+                    <Field label="Bitiş">
+                      <input
+                        type="time"
+                        value={ivEnd}
+                        onChange={(e) => setIvEnd(e.target.value)}
+                        className="w-full border border-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                      />
+                    </Field>
+                  </div>
+                )}
+              </div>
+            )}
+          </Section>
+
           {/* KW Category — REQUIRED */}
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
@@ -408,44 +504,6 @@ function CreateCandidateDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                 <Input value={form.socialMedia} onChange={(e) => f("socialMedia", e.target.value)} placeholder="https://linkedin.com/in/..." />
               </Field>
             </div>
-          </Section>
-
-          {/* Realtor */}
-          <Section title="Gayrimenkul Bilgileri">
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Mevcut Marka / Ofis">
-                <Select value={form.currentBrand} onValueChange={(v) => f("currentBrand", v)}>
-                  <SelectTrigger><SelectValue placeholder="Seçin..." /></SelectTrigger>
-                  <SelectContent>{REAL_ESTATE_BRANDS.map((b) => <SelectItem key={b} value={b}>{b}</SelectItem>)}</SelectContent>
-                </Select>
-              </Field>
-              <Field label="Deneyim (yıl)">
-                <Input type="number" min={0} value={form.experience} onChange={(e) => f("experience", e.target.value)} data-testid="input-candidate-experience" />
-              </Field>
-              <Field label="Lisans Durumu">
-                <Select value={form.licenseStatus} onValueChange={(v) => f("licenseStatus", v)}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="unlicensed">Lisanssız</SelectItem>
-                    <SelectItem value="pending">Lisans Bekliyor</SelectItem>
-                    <SelectItem value="licensed">Lisanslı</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field label="Lisans No">
-                <Input value={form.licenseNumber} onChange={(e) => f("licenseNumber", e.target.value)} placeholder="TKGM-..." />
-              </Field>
-            </div>
-          </Section>
-
-          {/* Specialization */}
-          <Section title="Uzmanlık Alanları">
-            <ChipToggle options={SPECIALIZATIONS} value={specialization} onChange={setSpecialization} />
-          </Section>
-
-          {/* Languages */}
-          <Section title="Yabancı Dil">
-            <ChipToggle options={LANGUAGES} value={languages} onChange={setLanguages} />
           </Section>
 
           {/* Location */}

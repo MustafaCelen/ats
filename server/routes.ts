@@ -233,7 +233,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.patch("/api/listings/:id", requireAuth, requireAdmin, async (req, res) => {
     try {
-      const { employeeId, status, clearAgreement } = req.body;
+      const { employeeId, status, clearAgreement, passiveAt } = req.body;
       const id = Number(req.params.id);
       if (clearAgreement) {
         await storage.clearListingAgreement(id);
@@ -242,6 +242,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const patch: any = {};
       if (employeeId !== undefined) patch.employeeId = employeeId === null ? null : Number(employeeId);
       if (status) patch.status = status;
+      if (passiveAt !== undefined) patch.passiveAt = passiveAt ? new Date(passiveAt) : null;
       res.json(await storage.updateListing(id, patch));
     } catch { res.status(500).json({ message: "Internal server error" }); }
   });
@@ -1327,7 +1328,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.get(api.interviews.list.path, requireAuth, async (req, res) => {
     // ?all=true bypasses job scoping (used by dashboard for full overview)
     const bypassScope = req.query.all === "true";
-    const filter = bypassScope ? undefined : (req.user!.role === "assistant" ? undefined : jobFilter(req));
+    const scopeFilter = bypassScope ? undefined : (req.user!.role === "assistant" ? undefined : jobFilter(req));
+    const jobIdParam = req.query.jobId ? Number(req.query.jobId) : undefined;
+    const filter = jobIdParam ? [jobIdParam] : scopeFilter;
     res.json(await storage.getInterviews(undefined, filter));
   });
 

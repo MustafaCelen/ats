@@ -400,6 +400,8 @@ export default function Listings() {
   const [previewFile, setPreviewFile] = useState<{ id: number; name: string; mime: string } | null>(null);
   const [deletingFileId, setDeletingFileId] = useState<number | null>(null);
   const [clearingAgreementId, setClearingAgreementId] = useState<number | null>(null);
+  const [editingPassiveAtId, setEditingPassiveAtId] = useState<number | null>(null);
+  const [editingPassiveAtVal, setEditingPassiveAtVal] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [page, setPage] = useState(0);
   const PAGE_SIZE = 50;
@@ -548,6 +550,21 @@ export default function Listings() {
       });
     } finally {
       setDeletingFileId(null);
+    }
+  };
+
+  const savePassiveAt = async (listingId: number, val: string) => {
+    setEditingPassiveAtId(null);
+    try {
+      await fetch(`/api/listings/${listingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ passiveAt: val || null }),
+      });
+      refresh();
+    } catch {
+      toast({ title: "Hata", description: "Tarih kaydedilemedi.", variant: "destructive" });
     }
   };
 
@@ -1169,8 +1186,31 @@ export default function Listings() {
                             ? <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Aktif</span>
                             : <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-slate-200 text-slate-600">Pasif</span>}
                         </td>
-                        <td className="px-3 py-2.5 whitespace-nowrap text-xs text-muted-foreground">
-                          {l.passiveAt ? new Date(l.passiveAt).toLocaleDateString("tr-TR") : "—"}
+                        <td className="px-3 py-2.5 whitespace-nowrap text-xs">
+                          {editingPassiveAtId === l.id ? (
+                            <input
+                              type="date"
+                              autoFocus
+                              className="border border-input rounded px-1 py-0.5 text-xs w-32"
+                              value={editingPassiveAtVal}
+                              onChange={(e) => setEditingPassiveAtVal(e.target.value)}
+                              onBlur={() => savePassiveAt(l.id, editingPassiveAtVal)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") savePassiveAt(l.id, editingPassiveAtVal);
+                                if (e.key === "Escape") setEditingPassiveAtId(null);
+                              }}
+                            />
+                          ) : (
+                            <button
+                              onClick={() => {
+                                setEditingPassiveAtId(l.id);
+                                setEditingPassiveAtVal(l.passiveAt ? l.passiveAt.slice(0, 10) : "");
+                              }}
+                              className="text-muted-foreground hover:text-foreground hover:underline"
+                            >
+                              {l.passiveAt ? new Date(l.passiveAt).toLocaleDateString("tr-TR") : "—"}
+                            </button>
+                          )}
                         </td>
                         <td className="px-3 py-2.5">
                           {l.agreementUploadedAt ? (

@@ -42,7 +42,7 @@ const TIME_SLOTS = Array.from({ length: 96 }, (_, i) => {
   return `${h}:${m}`;
 });
 import { MentionTextarea } from "@/components/MentionTextarea";
-import type { PublicUser } from "@shared/schema";
+import type { PublicUser, Interview } from "@shared/schema";
 import {
   DndContext,
   DragOverlay,
@@ -72,11 +72,40 @@ export default function JobDetails() {
   const [, params] = useRoute("/jobs/:id");
   const jobId = params ? parseInt(params.id) : 0;
   const { toast } = useToast();
+  const qc = useQueryClient();
 
   const { data: job, isLoading: jobLoading } = useJob(jobId);
   const { data: applications, isLoading: appsLoading } = useApplications(jobId);
   const { mutate: updateStatus } = useUpdateApplicationStatus();
   const { mutate: completeHiring, isPending: completingHiring } = useCompleteHiring();
+
+  const { data: jobInterviews = [] } = useQuery<Interview[]>({
+    queryKey: ["/api/interviews", jobId],
+    queryFn: async () => {
+      const res = await fetch(`/api/interviews?jobId=${jobId}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch interviews");
+      return res.json();
+    },
+    enabled: !!jobId,
+  });
+
+  const pendingInterviewByAppId = useMemo(() => {
+    const map: Record<number, Interview> = {};
+    for (const iv of jobInterviews) {
+      if (iv.status === "scheduled") map[iv.applicationId] = iv;
+    }
+    return map;
+  }, [jobInterviews]);
+
+  const { mutate: completeInterview } = useMutation({
+    mutationFn: (interviewId: number) =>
+      apiRequest("PATCH", `/api/interviews/${interviewId}`, { status: "completed" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/interviews", jobId] });
+      toast({ title: "Randevu tamamlandı" });
+    },
+  });
+
   const [addCandidateOpen, setAddCandidateOpen] = useState(false);
   const [interviewApp, setInterviewApp] = useState<ApplicationWithRelations | null>(null);
   const [offerApp, setOfferApp] = useState<ApplicationWithRelations | null>(null);
@@ -280,8 +309,9 @@ export default function JobDetails() {
                             onStatusChange={(s) => handleStatusChange(app.id, s, app.candidate?.name ?? "")}
                             onRateNote={() => setRateNoteApp(app)}
                             onInterview={() => setInterviewApp(app)}
-                            onOffer={() => setOfferApp(app)}
                             onCompleteHiring={() => setPendingHireApp(app)}
+                            pendingInterview={pendingInterviewByAppId[app.id] ?? null}
+                            onCompleteInterview={(iv) => completeInterview(iv.id)}
                           />
                         ))}
                       </AnimatePresence>
@@ -310,8 +340,9 @@ export default function JobDetails() {
             onStatusChange={handleStatusChange}
             onRateNote={(app) => setRateNoteApp(app)}
             onInterview={(app) => setInterviewApp(app)}
-            onOffer={(app) => setOfferApp(app)}
             onCompleteHiring={(app) => setPendingHireApp(app)}
+            pendingInterviewByAppId={pendingInterviewByAppId}
+            onCompleteInterview={(iv) => completeInterview(iv.id)}
           />
         )}
       </div>
@@ -408,16 +439,18 @@ function ApplicationListView({
   onStatusChange,
   onRateNote,
   onInterview,
-  onOffer,
   onCompleteHiring,
+  pendingInterviewByAppId,
+  onCompleteInterview,
 }: {
   applications: ApplicationWithRelations[];
   completingHiring: boolean;
   onStatusChange: (id: number, status: string, name: string) => void;
   onRateNote: (app: ApplicationWithRelations) => void;
   onInterview: (app: ApplicationWithRelations) => void;
-  onOffer: (app: ApplicationWithRelations) => void;
   onCompleteHiring: (app: ApplicationWithRelations) => void;
+  pendingInterviewByAppId: Record<number, Interview>;
+  onCompleteInterview: (iv: Interview) => void;
 }) {
   if (applications.length === 0) {
     return (
@@ -560,11 +593,16 @@ function ApplicationListView({
                     <DropdownMenuItem className="text-xs font-medium" onClick={() => onRateNote(app)}>
                       <Star className="h-3 w-3 mr-2 text-amber-400" fill="currentColor" /> Rate &amp; Add Note
                     </DropdownMenuItem>
+                    {pendingInterviewByAppId[app.id] && (
+                      <DropdownMenuItem
+                        className="text-xs font-medium text-emerald-700 focus:text-emerald-700"
+                        onClick={() => onCompleteInterview(pendingInterviewByAppId[app.id])}
+                      >
+                        <CheckCircle2 className="h-3 w-3 mr-2 text-emerald-500" /> Randevuyu Tamamla
+                      </DropdownMenuItem>
+                    )}
                     <DropdownMenuItem className="text-xs" onClick={() => onInterview(app)}>
                       <Calendar className="h-3 w-3 mr-2 text-amber-500" /> Schedule Interview
-                    </DropdownMenuItem>
-                    <DropdownMenuItem className="text-xs" onClick={() => onOffer(app)}>
-                      <DollarSign className="h-3 w-3 mr-2 text-emerald-500" /> Create Offer
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem className="text-xs" asChild>
@@ -637,8 +675,9 @@ function DraggableCard({
   onStatusChange,
   onRateNote,
   onInterview,
-  onOffer,
   onCompleteHiring,
+  pendingInterview,
+  onCompleteInterview,
 }: {
   app: ApplicationWithRelations;
   stage: string;
@@ -647,8 +686,9 @@ function DraggableCard({
   onStatusChange: (s: string) => void;
   onRateNote: () => void;
   onInterview: () => void;
-  onOffer: () => void;
   onCompleteHiring: () => void;
+  pendingInterview: Interview | null;
+  onCompleteInterview: (iv: Interview) => void;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: app.id,
@@ -712,6 +752,15 @@ function DraggableCard({
               Rate &amp; Add Note
             </DropdownMenuItem>
             <DropdownMenuSeparator />
+            {pendingInterview && (
+              <DropdownMenuItem
+                className="text-xs font-medium text-emerald-700 focus:text-emerald-700"
+                onClick={() => onCompleteInterview(pendingInterview)}
+              >
+                <CheckCircle2 className="h-3 w-3 mr-2 text-emerald-500" />
+                Randevuyu Tamamla
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem
               className="text-xs"
               onClick={onInterview}
@@ -719,14 +768,6 @@ function DraggableCard({
             >
               <Calendar className="h-3 w-3 mr-2 text-amber-500" />
               Schedule Interview
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              className="text-xs"
-              onClick={onOffer}
-              data-testid={`create-offer-${app.id}`}
-            >
-              <DollarSign className="h-3 w-3 mr-2 text-emerald-500" />
-              Create Offer
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             {app.candidateId && (
@@ -774,6 +815,15 @@ function DraggableCard({
         </div>
       </div>
 
+      {pendingInterview && (
+        <button
+          className="mt-2 w-full flex items-center justify-center gap-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-700 text-xs font-semibold py-1.5 transition-colors"
+          onClick={() => onCompleteInterview(pendingInterview)}
+        >
+          <CheckCircle2 className="h-3.5 w-3.5" />
+          Randevuyu Tamamla
+        </button>
+      )}
       {stage === "documents" && (
         <button
           className="mt-2 w-full flex items-center justify-center gap-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700 text-xs font-semibold py-1.5 transition-colors disabled:opacity-50"
@@ -1061,6 +1111,7 @@ function AddCandidateDialog({ open, onOpenChange, jobId }: { open: boolean; onOp
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
   const [dropdownOpen, setDropdownOpen] = useState(false);
+
   const { toast } = useToast();
 
   // Build set of candidateIds already assigned to any job
