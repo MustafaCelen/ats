@@ -182,90 +182,126 @@ function YearSection({ year, rows, isLoading }: { year: number; rows: CapRow[]; 
         ) : rows.length === 0 ? (
           <div className="p-8 text-center text-sm text-muted-foreground">Veri yok</div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-muted/40 border-b border-border">
-                  <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-left">#</th>
-                  <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-left">Danışman</th>
-                  <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-left">KWUID</th>
-                  <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-right">Cap Hedefi</th>
-                  <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-right">Kullanılan</th>
-                  <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-right">İlerleme</th>
-                  <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-left">Periyot Başlangıcı</th>
-                  <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-right">Cap Tarihi</th>
-                  <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-right">Süre</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r, i) => {
-                  const pct = r.capAmount > 0 ? Math.min(100, Math.round((r.capUsed / r.capAmount) * 100)) : 0;
-                  return (
-                    <tr key={r.employeeId} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
-                      <td className="py-2 px-4 text-xs text-muted-foreground">{i + 1}</td>
-                      <td className="py-2 px-4 font-medium">
-                        <div className="flex items-center gap-2">
-                          {r.hasCapped && <Trophy className="h-3 w-3 text-amber-500 shrink-0" />}
-                          {r.name}
-                          {r.status === "passive" && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">ayrıldı</span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="py-2 px-4 text-xs text-muted-foreground">{r.kwuid || "—"}</td>
-                      <td className="py-2 px-4 text-right">{fmtTRY(r.capAmount)}</td>
-                      <td className="py-2 px-4 text-right font-medium">{fmtTRY(r.capUsed)}</td>
-                      <td className="py-2 px-4">
-                        <div className="flex items-center gap-2 justify-end">
-                          <div className="w-20 h-1.5 rounded-full bg-muted overflow-hidden">
-                            <div
-                              className="h-full rounded-full"
-                              style={{
-                                width: `${pct}%`,
-                                backgroundColor: r.hasCapped ? "#f59e0b" : pct >= 75 ? "#10b981" : "#3b82f6",
-                              }}
-                            />
-                          </div>
-                          <span className={`text-xs font-semibold w-9 text-right ${r.hasCapped ? "text-amber-600" : "text-foreground"}`}>
-                            %{pct}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="py-2 px-4 text-xs text-muted-foreground">
-                        {new Date(r.periodStart).toLocaleDateString("tr-TR", { month: "long", year: "numeric" })}
-                      </td>
-                      <td className="py-2 px-4 text-right text-xs">
-                        {r.achievedAt
-                          ? new Date(r.achievedAt).toLocaleDateString("tr-TR", { day: "numeric", month: "short", year: "numeric" })
-                          : <span className="text-muted-foreground">—</span>}
-                      </td>
-                      <td className="py-2 px-4 text-right">
-                        {r.achievementDays !== null ? (
-                          <span className={`text-xs font-semibold ${r.achievementDays <= (avgDays ?? Infinity) ? "text-emerald-600" : "text-blue-600"}`}>
-                            {fmtDays(r.achievementDays)}
-                          </span>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">—</span>
+          <>
+            {/* Mobile cards */}
+            <div className="md:hidden divide-y divide-border">
+              {rows.map((r, i) => {
+                const pct = r.capAmount > 0 ? Math.min(100, Math.round((r.capUsed / r.capAmount) * 100)) : 0;
+                return (
+                  <div key={r.employeeId} className="p-4 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground">{i + 1}.</span>
+                        {r.hasCapped && <Trophy className="h-3 w-3 text-amber-500 shrink-0" />}
+                        <span className="font-medium text-sm">{r.name}</span>
+                        {r.status === "passive" && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">ayrıldı</span>
                         )}
+                      </div>
+                      <span className={`text-xs font-semibold ${r.hasCapped ? "text-amber-600" : "text-foreground"}`}>%{pct}</span>
+                    </div>
+                    <div className="w-full h-1.5 rounded-full bg-muted overflow-hidden">
+                      <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: r.hasCapped ? "#f59e0b" : pct >= 75 ? "#10b981" : "#3b82f6" }} />
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                      <div><span className="font-medium">Hedef:</span> {fmtTRY(r.capAmount)}</div>
+                      <div><span className="font-medium">Kullanılan:</span> {fmtTRY(r.capUsed)}</div>
+                      <div><span className="font-medium">Periyot:</span> {new Date(r.periodStart).toLocaleDateString("tr-TR", { month: "long", year: "numeric" })}</div>
+                      <div><span className="font-medium">Cap Tarihi:</span> {r.achievedAt ? new Date(r.achievedAt).toLocaleDateString("tr-TR", { day: "numeric", month: "short", year: "numeric" }) : "—"}</div>
+                      {r.achievementDays !== null && (
+                        <div className="col-span-2"><span className="font-medium">Süre:</span> <span className={r.achievementDays <= (avgDays ?? Infinity) ? "text-emerald-600" : "text-blue-600"}>{fmtDays(r.achievementDays)}</span></div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {/* Desktop table */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-muted/40 border-b border-border">
+                    <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-left">#</th>
+                    <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-left">Danışman</th>
+                    <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-left">KWUID</th>
+                    <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-right">Cap Hedefi</th>
+                    <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-right">Kullanılan</th>
+                    <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-right">İlerleme</th>
+                    <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-left">Periyot Başlangıcı</th>
+                    <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-right">Cap Tarihi</th>
+                    <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-right">Süre</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r, i) => {
+                    const pct = r.capAmount > 0 ? Math.min(100, Math.round((r.capUsed / r.capAmount) * 100)) : 0;
+                    return (
+                      <tr key={r.employeeId} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
+                        <td className="py-2 px-4 text-xs text-muted-foreground">{i + 1}</td>
+                        <td className="py-2 px-4 font-medium">
+                          <div className="flex items-center gap-2">
+                            {r.hasCapped && <Trophy className="h-3 w-3 text-amber-500 shrink-0" />}
+                            {r.name}
+                            {r.status === "passive" && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">ayrıldı</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-2 px-4 text-xs text-muted-foreground">{r.kwuid || "—"}</td>
+                        <td className="py-2 px-4 text-right">{fmtTRY(r.capAmount)}</td>
+                        <td className="py-2 px-4 text-right font-medium">{fmtTRY(r.capUsed)}</td>
+                        <td className="py-2 px-4">
+                          <div className="flex items-center gap-2 justify-end">
+                            <div className="w-20 h-1.5 rounded-full bg-muted overflow-hidden">
+                              <div
+                                className="h-full rounded-full"
+                                style={{
+                                  width: `${pct}%`,
+                                  backgroundColor: r.hasCapped ? "#f59e0b" : pct >= 75 ? "#10b981" : "#3b82f6",
+                                }}
+                              />
+                            </div>
+                            <span className={`text-xs font-semibold w-9 text-right ${r.hasCapped ? "text-amber-600" : "text-foreground"}`}>
+                              %{pct}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="py-2 px-4 text-xs text-muted-foreground">
+                          {new Date(r.periodStart).toLocaleDateString("tr-TR", { month: "long", year: "numeric" })}
+                        </td>
+                        <td className="py-2 px-4 text-right text-xs">
+                          {r.achievedAt
+                            ? new Date(r.achievedAt).toLocaleDateString("tr-TR", { day: "numeric", month: "short", year: "numeric" })
+                            : <span className="text-muted-foreground">—</span>}
+                        </td>
+                        <td className="py-2 px-4 text-right">
+                          {r.achievementDays !== null ? (
+                            <span className={`text-xs font-semibold ${r.achievementDays <= (avgDays ?? Infinity) ? "text-emerald-600" : "text-blue-600"}`}>
+                              {fmtDays(r.achievementDays)}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                {capped.length > 0 && (
+                  <tfoot>
+                    <tr className="bg-muted/30 border-t border-border font-semibold">
+                      <td colSpan={8} className="py-2.5 px-4 text-xs text-muted-foreground">
+                        Ortalama cap süresi ({capped.length} danışman)
+                      </td>
+                      <td className="py-2.5 px-4 text-right text-xs text-amber-600 font-bold">
+                        {avgDays !== null ? fmtDays(avgDays) : "—"}
                       </td>
                     </tr>
-                  );
-                })}
-              </tbody>
-              {capped.length > 0 && (
-                <tfoot>
-                  <tr className="bg-muted/30 border-t border-border font-semibold">
-                    <td colSpan={8} className="py-2.5 px-4 text-xs text-muted-foreground">
-                      Ortalama cap süresi ({capped.length} danışman)
-                    </td>
-                    <td className="py-2.5 px-4 text-right text-xs text-amber-600 font-bold">
-                      {avgDays !== null ? fmtDays(avgDays) : "—"}
-                    </td>
-                  </tr>
-                </tfoot>
-              )}
-            </table>
-          </div>
+                  </tfoot>
+                )}
+              </table>
+            </div>
+          </>
         )}
       </div>
     </div>

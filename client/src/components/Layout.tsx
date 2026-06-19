@@ -302,7 +302,7 @@ export function Layout({ children }: LayoutProps) {
           )}
         </header>
 
-        <div className="flex-1 p-6 max-w-7xl w-full mx-auto">
+        <div className="flex-1 p-3 md:p-6 max-w-7xl w-full mx-auto">
           {children}
         </div>
       </main>

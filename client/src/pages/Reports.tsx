@@ -475,7 +475,24 @@ export default function Reports() {
 
           <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
             <div className="p-5 border-b border-border flex items-center gap-2"><Activity className="h-4 w-4 text-primary" /><h2 className="text-base font-semibold">Sorumlu Yönetici Verimliliği</h2></div>
-            <div className="overflow-x-auto">
+            {/* Mobile cards */}
+            <div className="md:hidden divide-y divide-border">
+              {(stats?.hiringManagerEfficiency ?? []).map((m: any) => (
+                <div key={m.userId} className="p-4 space-y-2">
+                  <div className="font-medium text-sm">{m.name}</div>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                    <span>Söz. Süresi: <span className="font-medium text-foreground">{m.avgTimeToContractSign} gün</span></span>
+                    <span>Giriş Süresi: <span className="font-medium text-foreground">{m.avgTimeToEmploy} gün</span></span>
+                    <span>Randevu: <span className="font-medium text-foreground">{m.interviews}</span></span>
+                    <span>K0/K1/K2: <span className="font-medium text-foreground">{m.k0 ?? 0}/{m.k1 ?? 0}/{m.k2 ?? 0}</span></span>
+                    <span>Sözleşme: <span className="font-medium text-foreground">{m.totalHires}</span></span>
+                    <span>Giriş: <span className={`font-medium ${m.employedCount > 0 ? "text-emerald-600" : "text-foreground"}`}>{m.employedCount ?? 0}</span></span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {/* Desktop table */}
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-muted/30 text-muted-foreground uppercase text-xs">
                   <tr>
@@ -629,44 +646,71 @@ export default function Reports() {
           ) : !stats?.newEmployees?.length ? (
             <div className="px-5 py-8 text-sm text-muted-foreground text-center">Bu dönemde sisteme katılan danışman bulunmuyor.</div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/30 text-muted-foreground uppercase text-xs">
-                  <tr>
-                    <th className="text-left p-4">Danışman</th>
-                    <th className="text-left p-4">Üretim Bandı</th>
-                    <th className="text-left p-4">Şehir</th>
-                    <th className="text-left p-4">Kategori</th>
-                    <th className="text-left p-4">Sözleşme</th>
-                    <th className="text-left p-4">KWUID</th>
-                    <th className="text-left p-4">Başlangıç Tarihi</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {stats.newEmployees.map((emp: any) => (
-                    <tr key={emp.id} className="border-t border-border">
-                      <td className="p-4 font-medium text-foreground">{emp.name}</td>
-                      <td className="p-4 text-muted-foreground">{emp.jobTitle ?? "—"}</td>
-                      <td className="p-4 text-muted-foreground">{emp.city ?? "—"}</td>
-                      <td className="p-4">
-                        {emp.category ? (
-                          <span className={`inline-flex items-center text-xs font-bold px-2 py-0.5 rounded-full ring-1 ${
-                            emp.category === "K2" ? "bg-emerald-50 text-emerald-700 ring-emerald-200" :
-                            emp.category === "K1" ? "bg-amber-50 text-amber-700 ring-amber-200" :
-                            "bg-slate-50 text-slate-700 ring-slate-200"
-                          }`}>{emp.category}</span>
-                        ) : "—"}
-                      </td>
-                      <td className="p-4 text-muted-foreground">{emp.contractType ?? "—"}</td>
-                      <td className="p-4 font-mono text-xs text-muted-foreground">{emp.kwuid ?? "—"}</td>
-                      <td className="p-4 text-muted-foreground">
-                        {emp.startDate ? new Date(emp.startDate).toLocaleDateString("tr-TR") : "—"}
-                      </td>
+            <>
+              {/* Mobile cards */}
+              <div className="md:hidden divide-y divide-border">
+                {stats.newEmployees.map((emp: any) => (
+                  <div key={emp.id} className="p-4 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium text-sm text-foreground">{emp.name}</span>
+                      {emp.category ? (
+                        <span className={`inline-flex items-center text-xs font-bold px-2 py-0.5 rounded-full ring-1 ${
+                          emp.category === "K2" ? "bg-emerald-50 text-emerald-700 ring-emerald-200" :
+                          emp.category === "K1" ? "bg-amber-50 text-amber-700 ring-amber-200" :
+                          "bg-slate-50 text-slate-700 ring-slate-200"
+                        }`}>{emp.category}</span>
+                      ) : null}
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                      <div><span className="font-medium">Bant:</span> {emp.jobTitle ?? "—"}</div>
+                      <div><span className="font-medium">Şehir:</span> {emp.city ?? "—"}</div>
+                      <div><span className="font-medium">Sözleşme:</span> {emp.contractType ?? "—"}</div>
+                      <div><span className="font-medium">KWUID:</span> {emp.kwuid ?? "—"}</div>
+                      <div className="col-span-2"><span className="font-medium">Başlangıç:</span> {emp.startDate ? new Date(emp.startDate).toLocaleDateString("tr-TR") : "—"}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {/* Desktop table */}
+              <div className="hidden md:block overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/30 text-muted-foreground uppercase text-xs">
+                    <tr>
+                      <th className="text-left p-4">Danışman</th>
+                      <th className="text-left p-4">Üretim Bandı</th>
+                      <th className="text-left p-4">Şehir</th>
+                      <th className="text-left p-4">Kategori</th>
+                      <th className="text-left p-4">Sözleşme</th>
+                      <th className="text-left p-4">KWUID</th>
+                      <th className="text-left p-4">Başlangıç Tarihi</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {stats.newEmployees.map((emp: any) => (
+                      <tr key={emp.id} className="border-t border-border">
+                        <td className="p-4 font-medium text-foreground">{emp.name}</td>
+                        <td className="p-4 text-muted-foreground">{emp.jobTitle ?? "—"}</td>
+                        <td className="p-4 text-muted-foreground">{emp.city ?? "—"}</td>
+                        <td className="p-4">
+                          {emp.category ? (
+                            <span className={`inline-flex items-center text-xs font-bold px-2 py-0.5 rounded-full ring-1 ${
+                              emp.category === "K2" ? "bg-emerald-50 text-emerald-700 ring-emerald-200" :
+                              emp.category === "K1" ? "bg-amber-50 text-amber-700 ring-amber-200" :
+                              "bg-slate-50 text-slate-700 ring-slate-200"
+                            }`}>{emp.category}</span>
+                          ) : "—"}
+                        </td>
+                        <td className="p-4 text-muted-foreground">{emp.contractType ?? "—"}</td>
+                        <td className="p-4 font-mono text-xs text-muted-foreground">{emp.kwuid ?? "—"}</td>
+                        <td className="p-4 text-muted-foreground">
+                          {emp.startDate ? new Date(emp.startDate).toLocaleDateString("tr-TR") : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </div>
 
@@ -693,46 +737,86 @@ export default function Reports() {
           ) : !stats?.newContractSigners?.length ? (
             <div className="px-5 py-8 text-sm text-muted-foreground text-center">Bu dönemde sözleşme imzalayan aday bulunmuyor.</div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/30 text-muted-foreground uppercase text-xs">
-                  <tr>
-                    <th className="text-left p-4">Danışman</th>
-                    <th className="text-left p-4">Üretim Bandı</th>
-                    <th className="text-left p-4">Şehir</th>
-                    <th className="text-left p-4">Kategori</th>
-                    <th className="text-left p-4">Sözleşme Tarihi</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {stats.newContractSigners.map((s: any) => (
-                    <tr key={s.applicationId} className="border-t border-border">
-                      <td className="p-4 font-medium text-foreground">{s.candidateName}</td>
-                      <td className="p-4 text-muted-foreground">{s.jobTitle ?? "—"}</td>
-                      <td className="p-4 text-muted-foreground">{s.city ?? "—"}</td>
-                      <td className="p-4">
-                        {s.category ? (
-                          <span className={`inline-flex items-center text-xs font-bold px-2 py-0.5 rounded-full ring-1 ${
-                            s.category === "K2" ? "bg-emerald-50 text-emerald-700 ring-emerald-200" :
-                            s.category === "K1" ? "bg-amber-50 text-amber-700 ring-amber-200" :
-                            "bg-slate-50 text-slate-700 ring-slate-200"
-                          }`}>{s.category}</span>
-                        ) : "—"}
-                      </td>
-                      <td className="p-4 text-muted-foreground">
-                        {s.signedAt ? new Date(s.signedAt).toLocaleDateString("tr-TR") : "—"}
-                      </td>
+            <>
+              {/* Mobile cards */}
+              <div className="md:hidden divide-y divide-border">
+                {stats.newContractSigners.map((s: any) => (
+                  <div key={s.applicationId} className="p-4 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium text-sm text-foreground">{s.candidateName}</span>
+                      {s.category ? (
+                        <span className={`inline-flex items-center text-xs font-bold px-2 py-0.5 rounded-full ring-1 ${
+                          s.category === "K2" ? "bg-emerald-50 text-emerald-700 ring-emerald-200" :
+                          s.category === "K1" ? "bg-amber-50 text-amber-700 ring-amber-200" :
+                          "bg-slate-50 text-slate-700 ring-slate-200"
+                        }`}>{s.category}</span>
+                      ) : null}
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                      <div><span className="font-medium">Bant:</span> {s.jobTitle ?? "—"}</div>
+                      <div><span className="font-medium">Şehir:</span> {s.city ?? "—"}</div>
+                      <div className="col-span-2"><span className="font-medium">Sözleşme:</span> {s.signedAt ? new Date(s.signedAt).toLocaleDateString("tr-TR") : "—"}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {/* Desktop table */}
+              <div className="hidden md:block overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/30 text-muted-foreground uppercase text-xs">
+                    <tr>
+                      <th className="text-left p-4">Danışman</th>
+                      <th className="text-left p-4">Üretim Bandı</th>
+                      <th className="text-left p-4">Şehir</th>
+                      <th className="text-left p-4">Kategori</th>
+                      <th className="text-left p-4">Sözleşme Tarihi</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {stats.newContractSigners.map((s: any) => (
+                      <tr key={s.applicationId} className="border-t border-border">
+                        <td className="p-4 font-medium text-foreground">{s.candidateName}</td>
+                        <td className="p-4 text-muted-foreground">{s.jobTitle ?? "—"}</td>
+                        <td className="p-4 text-muted-foreground">{s.city ?? "—"}</td>
+                        <td className="p-4">
+                          {s.category ? (
+                            <span className={`inline-flex items-center text-xs font-bold px-2 py-0.5 rounded-full ring-1 ${
+                              s.category === "K2" ? "bg-emerald-50 text-emerald-700 ring-emerald-200" :
+                              s.category === "K1" ? "bg-amber-50 text-amber-700 ring-amber-200" :
+                              "bg-slate-50 text-slate-700 ring-slate-200"
+                            }`}>{s.category}</span>
+                          ) : "—"}
+                        </td>
+                        <td className="p-4 text-muted-foreground">
+                          {s.signedAt ? new Date(s.signedAt).toLocaleDateString("tr-TR") : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </div>
 
         <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
           <div className="p-5 border-b border-border flex items-center gap-2"><Briefcase className="h-4 w-4 text-primary" /><h2 className="text-base font-semibold">Aktif İlan Performansı</h2></div>
-          <div className="overflow-x-auto">
+          {/* Mobile cards */}
+          <div className="md:hidden divide-y divide-border">
+            {(stats?.activeJobPerformance ?? []).map((job: any) => (
+              <div key={job.jobId} className="p-4 space-y-2">
+                <div className="font-medium text-sm">{job.title}</div>
+                <div className="grid grid-cols-4 gap-2 text-xs text-muted-foreground">
+                  <div className="text-center"><div className="font-medium text-foreground">{job.applicants}</div><div>Toplam</div></div>
+                  <div className="text-center"><div className="font-medium text-foreground">{job.k0}</div><div>K0</div></div>
+                  <div className="text-center"><div className="font-medium text-foreground">{job.k1}</div><div>K1</div></div>
+                  <div className="text-center"><div className="font-medium text-foreground">{job.k2}</div><div>K2</div></div>
+                </div>
+              </div>
+            ))}
+          </div>
+          {/* Desktop table */}
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-muted/30 text-muted-foreground uppercase text-xs">
                 <tr>

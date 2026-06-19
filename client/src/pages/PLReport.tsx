@@ -86,7 +86,7 @@ export default function PLReport() {
         </div>
 
         {/* Annual summary cards */}
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
             <p className="text-xs text-emerald-700 font-medium mb-1 flex items-center gap-1">
               <TrendingUp className="h-3.5 w-3.5" /> Yıllık Toplam Gelir
@@ -157,8 +157,9 @@ export default function PLReport() {
 
         {/* Month-by-month table */}
         <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
+          <div className="overflow-x-auto">
           {/* Table header */}
-          <div className="grid grid-cols-[2fr_1fr_1fr_1fr_auto] gap-4 px-4 py-2.5 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <div className="min-w-[420px] grid grid-cols-[2fr_1fr_1fr_1fr_auto] gap-2 md:gap-4 px-3 md:px-4 py-2.5 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             <div>Ay</div>
             <div className="text-right text-emerald-700">Gelir</div>
             <div className="text-right text-red-700">Gider</div>
@@ -181,7 +182,7 @@ export default function PLReport() {
                     {/* Month summary row */}
                     <button
                       type="button"
-                      className={`w-full grid grid-cols-[2fr_1fr_1fr_1fr_auto] gap-4 px-4 py-3 items-center hover:bg-muted/20 transition-colors text-left ${!hasData ? "opacity-50" : ""}`}
+                      className={`min-w-[420px] w-full grid grid-cols-[2fr_1fr_1fr_1fr_auto] gap-2 md:gap-4 px-3 md:px-4 py-3 items-center hover:bg-muted/20 transition-colors text-left ${!hasData ? "opacity-50" : ""}`}
                       onClick={() => hasData && toggleMonth(m.month)}
                     >
                       <div className="font-medium text-sm">{MONTHS_TR[m.month - 1]} {year}</div>
@@ -322,7 +323,7 @@ export default function PLReport() {
 
           {/* Annual totals footer */}
           {!isLoading && (
-            <div className="grid grid-cols-[2fr_1fr_1fr_1fr_auto] gap-4 px-4 py-3 border-t-2 border-border bg-muted/40 font-semibold text-sm">
+            <div className="min-w-[420px] grid grid-cols-[2fr_1fr_1fr_1fr_auto] gap-2 md:gap-4 px-3 md:px-4 py-3 border-t-2 border-border bg-muted/40 font-semibold text-sm">
               <div>Yıl Toplamı</div>
               <div className="text-right text-emerald-700">{fmtTRY(yearTotals.income)}</div>
               <div className="text-right text-red-700">{fmtTRY(yearTotals.expenses)}</div>
@@ -332,6 +333,7 @@ export default function PLReport() {
               <div className="w-6" />
             </div>
           )}
+          </div>{/* /overflow-x-auto */}
         </div>
       </div>
     </Layout>

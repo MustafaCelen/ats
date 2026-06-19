@@ -462,8 +462,8 @@ function ApplicationListView({
 
   return (
     <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
-      {/* Header */}
-      <div className="grid grid-cols-[2fr_130px_72px_150px_2fr_2fr_100px_148px] gap-3 px-4 py-2.5 bg-muted/40 border-b border-border text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+      {/* Desktop Header */}
+      <div className="hidden md:grid grid-cols-[2fr_130px_72px_150px_2fr_2fr_100px_148px] gap-3 px-4 py-2.5 bg-muted/40 border-b border-border text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
         <div>Aday</div>
         <div>Aşama</div>
         <div>Puan</div>
@@ -479,139 +479,222 @@ function ApplicationListView({
         {applications.map((app) => {
           const meta = COLUMN_META[app.status] ?? { color: "text-gray-600", bg: "bg-gray-50", dot: "bg-gray-400" };
           return (
-            <div
-              key={app.id}
-              className="grid grid-cols-[2fr_130px_72px_150px_2fr_2fr_100px_148px] gap-3 px-4 py-3 items-start hover:bg-muted/20 transition-colors group"
-              data-testid={`list-row-${app.id}`}
-            >
-              {/* Candidate */}
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center text-primary text-[11px] font-bold shrink-0">
-                  {app.candidate?.name?.slice(0, 2).toUpperCase()}
-                </div>
-                <div className="min-w-0">
-                  <Link href={`/candidates/${app.candidateId}`} className="text-sm font-semibold text-foreground hover:text-primary transition-colors truncate block">
-                    {app.candidate?.name}
-                  </Link>
-                  <p className="text-xs text-muted-foreground truncate">{app.candidate?.city}{app.candidate?.district ? ` · ${app.candidate.district}` : ""}</p>
-                </div>
-              </div>
-
-              {/* Stage */}
-              <div>
-                <Select value={app.status} onValueChange={(s) => onStatusChange(app.id, s, app.candidate?.name ?? "")}>
-                  <SelectTrigger className="h-7 text-xs w-full border-0 bg-transparent px-0 focus:ring-0 shadow-none">
-                    <div className="flex items-center gap-1.5">
-                      <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${meta.dot}`} />
-                      <span className={`font-medium text-xs ${meta.color}`}>{STAGE_LABELS[app.status] ?? app.status}</span>
+            <div key={app.id} data-testid={`list-row-${app.id}`}>
+              {/* Mobile card */}
+              <div className="md:hidden p-4 space-y-3 hover:bg-muted/20">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center text-primary text-[11px] font-bold shrink-0">
+                      {app.candidate?.name?.slice(0, 2).toUpperCase()}
                     </div>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {APPLICATION_STAGES.map((s) => (
-                      <SelectItem key={s} value={s} className="text-xs">
-                        <div className="flex items-center gap-2">
-                          <span className={`h-1.5 w-1.5 rounded-full ${COLUMN_META[s]?.dot ?? "bg-gray-400"}`} />
-                          {STAGE_LABELS[s] ?? s}
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Score */}
-              <div>
-                <ScoreBadge score={app.score} size="sm" showLabel />
-              </div>
-
-              {/* Contact */}
-              <div className="space-y-0.5 min-w-0">
-                {app.candidate?.phone ? (
-                  <a href={`tel:${app.candidate.phone}`} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors truncate">
-                    <Phone className="h-3 w-3 shrink-0" />
-                    <span className="truncate">{app.candidate.phone}</span>
-                  </a>
-                ) : (
-                  <span className="text-xs text-muted-foreground/40">—</span>
-                )}
-                {app.candidate?.referredBy ? (
-                  <span className="flex items-center gap-1 text-xs text-muted-foreground truncate">
-                    <Users className="h-3 w-3 shrink-0" />
-                    <span className="truncate">{app.candidate.referredBy}</span>
-                  </span>
-                ) : null}
-              </div>
-
-              {/* Özet */}
-              <div className="min-w-0 overflow-hidden">
-                {app.candidate?.resumeText ? (
-                  <p className="text-xs text-muted-foreground line-clamp-2" title={app.candidate.resumeText}>
-                    {app.candidate.resumeText}
-                  </p>
-                ) : (
-                  <span className="text-xs text-muted-foreground/40">—</span>
-                )}
-              </div>
-
-              {/* Latest note */}
-              <div className="min-w-0 overflow-hidden">
-                {app.latestNote ? (
-                  <p className="text-xs text-muted-foreground line-clamp-2" title={app.latestNote}>
-                    {app.latestNote}
-                  </p>
-                ) : (
-                  <span className="text-xs text-muted-foreground/40">—</span>
-                )}
-              </div>
-
-              {/* Date */}
-              <div className="text-xs text-muted-foreground">
-                {app.appliedAt ? formatDistanceToNow(new Date(app.appliedAt), { addSuffix: true }) : "—"}
-              </div>
-
-              {/* Actions — fixed width so Tamamla button never shifts layout */}
-              <div className="flex items-center gap-1 justify-end w-full">
-                {app.status === "documents" ? (
-                  <button
-                    onClick={() => onCompleteHiring(app)}
-                    disabled={completingHiring}
-                    className="flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-md bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 transition-colors disabled:opacity-50 whitespace-nowrap"
-                    title="İşe Alımı Tamamla"
-                  >
-                    <CheckCircle2 className="h-3 w-3" /> Tamamla
-                  </button>
-                ) : (
-                  <div className="w-[72px]" />
-                )}
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button className="p-1.5 hover:bg-muted rounded-md text-muted-foreground transition-colors">
-                      <MoreHorizontal className="h-4 w-4" />
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-44">
-                    <DropdownMenuItem className="text-xs font-medium" onClick={() => onRateNote(app)}>
-                      <Star className="h-3 w-3 mr-2 text-amber-400" fill="currentColor" /> Rate &amp; Add Note
-                    </DropdownMenuItem>
-                    {pendingInterviewByAppId[app.id] && (
-                      <DropdownMenuItem
-                        className="text-xs font-medium text-emerald-700 focus:text-emerald-700"
-                        onClick={() => onCompleteInterview(pendingInterviewByAppId[app.id])}
-                      >
-                        <CheckCircle2 className="h-3 w-3 mr-2 text-emerald-500" /> Randevuyu Tamamla
-                      </DropdownMenuItem>
-                    )}
-                    <DropdownMenuItem className="text-xs" onClick={() => onInterview(app)}>
-                      <Calendar className="h-3 w-3 mr-2 text-amber-500" /> Schedule Interview
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem className="text-xs" asChild>
-                      <Link href={`/candidates/${app.candidateId}`}>
-                        <ExternalLink className="h-3 w-3 mr-2" /> View Profile
+                    <div className="min-w-0">
+                      <Link href={`/candidates/${app.candidateId}`} className="text-sm font-semibold text-foreground hover:text-primary transition-colors truncate block">
+                        {app.candidate?.name}
                       </Link>
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                      <p className="text-xs text-muted-foreground truncate">{app.candidate?.city}{app.candidate?.district ? ` · ${app.candidate.district}` : ""}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <ScoreBadge score={app.score} size="sm" showLabel />
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button className="p-1.5 hover:bg-muted rounded-md text-muted-foreground transition-colors">
+                          <MoreHorizontal className="h-4 w-4" />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-44">
+                        <DropdownMenuItem className="text-xs font-medium" onClick={() => onRateNote(app)}>
+                          <Star className="h-3 w-3 mr-2 text-amber-400" fill="currentColor" /> Rate &amp; Add Note
+                        </DropdownMenuItem>
+                        {pendingInterviewByAppId[app.id] && (
+                          <DropdownMenuItem
+                            className="text-xs font-medium text-emerald-700 focus:text-emerald-700"
+                            onClick={() => onCompleteInterview(pendingInterviewByAppId[app.id])}
+                          >
+                            <CheckCircle2 className="h-3 w-3 mr-2 text-emerald-500" /> Randevuyu Tamamla
+                          </DropdownMenuItem>
+                        )}
+                        <DropdownMenuItem className="text-xs" onClick={() => onInterview(app)}>
+                          <Calendar className="h-3 w-3 mr-2 text-amber-500" /> Schedule Interview
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem className="text-xs" asChild>
+                          <Link href={`/candidates/${app.candidateId}`}>
+                            <ExternalLink className="h-3 w-3 mr-2" /> View Profile
+                          </Link>
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Select value={app.status} onValueChange={(s) => onStatusChange(app.id, s, app.candidate?.name ?? "")}>
+                    <SelectTrigger className="h-7 text-xs border border-border bg-background px-2 focus:ring-0 shadow-none flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${meta.dot}`} />
+                        <span className={`font-medium text-xs ${meta.color}`}>{STAGE_LABELS[app.status] ?? app.status}</span>
+                      </div>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {APPLICATION_STAGES.map((s) => (
+                        <SelectItem key={s} value={s} className="text-xs">
+                          <div className="flex items-center gap-2">
+                            <span className={`h-1.5 w-1.5 rounded-full ${COLUMN_META[s]?.dot ?? "bg-gray-400"}`} />
+                            {STAGE_LABELS[s] ?? s}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {app.status === "documents" && (
+                    <button
+                      onClick={() => onCompleteHiring(app)}
+                      disabled={completingHiring}
+                      className="flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-md bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 transition-colors disabled:opacity-50 whitespace-nowrap"
+                    >
+                      <CheckCircle2 className="h-3 w-3" /> Tamamla
+                    </button>
+                  )}
+                </div>
+                {app.candidate?.phone && (
+                  <a href={`tel:${app.candidate.phone}`} className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <Phone className="h-3 w-3 shrink-0" />
+                    {app.candidate.phone}
+                  </a>
+                )}
+              </div>
+
+              {/* Desktop row */}
+              <div className="hidden md:grid grid-cols-[2fr_130px_72px_150px_2fr_2fr_100px_148px] gap-3 px-4 py-3 items-start hover:bg-muted/20 transition-colors group">
+                {/* Candidate */}
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center text-primary text-[11px] font-bold shrink-0">
+                    {app.candidate?.name?.slice(0, 2).toUpperCase()}
+                  </div>
+                  <div className="min-w-0">
+                    <Link href={`/candidates/${app.candidateId}`} className="text-sm font-semibold text-foreground hover:text-primary transition-colors truncate block">
+                      {app.candidate?.name}
+                    </Link>
+                    <p className="text-xs text-muted-foreground truncate">{app.candidate?.city}{app.candidate?.district ? ` · ${app.candidate.district}` : ""}</p>
+                  </div>
+                </div>
+
+                {/* Stage */}
+                <div>
+                  <Select value={app.status} onValueChange={(s) => onStatusChange(app.id, s, app.candidate?.name ?? "")}>
+                    <SelectTrigger className="h-7 text-xs w-full border-0 bg-transparent px-0 focus:ring-0 shadow-none">
+                      <div className="flex items-center gap-1.5">
+                        <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${meta.dot}`} />
+                        <span className={`font-medium text-xs ${meta.color}`}>{STAGE_LABELS[app.status] ?? app.status}</span>
+                      </div>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {APPLICATION_STAGES.map((s) => (
+                        <SelectItem key={s} value={s} className="text-xs">
+                          <div className="flex items-center gap-2">
+                            <span className={`h-1.5 w-1.5 rounded-full ${COLUMN_META[s]?.dot ?? "bg-gray-400"}`} />
+                            {STAGE_LABELS[s] ?? s}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Score */}
+                <div>
+                  <ScoreBadge score={app.score} size="sm" showLabel />
+                </div>
+
+                {/* Contact */}
+                <div className="space-y-0.5 min-w-0">
+                  {app.candidate?.phone ? (
+                    <a href={`tel:${app.candidate.phone}`} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors truncate">
+                      <Phone className="h-3 w-3 shrink-0" />
+                      <span className="truncate">{app.candidate.phone}</span>
+                    </a>
+                  ) : (
+                    <span className="text-xs text-muted-foreground/40">—</span>
+                  )}
+                  {app.candidate?.referredBy ? (
+                    <span className="flex items-center gap-1 text-xs text-muted-foreground truncate">
+                      <Users className="h-3 w-3 shrink-0" />
+                      <span className="truncate">{app.candidate.referredBy}</span>
+                    </span>
+                  ) : null}
+                </div>
+
+                {/* Özet */}
+                <div className="min-w-0 overflow-hidden">
+                  {app.candidate?.resumeText ? (
+                    <p className="text-xs text-muted-foreground line-clamp-2" title={app.candidate.resumeText}>
+                      {app.candidate.resumeText}
+                    </p>
+                  ) : (
+                    <span className="text-xs text-muted-foreground/40">—</span>
+                  )}
+                </div>
+
+                {/* Latest note */}
+                <div className="min-w-0 overflow-hidden">
+                  {app.latestNote ? (
+                    <p className="text-xs text-muted-foreground line-clamp-2" title={app.latestNote}>
+                      {app.latestNote}
+                    </p>
+                  ) : (
+                    <span className="text-xs text-muted-foreground/40">—</span>
+                  )}
+                </div>
+
+                {/* Date */}
+                <div className="text-xs text-muted-foreground">
+                  {app.appliedAt ? formatDistanceToNow(new Date(app.appliedAt), { addSuffix: true }) : "—"}
+                </div>
+
+                {/* Actions */}
+                <div className="flex items-center gap-1 justify-end w-full">
+                  {app.status === "documents" ? (
+                    <button
+                      onClick={() => onCompleteHiring(app)}
+                      disabled={completingHiring}
+                      className="flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-md bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 transition-colors disabled:opacity-50 whitespace-nowrap"
+                      title="İşe Alımı Tamamla"
+                    >
+                      <CheckCircle2 className="h-3 w-3" /> Tamamla
+                    </button>
+                  ) : (
+                    <div className="w-[72px]" />
+                  )}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button className="p-1.5 hover:bg-muted rounded-md text-muted-foreground transition-colors">
+                        <MoreHorizontal className="h-4 w-4" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-44">
+                      <DropdownMenuItem className="text-xs font-medium" onClick={() => onRateNote(app)}>
+                        <Star className="h-3 w-3 mr-2 text-amber-400" fill="currentColor" /> Rate &amp; Add Note
+                      </DropdownMenuItem>
+                      {pendingInterviewByAppId[app.id] && (
+                        <DropdownMenuItem
+                          className="text-xs font-medium text-emerald-700 focus:text-emerald-700"
+                          onClick={() => onCompleteInterview(pendingInterviewByAppId[app.id])}
+                        >
+                          <CheckCircle2 className="h-3 w-3 mr-2 text-emerald-500" /> Randevuyu Tamamla
+                        </DropdownMenuItem>
+                      )}
+                      <DropdownMenuItem className="text-xs" onClick={() => onInterview(app)}>
+                        <Calendar className="h-3 w-3 mr-2 text-amber-500" /> Schedule Interview
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem className="text-xs" asChild>
+                        <Link href={`/candidates/${app.candidateId}`}>
+                          <ExternalLink className="h-3 w-3 mr-2" /> View Profile
+                        </Link>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
               </div>
             </div>
           );

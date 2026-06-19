@@ -890,7 +890,7 @@ export default function FinancialReports() {
         </div>
 
         {/* ── Side Type Breakdown ── */}
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="rounded-xl border border-border bg-card p-4 shadow-sm flex items-center gap-3">
             <div className="rounded-lg p-2 bg-blue-50 text-blue-600 text-lg font-bold w-10 h-10 flex items-center justify-center">A</div>
             <div>
@@ -1204,48 +1204,78 @@ export default function FinancialReports() {
               ) : sortedAgents.length === 0 ? (
                 <div className="p-10 text-center text-sm text-muted-foreground">Bu dönem için veri yok</div>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="bg-muted/40 border-b border-border">
-                        {agentCols.map((col) => (
-                          <th
-                            key={col.key}
-                            onClick={() => handleAgentSort(col.key)}
-                            className={`text-xs font-medium text-muted-foreground py-2 px-4 ${col.align === "right" ? "text-right" : "text-left"} ${col.key !== "#" ? "cursor-pointer select-none hover:text-foreground" : ""}`}
-                          >
-                            {col.label}
-                            {col.key !== "#" && <SortIcon col={col.key} />}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sortedAgents.map((a: any, i: number) => (
-                        <tr key={a.name} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
-                          <td className="py-2 px-4 text-xs text-muted-foreground">{i + 1}</td>
-                          <td className="py-2 px-4 font-medium">{a.name}</td>
-                          <td className="py-2 px-4 text-xs text-muted-foreground">{a.kwuid || "—"}</td>
-                          <td className="py-2 px-4 text-right">{a.count}</td>
-                          <td className="py-2 px-4 text-right font-medium">{fmtTRY(a.bhb)}</td>
-                          <td className="py-2 px-4 text-right text-blue-700">{fmtTRY(a.bm)}</td>
-                          <td className="py-2 px-4 text-right font-semibold text-emerald-700">{fmtTRY(a.net)}</td>
-                          <td className="py-2 px-4 text-right text-muted-foreground">{a.count > 0 ? fmtTRY(a.bhb / a.count) : "—"}</td>
+                <>
+                  {/* Mobile cards */}
+                  <div className="md:hidden divide-y divide-border">
+                    {sortedAgents.map((a: any, i: number) => (
+                      <div key={a.name} className="p-4 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <span className="text-xs text-muted-foreground mr-2">{i + 1}.</span>
+                            <span className="font-medium text-sm">{a.name}</span>
+                          </div>
+                          <span className="text-xs text-muted-foreground">{a.kwuid || "—"}</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                          <div><span className="text-muted-foreground">Kapanış: </span>{a.count}</div>
+                          <div><span className="text-muted-foreground">Ort. BHB: </span>{a.count > 0 ? fmtTRY(a.bhb / a.count) : "—"}</div>
+                          <div><span className="text-muted-foreground">BHB: </span><span className="font-medium">{fmtTRY(a.bhb)}</span></div>
+                          <div><span className="text-muted-foreground">BM: </span><span className="text-blue-700">{fmtTRY(a.bm)}</span></div>
+                          <div className="col-span-2"><span className="text-muted-foreground">Net: </span><span className="font-semibold text-emerald-700">{fmtTRY(a.net)}</span></div>
+                        </div>
+                      </div>
+                    ))}
+                    <div className="p-4 bg-muted/30 text-xs font-semibold grid grid-cols-2 gap-x-4 gap-y-1">
+                      <div>Toplam kapanış: {(stats?.byAgent ?? []).reduce((s: number, a: any) => s + a.count, 0)}</div>
+                      <div>Net: <span className="text-emerald-700">{fmtTRY((stats?.byAgent ?? []).reduce((s: number, a: any) => s + a.net, 0))}</span></div>
+                      <div>BHB: {fmtTRY((stats?.byAgent ?? []).reduce((s: number, a: any) => s + a.bhb, 0))}</div>
+                      <div>BM: <span className="text-blue-700">{fmtTRY((stats?.byAgent ?? []).reduce((s: number, a: any) => s + a.bm, 0))}</span></div>
+                    </div>
+                  </div>
+                  {/* Desktop table */}
+                  <div className="hidden md:block overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-muted/40 border-b border-border">
+                          {agentCols.map((col) => (
+                            <th
+                              key={col.key}
+                              onClick={() => handleAgentSort(col.key)}
+                              className={`text-xs font-medium text-muted-foreground py-2 px-4 ${col.align === "right" ? "text-right" : "text-left"} ${col.key !== "#" ? "cursor-pointer select-none hover:text-foreground" : ""}`}
+                            >
+                              {col.label}
+                              {col.key !== "#" && <SortIcon col={col.key} />}
+                            </th>
+                          ))}
                         </tr>
-                      ))}
-                    </tbody>
-                    <tfoot>
-                      <tr className="bg-muted/30 font-semibold border-t border-border">
-                        <td colSpan={3} className="py-2.5 px-4 text-xs">Toplam</td>
-                        <td className="py-2.5 px-4 text-right">{(stats?.byAgent ?? []).reduce((s: number, a: any) => s + a.count, 0)}</td>
-                        <td className="py-2.5 px-4 text-right">{fmtTRY((stats?.byAgent ?? []).reduce((s: number, a: any) => s + a.bhb, 0))}</td>
-                        <td className="py-2.5 px-4 text-right text-blue-700">{fmtTRY((stats?.byAgent ?? []).reduce((s: number, a: any) => s + a.bm, 0))}</td>
-                        <td className="py-2.5 px-4 text-right text-emerald-700">{fmtTRY((stats?.byAgent ?? []).reduce((s: number, a: any) => s + a.net, 0))}</td>
-                        <td />
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody>
+                        {sortedAgents.map((a: any, i: number) => (
+                          <tr key={a.name} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
+                            <td className="py-2 px-4 text-xs text-muted-foreground">{i + 1}</td>
+                            <td className="py-2 px-4 font-medium">{a.name}</td>
+                            <td className="py-2 px-4 text-xs text-muted-foreground">{a.kwuid || "—"}</td>
+                            <td className="py-2 px-4 text-right">{a.count}</td>
+                            <td className="py-2 px-4 text-right font-medium">{fmtTRY(a.bhb)}</td>
+                            <td className="py-2 px-4 text-right text-blue-700">{fmtTRY(a.bm)}</td>
+                            <td className="py-2 px-4 text-right font-semibold text-emerald-700">{fmtTRY(a.net)}</td>
+                            <td className="py-2 px-4 text-right text-muted-foreground">{a.count > 0 ? fmtTRY(a.bhb / a.count) : "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr className="bg-muted/30 font-semibold border-t border-border">
+                          <td colSpan={3} className="py-2.5 px-4 text-xs">Toplam</td>
+                          <td className="py-2.5 px-4 text-right">{(stats?.byAgent ?? []).reduce((s: number, a: any) => s + a.count, 0)}</td>
+                          <td className="py-2.5 px-4 text-right">{fmtTRY((stats?.byAgent ?? []).reduce((s: number, a: any) => s + a.bhb, 0))}</td>
+                          <td className="py-2.5 px-4 text-right text-blue-700">{fmtTRY((stats?.byAgent ?? []).reduce((s: number, a: any) => s + a.bm, 0))}</td>
+                          <td className="py-2.5 px-4 text-right text-emerald-700">{fmtTRY((stats?.byAgent ?? []).reduce((s: number, a: any) => s + a.net, 0))}</td>
+                          <td />
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </>
               )}
             </div>
           );
@@ -1489,7 +1519,7 @@ export default function FinancialReports() {
                 </div>
               </div>
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="w-full min-w-[700px] text-sm">
                   <thead>
                     <tr className="bg-muted/40 border-b border-border">
                       <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-left w-20" rowSpan={2}>Ay</th>

@@ -407,7 +407,7 @@ function CreateCandidateDialog({ open, onOpenChange }: { open: boolean; onOpenCh
           <Plus className="mr-1.5 h-4 w-4" /> Aday Ekle
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" aria-describedby="create-candidate-desc">
+      <DialogContent className="w-full max-w-2xl max-h-[90vh] overflow-y-auto" aria-describedby="create-candidate-desc">
         <DialogHeader>
           <DialogTitle className="font-display text-xl">Yeni Aday Ekle</DialogTitle>
           <p id="create-candidate-desc" className="text-sm text-muted-foreground">Keller Williams Platin & Karma aday havuzuna ekleyin</p>
@@ -490,7 +490,7 @@ function CreateCandidateDialog({ open, onOpenChange }: { open: boolean; onOpenCh
 
           {/* Personal */}
           <Section title="Kişisel Bilgiler">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Field label="Ad Soyad *">
                 <Input value={form.name} onChange={(e) => f("name", e.target.value)} placeholder="Ahmet Yılmaz" data-testid="input-candidate-name" />
               </Field>
@@ -508,7 +508,7 @@ function CreateCandidateDialog({ open, onOpenChange }: { open: boolean; onOpenCh
 
           {/* Location */}
           <Section title="Konum (Türkiye)">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="col-span-2">
                 <Field label="KW Ofis *">
                   <Select value={form.office} onValueChange={(v) => f("office", v)}>
