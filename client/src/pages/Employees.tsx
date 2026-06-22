@@ -136,6 +136,8 @@ export default function Employees() {
   const [detailEmployee, setDetailEmployee] = useState<any | null>(null);
   const [detailTab, setDetailTab] = useState<"profil" | "islemler">("profil");
   const [editEmployee, setEditEmployee] = useState<any | null>(null);
+  const [pendingPassiveEmp, setPendingPassiveEmp] = useState<any | null>(null);
+  const [passiveDateInput, setPassiveDateInput] = useState("");
 
   const { data: employeeClosings = [], isFetching: closingsFetching } = useQuery<any[]>({
     queryKey: ["/api/employees", detailEmployee?.id, "closings"],
@@ -164,12 +166,30 @@ export default function Employees() {
   const inactiveCount = (employees ?? []).filter((e: any) => e.status === "inactive").length;
 
   const handleToggleStatus = (emp: any) => {
-    const newStatus = emp.status === "active" ? "inactive" : "active";
-    updateEmployee({ id: emp.id, status: newStatus }, {
-      onSuccess: () => {
-        toast({ title: `${emp.candidate?.name} — ${newStatus === "active" ? "Aktif yapıldı" : "Pasif yapıldı"}` });
-      },
-    });
+    if (emp.status === "active") {
+      setPassiveDateInput(new Date().toISOString().slice(0, 10));
+      setPendingPassiveEmp(emp);
+    } else {
+      updateEmployee({ id: emp.id, status: "active", passiveAt: null }, {
+        onSuccess: () => toast({ title: `${emp.candidate?.name} — Aktif yapıldı` }),
+      });
+    }
+  };
+
+  const confirmPassive = () => {
+    if (!pendingPassiveEmp) return;
+    updateEmployee(
+      { id: pendingPassiveEmp.id, status: "inactive", passiveAt: passiveDateInput || undefined },
+      {
+        onSuccess: () => {
+          toast({ title: `${pendingPassiveEmp.candidate?.name} — Pasif yapıldı` });
+          if (detailEmployee?.id === pendingPassiveEmp.id) {
+            setDetailEmployee((prev: any) => prev ? { ...prev, status: "inactive" } : null);
+          }
+          setPendingPassiveEmp(null);
+        },
+      }
+    );
   };
 
   const handleDelete = (emp: any) => {
@@ -718,10 +738,7 @@ export default function Employees() {
                   size="sm"
                   variant={detailEmployee.status === "active" ? "outline" : "default"}
                   className="flex-1"
-                  onClick={() => {
-                    handleToggleStatus(detailEmployee);
-                    setDetailEmployee({ ...detailEmployee, status: detailEmployee.status === "active" ? "inactive" : "active" });
-                  }}
+                  onClick={() => handleToggleStatus(detailEmployee)}
                   disabled={updating}
                   data-testid="btn-detail-toggle-status"
                 >
@@ -803,6 +820,35 @@ export default function Employees() {
           onOpenChange={(v) => { if (!v) setEditEmployee(null); }}
         />
       )}
+
+      {/* Pasife Al — tarih seçimi */}
+      <Dialog open={!!pendingPassiveEmp} onOpenChange={(v) => { if (!v) setPendingPassiveEmp(null); }}>
+        <DialogContent className="max-w-sm" aria-describedby="passive-date-desc">
+          <DialogHeader>
+            <DialogTitle>Pasife Al — {pendingPassiveEmp?.candidate?.name}</DialogTitle>
+            <p id="passive-date-desc" className="text-sm text-muted-foreground">Çalışanın pasife alınma tarihini seçin.</p>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Pasife Alınma Tarihi</label>
+              <input
+                type="date"
+                value={passiveDateInput}
+                onChange={(e) => setPassiveDateInput(e.target.value)}
+                className="w-full border border-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+              />
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" className="flex-1" onClick={() => setPendingPassiveEmp(null)}>
+                İptal
+              </Button>
+              <Button className="flex-1" onClick={confirmPassive} disabled={updating || !passiveDateInput}>
+                {updating ? "Kaydediliyor…" : "Pasife Al"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </Layout>
   );
 }
