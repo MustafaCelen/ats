@@ -97,6 +97,14 @@ export default function JobDetails() {
     return map;
   }, [jobInterviews]);
 
+  const completedInterviewByAppId = useMemo(() => {
+    const map: Record<number, Interview> = {};
+    for (const iv of jobInterviews) {
+      if (iv.status === "completed") map[iv.applicationId] = iv;
+    }
+    return map;
+  }, [jobInterviews]);
+
   const { mutate: completeInterview } = useMutation({
     mutationFn: (interviewId: number) =>
       apiRequest("PATCH", `/api/interviews/${interviewId}`, { status: "completed" }),
@@ -105,6 +113,21 @@ export default function JobDetails() {
       toast({ title: "Randevu tamamlandı" });
     },
   });
+
+  const { mutate: undoInterview } = useMutation({
+    mutationFn: (interviewId: number) =>
+      apiRequest("PATCH", `/api/interviews/${interviewId}`, { status: "scheduled" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/interviews", jobId] });
+      toast({ title: "Randevu geri alındı" });
+    },
+  });
+
+  const [completeInterviewTarget, setCompleteInterviewTarget] = useState<{
+    interview: Interview;
+    app: ApplicationWithRelations;
+  } | null>(null);
+  const [completeInterviewStage, setCompleteInterviewStage] = useState("");
 
   const [addCandidateOpen, setAddCandidateOpen] = useState(false);
   const [interviewApp, setInterviewApp] = useState<ApplicationWithRelations | null>(null);
@@ -311,7 +334,9 @@ export default function JobDetails() {
                             onInterview={() => setInterviewApp(app)}
                             onCompleteHiring={() => setPendingHireApp(app)}
                             pendingInterview={pendingInterviewByAppId[app.id] ?? null}
-                            onCompleteInterview={(iv) => completeInterview(iv.id)}
+                            completedInterview={completedInterviewByAppId[app.id] ?? null}
+                            onCompleteInterview={(iv) => { setCompleteInterviewStage(app.status); setCompleteInterviewTarget({ interview: iv, app }); }}
+                            onUndoInterview={(iv) => undoInterview(iv.id)}
                           />
                         ))}
                       </AnimatePresence>
@@ -342,10 +367,58 @@ export default function JobDetails() {
             onInterview={(app) => setInterviewApp(app)}
             onCompleteHiring={(app) => setPendingHireApp(app)}
             pendingInterviewByAppId={pendingInterviewByAppId}
-            onCompleteInterview={(iv) => completeInterview(iv.id)}
+            completedInterviewByAppId={completedInterviewByAppId}
+            onCompleteInterview={(iv, app) => { setCompleteInterviewStage(app.status); setCompleteInterviewTarget({ interview: iv, app }); }}
+            onUndoInterview={(iv) => undoInterview(iv.id)}
           />
         )}
       </div>
+
+      {/* Complete Interview Dialog */}
+      <Dialog open={!!completeInterviewTarget} onOpenChange={(v) => { if (!v) setCompleteInterviewTarget(null); }}>
+        <DialogContent className="max-w-sm" aria-describedby="complete-iv-desc">
+          <DialogHeader>
+            <DialogTitle>Randevuyu Tamamla</DialogTitle>
+            <p id="complete-iv-desc" className="text-sm text-muted-foreground">{completeInterviewTarget?.app.candidate?.name}</p>
+          </DialogHeader>
+          <div className="space-y-4 pt-1">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Aşamayı güncelle (opsiyonel)</label>
+              <Select value={completeInterviewStage} onValueChange={setCompleteInterviewStage}>
+                <SelectTrigger className="text-xs">
+                  <SelectValue placeholder="Mevcut aşamayı koru" />
+                </SelectTrigger>
+                <SelectContent>
+                  {APPLICATION_STAGES.map((s) => (
+                    <SelectItem key={s} value={s} className="text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className={`h-1.5 w-1.5 rounded-full ${COLUMN_META[s]?.dot ?? "bg-gray-400"}`} />
+                        {STAGE_LABELS[s] ?? s}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" className="flex-1" onClick={() => setCompleteInterviewTarget(null)}>İptal</Button>
+              <Button
+                className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white"
+                onClick={() => {
+                  if (!completeInterviewTarget) return;
+                  completeInterview(completeInterviewTarget.interview.id);
+                  if (completeInterviewStage && completeInterviewStage !== completeInterviewTarget.app.status) {
+                    handleStatusChange(completeInterviewTarget.app.id, completeInterviewStage, completeInterviewTarget.app.candidate?.name ?? "");
+                  }
+                  setCompleteInterviewTarget(null);
+                }}
+              >
+                Tamamla
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <AddCandidateDialog open={addCandidateOpen} onOpenChange={setAddCandidateOpen} jobId={jobId} />
       {interviewApp && (
@@ -441,7 +514,9 @@ function ApplicationListView({
   onInterview,
   onCompleteHiring,
   pendingInterviewByAppId,
+  completedInterviewByAppId,
   onCompleteInterview,
+  onUndoInterview,
 }: {
   applications: ApplicationWithRelations[];
   completingHiring: boolean;
@@ -450,7 +525,9 @@ function ApplicationListView({
   onInterview: (app: ApplicationWithRelations) => void;
   onCompleteHiring: (app: ApplicationWithRelations) => void;
   pendingInterviewByAppId: Record<number, Interview>;
-  onCompleteInterview: (iv: Interview) => void;
+  completedInterviewByAppId: Record<number, Interview>;
+  onCompleteInterview: (iv: Interview, app: ApplicationWithRelations) => void;
+  onUndoInterview: (iv: Interview) => void;
 }) {
   if (applications.length === 0) {
     return (
@@ -509,9 +586,17 @@ function ApplicationListView({
                         {pendingInterviewByAppId[app.id] && (
                           <DropdownMenuItem
                             className="text-xs font-medium text-emerald-700 focus:text-emerald-700"
-                            onClick={() => onCompleteInterview(pendingInterviewByAppId[app.id])}
+                            onClick={() => onCompleteInterview(pendingInterviewByAppId[app.id], app)}
                           >
                             <CheckCircle2 className="h-3 w-3 mr-2 text-emerald-500" /> Randevuyu Tamamla
+                          </DropdownMenuItem>
+                        )}
+                        {completedInterviewByAppId[app.id] && (
+                          <DropdownMenuItem
+                            className="text-xs font-medium text-amber-700 focus:text-amber-700"
+                            onClick={() => onUndoInterview(completedInterviewByAppId[app.id])}
+                          >
+                            <Calendar className="h-3 w-3 mr-2 text-amber-500" /> Randevuyu Geri Al
                           </DropdownMenuItem>
                         )}
                         <DropdownMenuItem className="text-xs" onClick={() => onInterview(app)}>
@@ -678,9 +763,17 @@ function ApplicationListView({
                       {pendingInterviewByAppId[app.id] && (
                         <DropdownMenuItem
                           className="text-xs font-medium text-emerald-700 focus:text-emerald-700"
-                          onClick={() => onCompleteInterview(pendingInterviewByAppId[app.id])}
+                          onClick={() => onCompleteInterview(pendingInterviewByAppId[app.id], app)}
                         >
                           <CheckCircle2 className="h-3 w-3 mr-2 text-emerald-500" /> Randevuyu Tamamla
+                        </DropdownMenuItem>
+                      )}
+                      {completedInterviewByAppId[app.id] && (
+                        <DropdownMenuItem
+                          className="text-xs font-medium text-amber-700 focus:text-amber-700"
+                          onClick={() => onUndoInterview(completedInterviewByAppId[app.id])}
+                        >
+                          <Calendar className="h-3 w-3 mr-2 text-amber-500" /> Randevuyu Geri Al
                         </DropdownMenuItem>
                       )}
                       <DropdownMenuItem className="text-xs" onClick={() => onInterview(app)}>
@@ -760,7 +853,9 @@ function DraggableCard({
   onInterview,
   onCompleteHiring,
   pendingInterview,
+  completedInterview,
   onCompleteInterview,
+  onUndoInterview,
 }: {
   app: ApplicationWithRelations;
   stage: string;
@@ -771,7 +866,9 @@ function DraggableCard({
   onInterview: () => void;
   onCompleteHiring: () => void;
   pendingInterview: Interview | null;
+  completedInterview: Interview | null;
   onCompleteInterview: (iv: Interview) => void;
+  onUndoInterview: (iv: Interview) => void;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: app.id,
@@ -842,6 +939,15 @@ function DraggableCard({
               >
                 <CheckCircle2 className="h-3 w-3 mr-2 text-emerald-500" />
                 Randevuyu Tamamla
+              </DropdownMenuItem>
+            )}
+            {completedInterview && (
+              <DropdownMenuItem
+                className="text-xs font-medium text-amber-700 focus:text-amber-700"
+                onClick={() => onUndoInterview(completedInterview)}
+              >
+                <Calendar className="h-3 w-3 mr-2 text-amber-500" />
+                Randevuyu Geri Al
               </DropdownMenuItem>
             )}
             <DropdownMenuItem

@@ -13,6 +13,7 @@ export const users = pgTable("users", {
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
   role: text("role").notNull().default("hiring_manager"), // admin | hiring_manager
+  canViewFinancials: boolean("can_view_financials").notNull().default(false),
   googleId: text("google_id").unique(),
   googleAccessToken: text("google_access_token"),
   googleRefreshToken: text("google_refresh_token"),
