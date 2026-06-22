@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Link } from "wouter";
 import { Layout } from "@/components/Layout";
 import { Button } from "@/components/ui/button";
@@ -411,6 +411,18 @@ export default function Interviews() {
                           </Button>
                         </>
                       )}
+                      {iv.status === "completed" && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="text-xs h-8 border-orange-200 text-orange-700 hover:bg-orange-50"
+                          onClick={() => handleStatusChange(iv.id, "scheduled", iv.title)}
+                          data-testid={`btn-undo-interview-${iv.id}`}
+                        >
+                          <RefreshCcw className="mr-1 h-3.5 w-3.5" />
+                          Randevuyu Geri Al
+                        </Button>
+                      )}
                       <Button
                         size="sm"
                         variant="outline"
@@ -474,8 +486,12 @@ function CompleteInterviewDialog({
   onOpenChange: (v: boolean) => void;
 }) {
   const { toast } = useToast();
-  const [stage, setStage] = useState("offer");
+  const [stage, setStage] = useState(interview?.application?.status ?? "offer");
   const { mutate: completeInterview, isPending: completing } = useUpdateInterview();
+
+  useEffect(() => {
+    if (interview) setStage(interview.application?.status ?? "offer");
+  }, [interview]);
   const { mutate: moveCandidate, isPending: moving } = useUpdateApplicationStatus();
 
   const handleConfirm = () => {
