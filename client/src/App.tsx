@@ -31,10 +31,12 @@ import AdvisorSelfService from "@/pages/AdvisorSelfService";
 function ProtectedRoute({
   children,
   adminOnly = false,
+  financialsOnly = false,
   noAssistant = false,
 }: {
   children: React.ReactNode;
   adminOnly?: boolean;
+  financialsOnly?: boolean;
   noAssistant?: boolean;
 }) {
   const { data: user, isLoading } = useAuth();
@@ -48,6 +50,7 @@ function ProtectedRoute({
   }
   if (!user) return <Redirect to="/login" />;
   if (adminOnly && user.role !== "admin") return <Redirect to="/dashboard" />;
+  if (financialsOnly && user.role !== "admin" && !user.canViewFinancials) return <Redirect to="/dashboard" />;
   if (noAssistant && user.role === "assistant") return <Redirect to="/tasks" />;
   return <>{children}</>;
 }
@@ -73,7 +76,7 @@ function Router() {
       <Route path="/closings" component={() => <ProtectedRoute adminOnly><Closings /></ProtectedRoute>} />
       <Route path="/listings" component={() => <ProtectedRoute adminOnly><Listings /></ProtectedRoute>} />
       <Route path="/listings/reports" component={() => <ProtectedRoute noAssistant><ListingReports /></ProtectedRoute>} />
-      <Route path="/financial-reports" component={() => <ProtectedRoute adminOnly><FinancialReports /></ProtectedRoute>} />
+      <Route path="/financial-reports" component={() => <ProtectedRoute financialsOnly><FinancialReports /></ProtectedRoute>} />
       <Route path="/cap-report" component={() => <ProtectedRoute adminOnly><CapReport /></ProtectedRoute>} />
       <Route path="/coaching" component={() => <ProtectedRoute noAssistant><Coaching /></ProtectedRoute>} />
       <Route path="/expenses" component={() => <ProtectedRoute adminOnly><Expenses /></ProtectedRoute>} />
