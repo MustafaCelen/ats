@@ -2942,5 +2942,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  app.get("/api/tmp-no-office", async (_req, res) => {
+    try {
+      const list = await storage.getEmployees();
+      const noOffice = list.filter((e: any) => !e.office || e.office.trim() === "");
+      res.json(noOffice.map((e: any) => ({ kwuid: e.kwuid, name: e.name, email: e.email, office: e.office })));
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   return httpServer;
 }
