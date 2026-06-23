@@ -4,7 +4,7 @@ import bcrypt from "bcrypt";
 import { storage } from "./storage";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
-import { requireAuth, requireAdmin, requireHiringManagerOrAdmin } from "./auth";
+import { requireAuth, requireAdmin, requireHiringManagerOrAdmin, requireFinancialsAccess } from "./auth";
 import { api } from "@shared/routes";
 import { z } from "zod";
 import { insertInterviewSchema, insertOfferSchema, type InsertTask, TASK_STATUSES } from "@shared/schema";
@@ -953,11 +953,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.patch("/api/users/:id", requireAuth, requireAdmin, async (req, res) => {
     try {
-      const { name, email, password, role } = req.body;
+      const { name, email, password, role, canViewFinancials } = req.body;
       const update: any = {};
       if (name) update.name = name;
       if (email) update.email = email;
       if (role) update.role = role;
+      if (canViewFinancials !== undefined) update.canViewFinancials = canViewFinancials;
       if (password) update.passwordHash = await bcrypt.hash(password, 10);
       const user = await storage.updateUser(Number(req.params.id), update);
       if (!user) return res.status(404).json({ message: "User not found" });
@@ -1662,9 +1663,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.patch("/api/employees/:id", requireAuth, async (req, res) => {
     try {
       const id = Number(req.params.id);
-      const { status, title, notes, startDate, kwuid, kwMail, contractType, uretkenlikKoclugu, uretkenlikKocluguManagerId, uretkenlikKocluguOran, dua, duaManagerId, ukStartDate, ukEndDate, capMonth, capValue, billingName, billingAddress, billingDistrict, billingCity, billingCountry, taxOffice, taxId, birthDate } = req.body;
+      const { status, passiveAt, title, notes, startDate, kwuid, kwMail, contractType, uretkenlikKoclugu, uretkenlikKocluguManagerId, uretkenlikKocluguOran, dua, duaManagerId, ukStartDate, ukEndDate, capMonth, capValue, billingName, billingAddress, billingDistrict, billingCity, billingCountry, taxOffice, taxId, birthDate } = req.body;
       const update: any = {};
       if (status !== undefined) update.status = status;
+      if (passiveAt !== undefined) update.passiveAt = passiveAt ? new Date(passiveAt) : null;
       if (title !== undefined) update.title = title;
       if (notes !== undefined) update.notes = notes;
       if (startDate !== undefined) update.startDate = new Date(startDate);
@@ -2578,7 +2580,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // ── Closing Stats (Financial Reports) ────────────────────────────────────────
 
-  app.get("/api/closings/stats", requireAuth, requireAdmin, async (req, res) => {
+  app.get("/api/closings/stats", requireAuth, requireFinancialsAccess, async (req, res) => {
     try {
       const { startDate, endDate, office, dealType, dealCategory } = req.query as { startDate?: string; endDate?: string; office?: string; dealType?: string; dealCategory?: string };
       const now = new Date();
@@ -2593,7 +2595,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // ── Financial Targets ─────────────────────────────────────────────────────────
 
-  app.get("/api/financial-targets", requireAuth, requireAdmin, async (req, res) => {
+  app.get("/api/financial-targets", requireAuth, requireFinancialsAccess, async (req, res) => {
     try {
       const year = parseInt(req.query.year as string) || new Date().getFullYear();
       const office = (req.query.office as string) ?? "";

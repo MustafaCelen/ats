@@ -108,7 +108,19 @@ export function Layout({ children }: LayoutProps) {
 
   const isAdmin     = user?.role === "admin";
   const isAssistant = user?.role === "assistant";
-  const navItems    = isAdmin ? adminNavItems : isAssistant ? assistantNavItems : hiringManagerNavItems;
+
+  const hmNavItems: NavEntry[] = [
+    { icon: LayoutDashboard, label: "Dashboard",    href: "/dashboard"  },
+    { icon: Briefcase,       label: "Üretim Bandı", href: "/jobs"       },
+    { icon: Users,           label: "Adaylar",      href: "/candidates" },
+    { icon: UserCheck,       label: "Danışmanlar",  href: "/employees"  },
+    { icon: Calendar,        label: "Randevular",   href: "/interviews" },
+    { icon: KanbanSquare,    label: "Onboarding",   href: "/onboarding" },
+    { icon: ClipboardList,   label: "Görevler",     href: "/tasks"      },
+    user?.canViewFinancials ? reportsGroupAdmin : reportsGroupHM,
+  ];
+
+  const navItems = isAdmin ? adminNavItems : isAssistant ? assistantNavItems : hmNavItems;
 
   // Auto-open the reports group if we're on a report sub-route
   const defaultOpen = navItems.find(

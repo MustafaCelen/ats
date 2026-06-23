@@ -15,7 +15,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Plus, Trash2, User, Shield, Briefcase, KeyRound, X, Check, ClipboardList } from "lucide-react";
+import { Plus, Trash2, User, Shield, Briefcase, KeyRound, X, Check, ClipboardList, BarChart2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import type { PublicUser } from "@shared/schema";
@@ -99,6 +99,9 @@ export default function Users() {
                         <Briefcase className="h-3 w-3 mr-1" /> Jobs
                       </Button>
                     )}
+                    {user.role !== "admin" && (
+                      <ToggleFinancialsButton user={user} />
+                    )}
                     {user.id !== currentUser?.id && (
                       <Button
                         size="sm" variant="ghost"
@@ -143,6 +146,45 @@ export default function Users() {
         </AlertDialog>
       </div>
     </Layout>
+  );
+}
+
+// ─── Toggle Financials Button ─────────────────────────────────────────────────
+
+function ToggleFinancialsButton({ user }: { user: PublicUser }) {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const [busy, setBusy] = useState(false);
+  const canView = (user as any).canViewFinancials ?? false;
+
+  const toggle = async () => {
+    setBusy(true);
+    try {
+      await fetch(`/api/users/${user.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ canViewFinancials: !canView }),
+      });
+      qc.invalidateQueries({ queryKey: ["/api/users"] });
+      toast({ title: !canView ? `${user.name} finansal raporlara erişebilir` : `${user.name} finansal erişimi kaldırıldı` });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Button
+      size="sm"
+      variant={canView ? "default" : "outline"}
+      className={`h-7 text-xs ${canView ? "bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600" : ""}`}
+      onClick={toggle}
+      disabled={busy}
+      title={canView ? "Finansal erişimi kaldır" : "Finansal raporlara erişim ver"}
+    >
+      <BarChart2 className="h-3 w-3 mr-1" />
+      {canView ? "Finans ✓" : "Finans"}
+    </Button>
   );
 }
 

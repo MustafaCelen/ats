@@ -262,9 +262,9 @@ function TargetProgressCard({ label, actual, reelTarget, highTarget, color, form
           {effHigh > 0 && badge(actual / effHigh * 100, meetsHigh, "RF")}
         </div>
       </div>
-      <div className="text-2xl font-bold text-foreground">{fmt(actual)}</div>
       {maxT > 0 ? (
         <>
+          <div className="text-2xl font-bold text-foreground">{fmt(maxT)}</div>
           <div className="relative h-2.5 rounded-full bg-muted overflow-hidden">
             {reelMark !== null && (
               <div className="absolute top-0 bottom-0 w-px bg-white/80 z-10" style={{ left: `${reelMark}%` }} />
@@ -272,14 +272,17 @@ function TargetProgressCard({ label, actual, reelTarget, highTarget, color, form
             <div className="h-full rounded-full transition-all" style={{ width: `${barFill}%`, backgroundColor: barColor }} />
           </div>
           <div className="flex flex-col gap-0.5 text-xs text-muted-foreground">
-            {effReel > 0 && <span>Forecast: <span className="font-semibold text-foreground">{fmt(effReel)}</span></span>}
-            {effHigh > 0 && <span>Re-Forecast: <span className="font-semibold text-foreground">{fmt(effHigh)}</span></span>}
+            <span>Gerçekleşen: <span className="font-semibold text-foreground">{fmt(actual)}</span></span>
+            {effReel > 0 && effHigh > 0 && <span>Forecast: <span className="font-semibold text-foreground">{fmt(effReel)}</span></span>}
           </div>
           {meetsHigh && <p className="text-xs text-amber-600 font-semibold">Re-Forecast aşıldı!</p>}
           {!meetsHigh && meetsReel && <p className="text-xs text-emerald-600 font-semibold">Forecast aşıldı!</p>}
         </>
       ) : (
-        <div className="text-xs text-muted-foreground/50 italic">Hedef belirlenmedi</div>
+        <>
+          <div className="text-2xl font-bold text-foreground">{fmt(actual)}</div>
+          <div className="text-xs text-muted-foreground/50 italic">Hedef belirlenmedi</div>
+        </>
       )}
     </div>
   );
