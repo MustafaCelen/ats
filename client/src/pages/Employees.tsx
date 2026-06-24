@@ -131,6 +131,7 @@ export default function Employees() {
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
+  const [officeFilter, setOfficeFilter] = useState<"all" | "Akatlar" | "Zekeriyaköy">("all");
   const [page, setPage] = useState(0);
   const PAGE_SIZE = 50;
   const [detailEmployee, setDetailEmployee] = useState<any | null>(null);
@@ -156,7 +157,8 @@ export default function Employees() {
       e.kwuid?.toLowerCase().includes(q) ||
       e.kwMail?.toLowerCase().includes(q);
     const matchesStatus = statusFilter === "all" || e.status === statusFilter;
-    return matchesSearch && matchesStatus;
+    const matchesOffice = officeFilter === "all" || (e as any).candidate?.office === officeFilter;
+    return matchesSearch && matchesStatus && matchesOffice;
   });
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
@@ -291,6 +293,17 @@ export default function Employees() {
           >
             <XCircle className="h-3.5 w-3.5 mr-1" /> Pasif ({inactiveCount})
           </Button>
+          <div className="w-px h-5 bg-border mx-1" />
+          {(["all", "Akatlar", "Zekeriyaköy"] as const).map((o) => (
+            <Button
+              key={o}
+              size="sm"
+              variant={officeFilter === o ? "default" : "outline"}
+              onClick={() => { setOfficeFilter(o); setPage(0); }}
+            >
+              {o === "all" ? "Tüm Ofisler" : o}
+            </Button>
+          ))}
         </div>
 
         {/* Search */}
@@ -353,11 +366,12 @@ export default function Employees() {
         {!isLoading && filtered.length > 0 && (
           <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
             {/* Table header */}
-            <div className="grid grid-cols-[2fr_2fr_1.5fr_1fr_1fr_1fr_1fr_auto] gap-4 px-4 py-2.5 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            <div className="grid grid-cols-[2fr_2fr_1.5fr_1fr_1fr_1fr_1fr_1fr_auto] gap-4 px-4 py-2.5 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               <div>Çalışan</div>
               <div>İletişim</div>
               <div>Üretim Bandı</div>
               <div>Kategori</div>
+              <div>Ofis</div>
               <div>KWUID</div>
               <div>Başlangıç</div>
               <div>Durum</div>
@@ -374,7 +388,7 @@ export default function Employees() {
                 return (
                   <div
                     key={emp.id}
-                    className="grid grid-cols-[2fr_2fr_1.5fr_1fr_1fr_1fr_1fr_auto] gap-4 px-4 py-3 items-center hover:bg-muted/20 transition-colors group"
+                    className="grid grid-cols-[2fr_2fr_1.5fr_1fr_1fr_1fr_1fr_1fr_auto] gap-4 px-4 py-3 items-center hover:bg-muted/20 transition-colors group"
                     data-testid={`row-employee-${emp.id}`}
                   >
                     {/* Name + avatar */}
@@ -433,6 +447,21 @@ export default function Employees() {
                         <span title="Lisanslı">
                           <Award className="h-3.5 w-3.5 text-teal-600" />
                         </span>
+                      )}
+                    </div>
+
+                    {/* Office */}
+                    <div>
+                      {cand?.office ? (
+                        <span className={`inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full border ${
+                          cand.office === "Akatlar"
+                            ? "bg-blue-50 text-blue-700 border-blue-200"
+                            : "bg-violet-50 text-violet-700 border-violet-200"
+                        }`}>
+                          {cand.office}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground/50">—</span>
                       )}
                     </div>
 

@@ -1568,6 +1568,7 @@ export default function Closings() {
   const [statusFilter, setStatusFilter] = useState<"all" | "completed" | "expected">("all");
   const [yearFilter, setYearFilter] = useState("all");
   const [monthFilter, setMonthFilter] = useState("all");
+  const [officeFilter, setOfficeFilter] = useState<"all" | "Akatlar" | "Zekeriyaköy">("all");
   // null sortKey = default order (closingId DESC)
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -1658,19 +1659,33 @@ export default function Closings() {
     return rows;
   }, [closings]);
 
+  const employeeOfficeMap = useMemo(() => {
+    const map: Record<number, string> = {};
+    for (const e of employees) {
+      map[e.id] = (e as any).candidate?.office ?? "";
+    }
+    return map;
+  }, [employees]);
+
   // Year + month filtered AGENT rows for stats
   const yearFilteredAgentRows = useMemo(() => {
-    if (yearFilter === "all" && monthFilter === "all") return agentRowsAll;
-    return agentRowsAll.filter(r => {
-      const dRef = r.effectiveStatus === "expected"
-        ? (r.effectiveDate ?? ((r.closing as any).createdAt ? new Date((r.closing as any).createdAt).toISOString().split("T")[0] : null))
-        : r.effectiveDate;
-      if (!dRef) return false;
-      const matchYear = yearFilter === "all" || dRef.slice(0, 4) === yearFilter;
-      const matchMonth = monthFilter === "all" || dRef.slice(5, 7) === monthFilter;
-      return matchYear && matchMonth;
-    });
-  }, [agentRowsAll, yearFilter, monthFilter]);
+    let rows = agentRowsAll;
+    if (yearFilter !== "all" || monthFilter !== "all") {
+      rows = rows.filter(r => {
+        const dRef = r.effectiveStatus === "expected"
+          ? (r.effectiveDate ?? ((r.closing as any).createdAt ? new Date((r.closing as any).createdAt).toISOString().split("T")[0] : null))
+          : r.effectiveDate;
+        if (!dRef) return false;
+        const matchYear = yearFilter === "all" || dRef.slice(0, 4) === yearFilter;
+        const matchMonth = monthFilter === "all" || dRef.slice(5, 7) === monthFilter;
+        return matchYear && matchMonth;
+      });
+    }
+    if (officeFilter !== "all") {
+      rows = rows.filter(r => employeeOfficeMap[(r.agent as any).employeeId] === officeFilter);
+    }
+    return rows;
+  }, [agentRowsAll, yearFilter, monthFilter, officeFilter, employeeOfficeMap]);
 
   const completedAgentRows = yearFilteredAgentRows.filter(r => r.effectiveStatus !== "expected");
   const expectedAgentRows  = yearFilteredAgentRows.filter(r => r.effectiveStatus === "expected");
@@ -1805,6 +1820,7 @@ export default function Closings() {
       const matchMonth = monthFilter === "all" || d.slice(5, 7) === monthFilter;
       return matchYear && matchMonth;
     });
+    if (officeFilter !== "all") rows = rows.filter(r => employeeOfficeMap[r.employeeId] === officeFilter);
     const q = search.trim().toLowerCase();
     if (q) {
       rows = rows.filter((row) =>
@@ -1853,10 +1869,10 @@ export default function Closings() {
       if (first) seenClosings.add(row.closingId);
       return first === row.isFirstOfClosing ? row : { ...row, isFirstOfClosing: first };
     });
-  }, [flatRows, search, statusFilter, yearFilter, monthFilter, sortKey, sortDir]);
+  }, [flatRows, search, statusFilter, yearFilter, monthFilter, officeFilter, sortKey, sortDir, employeeOfficeMap]);
 
   // Reset to page 1 when filters or sort change
-  useEffect(() => { setCurrentPage(1); }, [search, statusFilter, yearFilter, monthFilter, sortKey, sortDir]);
+  useEffect(() => { setCurrentPage(1); }, [search, statusFilter, yearFilter, monthFilter, officeFilter, sortKey, sortDir]);
 
   // Click handler for column headers: cycle through asc → desc → default
   const handleColumnSort = (key: string) => {
@@ -2302,6 +2318,21 @@ export default function Closings() {
 
         {/* Status filter + Year filter + Search bar */}
         <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1 border rounded-md p-0.5 bg-muted/30">
+            {(["all", "Akatlar", "Zekeriyaköy"] as const).map((o) => (
+              <button
+                key={o}
+                onClick={() => { setOfficeFilter(o); setCurrentPage(1); }}
+                className={`px-3 py-1 text-xs rounded font-medium transition-colors ${
+                  officeFilter === o
+                    ? "bg-white dark:bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {o === "all" ? "Tüm Ofisler" : o}
+              </button>
+            ))}
+          </div>
           <div className="flex items-center gap-1 border rounded-md p-0.5 bg-muted/30">
             {(["all", ...availableYears] as string[]).map((y) => (
               <button

@@ -133,6 +133,11 @@ export default function Dashboard() {
   const { data: jobs = [], isLoading: jobsLoading } = useJobs();
 
   const [viewDate, setViewDate] = useState(new Date());
+  const [officeFilter, setOfficeFilter] = useState<"all" | "Akatlar" | "Zekeriyaköy">("all");
+  const filteredInterviews = useMemo(
+    () => officeFilter === "all" ? interviews : interviews.filter((iv: any) => iv.candidate?.office === officeFilter),
+    [interviews, officeFilter]
+  );
   const viewYear = viewDate.getFullYear();
   const viewMonth = viewDate.getMonth(); // 0-based
   const apiMonth = viewMonth + 1; // 1-based for API
@@ -147,7 +152,7 @@ export default function Dashboard() {
   // Build: jobId → category → actual count (completed interviews this month)
   const actualsByJob = useMemo(() => {
     const map: Record<number, Record<string, number>> = {};
-    for (const iv of interviews) {
+    for (const iv of filteredInterviews) {
       if (iv.status !== "completed") continue;
       if (!iv.startTime) continue;
       const d = new Date(iv.startTime);
@@ -158,7 +163,7 @@ export default function Dashboard() {
       if (cat in map[jid]) map[jid][cat]++;
     }
     return map;
-  }, [interviews, viewYear, viewMonth]);
+  }, [filteredInterviews, viewYear, viewMonth]);
 
   // Build: jobId → category → target
   const targetsByJob = useMemo(() => {
@@ -177,7 +182,7 @@ export default function Dashboard() {
   // Daily matrix per job (completed only)
   const dailyMatrixByJob = useMemo(() => {
     const result: Record<number, Record<number, Record<string, number>>> = {};
-    for (const iv of interviews) {
+    for (const iv of filteredInterviews) {
       if (iv.status !== "completed") continue;
       if (!iv.startTime) continue;
       const d = new Date(iv.startTime);
@@ -199,7 +204,7 @@ export default function Dashboard() {
       }
     }
     return result;
-  }, [interviews, viewYear, viewMonth, daysInMonth, jobs]);
+  }, [filteredInterviews, viewYear, viewMonth, daysInMonth, jobs]);
 
   // Grand totals for KPI cards
   const grandActuals = useMemo(() => {
@@ -245,6 +250,21 @@ export default function Dashboard() {
             <p className="text-sm text-muted-foreground mt-0.5">Aylık görüşme takibi</p>
           </div>
           <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 border rounded-md p-0.5 bg-muted/30">
+              {(["all", "Akatlar", "Zekeriyaköy"] as const).map((o) => (
+                <button
+                  key={o}
+                  onClick={() => setOfficeFilter(o)}
+                  className={`px-3 py-1 text-xs rounded font-medium transition-colors ${
+                    officeFilter === o
+                      ? "bg-white dark:bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {o === "all" ? "Tüm Ofisler" : o}
+                </button>
+              ))}
+            </div>
             <button onClick={prevMonth} className="p-1.5 rounded hover:bg-muted transition-colors">
               <ChevronLeft className="h-4 w-4 text-muted-foreground" />
             </button>

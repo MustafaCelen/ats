@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { Layout } from "@/components/Layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/select";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { Plus, Pencil, Trash2, TrendingUp, TrendingDown, Receipt } from "lucide-react";
+import { Plus, Pencil, Trash2, TrendingUp, TrendingDown, Receipt, Upload, FileText, CheckSquare, Square, AlertCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { INCOME_CATEGORIES, EXPENSE_CATEGORY_GROUPS, BM_PREPAYMENT_CATEGORY } from "@shared/schema";
 import { EmployeePicker } from "@/components/EmployeePicker";
@@ -28,6 +28,248 @@ function fmtTRY(n: number) {
 function todayYMD() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// ── Bank statement CSV parser ──────────────────────────────────────────────────
+
+function parseCSVLine(line: string): string[] {
+  const result: string[] = [];
+  let cur = "";
+  let inQ = false;
+  for (const ch of line) {
+    if (ch === '"') { inQ = !inQ; }
+    else if (ch === "," && !inQ) { result.push(cur); cur = ""; }
+    else { cur += ch; }
+  }
+  result.push(cur);
+  return result;
+}
+
+type ImportRow = {
+  uid: string;
+  date: string;
+  description: string;
+  amount: number;
+  category: string;
+  notes: string;
+  included: boolean;
+};
+
+function parseGarantiCSV(text: string): ImportRow[] {
+  const lines = text.replace(/\r/g, "").split("\n");
+  let dataStart = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].includes("Tarih") && lines[i].includes("Tutar")) {
+      dataStart = i + 1;
+      break;
+    }
+  }
+  if (dataStart === -1) return [];
+  const rows: ImportRow[] = [];
+  for (let i = dataStart; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    const cols = parseCSVLine(line);
+    if (cols.length < 4) continue;
+    const [dateStr, description, , amountStr] = cols;
+    const amount = parseFloat(amountStr.replace(/,/g, ""));
+    if (isNaN(amount) || amount >= 0) continue;
+    const parts = dateStr.split("/");
+    if (parts.length !== 3) continue;
+    const date = `${parts[2]}-${parts[1]}-${parts[0]}`;
+    rows.push({
+      uid: `${i}-${Math.random()}`,
+      date,
+      description: description.trim(),
+      amount: Math.abs(amount),
+      category: "",
+      notes: description.trim(),
+      included: true,
+    });
+  }
+  return rows;
+}
+
+// ── Bank Statement Import Dialog ───────────────────────────────────────────────
+
+function BankStatementImportDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+}) {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [rows, setRows] = useState<ImportRow[]>([]);
+  const [importing, setImporting] = useState(false);
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const buf = ev.target?.result as ArrayBuffer;
+      let text: string;
+      try { text = new TextDecoder("utf-8", { fatal: true }).decode(buf); }
+      catch { text = new TextDecoder("windows-1254").decode(buf); }
+      const parsed = parseGarantiCSV(text);
+      setRows(parsed);
+      if (parsed.length === 0)
+        toast({ title: "İşlem bulunamadı", description: "Negatif tutarlı işlem yok veya format tanınamadı.", variant: "destructive" });
+    };
+    reader.readAsArrayBuffer(file);
+    e.target.value = "";
+  };
+
+  const selected = rows.filter((r) => r.included);
+  const allCategorized = selected.length > 0 && selected.every((r) => r.category);
+  const totalAmount = selected.reduce((s, r) => s + r.amount, 0);
+
+  const updateRow = (uid: string, patch: Partial<ImportRow>) =>
+    setRows((prev) => prev.map((r) => r.uid === uid ? { ...r, ...patch } : r));
+
+  const toggleAll = () => {
+    const allOn = rows.every((r) => r.included);
+    setRows((prev) => prev.map((r) => ({ ...r, included: !allOn })));
+  };
+
+  const handleImport = async () => {
+    setImporting(true);
+    let success = 0;
+    for (const row of selected) {
+      try {
+        const res = await fetch("/api/office-expenses", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ type: "expense", category: row.category, amount: String(row.amount), date: row.date, notes: row.notes || null, employeeId: null }),
+        });
+        if (res.ok) success++;
+      } catch {}
+    }
+    setImporting(false);
+    qc.invalidateQueries({ queryKey: ["/api/office-expenses"] });
+    qc.invalidateQueries({ queryKey: ["/api/office-expenses/monthly-pl"] });
+    toast({ title: `${success} kayıt içe aktarıldı` });
+    onOpenChange(false);
+    setRows([]);
+  };
+
+  const handleClose = (v: boolean) => {
+    if (!v) setRows([]);
+    onOpenChange(v);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={handleClose}>
+      <DialogContent className="max-w-5xl max-h-[90vh] flex flex-col gap-3" aria-describedby="import-desc">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Upload className="h-4 w-4" /> Banka Ekstresi Yükle
+          </DialogTitle>
+          <p id="import-desc" className="text-sm text-muted-foreground">
+            Garanti BBVA CSV ekstresini yükleyin. Negatif tutarlar (hesaptan çıkan) gider olarak listelenecek.
+          </p>
+        </DialogHeader>
+
+        {rows.length === 0 ? (
+          <div className="flex flex-col items-center justify-center gap-4 py-14">
+            <div className="rounded-full border-2 border-dashed border-border p-6">
+              <FileText className="h-10 w-10 text-muted-foreground/40" />
+            </div>
+            <p className="text-sm text-muted-foreground">CSV dosyası seçin</p>
+            <Button variant="outline" onClick={() => fileRef.current?.click()}>
+              <Upload className="mr-2 h-4 w-4" /> Dosya Seç
+            </Button>
+            <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={handleFile} />
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">{rows.length} gider işlemi bulundu</span>
+              <span className="font-semibold">{selected.length} seçili — <span className="text-red-700">{fmtTRY(totalAmount)}</span></span>
+            </div>
+
+            <div className="overflow-auto flex-1 border border-border rounded-lg">
+              <table className="w-full text-sm min-w-[700px]">
+                <thead className="bg-muted/30 sticky top-0 z-10">
+                  <tr>
+                    <th className="px-3 py-2 text-left w-8">
+                      <button onClick={toggleAll} className="text-muted-foreground hover:text-foreground">
+                        {rows.every((r) => r.included) ? <CheckSquare className="h-4 w-4 text-primary" /> : <Square className="h-4 w-4" />}
+                      </button>
+                    </th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-muted-foreground whitespace-nowrap">Tarih</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">Açıklama</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold text-muted-foreground whitespace-nowrap">Tutar</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-muted-foreground w-52">Kategori *</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-muted-foreground w-44">Not</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {rows.map((row) => (
+                    <tr key={row.uid} className={`transition-colors hover:bg-muted/10 ${!row.included ? "opacity-35" : ""}`}>
+                      <td className="px-3 py-1.5">
+                        <button onClick={() => updateRow(row.uid, { included: !row.included })} className="text-muted-foreground hover:text-foreground">
+                          {row.included ? <CheckSquare className="h-4 w-4 text-primary" /> : <Square className="h-4 w-4" />}
+                        </button>
+                      </td>
+                      <td className="px-3 py-1.5 text-muted-foreground whitespace-nowrap text-xs">
+                        {format(new Date(row.date + "T12:00:00"), "dd.MM.yyyy")}
+                      </td>
+                      <td className="px-3 py-1.5 max-w-[220px]">
+                        <p className="truncate text-xs" title={row.description}>{row.description}</p>
+                      </td>
+                      <td className="px-3 py-1.5 text-right font-semibold text-red-700 whitespace-nowrap text-xs">
+                        {fmtTRY(row.amount)}
+                      </td>
+                      <td className="px-3 py-1.5">
+                        <Select value={row.category} onValueChange={(v) => updateRow(row.uid, { category: v })}>
+                          <SelectTrigger className="h-7 text-xs">
+                            <SelectValue placeholder="Seçin..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {EXPENSE_CATEGORY_GROUPS.map((g) => (
+                              <SelectGroup key={g.group}>
+                                <SelectLabel className="text-xs font-bold text-muted-foreground">{g.group}</SelectLabel>
+                                {g.items.map((item) => <SelectItem key={item} value={item} className="text-xs">{item}</SelectItem>)}
+                              </SelectGroup>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </td>
+                      <td className="px-3 py-1.5">
+                        <Input className="h-7 text-xs" value={row.notes} onChange={(e) => updateRow(row.uid, { notes: e.target.value })} placeholder="Not..." />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {!allCategorized && selected.length > 0 && (
+              <p className="text-xs text-amber-600 flex items-center gap-1">
+                <AlertCircle className="h-3 w-3" /> Tüm seçili satırlar için kategori seçin.
+              </p>
+            )}
+
+            <div className="flex gap-2">
+              <Button variant="outline" className="flex-1" onClick={() => handleClose(false)}>İptal</Button>
+              <Button
+                className="flex-1 bg-red-600 hover:bg-red-700 text-white"
+                onClick={handleImport}
+                disabled={importing || !allCategorized}
+              >
+                {importing ? "Aktarılıyor..." : `${selected.length} Kaydı İçe Aktar`}
+              </Button>
+            </div>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 // ── Category Select ────────────────────────────────────────────────────────────
@@ -254,6 +496,7 @@ export default function Expenses() {
   const [typeFilter, setTypeFilter] = useState<"all" | "income" | "expense">("all");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editItem, setEditItem] = useState<any | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
 
   const { data: rows = [], isLoading } = useQuery<any[]>({
     queryKey: ["/api/office-expenses", { year, month }],
@@ -301,12 +544,14 @@ export default function Expenses() {
             </h1>
             <p className="text-sm text-muted-foreground mt-0.5">Aylık gelir ve gider kayıtları</p>
           </div>
-          <Button
-            onClick={() => { setEditItem(null); setDialogOpen(true); }}
-            className="gap-1.5"
-          >
-            <Plus className="h-4 w-4" /> Yeni Kayıt
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setImportOpen(true)} className="gap-1.5">
+              <Upload className="h-4 w-4" /> Ekstre Yükle
+            </Button>
+            <Button onClick={() => { setEditItem(null); setDialogOpen(true); }} className="gap-1.5">
+              <Plus className="h-4 w-4" /> Yeni Kayıt
+            </Button>
+          </div>
         </div>
 
         {/* Filters */}
@@ -447,6 +692,7 @@ export default function Expenses() {
           initial={editItem}
         />
       )}
+      <BankStatementImportDialog open={importOpen} onOpenChange={setImportOpen} />
     </Layout>
   );
 }

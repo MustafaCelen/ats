@@ -65,6 +65,7 @@ export default function Candidates() {
   const { data: allApplications } = useApplications();
   const [search, setSearch] = useState("");
   const [filterCat, setFilterCat] = useState<string>("all");
+  const [officeFilter, setOfficeFilter] = useState<"all" | "Akatlar" | "Zekeriyaköy">("all");
   const [page, setPage] = useState(0);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const PAGE_SIZE = 50;
@@ -89,7 +90,8 @@ export default function Candidates() {
       (c.currentBrand ?? "").toLowerCase().includes(search.toLowerCase()) ||
       jobTitles.toLowerCase().includes(search.toLowerCase());
     const matchCat = filterCat === "all" || c.category === filterCat;
-    return matchSearch && matchCat;
+    const matchOffice = officeFilter === "all" || c.office === officeFilter;
+    return matchSearch && matchCat && matchOffice;
   });
 
   const totalPages = Math.ceil((filtered?.length ?? 0) / PAGE_SIZE);
@@ -144,14 +146,32 @@ export default function Candidates() {
           ))}
         </div>
 
+        {/* Office filter */}
+        <div className="flex gap-1">
+          {(["all", "Akatlar", "Zekeriyaköy"] as const).map((o) => (
+            <button
+              key={o}
+              onClick={() => { setOfficeFilter(o); setPage(0); }}
+              className={`px-3 py-1.5 text-xs font-medium rounded-full border transition-colors ${
+                officeFilter === o
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"
+              }`}
+            >
+              {o === "all" ? "Tüm Ofisler" : o}
+            </button>
+          ))}
+        </div>
+
         {/* Table */}
         <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-          <div className="hidden md:grid grid-cols-[56px_2fr_180px_1.5fr_100px_72px_160px] gap-4 px-5 py-3 bg-muted/30 border-b border-border text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <div className="hidden md:grid grid-cols-[56px_2fr_180px_1.5fr_100px_100px_72px_160px] gap-4 px-5 py-3 bg-muted/30 border-b border-border text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             <div>Kat.</div>
             <div>Aday</div>
             <div>İletişim</div>
             <div>Üretim Bandı</div>
             <div>Konum</div>
+            <div>Ofis</div>
             <div>Exp</div>
             <div className="text-right">Eylemler</div>
           </div>
@@ -183,7 +203,7 @@ export default function Candidates() {
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     transition={{ delay: idx * 0.03 }}
-                    className="grid grid-cols-1 md:grid-cols-[56px_2fr_180px_1.5fr_100px_72px_160px] gap-4 px-5 py-3 items-start hover:bg-muted/20 transition-colors group"
+                    className="grid grid-cols-1 md:grid-cols-[56px_2fr_180px_1.5fr_100px_100px_72px_160px] gap-4 px-5 py-3 items-start hover:bg-muted/20 transition-colors group"
                     data-testid={`row-candidate-${candidate.id}`}
                   >
                     {/* Category badge */}
@@ -246,6 +266,21 @@ export default function Candidates() {
                     {/* City */}
                     <div className="text-xs text-muted-foreground flex items-center gap-1 min-w-0 overflow-hidden">
                       {candidate.city ? <><MapPin className="h-3 w-3 shrink-0" /><span className="truncate">{candidate.city}</span></> : "—"}
+                    </div>
+
+                    {/* Office */}
+                    <div>
+                      {candidate.office ? (
+                        <span className={`inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full border ${
+                          candidate.office === "Akatlar"
+                            ? "bg-blue-50 text-blue-700 border-blue-200"
+                            : "bg-violet-50 text-violet-700 border-violet-200"
+                        }`}>
+                          {candidate.office}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground/50">—</span>
+                      )}
                     </div>
 
                     {/* Experience */}

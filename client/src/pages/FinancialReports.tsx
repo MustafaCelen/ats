@@ -409,11 +409,12 @@ export default function FinancialReports() {
       if (!iv.startTime) continue;
       const d = new Date(iv.startTime);
       if (d < from || d > to) continue;
+      if (officeFilter && iv.candidate?.office !== officeFilter) continue;
       const cat: string = iv.candidate?.category ?? "K0";
       if (cat in counts) counts[cat]++;
     }
     return counts;
-  }, [allInterviews, computedStart, computedEnd]);
+  }, [allInterviews, computedStart, computedEnd, officeFilter]);
 
   const apptTargetTotals = useMemo(() => {
     const totals: Record<string, number> = { K0: 0, K1: 0, K2: 0 };
