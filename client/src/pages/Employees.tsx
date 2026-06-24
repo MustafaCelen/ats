@@ -787,6 +787,37 @@ export default function Employees() {
                     <p className="text-sm">Henüz işlem kaydı yok.</p>
                   </div>
                 ) : (
+                  <div className="space-y-2">
+                    <div className="flex justify-end">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="gap-1.5 text-xs"
+                        onClick={() => {
+                          const name = detailEmployee?.candidate?.name ?? "danışman";
+                          const rows = [
+                            ["Mülk", "Kategori", "Tür", "Satış Bedeli", "BHB", "Taraf", "Tarih"],
+                            ...employeeClosings.map((c: any) => [
+                              c.propertyAddress || "",
+                              c.dealCategory || "",
+                              c.dealType || "",
+                              parseFloat(c.saleValue || "0").toFixed(2),
+                              parseFloat(c.bhbShare || "0").toFixed(2),
+                              c.sideType === "buyer" ? "Alıcı" : "Satıcı",
+                              c.closingDate ? new Date(c.closingDate).toLocaleDateString("tr-TR") : "",
+                            ]),
+                          ];
+                          const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+                          const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+                          const url = URL.createObjectURL(blob);
+                          const a = document.createElement("a");
+                          a.href = url; a.download = `${name}-islemler.csv`; a.click();
+                          URL.revokeObjectURL(url);
+                        }}
+                      >
+                        <Download className="h-3.5 w-3.5" /> CSV İndir
+                      </Button>
+                    </div>
                   <div className="overflow-x-auto rounded-lg border border-border">
                     <table className="w-full text-sm">
                       <thead>
@@ -833,6 +864,7 @@ export default function Employees() {
                         </tr>
                       </tfoot>
                     </table>
+                  </div>
                   </div>
                 )}
               </div>
