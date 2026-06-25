@@ -21,6 +21,7 @@ import { type PublicUser } from "@shared/schema";
 import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import { EmployeeEditDialog } from "@/components/EmployeeEditDialog";
+import { useAuth } from "@/hooks/use-auth";
 
 
 function StatusPill({ status }: { status: string }) {
@@ -128,6 +129,12 @@ export default function Employees() {
     queryFn: () => fetch("/api/hiring-managers").then((r) => r.json()),
   });
   const { toast } = useToast();
+  const { data: authUser } = useAuth();
+
+  const canViewIslemler = (emp: any) => {
+    if (authUser?.role !== "assistant") return true;
+    return !!emp?.uretkenlikKoclugu;
+  };
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
@@ -584,12 +591,14 @@ export default function Employees() {
               >
                 Profil
               </button>
-              <button
-                onClick={() => setDetailTab("islemler")}
-                className={`pb-2 text-sm font-medium transition-colors border-b-2 -mb-px flex items-center gap-1.5 ${detailTab === "islemler" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
-              >
-                <HandCoins className="h-3.5 w-3.5" /> İşlemler
-              </button>
+              {canViewIslemler(detailEmployee) && (
+                <button
+                  onClick={() => setDetailTab("islemler")}
+                  className={`pb-2 text-sm font-medium transition-colors border-b-2 -mb-px flex items-center gap-1.5 ${detailTab === "islemler" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+                >
+                  <HandCoins className="h-3.5 w-3.5" /> İşlemler
+                </button>
+              )}
             </div>
 
             {detailTab === "profil" && (
@@ -777,7 +786,14 @@ export default function Employees() {
             </div>
             )}
 
-            {detailTab === "islemler" && (
+            {detailTab === "islemler" && !canViewIslemler(detailEmployee) && (
+              <div className="flex flex-col items-center justify-center py-12 text-muted-foreground gap-2">
+                <HandCoins className="h-8 w-8 opacity-30" />
+                <p className="text-sm">Bu danışman aktif ÜK programında değil.</p>
+              </div>
+            )}
+
+            {detailTab === "islemler" && canViewIslemler(detailEmployee) && (
               <div className="pt-2 max-h-[70vh] overflow-y-auto">
                 {closingsFetching ? (
                   <p className="text-sm text-muted-foreground py-8 text-center">Yükleniyor…</p>
