@@ -1,4 +1,6 @@
 import { useState, useRef } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { APPLICATION_STAGES } from "@shared/schema";
 import { Link } from "wouter";
 import { Layout } from "@/components/Layout";
 import { useEmployees, useUpdateEmployee, useDeleteEmployee, useImportEmployees } from "@/hooks/use-employees";
@@ -14,7 +16,7 @@ import {
 import {
   Users, Search, Phone, Mail, MapPin, Award, Building2,
   MoreHorizontal, ExternalLink, CheckCircle2, XCircle, Briefcase, CalendarDays,
-  Upload, Download, Pencil, Key, AtSign, AlertCircle, FileText, UserCheck, HandCoins,
+  Upload, Download, Pencil, Key, AtSign, AlertCircle, FileText, UserCheck, HandCoins, RotateCcw,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { type PublicUser } from "@shared/schema";
@@ -130,6 +132,7 @@ export default function Employees() {
   });
   const { toast } = useToast();
   const { data: authUser } = useAuth();
+  const queryClient = useQueryClient();
 
   const canViewIslemler = (emp: any) => {
     if (authUser?.role !== "assistant") return true;
@@ -146,6 +149,29 @@ export default function Employees() {
   const [editEmployee, setEditEmployee] = useState<any | null>(null);
   const [pendingPassiveEmp, setPendingPassiveEmp] = useState<any | null>(null);
   const [passiveDateInput, setPassiveDateInput] = useState("");
+  const [reEnrollEmp, setReEnrollEmp] = useState<any | null>(null);
+  const [reEnrollStage, setReEnrollStage] = useState("interview");
+
+  const { mutate: reEnroll, isPending: reEnrolling } = useMutation({
+    mutationFn: (emp: any) =>
+      fetch("/api/applications", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ candidateId: emp.candidateId, jobId: emp.jobId, status: reEnrollStage }),
+      }).then(async (r) => {
+        if (!r.ok) throw new Error(await r.text());
+        return r.json();
+      }),
+    onSuccess: () => {
+      toast({ title: `${reEnrollEmp?.candidate?.name} sürece geri alındı` });
+      queryClient.invalidateQueries({ queryKey: ["/api/applications"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/candidates"] });
+      setReEnrollEmp(null);
+    },
+    onError: (err: any) => {
+      toast({ title: "Hata", description: err.message, variant: "destructive" });
+    },
+  });
 
   const { data: employeeClosings = [], isFetching: closingsFetching } = useQuery<any[]>({
     queryKey: ["/api/employees", detailEmployee?.id, "closings"],
@@ -783,6 +809,18 @@ export default function Employees() {
                   {detailEmployee.status === "active" ? "Pasife Al" : "Aktifleştir"}
                 </Button>
               </div>
+              {detailEmployee.status === "inactive" && detailEmployee.candidateId && detailEmployee.jobId && (
+                <div className="pt-1">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="w-full gap-1.5 border-amber-200 text-amber-700 hover:bg-amber-50"
+                    onClick={() => setReEnrollEmp(detailEmployee)}
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" /> Sürece Geri Al
+                  </Button>
+                </div>
+              )}
             </div>
             )}
 
@@ -922,6 +960,50 @@ export default function Employees() {
               </Button>
               <Button className="flex-1" onClick={confirmPassive} disabled={updating || !passiveDateInput}>
                 {updating ? "Kaydediliyor…" : "Pasife Al"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Sürece Geri Al dialog */}
+      <Dialog open={!!reEnrollEmp} onOpenChange={(v) => { if (!v) setReEnrollEmp(null); }}>
+        <DialogContent className="max-w-sm" aria-describedby="reenroll-desc">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <RotateCcw className="h-4 w-4 text-amber-600" />
+              Sürece Geri Al
+            </DialogTitle>
+            <p id="reenroll-desc" className="text-sm text-muted-foreground">
+              {reEnrollEmp?.candidate?.name} için yeni bir başvuru oluşturulacak.
+              Mevcut kapanış geçmişi korunacak.
+            </p>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Başlangıç Aşaması</label>
+              <select
+                value={reEnrollStage}
+                onChange={(e) => setReEnrollStage(e.target.value)}
+                className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
+              >
+                {APPLICATION_STAGES.filter(s => !["hired", "myk_training", "account_setup", "documents", "rejected"].includes(s)).map(s => (
+                  <option key={s} value={s}>
+                    {s === "applied" ? "Başvurdu" : s === "screening" ? "Ön Eleme" : "Mülakat"}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" className="flex-1" onClick={() => setReEnrollEmp(null)}>
+                İptal
+              </Button>
+              <Button
+                className="flex-1 bg-amber-600 hover:bg-amber-700"
+                onClick={() => reEnroll(reEnrollEmp)}
+                disabled={reEnrolling}
+              >
+                {reEnrolling ? "Oluşturuluyor…" : "Sürece Al"}
               </Button>
             </div>
           </div>
