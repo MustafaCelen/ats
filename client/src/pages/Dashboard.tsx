@@ -31,11 +31,11 @@ function useJobs() {
   });
 }
 
-function useTargets(year: number, month: number) {
+function useTargets(year: number, month: number, office: string) {
   return useQuery<any[]>({
-    queryKey: ["/api/interview-targets", year, month],
+    queryKey: ["/api/interview-targets", year, month, office],
     queryFn: async () => {
-      const res = await fetch(`/api/interview-targets?year=${year}&month=${month}`, { credentials: "include" });
+      const res = await fetch(`/api/interview-targets?year=${year}&month=${month}&office=${encodeURIComponent(office)}`, { credentials: "include" });
       if (!res.ok) throw new Error("Failed");
       return res.json();
     },
@@ -45,7 +45,7 @@ function useTargets(year: number, month: number) {
 function useSaveTarget() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (data: { jobId: number; year: number; month: number; category: string; target: number }) => {
+    mutationFn: async (data: { jobId: number; year: number; month: number; category: string; office: string; target: number }) => {
       const res = await fetch("/api/interview-targets", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -55,7 +55,7 @@ function useSaveTarget() {
       if (!res.ok) throw new Error(await res.text());
     },
     onSuccess: (_d, vars) => {
-      qc.invalidateQueries({ queryKey: ["/api/interview-targets", vars.year, vars.month] });
+      qc.invalidateQueries({ queryKey: ["/api/interview-targets", vars.year, vars.month, vars.office] });
     },
   });
 }
@@ -142,7 +142,8 @@ export default function Dashboard() {
   const viewMonth = viewDate.getMonth(); // 0-based
   const apiMonth = viewMonth + 1; // 1-based for API
 
-  const { data: targets = [] } = useTargets(viewYear, apiMonth);
+  const officeParam = officeFilter === "all" ? "" : officeFilter;
+  const { data: targets = [] } = useTargets(viewYear, apiMonth, officeParam);
   const saveTarget = useSaveTarget();
 
   const prevMonth = () => setViewDate(new Date(viewYear, viewMonth - 1, 1));
@@ -176,8 +177,8 @@ export default function Dashboard() {
   }, [targets]);
 
   const handleSaveTarget = useCallback((jobId: number, category: string, target: number) => {
-    saveTarget.mutate({ jobId, year: viewYear, month: apiMonth, category, target });
-  }, [saveTarget, viewYear, apiMonth]);
+    saveTarget.mutate({ jobId, year: viewYear, month: apiMonth, category, office: officeParam, target });
+  }, [saveTarget, viewYear, apiMonth, officeParam]);
 
   // Daily matrix per job (completed only)
   const dailyMatrixByJob = useMemo(() => {

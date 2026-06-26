@@ -2005,8 +2005,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const year = parseInt(req.query.year as string) || new Date().getFullYear();
       const month = parseInt(req.query.month as string) || new Date().getMonth() + 1;
+      const office = (req.query.office as string) ?? "";
       const jobIds = jobFilter(req);
-      res.json(await storage.getInterviewTargets(year, month, jobIds));
+      res.json(await storage.getInterviewTargets(year, month, jobIds, office));
     } catch {
       res.status(500).json({ message: "Internal server error" });
     }
@@ -2014,9 +2015,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/interview-targets", requireAuth, async (req, res) => {
     try {
-      const { jobId, year, month, category, target } = req.body;
+      const { jobId, year, month, category, office, target } = req.body;
       if (!jobId || !year || !month || !category) return res.status(400).json({ message: "Missing fields" });
-      await storage.upsertInterviewTarget({ jobId: Number(jobId), year: Number(year), month: Number(month), category, target: Number(target) || 0 });
+      await storage.upsertInterviewTarget({ jobId: Number(jobId), year: Number(year), month: Number(month), category, office: office ?? "", target: Number(target) || 0 });
       res.status(204).send();
     } catch {
       res.status(500).json({ message: "Internal server error" });

@@ -133,6 +133,10 @@ app.use((req, res, next) => {
     DROP INDEX IF EXISTS "financial_targets_year_month_idx";
     CREATE UNIQUE INDEX IF NOT EXISTS "financial_targets_year_month_office_idx" ON "financial_targets" ("year", "month", "office");
 
+    ALTER TABLE "interview_targets" ADD COLUMN IF NOT EXISTS "office" text NOT NULL DEFAULT '';
+    DROP INDEX IF EXISTS "interview_targets_unique_idx";
+    CREATE UNIQUE INDEX IF NOT EXISTS "interview_targets_job_year_month_cat_office_idx" ON "interview_targets" ("job_id", "year", "month", "category", "office");
+
     CREATE TABLE IF NOT EXISTS "listing_price_history" (
       "id" serial PRIMARY KEY,
       "listing_id" integer NOT NULL,

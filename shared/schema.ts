@@ -497,6 +497,7 @@ export const interviewTargets = pgTable("interview_targets", {
   year: integer("year").notNull(),
   month: integer("month").notNull(), // 1-12
   category: text("category").notNull(), // K0 | K1 | K2
+  office: text("office").notNull().default(""), // "" = global, "Akatlar" | "Zekeriyaköy"
   target: integer("target").notNull().default(0),
   createdAt: timestamp("created_at").defaultNow(),
 });

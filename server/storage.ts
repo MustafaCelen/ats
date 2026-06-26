@@ -268,8 +268,8 @@ export interface IStorage {
       paymentCollected?: boolean;
     }>;
   }>): Promise<void>;
-  getInterviewTargets(year: number, month: number, jobIds?: number[]): Promise<import("@shared/schema").InterviewTarget[]>;
-  upsertInterviewTarget(data: { jobId: number; year: number; month: number; category: string; target: number }): Promise<void>;
+  getInterviewTargets(year: number, month: number, jobIds?: number[], office?: string): Promise<import("@shared/schema").InterviewTarget[]>;
+  upsertInterviewTarget(data: { jobId: number; year: number; month: number; category: string; office: string; target: number }): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -2361,18 +2361,16 @@ export class DatabaseStorage implements IStorage {
     });
   }
 
-  async getInterviewTargets(year: number, month: number, jobIds?: number[]): Promise<InterviewTarget[]> {
-    let query = db.select().from(interviewTargets)
-      .where(and(eq(interviewTargets.year, year), eq(interviewTargets.month, month)));
+  async getInterviewTargets(year: number, month: number, jobIds?: number[], office?: string): Promise<InterviewTarget[]> {
+    const conditions = [
+      eq(interviewTargets.year, year),
+      eq(interviewTargets.month, month),
+      eq(interviewTargets.office, office ?? ""),
+    ];
     if (jobIds && jobIds.length > 0) {
-      query = db.select().from(interviewTargets)
-        .where(and(
-          eq(interviewTargets.year, year),
-          eq(interviewTargets.month, month),
-          inArray(interviewTargets.jobId, jobIds),
-        ));
+      conditions.push(inArray(interviewTargets.jobId, jobIds));
     }
-    return query;
+    return db.select().from(interviewTargets).where(and(...conditions));
   }
 
   async getClosingStats(startDate: Date, endDate: Date, office?: string, dealType?: string, dealCategory?: string) {
@@ -2827,13 +2825,14 @@ export class DatabaseStorage implements IStorage {
       .onConflictDoUpdate({ target: [financialTargets.year, financialTargets.month, financialTargets.office], set: vals });
   }
 
-  async upsertInterviewTarget(data: { jobId: number; year: number; month: number; category: string; target: number }): Promise<void> {
+  async upsertInterviewTarget(data: { jobId: number; year: number; month: number; category: string; office: string; target: number }): Promise<void> {
     const [existing] = await db.select().from(interviewTargets).where(
       and(
         eq(interviewTargets.jobId, data.jobId),
         eq(interviewTargets.year, data.year),
         eq(interviewTargets.month, data.month),
         eq(interviewTargets.category, data.category),
+        eq(interviewTargets.office, data.office),
       )
     );
     if (existing) {
