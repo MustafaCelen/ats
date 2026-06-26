@@ -25,12 +25,12 @@ import {
   Trash2, Send, User, Pencil, MapPin, Building2,
   FileCheck, Globe, Star, Award, Users, TrendingUp,
   ExternalLink, Calendar, FileText, CheckCircle2, Circle, AtSign, History, Clock,
-  Key, UserCheck, BadgeCheck, RefreshCcw, XCircle, HandCoins, TrendingDown, Download,
+  Key, UserCheck, BadgeCheck, RefreshCcw, XCircle, HandCoins, TrendingDown, Download, RotateCcw,
 } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import {
   CANDIDATE_CATEGORIES, TURKEY_CITIES, REAL_ESTATE_BRANDS,
-  REQUIRED_DOCUMENTS, STAGE_LABELS,
+  REQUIRED_DOCUMENTS, STAGE_LABELS, APPLICATION_STAGES,
   type Candidate, type InsertCandidate, type CandidateNote,
 } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
@@ -251,6 +251,40 @@ export default function CandidateDetail() {
   const [activeTab, setActiveTab] = useState<"overview" | "applications" | "interviews" | "notes" | "islemler" | "history">("overview");
   const [editOpen, setEditOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [reEnrollOpen, setReEnrollOpen] = useState(false);
+  const [reEnrollStage, setReEnrollStage] = useState("interview");
+  const [reEnrollJobId, setReEnrollJobId] = useState<number | null>(null);
+
+  const { data: openJobs = [] } = useQuery<any[]>({
+    queryKey: ["/api/jobs"],
+    queryFn: () => fetch("/api/jobs").then((r) => r.json()),
+    enabled: reEnrollOpen && !employeeRecord?.jobId,
+  });
+
+  const { mutate: reEnroll, isPending: reEnrolling } = useMutation({
+    mutationFn: () =>
+      fetch("/api/applications", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          candidateId: employeeRecord?.candidateId,
+          jobId: reEnrollJobId ?? employeeRecord?.jobId,
+          status: reEnrollStage,
+        }),
+      }).then(async (r) => {
+        if (!r.ok) throw new Error(await r.text());
+        return r.json();
+      }),
+    onSuccess: () => {
+      toast({ title: `${candidate?.name} sürece geri alındı` });
+      queryClient.invalidateQueries({ queryKey: ["/api/applications"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/candidates", candidateId, "employee"] });
+      setReEnrollOpen(false);
+    },
+    onError: (err: any) => {
+      toast({ title: "Hata", description: err.message, variant: "destructive" });
+    },
+  });
 
   if (isLoading) {
     return (
@@ -526,6 +560,19 @@ export default function CandidateDetail() {
                   <div className="mt-4 pt-4 border-t border-[#CC0000]/15">
                     <p className="text-xs text-muted-foreground font-medium mb-1">Notlar</p>
                     <p className="text-sm text-foreground/80">{employeeRecord.notes}</p>
+                  </div>
+                )}
+
+                {employeeRecord.status === "inactive" && (
+                  <div className="mt-4 pt-4 border-t border-[#CC0000]/15">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="w-full gap-1.5 border-amber-200 text-amber-700 hover:bg-amber-50"
+                      onClick={() => { setReEnrollOpen(true); setReEnrollJobId(employeeRecord.jobId ?? null); }}
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" /> Sürece Geri Al
+                    </Button>
                   </div>
                 )}
               </div>
@@ -1177,6 +1224,62 @@ export default function CandidateDetail() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Sürece Geri Al dialog */}
+      <Dialog open={reEnrollOpen} onOpenChange={setReEnrollOpen}>
+        <DialogContent className="max-w-sm" aria-describedby="reenroll-cd-desc">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <RotateCcw className="h-4 w-4 text-amber-600" />
+              Sürece Geri Al
+            </DialogTitle>
+            <p id="reenroll-cd-desc" className="text-sm text-muted-foreground">
+              {candidate?.name} için yeni bir başvuru oluşturulacak. Mevcut kapanış geçmişi korunacak.
+            </p>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            {!employeeRecord?.jobId && (
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">İş Pozisyonu</label>
+                <select
+                  value={reEnrollJobId ?? ""}
+                  onChange={(e) => setReEnrollJobId(Number(e.target.value) || null)}
+                  className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
+                >
+                  <option value="">Seçiniz…</option>
+                  {openJobs.map((j: any) => (
+                    <option key={j.id} value={j.id}>{j.title}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Başlangıç Aşaması</label>
+              <select
+                value={reEnrollStage}
+                onChange={(e) => setReEnrollStage(e.target.value)}
+                className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
+              >
+                {APPLICATION_STAGES.filter(s => !["hired", "myk_training", "account_setup", "documents", "rejected"].includes(s)).map(s => (
+                  <option key={s} value={s}>
+                    {s === "applied" ? "Başvurdu" : s === "screening" ? "Ön Eleme" : "Mülakat"}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" className="flex-1" onClick={() => setReEnrollOpen(false)}>İptal</Button>
+              <Button
+                className="flex-1 bg-amber-600 hover:bg-amber-700"
+                onClick={() => reEnroll()}
+                disabled={reEnrolling || (!employeeRecord?.jobId && !reEnrollJobId)}
+              >
+                {reEnrolling ? "Oluşturuluyor…" : "Sürece Al"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </Layout>
   );
 }
