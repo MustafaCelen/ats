@@ -151,13 +151,20 @@ export default function Employees() {
   const [passiveDateInput, setPassiveDateInput] = useState("");
   const [reEnrollEmp, setReEnrollEmp] = useState<any | null>(null);
   const [reEnrollStage, setReEnrollStage] = useState("interview");
+  const [reEnrollJobId, setReEnrollJobId] = useState<number | null>(null);
+
+  const { data: openJobs = [] } = useQuery<any[]>({
+    queryKey: ["/api/jobs"],
+    queryFn: () => fetch("/api/jobs").then((r) => r.json()),
+    enabled: !!reEnrollEmp && !reEnrollEmp.jobId,
+  });
 
   const { mutate: reEnroll, isPending: reEnrolling } = useMutation({
     mutationFn: (emp: any) =>
       fetch("/api/applications", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ candidateId: emp.candidateId, jobId: emp.jobId, status: reEnrollStage }),
+        body: JSON.stringify({ candidateId: emp.candidateId, jobId: reEnrollJobId ?? emp.jobId, status: reEnrollStage }),
       }).then(async (r) => {
         if (!r.ok) throw new Error(await r.text());
         return r.json();
@@ -809,18 +816,6 @@ export default function Employees() {
                   {detailEmployee.status === "active" ? "Pasife Al" : "Aktifleştir"}
                 </Button>
               </div>
-              {detailEmployee.status === "inactive" && detailEmployee.candidateId && detailEmployee.jobId && (
-                <div className="pt-1">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="w-full gap-1.5 border-amber-200 text-amber-700 hover:bg-amber-50"
-                    onClick={() => setReEnrollEmp(detailEmployee)}
-                  >
-                    <RotateCcw className="h-3.5 w-3.5" /> Sürece Geri Al
-                  </Button>
-                </div>
-              )}
             </div>
             )}
 
@@ -924,6 +919,19 @@ export default function Employees() {
                 </div>
               </div>
             )}
+
+            {detailEmployee.status === "inactive" && detailEmployee.candidateId && (
+              <div className="pt-3 border-t border-border mt-1">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="w-full gap-1.5 border-amber-200 text-amber-700 hover:bg-amber-50"
+                  onClick={() => { setReEnrollEmp(detailEmployee); setReEnrollJobId(detailEmployee.jobId ?? null); }}
+                >
+                  <RotateCcw className="h-3.5 w-3.5" /> Sürece Geri Al
+                </Button>
+              </div>
+            )}
           </DialogContent>
         </Dialog>
       )}
@@ -980,6 +988,21 @@ export default function Employees() {
             </p>
           </DialogHeader>
           <div className="space-y-4 pt-2">
+            {!reEnrollEmp?.jobId && (
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">İş Pozisyonu</label>
+                <select
+                  value={reEnrollJobId ?? ""}
+                  onChange={(e) => setReEnrollJobId(Number(e.target.value) || null)}
+                  className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
+                >
+                  <option value="">Seçiniz…</option>
+                  {openJobs.map((j: any) => (
+                    <option key={j.id} value={j.id}>{j.title}</option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div className="space-y-1.5">
               <label className="text-sm font-medium">Başlangıç Aşaması</label>
               <select
@@ -1001,7 +1024,7 @@ export default function Employees() {
               <Button
                 className="flex-1 bg-amber-600 hover:bg-amber-700"
                 onClick={() => reEnroll(reEnrollEmp)}
-                disabled={reEnrolling}
+                disabled={reEnrolling || (!reEnrollEmp?.jobId && !reEnrollJobId)}
               >
                 {reEnrolling ? "Oluşturuluyor…" : "Sürece Al"}
               </Button>
