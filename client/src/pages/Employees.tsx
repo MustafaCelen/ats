@@ -607,8 +607,8 @@ export default function Employees() {
       {/* Detail dialog */}
       {detailEmployee && (
         <Dialog open={!!detailEmployee} onOpenChange={(v) => { if (!v) { setDetailEmployee(null); setDetailTab("profil"); } }}>
-          <DialogContent className="max-w-2xl" aria-describedby="emp-detail-desc">
-            <DialogHeader>
+          <DialogContent className="max-w-2xl flex flex-col max-h-[90vh] overflow-hidden" aria-describedby="emp-detail-desc">
+            <DialogHeader className="flex-shrink-0">
               <DialogTitle className="flex items-center gap-2">
                 <Briefcase className="h-4 w-4 text-primary" />
                 {detailEmployee.candidate?.name}
@@ -617,7 +617,7 @@ export default function Employees() {
             </DialogHeader>
 
             {/* Tab bar */}
-            <div className="flex border-b border-border -mx-6 px-6 gap-4">
+            <div className="flex border-b border-border -mx-6 px-6 gap-4 flex-shrink-0">
               <button
                 onClick={() => setDetailTab("profil")}
                 className={`pb-2 text-sm font-medium transition-colors border-b-2 -mb-px ${detailTab === "profil" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
@@ -635,7 +635,7 @@ export default function Employees() {
             </div>
 
             {detailTab === "profil" && (
-            <div className="space-y-3 text-sm pt-1 max-h-[70vh] overflow-y-auto pr-1">
+            <div className="space-y-3 text-sm pt-1 flex-1 overflow-y-auto pr-1">
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <p className="text-xs text-muted-foreground font-medium mb-0.5">Kategori</p>
@@ -827,8 +827,8 @@ export default function Employees() {
             )}
 
             {detailTab === "islemler" && canViewIslemler(detailEmployee) && (
-              <div className="pt-2 space-y-2">
-                <div className="flex justify-end">
+              <div className="pt-2 space-y-2 flex flex-col flex-1 min-h-0">
+                <div className="flex justify-end flex-shrink-0">
                   <Button
                     size="sm"
                     variant="outline"
@@ -859,7 +859,7 @@ export default function Employees() {
                     <Download className="h-3.5 w-3.5" /> CSV İndir
                   </Button>
                 </div>
-                <div className="max-h-[65vh] overflow-y-auto">
+                <div className="overflow-y-auto flex-1 min-h-0">
                 {closingsFetching ? (
                   <p className="text-sm text-muted-foreground py-8 text-center">Yükleniyor…</p>
                 ) : employeeClosings.length === 0 ? (
@@ -921,7 +921,7 @@ export default function Employees() {
             )}
 
             {detailEmployee.status === "inactive" && detailEmployee.candidateId && (
-              <div className="pt-3 border-t border-border mt-1">
+              <div className="pt-3 border-t border-border mt-1 flex-shrink-0">
                 <Button
                   size="sm"
                   variant="outline"
