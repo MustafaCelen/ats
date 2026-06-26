@@ -722,6 +722,9 @@ export default function Listings() {
         else failed++;
       } catch { failed++; }
       setBulkStatus((s) => s ? { ...s, sent, skipped, failed } : s);
+      if (i < toSend.length - 1 && !stopBulkRef.current) {
+        await new Promise((r) => setTimeout(r, 1000));
+      }
     }
     const wasStopped = stopBulkRef.current;
     setBulkSending(false);
@@ -757,7 +760,7 @@ export default function Listings() {
       } catch { failed++; }
       setBulkEmailStatus((s) => s ? { ...s, sent, skipped, failed } : s);
       if (i < toSend.length - 1 && !stopBulkEmailRef.current) {
-        await new Promise((r) => setTimeout(r, 500));
+        await new Promise((r) => setTimeout(r, 1500));
       }
     }
     const wasStopped = stopBulkEmailRef.current;
@@ -796,6 +799,9 @@ export default function Listings() {
         failed++;
       }
       setBulkStatus((s) => s ? { ...s, sent, skipped, failed } : s);
+      if (i < uniqueAdvisorIds.length - 1 && !stopBulkRef.current) {
+        await new Promise((r) => setTimeout(r, 1000));
+      }
     }
     const wasStopped = stopBulkRef.current;
     setBulkSending(false);
@@ -844,7 +850,7 @@ export default function Listings() {
       }
       setBulkEmailStatus((s) => s ? { ...s, sent, skipped, failed } : s);
       if (i < uniqueAdvisorIds.length - 1 && !stopBulkEmailRef.current) {
-        await new Promise((r) => setTimeout(r, 500));
+        await new Promise((r) => setTimeout(r, 1500));
       }
     }
     const wasStopped = stopBulkEmailRef.current;
