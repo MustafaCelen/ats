@@ -25,7 +25,7 @@ import {
   Trash2, Send, User, Pencil, MapPin, Building2,
   FileCheck, Globe, Star, Award, Users, TrendingUp,
   ExternalLink, Calendar, FileText, CheckCircle2, Circle, AtSign, History, Clock,
-  Key, UserCheck, BadgeCheck, RefreshCcw, XCircle, HandCoins, TrendingDown,
+  Key, UserCheck, BadgeCheck, RefreshCcw, XCircle, HandCoins, TrendingDown, Download,
 } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import {
@@ -912,6 +912,36 @@ export default function CandidateDetail() {
                   <div className="flex items-center gap-2 px-4 py-3 border-b border-border bg-muted/30">
                     <HandCoins className="h-4 w-4 text-primary" />
                     <h2 className="text-sm font-semibold">İşlem Detayları</h2>
+                    <div className="ml-auto">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="gap-1.5 text-xs h-7"
+                        onClick={() => {
+                          const name = candidate?.name ?? "danışman";
+                          const rows = [
+                            ["Mülk", "Kategori", "Tür", "Satış Bedeli", "BHB", "Taraf", "Tarih"],
+                            ...employeeClosings.map((c: any) => [
+                              c.propertyAddress || "",
+                              c.dealCategory || "",
+                              c.dealType || "",
+                              parseFloat(c.saleValue || "0").toFixed(2),
+                              parseFloat(c.bhbShare || "0").toFixed(2),
+                              c.sideType === "buyer" ? "Alıcı" : "Satıcı",
+                              c.closingDate ? new Date(c.closingDate).toLocaleDateString("tr-TR") : "",
+                            ]),
+                          ];
+                          const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+                          const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+                          const url = URL.createObjectURL(blob);
+                          const a = document.createElement("a");
+                          a.href = url; a.download = `${name}-islemler.csv`; a.click();
+                          URL.revokeObjectURL(url);
+                        }}
+                      >
+                        <Download className="h-3.5 w-3.5" /> CSV İndir
+                      </Button>
+                    </div>
                   </div>
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
