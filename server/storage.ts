@@ -81,6 +81,7 @@ export interface EmployeeClosingRow {
   closingDate: Date | null;
   sideType: string;
   status: string;
+  paymentCollected: boolean;
 }
 
 export interface ChurnRow {
@@ -94,6 +95,7 @@ export interface ChurnRow {
   closings3m: number;
   closingsPrev3m: number;
   trend: "up" | "flat" | "down";
+  activeListings: number;
   score: number;
   risk: "high" | "medium" | "low";
 }
@@ -1851,6 +1853,7 @@ export class DatabaseStorage implements IStorage {
         closingDate: effDate,
         sideType: closingSides.sideType,
         status: effStatus,
+        paymentCollected: closingAgents.paymentCollected,
       })
       .from(closingAgents)
       .innerJoin(closingSides, eq(closingAgents.closingSideId, closingSides.id))
@@ -1888,6 +1891,19 @@ export class DatabaseStorage implements IStorage {
       ))
       .where(eq(employees.status, "active"))
       .orderBy(asc(employees.id));
+
+    // Active listing count per employee (a churn signal: 0 active listings = inactive)
+    const listingRows = await db
+      .select({
+        employeeId: listings.employeeId,
+        activeCount: sql<number>`count(*) filter (where ${listings.status} = 'active')`,
+      })
+      .from(listings)
+      .where(isNotNull(listings.employeeId))
+      .groupBy(listings.employeeId);
+    const activeListingMap = new Map<number, number>(
+      listingRows.map((r) => [r.employeeId as number, Number(r.activeCount ?? 0)]),
+    );
 
     // Group by employee
     const empMap = new Map<number, {
@@ -1947,6 +1963,11 @@ export class DatabaseStorage implements IStorage {
       // Category
       if (emp.category === "K0") score += 10;
 
+      // Active listings — no portal presence is a strong inactivity signal
+      const activeListings = activeListingMap.get(empId) ?? 0;
+      if (activeListings === 0) score += 25;
+      else if (activeListings <= 2) score += 10;
+
       score = Math.max(0, score);
 
       const risk: "high" | "medium" | "low" =
@@ -1963,6 +1984,7 @@ export class DatabaseStorage implements IStorage {
         closings3m,
         closingsPrev3m,
         trend,
+        activeListings,
         score,
         risk,
       });
@@ -4612,6 +4634,27 @@ export class DatabaseStorage implements IStorage {
       else result[row.employeeId].passive++;
     }
     return result;
+  }
+
+  async getAdvisorListingStats(employeeId: number): Promise<{
+    totalActive: number; totalPassive: number;
+    agreementUploaded: number; agreementPending: number;
+  }> {
+    const [row] = await db
+      .select({
+        totalActive:       sql<number>`count(*) filter (where ${listings.status} = 'active')`,
+        totalPassive:      sql<number>`count(*) filter (where ${listings.status} = 'passive')`,
+        agreementUploaded: sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.agreementUploadedAt} is not null)`,
+        agreementPending:  sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.agreementUploadedAt} is null and ${listings.noAgreementAt} is null)`,
+      })
+      .from(listings)
+      .where(eq(listings.employeeId, employeeId));
+    return {
+      totalActive: Number(row?.totalActive ?? 0),
+      totalPassive: Number(row?.totalPassive ?? 0),
+      agreementUploaded: Number(row?.agreementUploaded ?? 0),
+      agreementPending: Number(row?.agreementPending ?? 0),
+    };
   }
 
   async markAdvisorNotified(employeeId: number, msgId?: string | null): Promise<void> {

@@ -3,6 +3,7 @@ import { useParams } from "wouter";
 import { LISTING_CLOSE_REASONS } from "@shared/schema";
 import {
   Building2, UploadCloud, CheckCircle2, Loader2, AlertCircle, ChevronDown, ChevronUp, XCircle, Trash2, ArrowDownToLine,
+  Trophy, Wallet, Clock3, FileText, ListChecks,
 } from "lucide-react";
 
 interface PendingListing {
@@ -445,11 +446,190 @@ function PassiveCard({ listing, token }: { listing: PendingListing; token: strin
   );
 }
 
+function fmtTRY(n: number): string {
+  return (Math.round(n) || 0).toLocaleString("tr-TR") + " ₺";
+}
+
+interface AdvisorSummary {
+  name: string;
+  cap: {
+    capAmount: number | null;
+    capUsed: number;
+    capRemaining: number | null;
+    capYear: number;
+    periodStart: string;
+  } | null;
+  listingStats: {
+    totalActive: number;
+    totalPassive: number;
+    agreementUploaded: number;
+    agreementPending: number;
+  };
+  commissions: {
+    closingId: number;
+    propertyAddress: string;
+    dealCategory: string;
+    dealType: string;
+    saleValue: string;
+    employeeNet: string;
+    closingDate: string | null;
+    paymentCollected: boolean;
+  }[];
+  totals: {
+    closingCount: number;
+    netTotal: number;
+    pendingCount: number;
+    pendingTotal: number;
+  };
+}
+
+function StatBox({ icon: Icon, label, value, tone = "default" }: {
+  icon: React.ElementType; label: string; value: string | number;
+  tone?: "default" | "amber" | "emerald" | "red";
+}) {
+  const toneCls = {
+    default: "bg-card border-border text-foreground",
+    amber: "bg-amber-50 border-amber-200 text-amber-800",
+    emerald: "bg-emerald-50 border-emerald-200 text-emerald-800",
+    red: "bg-red-50 border-red-200 text-red-800",
+  }[tone];
+  return (
+    <div className={`rounded-xl border p-3 ${toneCls}`}>
+      <div className="flex items-center gap-1.5 text-[11px] font-medium opacity-80">
+        <Icon className="h-3.5 w-3.5" /> {label}
+      </div>
+      <div className="text-lg font-bold mt-1">{value}</div>
+    </div>
+  );
+}
+
+function SummaryView({ token }: { token: string }) {
+  const [data, setData] = useState<AdvisorSummary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    fetch(`/api/public/advisor/${token}/summary`)
+      .then((r) => r.ok ? r.json() : Promise.reject(r))
+      .then((d) => { setData(d); setError(false); })
+      .catch(() => setError(true))
+      .finally(() => setLoading(false));
+  }, [token]);
+
+  if (loading) {
+    return <Card className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-primary" /></Card>;
+  }
+  if (error || !data) {
+    return <Card><div className="text-center py-6"><AlertCircle className="h-8 w-8 text-destructive mx-auto mb-2" /><p className="text-sm text-muted-foreground">Veriler yüklenemedi.</p></div></Card>;
+  }
+
+  const cap = data.cap;
+  const capPct = cap && cap.capAmount && cap.capAmount > 0
+    ? Math.min(100, Math.round((cap.capUsed / cap.capAmount) * 100))
+    : 0;
+
+  return (
+    <>
+      {/* Cap progress */}
+      <Card>
+        <div className="flex items-center gap-2 mb-3">
+          <Trophy className="h-4 w-4 text-amber-500" />
+          <h2 className="font-semibold text-sm">Cap Durumu {cap ? `(${cap.capYear})` : ""}</h2>
+        </div>
+        {!cap || cap.capAmount === null ? (
+          <p className="text-sm text-muted-foreground">Bu dönem için cap tanımlı değil.</p>
+        ) : (
+          <>
+            <div className="flex items-end justify-between mb-1.5">
+              <div>
+                <span className="text-2xl font-bold">{fmtTRY(cap.capUsed)}</span>
+                <span className="text-sm text-muted-foreground"> / {fmtTRY(cap.capAmount)}</span>
+              </div>
+              <span className="text-sm font-semibold text-amber-600">%{capPct}</span>
+            </div>
+            <div className="w-full bg-muted rounded-full h-2.5 overflow-hidden">
+              <div
+                className={`h-2.5 rounded-full transition-all ${capPct >= 100 ? "bg-emerald-500" : "bg-amber-500"}`}
+                style={{ width: `${capPct}%` }}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground mt-2">
+              {cap.capRemaining !== null && cap.capRemaining > 0
+                ? <>Cape ulaşmanıza <b className="text-foreground">{fmtTRY(cap.capRemaining)}</b> kaldı.</>
+                : <span className="text-emerald-600 font-medium">Tebrikler, cap tamamlandı! 🎉</span>}
+            </p>
+          </>
+        )}
+      </Card>
+
+      {/* Listing performance */}
+      <Card>
+        <div className="flex items-center gap-2 mb-3">
+          <ListChecks className="h-4 w-4 text-primary" />
+          <h2 className="font-semibold text-sm">İlan Performansım</h2>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <StatBox icon={Building2} label="Aktif İlan" value={data.listingStats.totalActive} />
+          <StatBox icon={Building2} label="Pasif İlan" value={data.listingStats.totalPassive} />
+          <StatBox icon={CheckCircle2} label="Sözleşme Yüklendi" value={data.listingStats.agreementUploaded} tone="emerald" />
+          <StatBox icon={Clock3} label="Sözleşme Bekleyen" value={data.listingStats.agreementPending} tone={data.listingStats.agreementPending > 0 ? "amber" : "default"} />
+        </div>
+      </Card>
+
+      {/* Pending payments */}
+      <Card>
+        <div className="flex items-center gap-2 mb-3">
+          <Wallet className="h-4 w-4 text-emerald-600" />
+          <h2 className="font-semibold text-sm">Hak Edişlerim</h2>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <StatBox icon={Trophy} label="Tamamlanan İşlem" value={data.totals.closingCount} />
+          <StatBox icon={Wallet} label="Toplam Net" value={fmtTRY(data.totals.netTotal)} tone="emerald" />
+          <StatBox icon={Clock3} label="Bekleyen Ödeme" value={data.totals.pendingCount} tone={data.totals.pendingCount > 0 ? "red" : "default"} />
+          <StatBox icon={Wallet} label="Bekleyen Tutar" value={fmtTRY(data.totals.pendingTotal)} tone={data.totals.pendingTotal > 0 ? "red" : "default"} />
+        </div>
+      </Card>
+
+      {/* Commission history */}
+      <Card>
+        <div className="flex items-center gap-2 mb-3">
+          <FileText className="h-4 w-4 text-primary" />
+          <h2 className="font-semibold text-sm">Komisyon Geçmişi ({data.commissions.length})</h2>
+        </div>
+        {data.commissions.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Henüz tamamlanmış işlem yok.</p>
+        ) : (
+          <div className="space-y-2">
+            {data.commissions.map((c) => (
+              <div key={c.closingId} className="flex items-center gap-3 p-3 rounded-lg border border-border bg-muted/20">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{c.propertyAddress || `${c.dealCategory} — ${c.dealType}`}</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {c.closingDate ? new Date(c.closingDate).toLocaleDateString("tr-TR") : "—"} · {c.dealType}
+                  </p>
+                </div>
+                <div className="text-right shrink-0">
+                  <p className="text-sm font-bold text-emerald-700">{fmtTRY(Number(c.employeeNet))}</p>
+                  {c.paymentCollected
+                    ? <span className="text-[10px] font-medium text-emerald-600">Ödendi</span>
+                    : <span className="text-[10px] font-medium text-red-500">Bekliyor</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+    </>
+  );
+}
+
 export default function AdvisorSelfService() {
   const { token } = useParams<{ token: string }>();
   const [data, setData] = useState<AdvisorData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [tab, setTab] = useState<"listings" | "summary">("listings");
 
   const loadData = useCallback(() => {
     setLoading(true);
@@ -487,9 +667,31 @@ export default function AdvisorSelfService() {
 
   const totalPending = data.active.length + data.passive.length;
 
-  if (totalPending === 0) {
-    return (
-      <Shell>
+  return (
+    <Shell>
+      <Card className="!p-1.5">
+        <div className="grid grid-cols-2 gap-1">
+          <button
+            onClick={() => setTab("listings")}
+            className={`h-9 rounded-xl text-sm font-medium transition-colors flex items-center justify-center gap-1.5 ${tab === "listings" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
+          >
+            <ListChecks className="h-4 w-4" /> İlanlarım
+            {totalPending > 0 && (
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${tab === "listings" ? "bg-white/20" : "bg-red-100 text-red-700"}`}>{totalPending}</span>
+            )}
+          </button>
+          <button
+            onClick={() => setTab("summary")}
+            className={`h-9 rounded-xl text-sm font-medium transition-colors flex items-center justify-center gap-1.5 ${tab === "summary" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
+          >
+            <Trophy className="h-4 w-4" /> Durumum
+          </button>
+        </div>
+      </Card>
+
+      {tab === "summary" ? (
+        <SummaryView token={token} />
+      ) : totalPending === 0 ? (
         <Card>
           <div className="text-center py-6">
             <CheckCircle2 className="h-10 w-10 text-emerald-500 mx-auto mb-3" />
@@ -499,38 +701,36 @@ export default function AdvisorSelfService() {
             </p>
           </div>
         </Card>
-      </Shell>
-    );
-  }
-
-  return (
-    <Shell>
-      <Card>
-        <h1 className="font-bold text-lg">Merhaba {data.name} 👋</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          {totalPending} ilanınız için işlem bekleniyor.
-        </p>
-      </Card>
-
-      {data.active.length > 0 && (
+      ) : (
         <>
-          <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide px-1">
-            Aktif İlanlar — Yetki Sözleşmesi ({data.active.length})
-          </div>
-          {data.active.map((l) => (
-            <ActiveCard key={l.id} listing={l} token={token} onRefresh={loadData} />
-          ))}
-        </>
-      )}
+          <Card>
+            <h1 className="font-bold text-lg">Merhaba {data.name} 👋</h1>
+            <p className="text-sm text-muted-foreground mt-1">
+              {totalPending} ilanınız için işlem bekleniyor.
+            </p>
+          </Card>
 
-      {data.passive.length > 0 && (
-        <>
-          <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide px-1 mt-2">
-            Pasif İlanlar — Kapanış Sebebi ({data.passive.length})
-          </div>
-          {data.passive.map((l) => (
-            <PassiveCard key={l.id} listing={l} token={token} />
-          ))}
+          {data.active.length > 0 && (
+            <>
+              <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide px-1">
+                Aktif İlanlar — Yetki Sözleşmesi ({data.active.length})
+              </div>
+              {data.active.map((l) => (
+                <ActiveCard key={l.id} listing={l} token={token} onRefresh={loadData} />
+              ))}
+            </>
+          )}
+
+          {data.passive.length > 0 && (
+            <>
+              <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide px-1 mt-2">
+                Pasif İlanlar — Kapanış Sebebi ({data.passive.length})
+              </div>
+              {data.passive.map((l) => (
+                <PassiveCard key={l.id} listing={l} token={token} />
+              ))}
+            </>
+          )}
         </>
       )}
     </Shell>

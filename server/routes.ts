@@ -586,6 +586,57 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     } catch { res.status(500).json({ message: "Internal server error" }); }
   });
 
+  // Advisor self-service summary: cap progress, commission history, pending payments, listing stats
+  app.get("/api/public/advisor/:token/summary", async (req, res) => {
+    try {
+      const emp = await storage.getAdvisorByToken(req.params.token);
+      if (!emp) return res.status(404).json({ message: "Bağlantı geçersiz" });
+
+      const [cap, closings, listingStats] = await Promise.all([
+        storage.getEmployeeCapStatus(emp.id),
+        storage.getClosingsByEmployee(emp.id),
+        storage.getAdvisorListingStats(emp.id),
+      ]);
+
+      // Only show completed deals to the advisor (expected/draft are internal)
+      const completed = closings.filter((c) => c.status === "completed");
+      const pendingPayments = completed.filter((c) => !c.paymentCollected);
+
+      const sumNet = (rows: typeof completed) =>
+        rows.reduce((s, c) => s + (Number(c.employeeNet) || 0), 0);
+
+      res.json({
+        name: (emp as any).candidate?.name ?? "Danışman",
+        cap: cap
+          ? {
+              capAmount: cap.capAmount,
+              capUsed: cap.capUsed,
+              capRemaining: cap.capRemaining,
+              capYear: cap.capYear,
+              periodStart: cap.periodStart,
+            }
+          : null,
+        listingStats,
+        commissions: completed.map((c) => ({
+          closingId: c.closingId,
+          propertyAddress: c.propertyAddress,
+          dealCategory: c.dealCategory,
+          dealType: c.dealType,
+          saleValue: c.saleValue,
+          employeeNet: c.employeeNet,
+          closingDate: c.closingDate,
+          paymentCollected: c.paymentCollected,
+        })),
+        totals: {
+          closingCount: completed.length,
+          netTotal: sumNet(completed),
+          pendingCount: pendingPayments.length,
+          pendingTotal: sumNet(pendingPayments),
+        },
+      });
+    } catch { res.status(500).json({ message: "Internal server error" }); }
+  });
+
   app.post("/api/public/advisor/:token/listings/:listingId/agreement", async (req, res) => {
     try {
       const emp = await storage.getAdvisorByToken(req.params.token);

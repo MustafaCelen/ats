@@ -4,12 +4,11 @@ import { useReportStats } from "@/hooks/use-stats";
 import { STAGE_COLORS } from "@/components/StatusBadge";
 import { STAGE_LABELS } from "@shared/schema";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, AreaChart, Area, CartesianGrid } from "recharts";
-import { Calendar, Clock, TrendingUp, Users, CheckCircle, DollarSign, Briefcase, Activity, TimerReset, XCircle, UserMinus, UserPlus, ChevronLeft, ChevronRight, FileSignature, AlertTriangle, TrendingDown, Minus, ShieldAlert } from "lucide-react";
+import { Calendar, Clock, Users, CheckCircle, DollarSign, Briefcase, Activity, TimerReset, XCircle, UserMinus, UserPlus, ChevronLeft, ChevronRight, FileSignature } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { format } from "date-fns";
 import { tr } from "date-fns/locale";
-import { useQuery } from "@tanstack/react-query";
 
 function MetricCard({ icon: Icon, label, value, sub, color }: { icon: React.ElementType; label: string; value: number | string; sub?: string; color: string; }) {
   return (
@@ -52,17 +51,11 @@ function formatYMD(d: Date) {
 }
 
 export default function Reports() {
-  const [mainTab, setMainTab] = useState<"ise-alim" | "churn">("ise-alim");
   const [viewDate, setViewDate] = useState(() => new Date());
   const [useCustomRange, setUseCustomRange] = useState(false);
   const [fromDate, setFromDate] = useState(formatDateInput(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)));
   const [toDate, setToDate] = useState(formatDateInput(new Date()));
   const [officeFilter, setOfficeFilter] = useState<string | undefined>(undefined);
-  const { data: churnData = [], isLoading: churnLoading } = useQuery<any[]>({
-    queryKey: ["/api/reports/churn"],
-    queryFn: () => fetch("/api/reports/churn").then((r) => r.json()),
-    enabled: mainTab === "churn",
-  });
 
   const viewYear = viewDate.getFullYear();
   const viewMonth = viewDate.getMonth();
@@ -80,186 +73,10 @@ export default function Reports() {
   const stageTimes = (stats?.stageTimes ?? []).filter((s: any) => s.stage !== "rejected");
   const maxStage = Math.max(...stageTimes.map((t: any) => t.avgDays), 1);
 
-  const hadClosings  = churnData.filter((r: any) => r.lastClosingDate !== null && r.risk === "high");
-  const neverClosed  = churnData.filter((r: any) => r.lastClosingDate === null && r.risk === "high");
-  const highRisk  = churnData.filter((r: any) => r.risk === "high").length;
-  const medRisk   = churnData.filter((r: any) => r.risk === "medium").length;
-  const lowRisk   = churnData.filter((r: any) => r.risk === "low").length;
-
   return (
     <Layout>
       <div className="space-y-6">
-        {/* ── Main tab bar ── */}
-        <div className="flex gap-1 border-b border-border">
-          <button
-            onClick={() => setMainTab("ise-alim")}
-            className={`px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px ${mainTab === "ise-alim" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
-          >
-            İşe Alım Raporu
-          </button>
-          <button
-            onClick={() => setMainTab("churn")}
-            className={`px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px flex items-center gap-1.5 ${mainTab === "churn" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
-          >
-            <ShieldAlert className="h-3.5 w-3.5" /> Danışman Sağlığı
-            {highRisk > 0 && (
-              <span className="ml-0.5 text-xs font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700">{highRisk}</span>
-            )}
-          </button>
-        </div>
-
-        {mainTab === "churn" && (
-          <div className="space-y-6">
-            {/* Summary cards */}
-            <div className="grid grid-cols-3 gap-4">
-              <div className="rounded-xl border-2 border-red-200 bg-red-50 p-4 shadow-sm">
-                <div className="flex items-center gap-2 mb-1">
-                  <AlertTriangle className="h-4 w-4 text-red-600" />
-                  <p className="text-xs font-bold text-red-700 uppercase tracking-wide">Yüksek Risk</p>
-                </div>
-                <p className="text-3xl font-bold text-red-700">{churnLoading ? "…" : highRisk}</p>
-                <p className="text-xs text-red-500 mt-1">danışman dikkat gerektiriyor</p>
-              </div>
-              <div className="rounded-xl border-2 border-amber-200 bg-amber-50 p-4 shadow-sm">
-                <div className="flex items-center gap-2 mb-1">
-                  <Minus className="h-4 w-4 text-amber-600" />
-                  <p className="text-xs font-bold text-amber-700 uppercase tracking-wide">Orta Risk</p>
-                </div>
-                <p className="text-3xl font-bold text-amber-700">{churnLoading ? "…" : medRisk}</p>
-                <p className="text-xs text-amber-500 mt-1">danışman takipte</p>
-              </div>
-              <div className="rounded-xl border-2 border-emerald-200 bg-emerald-50 p-4 shadow-sm">
-                <div className="flex items-center gap-2 mb-1">
-                  <CheckCircle className="h-4 w-4 text-emerald-600" />
-                  <p className="text-xs font-bold text-emerald-700 uppercase tracking-wide">Düşük Risk</p>
-                </div>
-                <p className="text-3xl font-bold text-emerald-700">{churnLoading ? "…" : lowRisk}</p>
-                <p className="text-xs text-emerald-500 mt-1">danışman sağlıklı</p>
-              </div>
-            </div>
-
-            {churnLoading ? (
-              <div className="rounded-xl border border-border bg-card shadow-sm p-12 text-center text-sm text-muted-foreground">Yükleniyor…</div>
-            ) : (<>
-            {/* ── Daha önce işlem yapmış ── */}
-            <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-              <div className="flex items-center gap-2 px-5 py-4 border-b border-border bg-muted/20">
-                <ShieldAlert className="h-4 w-4 text-primary" />
-                <h2 className="text-sm font-semibold">Üretim Durağanlığı</h2>
-                <span className="text-xs text-muted-foreground">— daha önce işlem yapmış, son dönem sessiz</span>
-                <span className="ml-auto text-xs font-semibold text-muted-foreground">{hadClosings.length} danışman</span>
-              </div>
-              {hadClosings.length === 0 ? (
-                <div className="px-5 py-8 text-sm text-muted-foreground text-center">Bu grupta danışman yok.</div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-muted/30 text-xs text-muted-foreground uppercase">
-                      <tr>
-                        <th className="text-left px-5 py-3">Danışman</th>
-                        <th className="text-left px-5 py-3">Risk</th>
-                        <th className="text-left px-5 py-3">Son İşlem</th>
-                        <th className="text-center px-5 py-3">Son 3 Ay</th>
-                        <th className="text-center px-5 py-3">Önceki 3 Ay</th>
-                        <th className="text-center px-5 py-3">Trend</th>
-                        <th className="text-left px-5 py-3">Tenure</th>
-                        <th className="text-left px-5 py-3">Kategori</th>
-                        <th className="text-right px-5 py-3">Skor</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border">
-                      {hadClosings.map((r: any) => (
-                        <tr key={r.employeeId} className={`transition-colors ${r.risk === "high" ? "bg-red-50/40 hover:bg-red-50/70" : r.risk === "medium" ? "bg-amber-50/30 hover:bg-amber-50/60" : "hover:bg-muted/20"}`}>
-                          <td className="px-5 py-3">
-                            <p className="font-medium">{r.name}</p>
-                            {r.kwuid && <p className="text-xs text-muted-foreground font-mono">{r.kwuid}</p>}
-                          </td>
-                          <td className="px-5 py-3">
-                            {r.risk === "high" && <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700 ring-1 ring-red-300"><AlertTriangle className="h-3 w-3" /> Yüksek</span>}
-                            {r.risk === "medium" && <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 ring-1 ring-amber-300"><Minus className="h-3 w-3" /> Orta</span>}
-                            {r.risk === "low" && <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 ring-1 ring-emerald-300"><CheckCircle className="h-3 w-3" /> Düşük</span>}
-                          </td>
-                          <td className="px-5 py-3">
-                            <p>{format(new Date(r.lastClosingDate), "d MMM yyyy", { locale: tr })}</p>
-                            <p className="text-xs text-muted-foreground">{r.daysSinceLast} gün önce</p>
-                          </td>
-                          <td className="px-5 py-3 text-center">
-                            <span className={`text-sm font-bold ${r.closings3m === 0 ? "text-red-600" : r.closings3m <= 1 ? "text-amber-600" : "text-emerald-600"}`}>{r.closings3m}</span>
-                          </td>
-                          <td className="px-5 py-3 text-center text-muted-foreground">{r.closingsPrev3m}</td>
-                          <td className="px-5 py-3 text-center">
-                            {r.trend === "up" && <TrendingUp className="h-4 w-4 text-emerald-600 mx-auto" />}
-                            {r.trend === "down" && <TrendingDown className="h-4 w-4 text-red-500 mx-auto" />}
-                            {r.trend === "flat" && <Minus className="h-4 w-4 text-muted-foreground mx-auto" />}
-                          </td>
-                          <td className="px-5 py-3 text-muted-foreground">{r.tenureMonths < 1 ? "<1 ay" : `${r.tenureMonths} ay`}</td>
-                          <td className="px-5 py-3">
-                            {r.category ? <span className={`text-xs font-bold px-2 py-0.5 rounded-full ring-1 ${r.category === "K2" ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : r.category === "K1" ? "bg-amber-50 text-amber-700 ring-amber-200" : "bg-slate-50 text-slate-700 ring-slate-200"}`}>{r.category}</span> : "—"}
-                          </td>
-                          <td className="px-5 py-3 text-right">
-                            <span className={`text-sm font-bold ${r.score >= 60 ? "text-red-600" : r.score >= 30 ? "text-amber-600" : "text-emerald-600"}`}>{r.score}</span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-
-            {/* ── Hiç işlem yapmamış ── */}
-            <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-              <div className="flex items-center gap-2 px-5 py-4 border-b border-border bg-muted/20">
-                <AlertTriangle className="h-4 w-4 text-amber-500" />
-                <h2 className="text-sm font-semibold">Henüz İşlem Yapmamış</h2>
-                <span className="text-xs text-muted-foreground">— sistemde hiç kapanış kaydı yok</span>
-                <span className="ml-auto text-xs font-semibold text-muted-foreground">{neverClosed.length} danışman</span>
-              </div>
-              {neverClosed.length === 0 ? (
-                <div className="px-5 py-8 text-sm text-muted-foreground text-center">Bu grupta danışman yok.</div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-muted/30 text-xs text-muted-foreground uppercase">
-                      <tr>
-                        <th className="text-left px-5 py-3">Danışman</th>
-                        <th className="text-left px-5 py-3">Risk</th>
-                        <th className="text-left px-5 py-3">Tenure</th>
-                        <th className="text-left px-5 py-3">Kategori</th>
-                        <th className="text-right px-5 py-3">Skor</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border">
-                      {neverClosed.map((r: any) => (
-                        <tr key={r.employeeId} className={`transition-colors ${r.risk === "high" ? "bg-red-50/40 hover:bg-red-50/70" : r.risk === "medium" ? "bg-amber-50/30 hover:bg-amber-50/60" : "hover:bg-muted/20"}`}>
-                          <td className="px-5 py-3">
-                            <p className="font-medium">{r.name}</p>
-                            {r.kwuid && <p className="text-xs text-muted-foreground font-mono">{r.kwuid}</p>}
-                          </td>
-                          <td className="px-5 py-3">
-                            {r.risk === "high" && <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700 ring-1 ring-red-300"><AlertTriangle className="h-3 w-3" /> Yüksek</span>}
-                            {r.risk === "medium" && <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 ring-1 ring-amber-300"><Minus className="h-3 w-3" /> Orta</span>}
-                            {r.risk === "low" && <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 ring-1 ring-emerald-300"><CheckCircle className="h-3 w-3" /> Düşük</span>}
-                          </td>
-                          <td className="px-5 py-3 text-muted-foreground">{r.tenureMonths < 1 ? "<1 ay" : `${r.tenureMonths} ay`}</td>
-                          <td className="px-5 py-3">
-                            {r.category ? <span className={`text-xs font-bold px-2 py-0.5 rounded-full ring-1 ${r.category === "K2" ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : r.category === "K1" ? "bg-amber-50 text-amber-700 ring-amber-200" : "bg-slate-50 text-slate-700 ring-slate-200"}`}>{r.category}</span> : "—"}
-                          </td>
-                          <td className="px-5 py-3 text-right">
-                            <span className={`text-sm font-bold ${r.score >= 60 ? "text-red-600" : r.score >= 30 ? "text-amber-600" : "text-emerald-600"}`}>{r.score}</span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-            </>)}
-          </div>
-        )}
-
-        {mainTab === "ise-alim" && (<>
+        {(<>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-2xl font-display font-bold text-foreground">Reports &amp; Analytics</h1>
