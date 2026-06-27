@@ -472,16 +472,12 @@ interface AdvisorSummary {
     dealType: string;
     saleValue: string;
     bhbShare: string;
-    employeeNet: string;
     closingDate: string | null;
-    paymentCollected: boolean;
   }[];
   totals: {
     closingCount: number;
+    saleValueTotal: number;
     bhbTotal: number;
-    netTotal: number;
-    pendingCount: number;
-    pendingTotal: number;
   };
 }
 
@@ -579,18 +575,16 @@ function SummaryView({ token }: { token: string }) {
         </div>
       </Card>
 
-      {/* Pending payments */}
+      {/* Production summary */}
       <Card>
         <div className="flex items-center gap-2 mb-3">
           <Wallet className="h-4 w-4 text-emerald-600" />
-          <h2 className="font-semibold text-sm">Hak Edişlerim</h2>
+          <h2 className="font-semibold text-sm">İşlem Özetim</h2>
         </div>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-3 gap-2">
           <StatBox icon={Trophy} label="Tamamlanan İşlem" value={data.totals.closingCount} />
-          <StatBox icon={Wallet} label="Toplam BHB" value={fmtTRY(data.totals.bhbTotal)} />
-          <StatBox icon={Wallet} label="Toplam Net" value={fmtTRY(data.totals.netTotal)} tone="emerald" />
-          <StatBox icon={Clock3} label="Bekleyen Ödeme" value={data.totals.pendingCount} tone={data.totals.pendingCount > 0 ? "red" : "default"} />
-          <StatBox icon={Wallet} label="Bekleyen Tutar" value={fmtTRY(data.totals.pendingTotal)} tone={data.totals.pendingTotal > 0 ? "red" : "default"} />
+          <StatBox icon={Wallet} label="Toplam İşlem Değeri" value={fmtTRY(data.totals.saleValueTotal)} />
+          <StatBox icon={Wallet} label="Toplam BHB" value={fmtTRY(data.totals.bhbTotal)} tone="emerald" />
         </div>
       </Card>
 
@@ -613,11 +607,8 @@ function SummaryView({ token }: { token: string }) {
                   </p>
                 </div>
                 <div className="text-right shrink-0">
-                  <p className="text-[11px] text-muted-foreground">BHB {fmtTRY(Number(c.bhbShare))}</p>
-                  <p className="text-sm font-bold text-emerald-700">{fmtTRY(Number(c.employeeNet))}</p>
-                  {c.paymentCollected
-                    ? <span className="text-[10px] font-medium text-emerald-600">Ödendi</span>
-                    : <span className="text-[10px] font-medium text-red-500">Bekliyor</span>}
+                  <p className="text-[11px] text-muted-foreground">İşlem: {fmtTRY(Number(c.saleValue))}</p>
+                  <p className="text-sm font-bold text-emerald-700">BHB {fmtTRY(Number(c.bhbShare))}</p>
                 </div>
               </div>
             ))}

@@ -660,10 +660,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       // Only show completed deals to the advisor (expected/draft are internal)
       const completed = closings.filter((c) => c.status === "completed");
-      const pendingPayments = completed.filter((c) => !c.paymentCollected);
-
-      const sumNet = (rows: typeof completed) =>
-        rows.reduce((s, c) => s + (Number(c.employeeNet) || 0), 0);
 
       res.json({
         name: (emp as any).candidate?.name ?? "Danışman",
@@ -684,16 +680,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           dealType: c.dealType,
           saleValue: c.saleValue,
           bhbShare: c.bhbShare,
-          employeeNet: c.employeeNet,
           closingDate: c.closingDate,
-          paymentCollected: c.paymentCollected,
         })),
         totals: {
           closingCount: completed.length,
+          saleValueTotal: completed.reduce((s, c) => s + (Number(c.saleValue) || 0), 0),
           bhbTotal: completed.reduce((s, c) => s + (Number(c.bhbShare) || 0), 0),
-          netTotal: sumNet(completed),
-          pendingCount: pendingPayments.length,
-          pendingTotal: sumNet(pendingPayments),
         },
       });
     } catch { res.status(500).json({ message: "Internal server error" }); }

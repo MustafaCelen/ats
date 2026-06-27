@@ -4,7 +4,7 @@ import { useReportStats } from "@/hooks/use-stats";
 import { STAGE_COLORS } from "@/components/StatusBadge";
 import { STAGE_LABELS } from "@shared/schema";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, AreaChart, Area, CartesianGrid } from "recharts";
-import { Calendar, Clock, Users, CheckCircle, DollarSign, Briefcase, Activity, TimerReset, XCircle, UserMinus, UserPlus, ChevronLeft, ChevronRight, FileSignature } from "lucide-react";
+import { Calendar, Clock, TrendingUp, Users, CheckCircle, DollarSign, Briefcase, Activity, TimerReset, XCircle, UserMinus, UserPlus, ChevronLeft, ChevronRight, FileSignature } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { format } from "date-fns";
