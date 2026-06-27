@@ -393,11 +393,22 @@ export default function FinancialReports() {
     queryFn: () => fetch("/api/interviews?all=true", { credentials: "include" }).then(r => r.ok ? r.json() : []),
     staleTime: 5 * 60 * 1000,
   });
-  const { data: apptTargets = [] } = useQuery<any[]>({
-    queryKey: ["/api/interview-targets", vy, vm + 1],
-    queryFn: () => fetch(`/api/interview-targets?year=${vy}&month=${vm + 1}`, { credentials: "include" }).then(r => r.ok ? r.json() : []),
+  // Interview targets are stored per office; fetch both and combine per the active office filter.
+  const { data: apptTargetsAk = [] } = useQuery<any[]>({
+    queryKey: ["/api/interview-targets", vy, vm + 1, "Akatlar"],
+    queryFn: () => fetch(`/api/interview-targets?year=${vy}&month=${vm + 1}&office=Akatlar`, { credentials: "include" }).then(r => r.ok ? r.json() : []),
     staleTime: 5 * 60 * 1000,
   });
+  const { data: apptTargetsZk = [] } = useQuery<any[]>({
+    queryKey: ["/api/interview-targets", vy, vm + 1, "Zekeriyaköy"],
+    queryFn: () => fetch(`/api/interview-targets?year=${vy}&month=${vm + 1}&office=${encodeURIComponent("Zekeriyaköy")}`, { credentials: "include" }).then(r => r.ok ? r.json() : []),
+    staleTime: 5 * 60 * 1000,
+  });
+  const apptTargets = useMemo(
+    () => !officeFilter ? [...apptTargetsAk, ...apptTargetsZk]
+        : officeFilter === "Akatlar" ? apptTargetsAk : apptTargetsZk,
+    [officeFilter, apptTargetsAk, apptTargetsZk]
+  );
 
   const APPT_CATS = ["K0", "K1", "K2"] as const;
 

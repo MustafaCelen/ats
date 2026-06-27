@@ -68,9 +68,17 @@ const CAT_COLORS: Record<string, { badge: string; text: string; bg: string }> = 
 };
 
 // ── Inline editable target cell ───────────────────────────────────────────────
-function TargetCell({ value, onSave }: { value: number; onSave: (v: number) => void }) {
+function TargetCell({ value, onSave, readOnly = false }: { value: number; onSave: (v: number) => void; readOnly?: boolean }) {
   const [editing, setEditing] = useState(false);
   const [local, setLocal] = useState(String(value));
+
+  if (readOnly) {
+    return (
+      <span className="text-xs text-muted-foreground min-w-[24px] text-center" title="Düzenlemek için bir ofis seçin">
+        {value > 0 ? value : <span className="opacity-40">—</span>}
+      </span>
+    );
+  }
 
   const commit = () => {
     setEditing(false);
@@ -142,8 +150,10 @@ export default function Dashboard() {
   const viewMonth = viewDate.getMonth(); // 0-based
   const apiMonth = viewMonth + 1; // 1-based for API
 
-  const officeParam = officeFilter === "all" ? "" : officeFilter;
-  const { data: targets = [] } = useTargets(viewYear, apiMonth, officeParam);
+  // Targets are stored per office. "Tümü" shows the combined (Akatlar + Zekeriyaköy) sum.
+  const isAllOffices = officeFilter === "all";
+  const { data: targetsAkatlar = [] } = useTargets(viewYear, apiMonth, "Akatlar");
+  const { data: targetsZekeriyakoy = [] } = useTargets(viewYear, apiMonth, "Zekeriyaköy");
   const saveTarget = useSaveTarget();
 
   const prevMonth = () => setViewDate(new Date(viewYear, viewMonth - 1, 1));
@@ -166,19 +176,25 @@ export default function Dashboard() {
     return map;
   }, [filteredInterviews, viewYear, viewMonth]);
 
-  // Build: jobId → category → target
+  // Build: jobId → category → target. For "Tümü" sum both offices; otherwise the selected office.
   const targetsByJob = useMemo(() => {
     const map: Record<number, Record<string, number>> = {};
-    for (const t of targets) {
-      if (!map[t.jobId]) map[t.jobId] = { K0: 0, K1: 0, K2: 0 };
-      map[t.jobId][t.category] = t.target;
-    }
+    const add = (arr: any[]) => {
+      for (const t of arr) {
+        if (!map[t.jobId]) map[t.jobId] = { K0: 0, K1: 0, K2: 0 };
+        map[t.jobId][t.category] = (map[t.jobId][t.category] ?? 0) + t.target;
+      }
+    };
+    if (isAllOffices) { add(targetsAkatlar); add(targetsZekeriyakoy); }
+    else if (officeFilter === "Akatlar") add(targetsAkatlar);
+    else add(targetsZekeriyakoy);
     return map;
-  }, [targets]);
+  }, [isAllOffices, officeFilter, targetsAkatlar, targetsZekeriyakoy]);
 
   const handleSaveTarget = useCallback((jobId: number, category: string, target: number) => {
-    saveTarget.mutate({ jobId, year: viewYear, month: apiMonth, category, office: officeParam, target });
-  }, [saveTarget, viewYear, apiMonth, officeParam]);
+    if (isAllOffices) return; // editing disabled in the combined view
+    saveTarget.mutate({ jobId, year: viewYear, month: apiMonth, category, office: officeFilter, target });
+  }, [saveTarget, viewYear, apiMonth, officeFilter, isAllOffices]);
 
   // Daily matrix per job (completed only)
   const dailyMatrixByJob = useMemo(() => {
@@ -316,7 +332,9 @@ export default function Dashboard() {
             <div className="flex items-center gap-2 px-5 py-3 border-b border-border">
               <Target className="h-4 w-4 text-muted-foreground" />
               <h2 className="text-sm font-semibold text-foreground">Hedefler</h2>
-              <span className="text-xs text-muted-foreground ml-1">(hedef rakamına tıklayarak düzenleyin)</span>
+              <span className="text-xs text-muted-foreground ml-1">
+                {isAllOffices ? "(Tümü = Akatlar + Zekeriyaköy toplamı — düzenlemek için ofis seçin)" : "(hedef rakamına tıklayarak düzenleyin)"}
+              </span>
             </div>
 
             {isLoading ? (
@@ -361,6 +379,7 @@ export default function Dashboard() {
                                   <TargetCell
                                     value={tgts[cat]}
                                     onSave={(v) => handleSaveTarget(job.id, cat, v)}
+                                    readOnly={isAllOffices}
                                   />
                                 </div>
                               </div>

@@ -186,6 +186,26 @@ app.use((req, res, next) => {
       );
   `);
 
+  // One-time migration: interview targets moved from a global ("") bucket to per-office.
+  // Move legacy global targets to "Akatlar" (main office), skipping rows that would collide
+  // with an existing Akatlar target, then drop leftover global rows. Idempotent: after the
+  // first run there are no office='' rows, so subsequent boots are no-ops.
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'interview_targets') THEN
+        UPDATE interview_targets g SET office = 'Akatlar'
+        WHERE g.office = ''
+          AND NOT EXISTS (
+            SELECT 1 FROM interview_targets a
+            WHERE a.office = 'Akatlar' AND a.job_id = g.job_id AND a.year = g.year
+              AND a.month = g.month AND a.category = g.category
+          );
+        DELETE FROM interview_targets WHERE office = '';
+      END IF;
+    END $$;
+  `);
+
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
