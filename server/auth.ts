@@ -5,6 +5,8 @@ import type { PublicUser } from "@shared/schema";
 declare module "express-session" {
   interface SessionData {
     userId: number;
+    /** Employee ids the visitor has authenticated for via Google on the advisor self-service link. */
+    advisorEmployeeIds?: number[];
   }
 }
 

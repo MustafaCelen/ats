@@ -562,12 +562,72 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     } catch { res.status(500).json({ message: "Internal server error" }); }
   });
 
-  // ── Public advisor batch self-service (token, no auth) ──────────────────────
+  // ── Public advisor batch self-service (token + Google login) ────────────────
 
-  app.get("/api/public/advisor/:token", async (req, res) => {
+  // Resolve the emails allowed to log in for this advisor (KW mail + personal email).
+  const advisorEmails = (emp: any): string[] => {
+    return [emp?.kwMail, emp?.candidate?.email]
+      .map((m) => (m ?? "").trim().toLowerCase())
+      .filter((m) => m.length > 0);
+  };
+
+  // Gate: fetch employee by token AND require the visitor's Google session to be
+  // authorized for that employee. Sends the proper response and returns null if not.
+  const authedAdvisor = async (req: any, res: any) => {
+    const emp = await storage.getAdvisorByToken(req.params.token);
+    if (!emp) { res.status(404).json({ message: "Bağlantı geçersiz" }); return null; }
+    const ids: number[] = req.session?.advisorEmployeeIds ?? [];
+    if (!ids.includes(emp.id)) {
+      res.status(401).json({ message: "Giriş gerekli", needAuth: true });
+      return null;
+    }
+    return emp;
+  };
+
+  // Auth status — drives the login screen. No session required.
+  app.get("/api/public/advisor/:token/auth-status", async (req, res) => {
     try {
       const emp = await storage.getAdvisorByToken(req.params.token);
       if (!emp) return res.status(404).json({ message: "Bağlantı geçersiz" });
+      const name = (emp as any).candidate?.name ?? "Danışman";
+      // Advisors without any registered email can never log in.
+      if (advisorEmails(emp).length === 0) {
+        return res.json({ name, blocked: true, authenticated: false });
+      }
+      const ids: number[] = (req.session as any)?.advisorEmployeeIds ?? [];
+      return res.json({ name, blocked: false, authenticated: ids.includes(emp.id) });
+    } catch { res.status(500).json({ message: "Internal server error" }); }
+  });
+
+  // Returns the Google login URL (state carries the advisor token).
+  app.get("/api/public/advisor/:token/google-login", async (req, res) => {
+    try {
+      const emp = await storage.getAdvisorByToken(req.params.token);
+      if (!emp) return res.status(404).json({ message: "Bağlantı geçersiz" });
+      if (advisorEmails(emp).length === 0) return res.status(403).json({ message: "Bu bağlantı için yetki tanımlı değil" });
+      const url = getAuthUrl(`advisor:${req.params.token}`);
+      return res.json({ url });
+    } catch (err) {
+      console.error("[advisor google-login]", err);
+      return res.status(500).json({ message: "Google girişi yapılandırılmamış" });
+    }
+  });
+
+  // Log out of the advisor session for this token.
+  app.post("/api/public/advisor/:token/logout", async (req, res) => {
+    try {
+      const emp = await storage.getAdvisorByToken(req.params.token);
+      if (emp && req.session) {
+        req.session.advisorEmployeeIds = (req.session.advisorEmployeeIds ?? []).filter((id) => id !== emp.id);
+      }
+      res.json({ ok: true });
+    } catch { res.status(500).json({ message: "Internal server error" }); }
+  });
+
+  app.get("/api/public/advisor/:token", async (req, res) => {
+    try {
+      const emp = await authedAdvisor(req, res);
+      if (!emp) return;
       const pending = await storage.getAdvisorPendingListings(emp.id);
       res.json({
         name: (emp as any).candidate?.name ?? "Danışman",
@@ -589,8 +649,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // Advisor self-service summary: cap progress, commission history, pending payments, listing stats
   app.get("/api/public/advisor/:token/summary", async (req, res) => {
     try {
-      const emp = await storage.getAdvisorByToken(req.params.token);
-      if (!emp) return res.status(404).json({ message: "Bağlantı geçersiz" });
+      const emp = await authedAdvisor(req, res);
+      if (!emp) return;
 
       const [cap, closings, listingStats] = await Promise.all([
         storage.getEmployeeCapStatus(emp.id),
@@ -623,12 +683,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           dealCategory: c.dealCategory,
           dealType: c.dealType,
           saleValue: c.saleValue,
+          bhbShare: c.bhbShare,
           employeeNet: c.employeeNet,
           closingDate: c.closingDate,
           paymentCollected: c.paymentCollected,
         })),
         totals: {
           closingCount: completed.length,
+          bhbTotal: completed.reduce((s, c) => s + (Number(c.bhbShare) || 0), 0),
           netTotal: sumNet(completed),
           pendingCount: pendingPayments.length,
           pendingTotal: sumNet(pendingPayments),
@@ -639,8 +701,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/public/advisor/:token/listings/:listingId/agreement", async (req, res) => {
     try {
-      const emp = await storage.getAdvisorByToken(req.params.token);
-      if (!emp) return res.status(404).json({ message: "Bağlantı geçersiz" });
+      const emp = await authedAdvisor(req, res);
+      if (!emp) return;
       const listing = await storage.getListing(Number(req.params.listingId));
       if (!listing || listing.employeeId !== emp.id) return res.status(404).json({ message: "İlan bulunamadı" });
       const body = req.body as { files?: { fileName?: string; mime?: string; data?: string }[]; fileName?: string; mime?: string; data?: string };
@@ -661,8 +723,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.get("/api/public/advisor/:token/listings/:listingId/files", async (req, res) => {
     try {
-      const emp = await storage.getAdvisorByToken(req.params.token);
-      if (!emp) return res.status(404).json({ message: "Bağlantı geçersiz" });
+      const emp = await authedAdvisor(req, res);
+      if (!emp) return;
       const listing = await storage.getListing(Number(req.params.listingId));
       if (!listing || listing.employeeId !== emp.id) return res.status(404).json({ message: "İlan bulunamadı" });
       const files = await storage.getListingAgreementFileMetas(listing.id);
@@ -672,8 +734,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.delete("/api/public/advisor/:token/listings/:listingId/files/:fileId", async (req, res) => {
     try {
-      const emp = await storage.getAdvisorByToken(req.params.token);
-      if (!emp) return res.status(404).json({ message: "Bağlantı geçersiz" });
+      const emp = await authedAdvisor(req, res);
+      if (!emp) return;
       const listing = await storage.getListing(Number(req.params.listingId));
       if (!listing || listing.employeeId !== emp.id) return res.status(404).json({ message: "İlan bulunamadı" });
       await storage.deleteListingAgreementFile(Number(req.params.fileId), listing.id);
@@ -683,8 +745,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/public/advisor/:token/listings/:listingId/to-passive", async (req, res) => {
     try {
-      const emp = await storage.getAdvisorByToken(req.params.token);
-      if (!emp) return res.status(404).json({ message: "Bağlantı geçersiz" });
+      const emp = await authedAdvisor(req, res);
+      if (!emp) return;
       const ok = await storage.setListingToPassive(Number(req.params.listingId), emp.id);
       if (!ok) return res.status(404).json({ message: "İlan bulunamadı veya zaten pasif" });
       res.json({ ok: true });
@@ -693,8 +755,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/public/advisor/:token/listings/:listingId/no-agreement", async (req, res) => {
     try {
-      const emp = await storage.getAdvisorByToken(req.params.token);
-      if (!emp) return res.status(404).json({ message: "Bağlantı geçersiz" });
+      const emp = await authedAdvisor(req, res);
+      if (!emp) return;
       const row = await storage.toggleListingNoAgreement(Number(req.params.listingId), emp.id);
       if (!row) return res.status(404).json({ message: "İlan bulunamadı" });
       res.json({ ok: true, noAgreementAt: (row as any).noAgreementAt });
@@ -703,8 +765,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/public/advisor/:token/listings/:listingId/hand-delivered", async (req, res) => {
     try {
-      const emp = await storage.getAdvisorByToken(req.params.token);
-      if (!emp) return res.status(404).json({ message: "Bağlantı geçersiz" });
+      const emp = await authedAdvisor(req, res);
+      if (!emp) return;
       const ok = await storage.setListingHandDelivered(Number(req.params.listingId), emp.id);
       if (!ok) return res.status(404).json({ message: "İlan bulunamadı" });
       res.json({ ok: true });
@@ -713,8 +775,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/public/advisor/:token/listings/:listingId/reason", async (req, res) => {
     try {
-      const emp = await storage.getAdvisorByToken(req.params.token);
-      if (!emp) return res.status(404).json({ message: "Bağlantı geçersiz" });
+      const emp = await authedAdvisor(req, res);
+      if (!emp) return;
       const listing = await storage.getListing(Number(req.params.listingId));
       if (!listing || listing.employeeId !== emp.id) return res.status(404).json({ message: "İlan bulunamadı" });
       const { reason, note } = req.body as { reason?: string; note?: string };
@@ -883,6 +945,23 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const { data: profile } = await oauth2.userinfo.get();
 
       if (!profile.id || !profile.email) return htmlRedirect("/?error=no_profile");
+
+      // Advisor self-service login: match the Google email against the employee's KW mail.
+      if (state?.startsWith("advisor:")) {
+        const token = state.slice("advisor:".length);
+        const emp = await storage.getAdvisorByToken(token);
+        if (!emp) return htmlRedirect(`/a/${token}?error=not_authorized`);
+        const allowed = [(emp as any).kwMail, (emp as any).candidate?.email]
+          .map((m) => (m ?? "").trim().toLowerCase())
+          .filter((m) => m.length > 0);
+        if (allowed.length === 0) return htmlRedirect(`/a/${token}?error=not_authorized`);
+        if (!allowed.includes(profile.email.toLowerCase())) return htmlRedirect(`/a/${token}?error=email_mismatch`);
+        const ids = new Set(req.session.advisorEmployeeIds ?? []);
+        ids.add(emp.id);
+        req.session.advisorEmployeeIds = Array.from(ids);
+        await new Promise<void>((resolve, reject) => req.session.save((err) => err ? reject(err) : resolve()));
+        return htmlRedirect(`/a/${token}`);
+      }
 
       if (state === "link" && req.session?.userId) {
         await storage.updateUserGoogleTokens(req.session.userId, {

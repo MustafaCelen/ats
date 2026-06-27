@@ -471,12 +471,14 @@ interface AdvisorSummary {
     dealCategory: string;
     dealType: string;
     saleValue: string;
+    bhbShare: string;
     employeeNet: string;
     closingDate: string | null;
     paymentCollected: boolean;
   }[];
   totals: {
     closingCount: number;
+    bhbTotal: number;
     netTotal: number;
     pendingCount: number;
     pendingTotal: number;
@@ -585,6 +587,7 @@ function SummaryView({ token }: { token: string }) {
         </div>
         <div className="grid grid-cols-2 gap-2">
           <StatBox icon={Trophy} label="Tamamlanan İşlem" value={data.totals.closingCount} />
+          <StatBox icon={Wallet} label="Toplam BHB" value={fmtTRY(data.totals.bhbTotal)} />
           <StatBox icon={Wallet} label="Toplam Net" value={fmtTRY(data.totals.netTotal)} tone="emerald" />
           <StatBox icon={Clock3} label="Bekleyen Ödeme" value={data.totals.pendingCount} tone={data.totals.pendingCount > 0 ? "red" : "default"} />
           <StatBox icon={Wallet} label="Bekleyen Tutar" value={fmtTRY(data.totals.pendingTotal)} tone={data.totals.pendingTotal > 0 ? "red" : "default"} />
@@ -610,6 +613,7 @@ function SummaryView({ token }: { token: string }) {
                   </p>
                 </div>
                 <div className="text-right shrink-0">
+                  <p className="text-[11px] text-muted-foreground">BHB {fmtTRY(Number(c.bhbShare))}</p>
                   <p className="text-sm font-bold text-emerald-700">{fmtTRY(Number(c.employeeNet))}</p>
                   {c.paymentCollected
                     ? <span className="text-[10px] font-medium text-emerald-600">Ödendi</span>
@@ -624,8 +628,7 @@ function SummaryView({ token }: { token: string }) {
   );
 }
 
-export default function AdvisorSelfService() {
-  const { token } = useParams<{ token: string }>();
+function AdvisorApp({ token }: { token: string }) {
   const [data, setData] = useState<AdvisorData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -735,4 +738,107 @@ export default function AdvisorSelfService() {
       )}
     </Shell>
   );
+}
+
+function GoogleIcon() {
+  return (
+    <svg className="h-4 w-4" viewBox="0 0 24 24" aria-hidden>
+      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.27-4.74 3.27-8.1Z" />
+      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A11 11 0 0 0 12 23Z" />
+      <path fill="#FBBC05" d="M5.84 14.1a6.6 6.6 0 0 1 0-4.2V7.06H2.18a11 11 0 0 0 0 9.88l3.66-2.84Z" />
+      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1A11 11 0 0 0 2.18 7.06l3.66 2.84C6.71 7.31 9.14 5.38 12 5.38Z" />
+    </svg>
+  );
+}
+
+export default function AdvisorSelfService() {
+  const { token } = useParams<{ token: string }>();
+  const [authState, setAuthState] = useState<"checking" | "need-login" | "blocked" | "authed">("checking");
+  const [loginErr, setLoginErr] = useState<string | null>(null);
+  const [redirecting, setRedirecting] = useState(false);
+
+  useEffect(() => {
+    const e = new URLSearchParams(window.location.search).get("error");
+    if (e === "email_mismatch") setLoginErr("Bu bağlantı size ait değil. Lütfen kayıtlı KW Google hesabınızla giriş yapın.");
+    else if (e === "not_authorized") setLoginErr("Bu bağlantı için yetkiniz bulunmuyor. Lütfen ofisle iletişime geçin.");
+  }, []);
+
+  useEffect(() => {
+    fetch(`/api/public/advisor/${token}/auth-status`)
+      .then((r) => r.ok ? r.json() : Promise.reject(r))
+      .then((d) => {
+        if (d.blocked) setAuthState("blocked");
+        else if (d.authenticated) setAuthState("authed");
+        else setAuthState("need-login");
+      })
+      .catch(() => setAuthState("blocked"));
+  }, [token]);
+
+  const startGoogleLogin = async () => {
+    setRedirecting(true);
+    try {
+      const res = await fetch(`/api/public/advisor/${token}/google-login`);
+      const d = await res.json();
+      if (d.url) { window.location.href = d.url; return; }
+      setLoginErr(d.message || "Google girişi başlatılamadı.");
+    } catch {
+      setLoginErr("Google girişi başlatılamadı.");
+    }
+    setRedirecting(false);
+  };
+
+  if (authState === "checking") {
+    return (
+      <Shell>
+        <Card className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-primary" /></Card>
+      </Shell>
+    );
+  }
+
+  if (authState === "blocked") {
+    return (
+      <Shell>
+        <Card>
+          <div className="text-center py-6">
+            <AlertCircle className="h-9 w-9 text-destructive mx-auto mb-3" />
+            <h2 className="font-semibold text-lg">Erişim Yok</h2>
+            <p className="text-sm text-muted-foreground mt-1">
+              Bu bağlantı geçersiz ya da hesabınız için giriş yetkisi tanımlı değil.
+              Lütfen ofisle iletişime geçin.
+            </p>
+          </div>
+        </Card>
+      </Shell>
+    );
+  }
+
+  if (authState === "need-login") {
+    return (
+      <Shell>
+        <Card>
+          <div className="text-center py-4">
+            <Building2 className="h-9 w-9 text-primary mx-auto mb-3" />
+            <h2 className="font-semibold text-lg">Danışman Girişi</h2>
+            <p className="text-sm text-muted-foreground mt-1 mb-4">
+              Devam etmek için <b>KW Google hesabınızla</b> giriş yapın.
+              Yalnızca size tanımlı hesap erişebilir.
+            </p>
+            {loginErr && (
+              <div className="mb-3 rounded-lg bg-red-50 border border-red-200 p-3 text-xs text-red-700">{loginErr}</div>
+            )}
+            <button
+              onClick={startGoogleLogin}
+              disabled={redirecting}
+              className="w-full h-11 rounded-xl border border-border bg-white hover:bg-muted/50 font-medium text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              {redirecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <GoogleIcon />}
+              Google ile giriş yap
+            </button>
+          </div>
+        </Card>
+      </Shell>
+    );
+  }
+
+  return <AdvisorApp token={token} />;
 }
