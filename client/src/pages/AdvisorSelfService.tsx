@@ -503,22 +503,72 @@ function StatBox({ icon: Icon, label, value, tone = "default" }: {
 
 function SummaryView({ token }: { token: string }) {
   const [data, setData] = useState<AdvisorSummary | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
+  const [state, setState] = useState<"loading" | "need-login" | "error" | "ready">("loading");
+  const [loginErr, setLoginErr] = useState<string | null>(null);
+  const [redirecting, setRedirecting] = useState(false);
 
   useEffect(() => {
-    setLoading(true);
-    fetch(`/api/public/advisor/${token}/summary`)
-      .then((r) => r.ok ? r.json() : Promise.reject(r))
-      .then((d) => { setData(d); setError(false); })
-      .catch(() => setError(true))
-      .finally(() => setLoading(false));
+    const e = new URLSearchParams(window.location.search).get("error");
+    if (e === "email_mismatch") setLoginErr("Bu bağlantı size ait değil. Lütfen kayıtlı KW hesabınızla giriş yapın.");
+    else if (e === "not_authorized") setLoginErr("Bu bölüm için yetkiniz bulunmuyor. Lütfen ofisle iletişime geçin.");
+  }, []);
+
+  useEffect(() => {
+    setState("loading");
+    fetch(`/api/public/advisor/${token}/summary`, { credentials: "include" })
+      .then((r) => {
+        if (r.status === 401) { setState("need-login"); return null; }
+        if (!r.ok) { setState("error"); return null; }
+        return r.json();
+      })
+      .then((d) => { if (d) { setData(d); setState("ready"); } })
+      .catch(() => setState("error"));
   }, [token]);
 
-  if (loading) {
+  const startGoogleLogin = async () => {
+    setRedirecting(true);
+    try {
+      const res = await fetch(`/api/public/advisor/${token}/google-login`, { credentials: "include" });
+      const d = await res.json();
+      if (d.url) { window.location.href = d.url; return; }
+      setLoginErr(d.message || "Google girişi başlatılamadı.");
+    } catch {
+      setLoginErr("Google girişi başlatılamadı.");
+    }
+    setRedirecting(false);
+  };
+
+  if (state === "loading") {
     return <Card className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-primary" /></Card>;
   }
-  if (error || !data) {
+
+  if (state === "need-login") {
+    return (
+      <Card>
+        <div className="text-center py-4">
+          <Trophy className="h-9 w-9 text-amber-500 mx-auto mb-3" />
+          <h2 className="font-semibold text-lg">İşlem Verileriniz</h2>
+          <p className="text-sm text-muted-foreground mt-1 mb-4">
+            Cap durumu, işlem ve BHB bilgilerinizi görmek için <b>KW Google hesabınızla</b> giriş yapın.
+            Bu bölüm yalnızca size özeldir.
+          </p>
+          {loginErr && (
+            <div className="mb-3 rounded-lg bg-red-50 border border-red-200 p-3 text-xs text-red-700">{loginErr}</div>
+          )}
+          <button
+            onClick={startGoogleLogin}
+            disabled={redirecting}
+            className="w-full h-11 rounded-xl border border-border bg-white hover:bg-muted/50 font-medium text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+          >
+            {redirecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <GoogleIcon />}
+            Google ile giriş yap
+          </button>
+        </div>
+      </Card>
+    );
+  }
+
+  if (state === "error" || !data) {
     return <Card><div className="text-center py-6"><AlertCircle className="h-8 w-8 text-destructive mx-auto mb-2" /><p className="text-sm text-muted-foreground">Veriler yüklenemedi.</p></div></Card>;
   }
 
@@ -619,11 +669,11 @@ function SummaryView({ token }: { token: string }) {
   );
 }
 
-function AdvisorApp({ token }: { token: string }) {
+function AdvisorApp({ token, initialTab = "listings" }: { token: string; initialTab?: "listings" | "summary" }) {
   const [data, setData] = useState<AdvisorData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<"listings" | "summary">("listings");
+  const [tab, setTab] = useState<"listings" | "summary">(initialTab);
 
   const loadData = useCallback(() => {
     setLoading(true);
@@ -744,92 +794,8 @@ function GoogleIcon() {
 
 export default function AdvisorSelfService() {
   const { token } = useParams<{ token: string }>();
-  const [authState, setAuthState] = useState<"checking" | "need-login" | "blocked" | "authed">("checking");
-  const [loginErr, setLoginErr] = useState<string | null>(null);
-  const [redirecting, setRedirecting] = useState(false);
-
-  useEffect(() => {
-    const e = new URLSearchParams(window.location.search).get("error");
-    if (e === "email_mismatch") setLoginErr("Bu bağlantı size ait değil. Lütfen kayıtlı KW Google hesabınızla giriş yapın.");
-    else if (e === "not_authorized") setLoginErr("Bu bağlantı için yetkiniz bulunmuyor. Lütfen ofisle iletişime geçin.");
-  }, []);
-
-  useEffect(() => {
-    fetch(`/api/public/advisor/${token}/auth-status`)
-      .then((r) => r.ok ? r.json() : Promise.reject(r))
-      .then((d) => {
-        if (d.blocked) setAuthState("blocked");
-        else if (d.authenticated) setAuthState("authed");
-        else setAuthState("need-login");
-      })
-      .catch(() => setAuthState("blocked"));
-  }, [token]);
-
-  const startGoogleLogin = async () => {
-    setRedirecting(true);
-    try {
-      const res = await fetch(`/api/public/advisor/${token}/google-login`);
-      const d = await res.json();
-      if (d.url) { window.location.href = d.url; return; }
-      setLoginErr(d.message || "Google girişi başlatılamadı.");
-    } catch {
-      setLoginErr("Google girişi başlatılamadı.");
-    }
-    setRedirecting(false);
-  };
-
-  if (authState === "checking") {
-    return (
-      <Shell>
-        <Card className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-primary" /></Card>
-      </Shell>
-    );
-  }
-
-  if (authState === "blocked") {
-    return (
-      <Shell>
-        <Card>
-          <div className="text-center py-6">
-            <AlertCircle className="h-9 w-9 text-destructive mx-auto mb-3" />
-            <h2 className="font-semibold text-lg">Erişim Yok</h2>
-            <p className="text-sm text-muted-foreground mt-1">
-              Bu bağlantı geçersiz ya da hesabınız için giriş yetkisi tanımlı değil.
-              Lütfen ofisle iletişime geçin.
-            </p>
-          </div>
-        </Card>
-      </Shell>
-    );
-  }
-
-  if (authState === "need-login") {
-    return (
-      <Shell>
-        <Card>
-          <div className="text-center py-4">
-            <Building2 className="h-9 w-9 text-primary mx-auto mb-3" />
-            <h2 className="font-semibold text-lg">Danışman Girişi</h2>
-            <p className="text-sm text-muted-foreground mt-1 mb-4">
-              Devam etmek için <b>KW Google hesabınızla</b> giriş yapın.
-              Yalnızca size tanımlı hesap erişebilir.
-            </p>
-            {loginErr && (
-              <div className="mb-3 rounded-lg bg-red-50 border border-red-200 p-3 text-xs text-red-700">{loginErr}</div>
-            )}
-            <button
-              onClick={startGoogleLogin}
-              disabled={redirecting}
-              className="w-full h-11 rounded-xl border border-border bg-white hover:bg-muted/50 font-medium text-sm flex items-center justify-center gap-2 disabled:opacity-50"
-            >
-              {redirecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <GoogleIcon />}
-              Google ile giriş yap
-            </button>
-          </div>
-        </Card>
-      </Shell>
-    );
-  }
-
-  return <AdvisorApp token={token} />;
+  // Listings are token-only; financial data (Durumum) is Google-gated inside SummaryView.
+  // If we returned here from a failed Google login, open the Durumum tab to show the error.
+  const hasAuthError = new URLSearchParams(window.location.search).has("error");
+  return <AdvisorApp token={token} initialTab={hasAuthError ? "summary" : "listings"} />;
 }

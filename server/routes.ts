@@ -571,8 +571,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       .filter((m) => m.length > 0);
   };
 
+  // Token-only resolve (no Google auth): used for the operational listing endpoints
+  // (yetki sözleşmesi / kapanış sebebi) so advisors can act straight from the link.
+  const advisorByTokenOr404 = async (req: any, res: any) => {
+    const emp = await storage.getAdvisorByToken(req.params.token);
+    if (!emp) { res.status(404).json({ message: "Bağlantı geçersiz" }); return null; }
+    return emp;
+  };
+
   // Gate: fetch employee by token AND require the visitor's Google session to be
-  // authorized for that employee. Sends the proper response and returns null if not.
+  // authorized for that employee. Used for sensitive financial data (Durumum / summary).
   const authedAdvisor = async (req: any, res: any) => {
     const emp = await storage.getAdvisorByToken(req.params.token);
     if (!emp) { res.status(404).json({ message: "Bağlantı geçersiz" }); return null; }
@@ -626,7 +634,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.get("/api/public/advisor/:token", async (req, res) => {
     try {
-      const emp = await authedAdvisor(req, res);
+      const emp = await advisorByTokenOr404(req, res);
       if (!emp) return;
       const pending = await storage.getAdvisorPendingListings(emp.id);
       res.json({
@@ -693,7 +701,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/public/advisor/:token/listings/:listingId/agreement", async (req, res) => {
     try {
-      const emp = await authedAdvisor(req, res);
+      const emp = await advisorByTokenOr404(req, res);
       if (!emp) return;
       const listing = await storage.getListing(Number(req.params.listingId));
       if (!listing || listing.employeeId !== emp.id) return res.status(404).json({ message: "İlan bulunamadı" });
@@ -715,7 +723,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.get("/api/public/advisor/:token/listings/:listingId/files", async (req, res) => {
     try {
-      const emp = await authedAdvisor(req, res);
+      const emp = await advisorByTokenOr404(req, res);
       if (!emp) return;
       const listing = await storage.getListing(Number(req.params.listingId));
       if (!listing || listing.employeeId !== emp.id) return res.status(404).json({ message: "İlan bulunamadı" });
@@ -726,7 +734,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.delete("/api/public/advisor/:token/listings/:listingId/files/:fileId", async (req, res) => {
     try {
-      const emp = await authedAdvisor(req, res);
+      const emp = await advisorByTokenOr404(req, res);
       if (!emp) return;
       const listing = await storage.getListing(Number(req.params.listingId));
       if (!listing || listing.employeeId !== emp.id) return res.status(404).json({ message: "İlan bulunamadı" });
@@ -737,7 +745,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/public/advisor/:token/listings/:listingId/to-passive", async (req, res) => {
     try {
-      const emp = await authedAdvisor(req, res);
+      const emp = await advisorByTokenOr404(req, res);
       if (!emp) return;
       const ok = await storage.setListingToPassive(Number(req.params.listingId), emp.id);
       if (!ok) return res.status(404).json({ message: "İlan bulunamadı veya zaten pasif" });
@@ -747,7 +755,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/public/advisor/:token/listings/:listingId/no-agreement", async (req, res) => {
     try {
-      const emp = await authedAdvisor(req, res);
+      const emp = await advisorByTokenOr404(req, res);
       if (!emp) return;
       const row = await storage.toggleListingNoAgreement(Number(req.params.listingId), emp.id);
       if (!row) return res.status(404).json({ message: "İlan bulunamadı" });
@@ -757,7 +765,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/public/advisor/:token/listings/:listingId/hand-delivered", async (req, res) => {
     try {
-      const emp = await authedAdvisor(req, res);
+      const emp = await advisorByTokenOr404(req, res);
       if (!emp) return;
       const ok = await storage.setListingHandDelivered(Number(req.params.listingId), emp.id);
       if (!ok) return res.status(404).json({ message: "İlan bulunamadı" });
@@ -767,7 +775,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/public/advisor/:token/listings/:listingId/reason", async (req, res) => {
     try {
-      const emp = await authedAdvisor(req, res);
+      const emp = await advisorByTokenOr404(req, res);
       if (!emp) return;
       const listing = await storage.getListing(Number(req.params.listingId));
       if (!listing || listing.employeeId !== emp.id) return res.status(404).json({ message: "İlan bulunamadı" });
