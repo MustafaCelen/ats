@@ -646,6 +646,25 @@ export type ListingAgreementFile = typeof listingAgreementFiles.$inferSelect;
 export type Listing = typeof listings.$inferSelect;
 export type ListingWithEmployee = Listing & { employeeName?: string; employeePhone?: string };
 
+// ── Teams ─────────────────────────────────────────────────────────────────────
+export const teams = pgTable("teams", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull().unique(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const teamMembers = pgTable("team_members", {
+  id: serial("id").primaryKey(),
+  teamId: integer("team_id").notNull(),
+  employeeId: integer("employee_id").notNull(),
+}, (t) => ({
+  uniq: uniqueIndex("team_members_team_employee_idx").on(t.teamId, t.employeeId),
+}));
+
+export type Team = typeof teams.$inferSelect;
+export type TeamMember = typeof teamMembers.$inferSelect;
+export type TeamWithMembers = Team & { memberIds: number[] };
+
 // Insert schemas
 export const insertJobSchema = createInsertSchema(jobs).omit({ id: true, createdAt: true });
 export const insertCandidateSchema = createInsertSchema(candidates).omit({ id: true, createdAt: true, createdByUserId: true });

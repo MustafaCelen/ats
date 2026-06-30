@@ -171,6 +171,18 @@ app.use((req, res, next) => {
     );
     CREATE INDEX IF NOT EXISTS "laf_listing_id_idx" ON "listing_agreement_files" ("listing_id");
 
+    CREATE TABLE IF NOT EXISTS "teams" (
+      "id" serial PRIMARY KEY NOT NULL,
+      "name" text NOT NULL UNIQUE,
+      "created_at" timestamp DEFAULT now()
+    );
+    CREATE TABLE IF NOT EXISTS "team_members" (
+      "id" serial PRIMARY KEY NOT NULL,
+      "team_id" integer NOT NULL,
+      "employee_id" integer NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS "team_members_team_employee_idx" ON "team_members" ("team_id", "employee_id");
+
     -- Migrate old single-file agreement data into the new multi-file table
     INSERT INTO listing_agreement_files (listing_id, name, mime, data, uploaded_at)
     SELECT

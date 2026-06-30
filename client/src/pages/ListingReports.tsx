@@ -32,11 +32,26 @@ interface AdvisorReport {
   lastClosingDate: string | null;
 }
 
-type AdvisorSortKey = keyof Pick<AdvisorReport,
-  "employeeName" | "totalActive" | "totalPassive" | "agreementUploaded" |
+type AdvisorSortKey = "displayName" | "totalActive" | "totalPassive" | "agreementUploaded" |
   "agreementPending" | "noAgreementCount" | "closeReasonSubmitted" | "closeReasonPending" |
-  "closingCount" | "lastClosingDate"
->;
+  "closingCount" | "lastClosingDate";
+
+interface DisplayRow {
+  isTeam: boolean;
+  displayName: string;
+  memberCount?: number;
+  subName?: string | null;
+  hasEmployeeId?: boolean;
+  totalActive: number;
+  totalPassive: number;
+  agreementUploaded: number;
+  agreementPending: number;
+  noAgreementCount: number;
+  closeReasonSubmitted: number;
+  closeReasonPending: number;
+  closingCount: number;
+  lastClosingDate: string | null;
+}
 
 interface OfficeReport {
   office: string | null;
@@ -136,7 +151,7 @@ export default function ListingReports() {
   const [runningReminders, setRunningReminders] = useState(false);
   const [reminderResult, setReminderResult] = useState<{ agreementQueued: number; closeReasonQueued: number } | null>(null);
 
-  // ── Advisor table sort + pagination + search ──
+  // ── Advisor table sort + pagination + search + team filter ──
   const [sortKey, setSortKey] = useState<AdvisorSortKey>("totalActive");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [advisorPage, setAdvisorPage] = useState(0);
@@ -189,23 +204,78 @@ export default function ListingReports() {
     queryFn: () => fetch("/api/listings/reports/age-groups", { credentials: "include" }).then((r) => r.json()),
   });
 
+  const { data: teams = [] } = useQuery<{ id: number; name: string; memberIds: number[] }[]>({
+    queryKey: ["/api/teams"],
+    queryFn: () => fetch("/api/teams", { credentials: "include" }).then(r => r.json()),
+    staleTime: 60_000,
+  });
+
   // ── Derived data ──
 
-  const sortedAdvisors = useMemo(() => {
+  const employeeTeamMap = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const t of teams) {
+      for (const id of t.memberIds) map.set(id, t.name);
+    }
+    return map;
+  }, [teams]);
+
+  const sortedAdvisors = useMemo((): DisplayRow[] => {
+    const teamAggMap = new Map<string, DisplayRow>();
+    const individuals: DisplayRow[] = [];
+
+    for (const r of advisorData) {
+      const teamName = r.employeeId != null ? employeeTeamMap.get(r.employeeId) : undefined;
+      if (teamName) {
+        if (!teamAggMap.has(teamName)) {
+          teamAggMap.set(teamName, {
+            isTeam: true, displayName: teamName, memberCount: 0,
+            totalActive: 0, totalPassive: 0, agreementUploaded: 0, agreementPending: 0,
+            noAgreementCount: 0, closeReasonSubmitted: 0, closeReasonPending: 0,
+            closingCount: 0, lastClosingDate: null,
+          });
+        }
+        const agg = teamAggMap.get(teamName)!;
+        agg.memberCount = (agg.memberCount ?? 0) + 1;
+        agg.totalActive += r.totalActive;
+        agg.totalPassive += r.totalPassive;
+        agg.agreementUploaded += r.agreementUploaded;
+        agg.agreementPending += r.agreementPending;
+        agg.noAgreementCount += r.noAgreementCount;
+        agg.closeReasonSubmitted += r.closeReasonSubmitted;
+        agg.closeReasonPending += r.closeReasonPending;
+        agg.closingCount += r.closingCount;
+        if (r.lastClosingDate && (!agg.lastClosingDate || r.lastClosingDate > agg.lastClosingDate)) {
+          agg.lastClosingDate = r.lastClosingDate;
+        }
+      } else {
+        individuals.push({
+          isTeam: false,
+          displayName: r.employeeName ?? r.advisorName ?? "—",
+          subName: r.employeeName && r.advisorName && r.employeeName !== r.advisorName ? r.advisorName : null,
+          hasEmployeeId: r.employeeId != null,
+          totalActive: r.totalActive, totalPassive: r.totalPassive,
+          agreementUploaded: r.agreementUploaded, agreementPending: r.agreementPending,
+          noAgreementCount: r.noAgreementCount, closeReasonSubmitted: r.closeReasonSubmitted,
+          closeReasonPending: r.closeReasonPending, closingCount: r.closingCount,
+          lastClosingDate: r.lastClosingDate,
+        });
+      }
+    }
+
     const q = advisorSearch.toLowerCase().trim();
-    const filtered = q
-      ? advisorData.filter(r =>
-          (r.employeeName ?? r.advisorName ?? "").toLowerCase().includes(q)
-        )
-      : advisorData;
+    const allRows: DisplayRow[] = [...Array.from(teamAggMap.values()), ...individuals];
+    const filtered = q ? allRows.filter(r => r.displayName.toLowerCase().includes(q)) : allRows;
+
     return [...filtered].sort((a, b) => {
-      const av = a[sortKey], bv = b[sortKey];
+      const av = (a as any)[sortKey];
+      const bv = (b as any)[sortKey];
       if (av === null || av === undefined) return 1;
       if (bv === null || bv === undefined) return -1;
       const cmp = av < bv ? -1 : av > bv ? 1 : 0;
       return sortDir === "asc" ? cmp : -cmp;
     });
-  }, [advisorData, sortKey, sortDir, advisorSearch]);
+  }, [advisorData, sortKey, sortDir, advisorSearch, employeeTeamMap]);
 
   const advisorPageCount = Math.ceil(sortedAdvisors.length / PAGE_SIZE);
   const advisorPageRows = sortedAdvisors.slice(advisorPage * PAGE_SIZE, (advisorPage + 1) * PAGE_SIZE);
@@ -532,7 +602,7 @@ export default function ListingReports() {
           <div className="space-y-4">
 
             {/* Search */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <div className="relative w-64">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
                 <Input
@@ -553,8 +623,8 @@ export default function ListingReports() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border bg-muted/40 text-left text-xs text-muted-foreground">
-                    <th className="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort("employeeName")}>
-                      Danışman{sortKey === "employeeName" ? (sortDir === "desc" ? " ↓" : " ↑") : ""}
+                    <th className="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort("displayName")}>
+                      Danışman / Takım{sortKey === "displayName" ? (sortDir === "desc" ? " ↓" : " ↑") : ""}
                     </th>
                     <SortTh col="totalActive"          label="Aktif" />
                     <SortTh col="totalPassive"         label="Pasif" />
@@ -575,14 +645,19 @@ export default function ListingReports() {
                       {advisorSearch ? "Arama sonucu bulunamadı." : "Veri yok."}
                     </td></tr>
                   ) : advisorPageRows.map((r, i) => (
-                    <tr key={i} className="border-b border-border last:border-0 hover:bg-muted/30">
+                    <tr key={i} className={`border-b border-border last:border-0 hover:bg-muted/30 ${r.isTeam ? "bg-blue-50/30" : ""}`}>
                       <td className="px-3 py-2.5">
-                        <div className="font-medium text-sm">{r.employeeName ?? r.advisorName ?? "—"}</div>
-                        {r.employeeName && r.advisorName && r.employeeName !== r.advisorName && (
-                          <div className="text-[11px] text-muted-foreground">{r.advisorName}</div>
-                        )}
-                        {!r.employeeId && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">Eşleşmemiş</span>
+                        {r.isTeam ? (
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-sm">{r.displayName}</span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium">{r.memberCount} üye</span>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="font-medium text-sm">{r.displayName}</div>
+                            {r.subName && <div className="text-[11px] text-muted-foreground">{r.subName}</div>}
+                            {!r.hasEmployeeId && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">Eşleşmemiş</span>}
+                          </>
                         )}
                       </td>
                       <td className="px-3 py-2.5 text-right font-medium text-emerald-700">{r.totalActive}</td>

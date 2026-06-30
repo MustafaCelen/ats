@@ -4,6 +4,7 @@ import {
   users, jobAssignments, applicationDocuments, tasks, employees,
   capSettings, closings, closingSides, closingAgents, interviewTargets,
   officeExpenses, listings, financialTargets, listingAgreementFiles,
+  teams, teamMembers,
   APPLICATION_STAGES, BM_PREPAYMENT_CATEGORY,
   type Job, type InsertJob,
   type Candidate, type InsertCandidate,
@@ -22,6 +23,7 @@ import {
   type Listing, type ListingWithEmployee,
   type FinancialTarget,
   type ListingAgreementFile,
+  type Team, type TeamWithMembers,
 } from "@shared/schema";
 import { eq, desc, asc, count, sql, gte, lte, lt, and, or, isNull, isNotNull, inArray, notInArray } from "drizzle-orm";
 import { differenceInDays } from "date-fns";
@@ -2194,7 +2196,7 @@ export class DatabaseStorage implements IStorage {
             marketCenterActual = (data.disableCap || capAmount === null)
               ? marketCenterDue
               : Math.min(marketCenterDue, Math.max(0, capAmount - capUsedSoFar));
-            bmKdv = bhbShare * 0.004; // BHB × %2 × %20
+            bmKdv = marketCenterActual > 0 ? bhbShare * 0.004 : 0; // BHB × %2 × %20, yalnızca BM payı > 0 ise
             ukShare = 0;
             if (emp.uretkenlikKoclugu && emp.uretkenlikKocluguOran) {
               ukRateSnapshot = parseInt(emp.uretkenlikKocluguOran.replace(/[^0-9]/g, "")) || 5;
@@ -2344,7 +2346,7 @@ export class DatabaseStorage implements IStorage {
             marketCenterActual = capAmount === null
               ? marketCenterDue
               : Math.min(marketCenterDue, Math.max(0, capAmount - capUsedSoFar));
-            bmKdv = bhbShare * 0.004; // BHB × %2 × %20
+            bmKdv = marketCenterActual > 0 ? bhbShare * 0.004 : 0; // BHB × %2 × %20, yalnızca BM payı > 0 ise
             ukShare = 0;
             if (emp.uretkenlikKoclugu && emp.uretkenlikKocluguOran) {
               ukRateSnapshot = parseInt(emp.uretkenlikKocluguOran.replace(/[^0-9]/g, "")) || 5;
@@ -2395,25 +2397,27 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(interviewTargets).where(and(...conditions));
   }
 
-  async getClosingStats(startDate: Date, endDate: Date, office?: string, dealType?: string, dealCategory?: string) {
+  async getClosingStats(startDate: Date, endDate: Date, office?: string, dealType?: string, dealCategory?: string, employeeIds?: number[]) {
     const end = new Date(endDate);
     end.setHours(23, 59, 59, 999);
 
-    // ── Pre-compute office employee IDs (same pattern as getReportStats) ──
-    let officeEmpIds: number[] | null = null;
-    if (office) {
+    // ── Pre-compute employee IDs for filtering (team filter takes precedence over office) ──
+    let filterEmpIds: number[] | null = null;
+    if (employeeIds && employeeIds.length > 0) {
+      filterEmpIds = employeeIds;
+    } else if (office) {
       const rows = await db
         .select({ id: employees.id })
         .from(employees)
         .innerJoin(candidates, eq(employees.candidateId, candidates.id))
         .where(eq(candidates.office, office));
-      officeEmpIds = rows.map(r => r.id);
+      filterEmpIds = rows.map(r => r.id);
     }
-    const hasOfficeFilter = officeEmpIds !== null;
-    const hasOfficeData   = hasOfficeFilter && officeEmpIds!.length > 0;
+    const hasOfficeFilter = filterEmpIds !== null;
+    const hasOfficeData   = hasOfficeFilter && filterEmpIds!.length > 0;
 
     const completedAgentCond = hasOfficeFilter
-      ? (hasOfficeData ? inArray(closingAgents.employeeId, officeEmpIds!) : sql`1=0`)
+      ? (hasOfficeData ? inArray(closingAgents.employeeId, filterEmpIds!) : sql`1=0`)
       : undefined;
     const expectedAgentCond = completedAgentCond;
 
@@ -2550,7 +2554,7 @@ export class DatabaseStorage implements IStorage {
       if (r.employeeNet) a.net += parseFloat(r.employeeNet);
     }
     const byAgent = Array.from(agentMap.entries())
-      .map(([id, v]) => ({ name: empMap.get(id)?.name ?? `#${id}`, kwuid: empMap.get(id)?.kwuid ?? "", bhb: v.bhb, bm: v.bm, net: v.net, count: Math.round(v.count) }))
+      .map(([id, v]) => ({ employeeId: id, name: empMap.get(id)?.name ?? `#${id}`, kwuid: empMap.get(id)?.kwuid ?? "", bhb: v.bhb, bm: v.bm, net: v.net, count: Math.round(v.count) }))
       .sort((a, b) => b.bhb - a.bhb);
 
     // ── By category ──
@@ -4668,6 +4672,41 @@ export class DatabaseStorage implements IStorage {
     await db.update(employees).set({
       advisorLastEmailNotifiedAt: new Date(),
     } as any).where(eq(employees.id, employeeId));
+  }
+
+  // ── Teams ───────────────────────────────────────────────────────────────────
+
+  async getTeams(): Promise<TeamWithMembers[]> {
+    const allTeams = await db.select().from(teams).orderBy(asc(teams.name));
+    if (allTeams.length === 0) return [];
+    const members = await db.select().from(teamMembers);
+    return allTeams.map(t => ({
+      ...t,
+      memberIds: members.filter(m => m.teamId === t.id).map(m => m.employeeId),
+    }));
+  }
+
+  async createTeam(name: string): Promise<Team> {
+    const [team] = await db.insert(teams).values({ name }).returning();
+    return team;
+  }
+
+  async renameTeam(id: number, name: string): Promise<Team> {
+    const [team] = await db.update(teams).set({ name }).where(eq(teams.id, id)).returning();
+    return team;
+  }
+
+  async deleteTeam(id: number): Promise<void> {
+    await db.delete(teamMembers).where(eq(teamMembers.teamId, id));
+    await db.delete(teams).where(eq(teams.id, id));
+  }
+
+  async addTeamMember(teamId: number, employeeId: number): Promise<void> {
+    await db.insert(teamMembers).values({ teamId, employeeId }).onConflictDoNothing();
+  }
+
+  async removeTeamMember(teamId: number, employeeId: number): Promise<void> {
+    await db.delete(teamMembers).where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.employeeId, employeeId)));
   }
 }
 

@@ -28,6 +28,7 @@ import ListingReports from "@/pages/ListingReports";
 import AgentHealth from "@/pages/AgentHealth";
 import PublicListing from "@/pages/PublicListing";
 import AdvisorSelfService from "@/pages/AdvisorSelfService";
+import Teams from "@/pages/Teams";
 
 function ProtectedRoute({
   children,
@@ -83,6 +84,7 @@ function Router() {
       <Route path="/coaching" component={() => <ProtectedRoute noAssistant><Coaching /></ProtectedRoute>} />
       <Route path="/expenses" component={() => <ProtectedRoute adminOnly><Expenses /></ProtectedRoute>} />
       <Route path="/pl-report" component={() => <ProtectedRoute adminOnly><PLReport /></ProtectedRoute>} />
+      <Route path="/teams" component={() => <ProtectedRoute adminOnly><Teams /></ProtectedRoute>} />
       <Route component={NotFound} />
     </Switch>
   );

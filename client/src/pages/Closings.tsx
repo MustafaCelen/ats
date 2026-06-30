@@ -134,7 +134,7 @@ function calcAgentBreakdown(
     : Math.min(marketCenterDue, Math.max(0, capAmount - capUsedSoFar));
   const capUsedAfter = capUsedSoFar + marketCenterActual;
 
-  const bmKdv = bhbShare * (bmKdvRatePct / 100);
+  const bmKdv = marketCenterActual > 0 ? bhbShare * (bmKdvRatePct / 100) : 0;
 
   let ukShare = 0;
   if (employee?.uretkenlikKoclugu && employee?.uretkenlikKocluguOran) {
@@ -527,8 +527,9 @@ function SideSection({
               if (field === "bmKdvRatePct") {
                 const rate = parseFloat(val) || 0;
                 const bhb = parseFloat(agent.bhbShare || "0");
+                const bm = parseFloat(agent.marketCenterActual || "0");
                 const updated = { ...agent, bmKdvRatePct: val, isManuallyEdited: true };
-                updated.bmKdv = (bhb * rate / 100).toFixed(2);
+                updated.bmKdv = bm > 0 ? (bhb * rate / 100).toFixed(2) : "0";
                 updated.employeeNet = deriveNet(updated);
                 const dk = deriveKasaNakitBanka(updated);
                 updated.kasa = dk.kasa; updated.nakit = dk.nakit; updated.banka = dk.banka;
@@ -536,8 +537,18 @@ function SideSection({
                 return;
               }
               const updated = { ...agent, [field]: val, isManuallyEdited: true };
+              // BM payı sıfırlanınca BM KDV de sıfırlanmalı
+              if (field === "marketCenterActual") {
+                const bm = parseFloat(val || "0");
+                if (bm === 0) updated.bmKdv = "0";
+                else {
+                  const bhb = parseFloat(agent.bhbShare || "0");
+                  const rate = parseFloat(agent.bmKdvRatePct || "0.40");
+                  updated.bmKdv = (bhb * rate / 100).toFixed(2);
+                }
+              }
               if (field !== "employeeNet") {
-                updated.employeeNet = deriveNet({ ...updated, [field]: val });
+                updated.employeeNet = deriveNet(updated);
               }
               if (!["kasa", "nakit", "banka", "employeeNet"].includes(field)) {
                 const dk = deriveKasaNakitBanka({ ...updated, [field]: val });

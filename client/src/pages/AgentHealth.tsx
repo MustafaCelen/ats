@@ -1,3 +1,4 @@
+import { useState, useMemo } from "react";
 import { Layout } from "@/components/Layout";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
@@ -54,6 +55,19 @@ export default function AgentHealth() {
     queryFn: () => fetch("/api/reports/churn").then((r) => r.json()),
   });
 
+  const { data: teams = [] } = useQuery<{ id: number; name: string; memberIds: number[] }[]>({
+    queryKey: ["/api/teams"],
+    queryFn: () => fetch("/api/teams", { credentials: "include" }).then(r => r.json()),
+  });
+
+  const employeeTeamMap = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const t of teams) {
+      for (const id of t.memberIds) map.set(id, t.name);
+    }
+    return map;
+  }, [teams]);
+
   const hadClosings = churnData.filter((r) => r.lastClosingDate !== null && r.risk === "high");
   const neverClosed = churnData.filter((r) => r.lastClosingDate === null && r.risk === "high");
   const highRisk = churnData.filter((r) => r.risk === "high").length;
@@ -63,13 +77,15 @@ export default function AgentHealth() {
   return (
     <Layout>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-display font-bold text-foreground flex items-center gap-2">
-            <ShieldAlert className="h-6 w-6 text-primary" /> Danışman Sağlığı
-          </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Son işlem tarihi ve aktif ilan varlığına göre risk altındaki danışmanlar
-          </p>
+        <div className="flex flex-wrap items-start gap-4">
+          <div>
+            <h1 className="text-2xl font-display font-bold text-foreground flex items-center gap-2">
+              <ShieldAlert className="h-6 w-6 text-primary" /> Danışman Sağlığı
+            </h1>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              Son işlem tarihi ve aktif ilan varlığına göre risk altındaki danışmanlar
+            </p>
+          </div>
         </div>
 
         {/* Summary cards */}
@@ -119,6 +135,7 @@ export default function AgentHealth() {
                   <thead className="bg-muted/30 text-xs text-muted-foreground uppercase">
                     <tr>
                       <th className="text-left px-5 py-3">Danışman</th>
+                      <th className="text-left px-5 py-3">Takım</th>
                       <th className="text-left px-5 py-3">Risk</th>
                       <th className="text-left px-5 py-3">Son İşlem</th>
                       <th className="text-center px-5 py-3">Son 3 Ay</th>
@@ -136,6 +153,11 @@ export default function AgentHealth() {
                         <td className="px-5 py-3">
                           <p className="font-medium">{r.name}</p>
                           {r.kwuid && <p className="text-xs text-muted-foreground font-mono">{r.kwuid}</p>}
+                        </td>
+                        <td className="px-5 py-3 text-xs">
+                          {employeeTeamMap.has(r.employeeId)
+                            ? <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-medium">{employeeTeamMap.get(r.employeeId)}</span>
+                            : <span className="text-muted-foreground">—</span>}
                         </td>
                         <td className="px-5 py-3"><RiskBadge risk={r.risk} /></td>
                         <td className="px-5 py-3">
@@ -181,6 +203,7 @@ export default function AgentHealth() {
                   <thead className="bg-muted/30 text-xs text-muted-foreground uppercase">
                     <tr>
                       <th className="text-left px-5 py-3">Danışman</th>
+                      <th className="text-left px-5 py-3">Takım</th>
                       <th className="text-left px-5 py-3">Risk</th>
                       <th className="text-center px-5 py-3">Aktif İlan</th>
                       <th className="text-left px-5 py-3">Kıdem</th>
@@ -194,6 +217,11 @@ export default function AgentHealth() {
                         <td className="px-5 py-3">
                           <p className="font-medium">{r.name}</p>
                           {r.kwuid && <p className="text-xs text-muted-foreground font-mono">{r.kwuid}</p>}
+                        </td>
+                        <td className="px-5 py-3 text-xs">
+                          {employeeTeamMap.has(r.employeeId)
+                            ? <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-medium">{employeeTeamMap.get(r.employeeId)}</span>
+                            : <span className="text-muted-foreground">—</span>}
                         </td>
                         <td className="px-5 py-3"><RiskBadge risk={r.risk} /></td>
                         <td className="px-5 py-3 text-center"><ActiveListingCell n={r.activeListings} /></td>

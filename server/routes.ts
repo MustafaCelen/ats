@@ -1355,12 +1355,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         if (!job) return res.status(404).json({ message: "Job not found" });
         if (job.status !== "open") return res.status(403).json({ message: "Can only apply to open jobs" });
       }
+      const TERMINAL = ["employed", "rejected", "hired"] as const;
       const existing = await storage.getApplications(input.jobId, input.candidateId);
-      if (existing.length > 0) return res.status(409).json({ message: "Bu aday zaten bu pozisyona başvurmuş." });
+      const activeExisting = existing.filter((a) => !TERMINAL.includes(a.status as any));
+      if (activeExisting.length > 0) return res.status(409).json({ message: "Bu aday zaten bu pozisyonda aktif süreçte." });
 
       // A candidate can only be in one active pipeline at a time
       const allApps = await storage.getApplications(undefined, input.candidateId);
-      const activeApp = allApps.find((a) => a.status !== "employed" && a.status !== "rejected");
+      const activeApp = allApps.find((a) => !TERMINAL.includes(a.status as any));
       if (activeApp) {
         return res.status(409).json({
           message: `Bu aday zaten başka bir pozisyonda aktif süreçte (${activeApp.job?.title ?? "bilinmeyen ilan"}). Bir aday aynı anda yalnızca 1 pozisyona atanabilir.`,
@@ -1381,8 +1383,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const { status } = api.applications.updateStatus.input.parse(req.body);
       const existing = await storage.getApplication(Number(req.params.id));
       if (!existing) return res.status(404).json({ message: "Application not found" });
-      const filter = jobFilter(req);
-      if (filter !== undefined && !filter.includes(existing.jobId)) return res.status(403).json({ message: "Forbidden" });
+      if (req.user!.role !== "assistant") {
+        const filter = jobFilter(req);
+        if (filter !== undefined && !filter.includes(existing.jobId)) return res.status(403).json({ message: "Forbidden" });
+      }
       const fromStatus = existing.status;
       const application = await storage.updateApplicationStatus(Number(req.params.id), status);
       if (!application) return res.status(404).json({ message: "Not found" });
@@ -2281,6 +2285,30 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return null;
       };
 
+      let autoCreatedEmployees = 0;
+      const ensureEmployee = async (kwuid: string, name: string, closingDate: Date | null): Promise<number | null> => {
+        const existing = resolveEmployee(kwuid, name);
+        if (existing) return existing;
+        const trimmedName = name?.trim();
+        if (!trimmedName) return null;
+        const trimmedKwuid = kwuid?.trim() || null;
+        const candidate = await storage.createCandidate({
+          name: trimmedName,
+          office: "Akatlar",
+        } as any);
+        const emp = await storage.createEmployee({
+          candidateId: candidate.id,
+          status: "inactive",
+          passiveAt: new Date(),
+          kwuid: trimmedKwuid,
+          ...(closingDate ? { startDate: closingDate } : {}),
+        } as any);
+        if (trimmedKwuid) byKwuid[trimmedKwuid] = emp.id;
+        byName[trimmedName.toLowerCase()] = emp.id;
+        autoCreatedEmployees++;
+        return emp.id;
+      };
+
       // Group rows into closings by date + transaction value + deal type + address.
       const groups = new Map<string, typeof rows>();
       for (const row of rows) {
@@ -2332,8 +2360,25 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             for (const row of sideRows) {
               const kwuid = row["KWUID"] ?? "";
               const name = row["Danışman"] ?? row["Danışman Adı"] ?? "";
-              const empId = resolveEmployee(kwuid, name);
-              if (!empId) { errors.push(`Danışman bulunamadı: ${name || kwuid || "?"}`); continue; }
+              let empId: number | null = null;
+              try {
+                empId = await ensureEmployee(kwuid, name, closingDate);
+              } catch (e: any) {
+                errors.push(`Danışman oluşturulamadı (${name?.trim() || kwuid?.trim() || "?"}): ${e?.message ?? "Bilinmeyen hata"}`);
+                continue;
+              }
+              if (!empId) {
+                const nameTrim = name?.trim();
+                const kwuidTrim = kwuid?.trim();
+                if (!nameTrim && !kwuidTrim) {
+                  errors.push(`Danışman bulunamadı: satırda isim ve KWUID boş`);
+                } else if (!nameTrim) {
+                  errors.push(`Danışman bulunamadı: KWUID=${kwuidTrim} sistemde yok ve CSV'de isim boş — yeni kayıt için isim gerekli`);
+                } else {
+                  errors.push(`Danışman bulunamadı: ${nameTrim}${kwuidTrim ? ` (KWUID=${kwuidTrim})` : ""}`);
+                }
+                continue;
+              }
               // Default all numeric fields to "0" so the server never auto-calculates them.
               agents.push({
                 employeeId: empId,
@@ -2396,7 +2441,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         })); // end map + Promise.allSettled
       } // end batch for
 
-      res.json({ created, errors });
+      res.json({ created, errors, autoCreatedEmployees });
     } catch {
       res.status(500).json({ message: "Internal server error" });
     }
@@ -2709,15 +2754,87 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // ── Teams ─────────────────────────────────────────────────────────────────────
+
+  app.get("/api/teams", requireAuth, async (req, res) => {
+    try {
+      res.json(await storage.getTeams());
+    } catch (err) {
+      console.error("[GET /api/teams]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.post("/api/teams", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const { name } = req.body;
+      if (!name || typeof name !== "string" || !name.trim())
+        return res.status(400).json({ message: "name required" });
+      const team = await storage.createTeam(name.trim());
+      res.json(team);
+    } catch (err: any) {
+      if (err?.code === "23505") return res.status(409).json({ message: "Bu isimde bir takım zaten var" });
+      console.error("[POST /api/teams]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.patch("/api/teams/:id", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const { name } = req.body;
+      if (!name || typeof name !== "string" || !name.trim())
+        return res.status(400).json({ message: "name required" });
+      const team = await storage.renameTeam(Number(req.params.id), name.trim());
+      res.json(team);
+    } catch (err: any) {
+      if (err?.code === "23505") return res.status(409).json({ message: "Bu isimde bir takım zaten var" });
+      console.error("[PATCH /api/teams/:id]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.delete("/api/teams/:id", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      await storage.deleteTeam(Number(req.params.id));
+      res.status(204).send();
+    } catch (err) {
+      console.error("[DELETE /api/teams/:id]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.post("/api/teams/:id/members", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const { employeeId } = req.body;
+      if (!employeeId) return res.status(400).json({ message: "employeeId required" });
+      await storage.addTeamMember(Number(req.params.id), Number(employeeId));
+      res.json({ ok: true });
+    } catch (err) {
+      console.error("[POST /api/teams/:id/members]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.delete("/api/teams/:id/members/:employeeId", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      await storage.removeTeamMember(Number(req.params.id), Number(req.params.employeeId));
+      res.status(204).send();
+    } catch (err) {
+      console.error("[DELETE /api/teams/:id/members/:employeeId]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   // ── Closing Stats (Financial Reports) ────────────────────────────────────────
 
   app.get("/api/closings/stats", requireAuth, requireFinancialsAccess, async (req, res) => {
     try {
-      const { startDate, endDate, office, dealType, dealCategory } = req.query as { startDate?: string; endDate?: string; office?: string; dealType?: string; dealCategory?: string };
+      const { startDate, endDate, office, dealType, dealCategory, employeeIds: empIdsParam } = req.query as { startDate?: string; endDate?: string; office?: string; dealType?: string; dealCategory?: string; employeeIds?: string };
       const now = new Date();
       const start = startDate ? new Date(startDate) : new Date(now.getFullYear(), now.getMonth(), 1);
       const end = endDate ? new Date(endDate) : new Date(now.getFullYear(), now.getMonth() + 1, 0);
-      res.json(await storage.getClosingStats(start, end, office, dealType, dealCategory));
+      const employeeIds = empIdsParam ? empIdsParam.split(",").map(Number).filter(Boolean) : undefined;
+      res.json(await storage.getClosingStats(start, end, office, dealType, dealCategory, employeeIds));
     } catch (err) {
       console.error("[GET /api/closings/stats]", err);
       res.status(500).json({ message: "Internal server error" });
