@@ -243,6 +243,8 @@ export default function CandidateDetail() {
     employeeRecord.duaManagerId === user.id
   );
   const [, navigate] = useLocation();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
   const { mutate: deleteCandidate, isPending: isDeleting } = useDeleteCandidate();
   const { mutate: updateHistoryDate } = useUpdateStageHistoryDate(candidateId);
   const [noteText, setNoteText] = useState("");
@@ -252,39 +254,39 @@ export default function CandidateDetail() {
   const [editOpen, setEditOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [reEnrollOpen, setReEnrollOpen] = useState(false);
-  const [reEnrollStage, setReEnrollStage] = useState("interview");
   const [reEnrollJobId, setReEnrollJobId] = useState<number | null>(null);
+  const [reEnrolling, setReEnrolling] = useState(false);
 
   const { data: openJobs = [] } = useQuery<any[]>({
-    queryKey: ["/api/jobs"],
-    queryFn: () => fetch("/api/jobs").then((r) => r.json()),
-    enabled: reEnrollOpen && !employeeRecord?.jobId,
+    queryKey: ["/api/jobs", "all"],
+    queryFn: () => fetch("/api/jobs?all=true").then((r) => r.json()).then((jobs: any[]) => jobs.filter((j) => j.status === "open")),
+    enabled: reEnrollOpen,
   });
 
-  const { mutate: reEnroll, isPending: reEnrolling } = useMutation({
-    mutationFn: () =>
-      fetch("/api/applications", {
+  const handleReEnroll = async () => {
+    if (!reEnrollJobId || !employeeRecord?.candidateId || reEnrolling) return;
+    setReEnrolling(true);
+    try {
+      const r = await fetch("/api/applications", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          candidateId: employeeRecord?.candidateId,
-          jobId: reEnrollJobId ?? employeeRecord?.jobId,
-          status: reEnrollStage,
-        }),
-      }).then(async (r) => {
-        if (!r.ok) throw new Error(await r.text());
-        return r.json();
-      }),
-    onSuccess: () => {
+        body: JSON.stringify({ candidateId: employeeRecord.candidateId, jobId: reEnrollJobId, status: "applied" }),
+      });
+      const body = await r.json().catch(() => null);
+      if (!r.ok) {
+        toast({ title: "Hata", description: body?.message ?? r.statusText, variant: "destructive" });
+        return;
+      }
       toast({ title: `${candidate?.name} sürece geri alındı` });
       queryClient.invalidateQueries({ queryKey: ["/api/applications"] });
       queryClient.invalidateQueries({ queryKey: ["/api/candidates", candidateId, "employee"] });
       setReEnrollOpen(false);
-    },
-    onError: (err: any) => {
-      toast({ title: "Hata", description: err.message, variant: "destructive" });
-    },
-  });
+    } catch (e: any) {
+      toast({ title: "Hata", description: e?.message ?? "Bir hata oluştu", variant: "destructive" });
+    } finally {
+      setReEnrolling(false);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -634,7 +636,7 @@ export default function CandidateDetail() {
                   <div key={app.id} className="flex items-center justify-between gap-3 text-sm py-1.5 border-b border-border/40 last:border-0" data-testid={`overview-score-app-${app.id}`}>
                     <div className="flex items-center gap-2 min-w-0">
                       <span className="font-medium truncate">{app.job?.title ?? `Başvuru #${app.id}`}</span>
-                      <span className="text-xs text-muted-foreground shrink-0 hidden sm:inline">{app.stage}</span>
+                      <span className="text-xs text-muted-foreground shrink-0 hidden sm:inline">{STAGE_LABELS[app.status] ?? app.status}</span>
                     </div>
                     <ScoreBadge score={app.score} size="sm" showLabel data-testid={`overview-score-val-${app.id}`} />
                   </div>
@@ -1238,41 +1240,28 @@ export default function CandidateDetail() {
             </p>
           </DialogHeader>
           <div className="space-y-4 pt-2">
-            {!employeeRecord?.jobId && (
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium">İş Pozisyonu</label>
-                <select
-                  value={reEnrollJobId ?? ""}
-                  onChange={(e) => setReEnrollJobId(Number(e.target.value) || null)}
-                  className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
-                >
-                  <option value="">Seçiniz…</option>
-                  {openJobs.map((j: any) => (
-                    <option key={j.id} value={j.id}>{j.title}</option>
-                  ))}
-                </select>
-              </div>
-            )}
             <div className="space-y-1.5">
-              <label className="text-sm font-medium">Başlangıç Aşaması</label>
+              <label className="text-sm font-medium">Üretim Bandı</label>
               <select
-                value={reEnrollStage}
-                onChange={(e) => setReEnrollStage(e.target.value)}
+                value={reEnrollJobId ?? ""}
+                onChange={(e) => setReEnrollJobId(Number(e.target.value) || null)}
                 className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
               >
-                {APPLICATION_STAGES.filter(s => !["hired", "myk_training", "account_setup", "documents", "rejected"].includes(s)).map(s => (
-                  <option key={s} value={s}>
-                    {s === "applied" ? "Başvurdu" : s === "screening" ? "Ön Eleme" : "Mülakat"}
-                  </option>
+                <option value="">Seçiniz…</option>
+                {openJobs.map((j: any) => (
+                  <option key={j.id} value={j.id}>{j.title}</option>
                 ))}
               </select>
             </div>
+            <p className="text-xs text-muted-foreground bg-muted/50 rounded-md px-3 py-2">
+              Aday <span className="font-medium text-foreground">Başvuru</span> aşamasından sürece dahil edilecek.
+            </p>
             <div className="flex gap-2">
               <Button variant="outline" className="flex-1" onClick={() => setReEnrollOpen(false)}>İptal</Button>
               <Button
                 className="flex-1 bg-amber-600 hover:bg-amber-700"
-                onClick={() => reEnroll()}
-                disabled={reEnrolling || (!employeeRecord?.jobId && !reEnrollJobId)}
+                onClick={handleReEnroll}
+                disabled={reEnrolling || !reEnrollJobId}
               >
                 {reEnrolling ? "Oluşturuluyor…" : "Sürece Al"}
               </Button>

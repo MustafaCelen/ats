@@ -40,9 +40,9 @@ const TIME_SLOTS = Array.from({ length: 96 }, (_, i) => {
 });
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: any }> = {
-  scheduled: { label: "Scheduled",  color: "bg-blue-100 text-blue-700 border-blue-200",    icon: Calendar },
-  completed: { label: "Completed",  color: "bg-emerald-100 text-emerald-700 border-emerald-200", icon: CheckCircle2 },
-  cancelled: { label: "Cancelled",  color: "bg-red-100 text-red-700 border-red-200",       icon: XCircle },
+  scheduled: { label: "Planlandı",     color: "bg-blue-100 text-blue-700 border-blue-200",         icon: Calendar },
+  completed: { label: "Tamamlandı",   color: "bg-emerald-100 text-emerald-700 border-emerald-200", icon: CheckCircle2 },
+  cancelled: { label: "İptal Edildi", color: "bg-red-100 text-red-700 border-red-200",             icon: XCircle },
 };
 
 function useInterviews() {
@@ -182,11 +182,11 @@ export default function Interviews() {
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-display font-bold">Interviews</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">Schedule and manage candidate interviews</p>
+            <h1 className="text-2xl font-display font-bold">Randevular</h1>
+            <p className="text-sm text-muted-foreground mt-0.5">Aday randevularını planlayın ve yönetin</p>
           </div>
           <Button onClick={() => setScheduleOpen(true)} data-testid="btn-schedule-interview">
-            <Plus className="mr-1.5 h-4 w-4" /> Schedule Interview
+            <Plus className="mr-1.5 h-4 w-4" /> Randevu Planla
           </Button>
         </div>
 
@@ -239,9 +239,9 @@ export default function Interviews() {
         {/* KPI row */}
         <div className="grid grid-cols-3 gap-4">
           {[
-            { label: "Upcoming", value: upcoming, color: "text-blue-600" },
-            { label: "Today", value: todayCount, color: "text-amber-600" },
-            { label: "Completed", value: completed, color: "text-emerald-600" },
+            { label: "Yaklaşan", value: upcoming, color: "text-blue-600" },
+            { label: "Bugün", value: todayCount, color: "text-amber-600" },
+            { label: "Tamamlandı", value: completed, color: "text-emerald-600" },
           ].map((kpi) => (
             <div key={kpi.label} className="rounded-xl border border-border bg-card p-4 shadow-sm">
               <p className="text-xs text-muted-foreground font-medium">{kpi.label}</p>
@@ -274,7 +274,7 @@ export default function Interviews() {
               }`}
               data-testid={`filter-${f}`}
             >
-              {f === "all" ? `All (${interviews?.length ?? 0})` : `${f.charAt(0).toUpperCase() + f.slice(1)} (${interviews?.filter((iv) => iv.status === f).length ?? 0})`}
+              {f === "all" ? `Tümü (${interviews?.length ?? 0})` : `${STATUS_CONFIG[f]?.label ?? f} (${interviews?.filter((iv) => iv.status === f).length ?? 0})`}
             </button>
           ))}
         </div>
@@ -289,9 +289,9 @@ export default function Interviews() {
         ) : filtered.length === 0 ? (
           <div className="text-center py-20">
             <Calendar className="h-10 w-10 text-muted-foreground/40 mx-auto mb-3" />
-            <p className="text-muted-foreground">No interviews found</p>
+            <p className="text-muted-foreground">Randevu bulunamadı</p>
             <Button variant="outline" size="sm" className="mt-3" onClick={() => setScheduleOpen(true)}>
-              Schedule one now
+              Şimdi planla
             </Button>
           </div>
         ) : (
@@ -316,7 +316,7 @@ export default function Interviews() {
                         </span>
                         {isOverdue && (
                           <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full border bg-orange-50 text-orange-700 border-orange-200">
-                            <AlertCircle className="h-3 w-3" /> Overdue
+                            <AlertCircle className="h-3 w-3" /> Gecikmiş
                           </span>
                         )}
                         {(iv as any).rescheduleCount > 0 && (
@@ -387,7 +387,7 @@ export default function Interviews() {
                             data-testid={`btn-complete-interview-${iv.id}`}
                           >
                             <CheckCircle2 className="mr-1 h-3.5 w-3.5 text-emerald-600" />
-                            Complete
+                            Tamamla
                           </Button>
                           <Button
                             size="sm"
@@ -407,7 +407,7 @@ export default function Interviews() {
                             data-testid={`btn-cancel-interview-${iv.id}`}
                           >
                             <XCircle className="mr-1 h-3.5 w-3.5 text-red-500" />
-                            Cancel
+                            İptal
                           </Button>
                         </>
                       )}
@@ -505,8 +505,8 @@ function CompleteInterviewDialog({
             {
               onSuccess: () => {
                 toast({
-                  title: "Interview completed",
-                  description: `${interview.candidate?.name} moved to ${STAGE_LABELS[stage] ?? stage}`,
+                  title: "Randevu tamamlandı",
+                  description: `${interview.candidate?.name} → ${STAGE_LABELS[stage] ?? stage}`,
                 });
                 onOpenChange(false);
               },
@@ -523,7 +523,7 @@ function CompleteInterviewDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-            Complete Interview
+            Randevuyu Tamamla
           </DialogTitle>
           <p id="complete-iv-desc" className="text-sm text-muted-foreground">
             {interview?.candidate?.name} · {interview?.title}
@@ -532,7 +532,7 @@ function CompleteInterviewDialog({
 
         <div className="space-y-4 pt-2">
           <div>
-            <Label className="text-xs font-medium mb-1.5 block">Move candidate to</Label>
+            <Label className="text-xs font-medium mb-1.5 block">Adayı taşı</Label>
             <Select value={stage} onValueChange={setStage}>
               <SelectTrigger data-testid="select-next-stage">
                 <SelectValue />
@@ -555,7 +555,7 @@ function CompleteInterviewDialog({
 
           <div className="flex gap-2">
             <Button variant="outline" className="flex-1" onClick={() => onOpenChange(false)}>
-              Cancel
+              İptal
             </Button>
             <Button
               className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white"
@@ -563,7 +563,7 @@ function CompleteInterviewDialog({
               disabled={completing || moving}
               data-testid="btn-confirm-complete-interview"
             >
-              {completing || moving ? "Saving..." : "Complete & Move"}
+              {completing || moving ? "Kaydediliyor..." : "Tamamla & Taşı"}
             </Button>
           </div>
         </div>

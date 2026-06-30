@@ -178,14 +178,15 @@ function useCapStatuses() {
   });
 }
 
-function useClosingStats(startDate: string, endDate: string, office?: string, dealCategory?: string, dealType?: string) {
+function useClosingStats(startDate: string, endDate: string, office?: string, dealCategory?: string, dealType?: string, employeeIds?: number[]) {
   return useQuery<any>({
-    queryKey: ["/api/closings/stats", startDate, endDate, office ?? "all", dealCategory ?? "all", dealType ?? "all"],
+    queryKey: ["/api/closings/stats", startDate, endDate, office ?? "all", dealCategory ?? "all", dealType ?? "all", employeeIds?.join(",") ?? ""],
     queryFn: async () => {
       const params = new URLSearchParams({ startDate, endDate });
       if (office) params.set("office", office);
       if (dealCategory) params.set("dealCategory", dealCategory);
       if (dealType) params.set("dealType", dealType);
+      if (employeeIds && employeeIds.length > 0) params.set("employeeIds", employeeIds.join(","));
       const res = await fetch(`/api/closings/stats?${params.toString()}`, { credentials: "include" });
       if (!res.ok) throw new Error("Failed");
       return res.json();
@@ -363,6 +364,20 @@ export default function FinancialReports() {
   const { data: currentUser } = useAuth();
   const isAdmin = currentUser?.role === "admin";
   const qc = useQueryClient();
+
+  const { data: teams = [] } = useQuery<{ id: number; name: string; memberIds: number[] }[]>({
+    queryKey: ["/api/teams"],
+    queryFn: () => fetch("/api/teams", { credentials: "include" }).then(r => r.json()),
+    staleTime: 60_000,
+  });
+
+  const employeeTeamMap = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const t of teams) {
+      for (const id of t.memberIds) map.set(id, t.name);
+    }
+    return map;
+  }, [teams]);
 
   const vy = viewDate.getFullYear();
   const vm = viewDate.getMonth();
@@ -1295,6 +1310,75 @@ export default function FinancialReports() {
             </div>
           );
         })()}
+
+        {/* ── Takım Performans Tablosu ── */}
+        {teams.length > 0 && (
+          <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+            <div className="px-5 py-4 border-b border-border">
+              <h2 className="text-base font-semibold">Takım Performans Tablosu</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">Seçili dönem — takım üyelerinin toplam üretimi</p>
+            </div>
+            {isLoading ? (
+              <div className="p-5 space-y-2">{[...Array(3)].map((_, i) => <div key={i} className="h-8 bg-muted/40 rounded animate-pulse" />)}</div>
+            ) : (() => {
+              const byAgent: any[] = stats?.byAgent ?? [];
+              const teamRows = teams.map(t => {
+                const members = byAgent.filter(a => a.employeeId != null && t.memberIds.includes(a.employeeId));
+                return {
+                  name: t.name,
+                  memberCount: t.memberIds.length,
+                  activeCount: members.length,
+                  count: members.reduce((s, a) => s + a.count, 0),
+                  bhb: members.reduce((s, a) => s + a.bhb, 0),
+                  bm: members.reduce((s, a) => s + a.bm, 0),
+                  net: members.reduce((s, a) => s + a.net, 0),
+                };
+              }).filter(t => t.count > 0).sort((a, b) => b.net - a.net);
+              if (teamRows.length === 0) {
+                return <div className="p-10 text-center text-sm text-muted-foreground">Bu dönem için takım verisi yok</div>;
+              }
+              return (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-muted/40 border-b border-border text-xs font-medium text-muted-foreground">
+                        <th className="text-left py-2 px-4">Takım</th>
+                        <th className="text-right py-2 px-4">Üye</th>
+                        <th className="text-right py-2 px-4">Üreten</th>
+                        <th className="text-right py-2 px-4">Kapanış</th>
+                        <th className="text-right py-2 px-4">BHB Toplam</th>
+                        <th className="text-right py-2 px-4">BM Toplam</th>
+                        <th className="text-right py-2 px-4">Net Toplam</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {teamRows.map((t, i) => (
+                        <tr key={i} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
+                          <td className="py-2 px-4 font-medium">{t.name}</td>
+                          <td className="py-2 px-4 text-right text-muted-foreground">{t.memberCount}</td>
+                          <td className="py-2 px-4 text-right text-muted-foreground">{t.activeCount}</td>
+                          <td className="py-2 px-4 text-right">{t.count}</td>
+                          <td className="py-2 px-4 text-right font-medium">{fmtTRY(t.bhb)}</td>
+                          <td className="py-2 px-4 text-right text-blue-700">{fmtTRY(t.bm)}</td>
+                          <td className="py-2 px-4 text-right font-semibold text-emerald-700">{fmtTRY(t.net)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="bg-muted/30 font-semibold border-t border-border">
+                        <td colSpan={3} className="py-2.5 px-4 text-xs">Toplam</td>
+                        <td className="py-2.5 px-4 text-right">{teamRows.reduce((s, t) => s + t.count, 0)}</td>
+                        <td className="py-2.5 px-4 text-right">{fmtTRY(teamRows.reduce((s, t) => s + t.bhb, 0))}</td>
+                        <td className="py-2.5 px-4 text-right text-blue-700">{fmtTRY(teamRows.reduce((s, t) => s + t.bm, 0))}</td>
+                        <td className="py-2.5 px-4 text-right text-emerald-700">{fmtTRY(teamRows.reduce((s, t) => s + t.net, 0))}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              );
+            })()}
+          </div>
+        )}
 
         {/* ── First-timers + New cappers (period highlights) ── */}
         <div className="grid lg:grid-cols-2 gap-6">

@@ -52,14 +52,14 @@ export default function Jobs() {
         {/* Header */}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-2xl font-display font-bold text-foreground">Positions</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">Manage open roles and track applicants</p>
+            <h1 className="text-2xl font-display font-bold text-foreground">Üretim Bandı</h1>
+            <p className="text-sm text-muted-foreground mt-0.5">Açık pozisyonları yönetin ve adayları takip edin</p>
           </div>
           <div className="flex gap-2 flex-wrap">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
               <Input
-                placeholder="Search jobs..."
+                placeholder="İlan ara..."
                 className="pl-8 w-52 h-9 text-sm bg-card"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -71,11 +71,11 @@ export default function Jobs() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Status</SelectItem>
-                <SelectItem value="draft">Draft</SelectItem>
-                <SelectItem value="open">Open</SelectItem>
-                <SelectItem value="closed">Closed</SelectItem>
-                <SelectItem value="archived">Archived</SelectItem>
+                <SelectItem value="all">Tüm Durumlar</SelectItem>
+                <SelectItem value="draft">Taslak</SelectItem>
+                <SelectItem value="open">Açık</SelectItem>
+                <SelectItem value="closed">Kapalı</SelectItem>
+                <SelectItem value="archived">Arşivlendi</SelectItem>
               </SelectContent>
             </Select>
             <CreateJobDialog open={isDialogOpen} onOpenChange={setIsDialogOpen} />
@@ -90,7 +90,7 @@ export default function Jobs() {
         ) : filtered?.length === 0 ? (
           <div className="py-20 text-center text-muted-foreground border border-dashed border-border rounded-xl">
             <Briefcase className="h-10 w-10 mx-auto mb-3 opacity-20" />
-            <p className="text-sm">No positions found. Create one to get started.</p>
+            <p className="text-sm">İlan bulunamadı. Başlamak için yeni bir ilan oluşturun.</p>
           </div>
         ) : (
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -151,9 +151,9 @@ export default function Jobs() {
                     </div>
 
                     <div className="mt-4 pt-4 border-t border-border flex items-center justify-between text-xs text-muted-foreground">
-                      <span>Posted {format(new Date(job.createdAt!), "MMM d, yyyy")}</span>
+                      <span>Oluşturuldu: {format(new Date(job.createdAt!), "d MMM yyyy")}</span>
                       <span className="flex items-center gap-1 text-primary font-medium">
-                        View Board <ChevronRight className="h-3 w-3" />
+                        Görüntüle <ChevronRight className="h-3 w-3" />
                       </span>
                     </div>
                   </Link>
@@ -185,23 +185,23 @@ function CreateJobDialog({ open, onOpenChange }: { open: boolean; onOpenChange: 
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>
         <Button size="sm" className="h-9 shadow-sm" data-testid="btn-create-job">
-          <Plus className="mr-1.5 h-4 w-4" /> New Job
+          <Plus className="mr-1.5 h-4 w-4" /> Yeni İlan
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-[600px]" aria-describedby="create-job-desc">
         <DialogHeader>
-          <DialogTitle className="font-display text-xl">Create New Position</DialogTitle>
-          <p id="create-job-desc" className="text-sm text-muted-foreground">Fill in the details for the new job posting.</p>
+          <DialogTitle className="font-display text-xl">Yeni İlan Oluştur</DialogTitle>
+          <p id="create-job-desc" className="text-sm text-muted-foreground">Yeni ilan için bilgileri doldurun.</p>
         </DialogHeader>
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 mt-2">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <label className="text-sm font-medium">Job Title</label>
-              <Input {...form.register("title")} placeholder="e.g. Senior Frontend Engineer" data-testid="input-job-title" />
+              <label className="text-sm font-medium">İlan Başlığı</label>
+              <Input {...form.register("title")} placeholder="örn. Gayrimenkul Danışmanı" data-testid="input-job-title" />
               {form.formState.errors.title && <p className="text-destructive text-xs">{form.formState.errors.title.message}</p>}
             </div>
             <div className="space-y-1.5">
-              <label className="text-sm font-medium">Department</label>
+              <label className="text-sm font-medium">Departman</label>
               <Select value={form.watch("department")} onValueChange={(v) => form.setValue("department", v)}>
                 <SelectTrigger data-testid="select-department"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -213,46 +213,46 @@ function CreateJobDialog({ open, onOpenChange }: { open: boolean; onOpenChange: 
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <label className="text-sm font-medium">Company</label>
-              <Input {...form.register("company")} placeholder="e.g. Acme Inc" data-testid="input-job-company" />
+              <label className="text-sm font-medium">Şirket</label>
+              <Input {...form.register("company")} placeholder="örn. KW Platin" data-testid="input-job-company" />
             </div>
             <div className="space-y-1.5">
-              <label className="text-sm font-medium">Location</label>
-              <Input {...form.register("location")} placeholder="e.g. Remote / NYC" data-testid="input-job-location" />
+              <label className="text-sm font-medium">Konum</label>
+              <Input {...form.register("location")} placeholder="örn. İstanbul / Uzaktan" data-testid="input-job-location" />
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <label className="text-sm font-medium">Salary Range</label>
-              <Input {...form.register("salaryRange")} placeholder="e.g. $120k–$160k" data-testid="input-job-salary" />
+              <label className="text-sm font-medium">Ücret Aralığı</label>
+              <Input {...form.register("salaryRange")} placeholder="örn. 50.000–80.000 TL" data-testid="input-job-salary" />
             </div>
             <div className="space-y-1.5">
-              <label className="text-sm font-medium">Status</label>
+              <label className="text-sm font-medium">Durum</label>
               <Select value={form.watch("status")} onValueChange={(v) => form.setValue("status", v)}>
                 <SelectTrigger data-testid="select-job-status"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="draft">Draft</SelectItem>
-                  <SelectItem value="open">Open</SelectItem>
-                  <SelectItem value="closed">Closed</SelectItem>
+                  <SelectItem value="draft">Taslak</SelectItem>
+                  <SelectItem value="open">Açık</SelectItem>
+                  <SelectItem value="closed">Kapalı</SelectItem>
                 </SelectContent>
               </Select>
             </div>
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-sm font-medium">Description</label>
-            <Textarea {...form.register("description")} placeholder="Role responsibilities..." rows={3} data-testid="textarea-job-description" />
+            <label className="text-sm font-medium">Açıklama</label>
+            <Textarea {...form.register("description")} placeholder="Pozisyon sorumlulukları..." rows={3} data-testid="textarea-job-description" />
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-sm font-medium">Requirements</label>
-            <Textarea {...form.register("requirements")} placeholder="Skills and qualifications needed..." rows={2} data-testid="textarea-job-requirements" />
+            <label className="text-sm font-medium">Gereksinimler</label>
+            <Textarea {...form.register("requirements")} placeholder="Gerekli beceri ve nitelikler..." rows={2} data-testid="textarea-job-requirements" />
           </div>
 
           <div className="flex justify-end pt-2">
             <Button type="submit" disabled={isPending} data-testid="btn-submit-job">
-              {isPending ? "Creating..." : "Create Position"}
+              {isPending ? "Oluşturuluyor..." : "İlan Oluştur"}
             </Button>
           </div>
         </form>

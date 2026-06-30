@@ -96,7 +96,7 @@ export default function Users() {
                         onClick={() => setSelectedJobId(selectedJobId === user.id ? null : user.id)}
                         data-testid={`btn-assign-jobs-${user.id}`}
                       >
-                        <Briefcase className="h-3 w-3 mr-1" /> Jobs
+                        <Briefcase className="h-3 w-3 mr-1" /> İlanlar
                       </Button>
                     )}
                     {user.role !== "admin" && (

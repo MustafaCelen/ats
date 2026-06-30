@@ -137,6 +137,7 @@ export default function JobDetails() {
   const [activeApp, setActiveApp] = useState<ApplicationWithRelations | null>(null);
   const [viewMode, setViewMode] = useState<"kanban" | "list">("kanban");
   const [listStageFilter, setListStageFilter] = useState<string>("all");
+  const [listRatingFilter, setListRatingFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
 
   const visibleApps = useMemo(() => {
@@ -281,26 +282,52 @@ export default function JobDetails() {
             </button>
           </div>
           {viewMode === "list" && (
-            <div className="flex items-center gap-1 flex-wrap">
-              <button
-                onClick={() => setListStageFilter("all")}
-                className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${listStageFilter === "all" ? "bg-foreground text-background border-foreground" : "border-border text-muted-foreground hover:text-foreground"}`}
-              >
-                Tümü
-              </button>
-              {APPLICATION_STAGES.map((s) => {
-                const meta = COLUMN_META[s];
-                return (
+            <div className="flex flex-col gap-2">
+              {/* Stage filter — single scrollable row */}
+              <div className="overflow-x-auto">
+                <div className="flex gap-1 min-w-max">
                   <button
-                    key={s}
-                    onClick={() => setListStageFilter(s)}
-                    className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${listStageFilter === s ? "bg-foreground text-background border-foreground" : "border-border text-muted-foreground hover:text-foreground"}`}
+                    onClick={() => setListStageFilter("all")}
+                    className={`flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors whitespace-nowrap ${listStageFilter === "all" ? "bg-foreground text-background border-foreground" : "border-border text-muted-foreground hover:text-foreground"}`}
                   >
-                    <span className={`h-1.5 w-1.5 rounded-full ${meta?.dot}`} />
-                    {STAGE_LABELS[s] ?? s}
+                    Tümü
                   </button>
-                );
-              })}
+                  {APPLICATION_STAGES.map((s) => {
+                    const meta = COLUMN_META[s];
+                    return (
+                      <button
+                        key={s}
+                        onClick={() => setListStageFilter(s)}
+                        className={`flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors whitespace-nowrap ${listStageFilter === s ? "bg-foreground text-background border-foreground" : "border-border text-muted-foreground hover:text-foreground"}`}
+                      >
+                        <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${meta?.dot}`} />
+                        {STAGE_LABELS[s] ?? s}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              {/* Rating filter — 7 columns, all equal width */}
+              <div className="grid grid-cols-7 gap-1">
+                {([
+                  { key: "all",       label: "Tüm Puanlar",       dot: "bg-muted-foreground/40" },
+                  { key: "excellent", label: "9–10",               dot: "bg-emerald-500" },
+                  { key: "strong",    label: "7–8",                dot: "bg-blue-500" },
+                  { key: "good",      label: "5–6",                dot: "bg-amber-500" },
+                  { key: "fair",      label: "3–4",                dot: "bg-orange-500" },
+                  { key: "low",       label: "1–2",                dot: "bg-red-500" },
+                  { key: "unrated",   label: "Değerlend.",         dot: "bg-muted-foreground/20" },
+                ] as const).map(({ key, label, dot }) => (
+                  <button
+                    key={key}
+                    onClick={() => setListRatingFilter(key)}
+                    className={`flex items-center justify-center gap-1 px-2 py-1.5 rounded-md text-xs font-medium border transition-colors ${listRatingFilter === key ? "bg-foreground text-background border-foreground" : "border-border text-muted-foreground hover:text-foreground"}`}
+                  >
+                    <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${dot}`} />
+                    <span className="truncate">{label}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
         </div>
@@ -360,7 +387,20 @@ export default function JobDetails() {
         {/* List view */}
         {viewMode === "list" && (
           <ApplicationListView
-            applications={visibleApps.filter((a) => a.status !== "employed" && (listStageFilter === "all" || a.status === listStageFilter))}
+            applications={visibleApps.filter((a) => {
+              if (a.status === "employed") return false;
+              if (listStageFilter !== "all" && a.status !== listStageFilter) return false;
+              if (listRatingFilter !== "all") {
+                const s = a.score ?? 0;
+                if (listRatingFilter === "unrated" && s !== 0) return false;
+                if (listRatingFilter === "excellent" && s < 9) return false;
+                if (listRatingFilter === "strong" && !(s >= 7 && s < 9)) return false;
+                if (listRatingFilter === "good" && !(s >= 5 && s < 7)) return false;
+                if (listRatingFilter === "fair" && !(s >= 3 && s < 5)) return false;
+                if (listRatingFilter === "low" && !(s > 0 && s < 3)) return false;
+              }
+              return true;
+            })}
             completingHiring={completingHiring}
             onStatusChange={handleStatusChange}
             onRateNote={(app) => setRateNoteApp(app)}
@@ -572,7 +612,7 @@ function ApplicationListView({
                     </div>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
-                    <ScoreBadge score={app.score} size="sm" showLabel />
+                    <ScoreBadge score={app.score} size="sm" />
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <button className="p-1.5 hover:bg-muted rounded-md text-muted-foreground transition-colors">
@@ -688,7 +728,7 @@ function ApplicationListView({
 
                 {/* Score */}
                 <div>
-                  <ScoreBadge score={app.score} size="sm" showLabel />
+                  <ScoreBadge score={app.score} size="sm" />
                 </div>
 
                 {/* Contact */}
@@ -982,7 +1022,7 @@ function DraggableCard({
         </p>
       )}
       <div className="flex items-center justify-between mt-2 mb-0.5">
-        <ScoreBadge score={app.score} size="sm" showLabel />
+        <ScoreBadge score={app.score} size="sm" />
       </div>
 
       {app.candidate?.tags && app.candidate.tags.length > 0 && (
@@ -1045,7 +1085,7 @@ function CardDragPreview({ app }: { app: ApplicationWithRelations }) {
         </p>
       )}
       <div className="mt-1.5">
-        <ScoreBadge score={app.score} size="sm" showLabel />
+        <ScoreBadge score={app.score} size="sm" />
       </div>
     </div>
   );

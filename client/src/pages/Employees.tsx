@@ -1,6 +1,5 @@
 import { useState, useRef } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { APPLICATION_STAGES } from "@shared/schema";
 import { Link } from "wouter";
 import { Layout } from "@/components/Layout";
 import { useEmployees, useUpdateEmployee, useDeleteEmployee, useImportEmployees } from "@/hooks/use-employees";
@@ -150,13 +149,12 @@ export default function Employees() {
   const [pendingPassiveEmp, setPendingPassiveEmp] = useState<any | null>(null);
   const [passiveDateInput, setPassiveDateInput] = useState("");
   const [reEnrollEmp, setReEnrollEmp] = useState<any | null>(null);
-  const [reEnrollStage, setReEnrollStage] = useState("interview");
   const [reEnrollJobId, setReEnrollJobId] = useState<number | null>(null);
 
   const { data: openJobs = [] } = useQuery<any[]>({
-    queryKey: ["/api/jobs"],
-    queryFn: () => fetch("/api/jobs").then((r) => r.json()),
-    enabled: !!reEnrollEmp && !reEnrollEmp.jobId,
+    queryKey: ["/api/jobs", "all"],
+    queryFn: () => fetch("/api/jobs?all=true").then((r) => r.json()).then((jobs: any[]) => jobs.filter((j) => j.status === "open")),
+    enabled: !!reEnrollEmp,
   });
 
   const { mutate: reEnroll, isPending: reEnrolling } = useMutation({
@@ -164,7 +162,7 @@ export default function Employees() {
       fetch("/api/applications", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ candidateId: emp.candidateId, jobId: reEnrollJobId ?? emp.jobId, status: reEnrollStage }),
+        body: JSON.stringify({ candidateId: emp.candidateId, jobId: reEnrollJobId ?? emp.jobId, status: "applied" }),
       }).then(async (r) => {
         if (!r.ok) throw new Error(await r.text());
         return r.json();
@@ -988,35 +986,22 @@ export default function Employees() {
             </p>
           </DialogHeader>
           <div className="space-y-4 pt-2">
-            {!reEnrollEmp?.jobId && (
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium">İş Pozisyonu</label>
-                <select
-                  value={reEnrollJobId ?? ""}
-                  onChange={(e) => setReEnrollJobId(Number(e.target.value) || null)}
-                  className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
-                >
-                  <option value="">Seçiniz…</option>
-                  {openJobs.map((j: any) => (
-                    <option key={j.id} value={j.id}>{j.title}</option>
-                  ))}
-                </select>
-              </div>
-            )}
             <div className="space-y-1.5">
-              <label className="text-sm font-medium">Başlangıç Aşaması</label>
+              <label className="text-sm font-medium">Üretim Bandı</label>
               <select
-                value={reEnrollStage}
-                onChange={(e) => setReEnrollStage(e.target.value)}
+                value={reEnrollJobId ?? ""}
+                onChange={(e) => setReEnrollJobId(Number(e.target.value) || null)}
                 className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
               >
-                {APPLICATION_STAGES.filter(s => !["hired", "myk_training", "account_setup", "documents", "rejected"].includes(s)).map(s => (
-                  <option key={s} value={s}>
-                    {s === "applied" ? "Başvurdu" : s === "screening" ? "Ön Eleme" : "Mülakat"}
-                  </option>
+                <option value="">Seçiniz…</option>
+                {openJobs.map((j: any) => (
+                  <option key={j.id} value={j.id}>{j.title}</option>
                 ))}
               </select>
             </div>
+            <p className="text-xs text-muted-foreground bg-muted/50 rounded-md px-3 py-2">
+              Danışman <span className="font-medium text-foreground">Başvuru</span> aşamasından sürece dahil edilecek.
+            </p>
             <div className="flex gap-2">
               <Button variant="outline" className="flex-1" onClick={() => setReEnrollEmp(null)}>
                 İptal
@@ -1024,7 +1009,7 @@ export default function Employees() {
               <Button
                 className="flex-1 bg-amber-600 hover:bg-amber-700"
                 onClick={() => reEnroll(reEnrollEmp)}
-                disabled={reEnrolling || (!reEnrollEmp?.jobId && !reEnrollJobId)}
+                disabled={reEnrolling || !reEnrollJobId}
               >
                 {reEnrolling ? "Oluşturuluyor…" : "Sürece Al"}
               </Button>

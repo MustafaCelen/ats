@@ -37,11 +37,11 @@ export function ScoreBadge({ score, showLabel = false, size = "sm" }: ScoreBadge
         </TooltipTrigger>
         <TooltipContent side="top" className="text-xs">
           {isUnrated ? (
-            <p>Not yet rated by hiring manager</p>
+            <p>Henüz değerlendirilmedi</p>
           ) : (
             <>
               <p className="font-semibold">{label} — {s} / 10</p>
-              <p className="text-muted-foreground text-[10px] mt-0.5">Rated by hiring manager</p>
+              <p className="text-muted-foreground text-[10px] mt-0.5">Değerlendirildi</p>
             </>
           )}
         </TooltipContent>
@@ -89,9 +89,9 @@ export function ScoreBar({ score }: { score: number | null | undefined }) {
   return (
     <div className="space-y-1" data-testid="score-bar">
       <div className="flex items-center justify-between text-xs">
-        <span className="text-muted-foreground">Hiring Manager Score</span>
+        <span className="text-muted-foreground">Puan</span>
         {s === 0 ? (
-          <span className="text-muted-foreground italic">Not rated yet</span>
+          <span className="text-muted-foreground italic">Henüz değerlendirilmedi</span>
         ) : (
           <span className={`font-bold ${color}`}>{s}/10 — {label}</span>
         )}

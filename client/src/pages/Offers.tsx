@@ -24,20 +24,20 @@ import type { Offer, Candidate, Job } from "@shared/schema";
 type OfferWithRelations = Offer & { candidate?: Candidate; job?: Job };
 
 const OFFER_STATUS_CONFIG: Record<string, { label: string; color: string; icon: any; next?: string[] }> = {
-  draft:            { label: "Draft",            color: "bg-gray-100 text-gray-700 border-gray-200",         icon: FileText,     next: ["pending_approval", "sent"] },
-  pending_approval: { label: "Pending Approval", color: "bg-yellow-100 text-yellow-700 border-yellow-200",    icon: Clock,        next: ["approved", "rejected"] },
-  approved:         { label: "Approved",         color: "bg-blue-100 text-blue-700 border-blue-200",         icon: CheckCircle2, next: ["sent"] },
-  sent:             { label: "Sent",             color: "bg-purple-100 text-purple-700 border-purple-200",   icon: Send,         next: ["accepted", "rejected"] },
-  accepted:         { label: "Accepted",         color: "bg-emerald-100 text-emerald-700 border-emerald-200", icon: TrendingUp,   next: [] },
-  rejected:         { label: "Rejected",         color: "bg-red-100 text-red-700 border-red-200",            icon: XCircle,      next: [] },
+  draft:            { label: "Taslak",         color: "bg-gray-100 text-gray-700 border-gray-200",         icon: FileText,     next: ["pending_approval", "sent"] },
+  pending_approval: { label: "Onay Bekliyor",  color: "bg-yellow-100 text-yellow-700 border-yellow-200",    icon: Clock,        next: ["approved", "rejected"] },
+  approved:         { label: "Onaylandı",      color: "bg-blue-100 text-blue-700 border-blue-200",         icon: CheckCircle2, next: ["sent"] },
+  sent:             { label: "Gönderildi",     color: "bg-purple-100 text-purple-700 border-purple-200",   icon: Send,         next: ["accepted", "rejected"] },
+  accepted:         { label: "Kabul Edildi",   color: "bg-emerald-100 text-emerald-700 border-emerald-200", icon: TrendingUp,   next: [] },
+  rejected:         { label: "Reddedildi",     color: "bg-red-100 text-red-700 border-red-200",            icon: XCircle,      next: [] },
 };
 
 const STATUS_LABELS: Record<string, string> = {
-  pending_approval: "Pending Approval",
-  approved: "Approved",
-  sent: "Sent to Candidate",
-  accepted: "Mark Accepted",
-  rejected: "Mark Rejected",
+  pending_approval: "Onaya Gönder",
+  approved: "Onayla",
+  sent: "Adaya Gönder",
+  accepted: "Kabul Edildi",
+  rejected: "Reddedildi",
 };
 
 function useOffers() {
@@ -111,21 +111,21 @@ export default function Offers() {
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-display font-bold">Offers</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">Track and manage candidate offers</p>
+            <h1 className="text-2xl font-display font-bold">Teklifler</h1>
+            <p className="text-sm text-muted-foreground mt-0.5">Aday tekliflerini takip edin ve yönetin</p>
           </div>
           <Button onClick={() => setCreateOpen(true)} data-testid="btn-create-offer">
-            <Plus className="mr-1.5 h-4 w-4" /> Create Offer
+            <Plus className="mr-1.5 h-4 w-4" /> Teklif Oluştur
           </Button>
         </div>
 
         {/* KPI row */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           {[
-            { label: "Total Offers", value: totalOffers, color: "text-foreground" },
-            { label: "Pending", value: pendingOffers, color: "text-amber-600" },
-            { label: "Accepted", value: acceptedOffers, color: "text-emerald-600" },
-            { label: "Total Value", value: `$${(totalValue / 1000).toFixed(0)}k`, color: "text-primary", isString: true },
+            { label: "Toplam Teklif", value: totalOffers, color: "text-foreground" },
+            { label: "Beklemede", value: pendingOffers, color: "text-amber-600" },
+            { label: "Kabul Edildi", value: acceptedOffers, color: "text-emerald-600" },
+            { label: "Toplam Değer", value: `$${(totalValue / 1000).toFixed(0)}k`, color: "text-primary", isString: true },
           ].map((kpi) => (
             <div key={kpi.label} className="rounded-xl border border-border bg-card p-4 shadow-sm">
               <p className="text-xs text-muted-foreground font-medium">{kpi.label}</p>
@@ -150,7 +150,7 @@ export default function Offers() {
                 }`}
                 data-testid={`filter-offer-${f}`}
               >
-                {cfg?.label ?? "All"} ({cnt})
+                {cfg?.label ?? "Tümü"} ({cnt})
               </button>
             );
           })}
@@ -164,9 +164,9 @@ export default function Offers() {
         ) : filtered.length === 0 ? (
           <div className="text-center py-20">
             <DollarSign className="h-10 w-10 text-muted-foreground/40 mx-auto mb-3" />
-            <p className="text-muted-foreground">No offers found</p>
+            <p className="text-muted-foreground">Teklif bulunamadı</p>
             <Button variant="outline" size="sm" className="mt-3" onClick={() => setCreateOpen(true)}>
-              Create your first offer
+              İlk teklifinizi oluşturun
             </Button>
           </div>
         ) : (
@@ -191,10 +191,10 @@ export default function Offers() {
                         </span>
                       </div>
                       <h3 className="font-semibold text-foreground">
-                        {offer.candidate?.name ?? "Unknown Candidate"}
+                        {offer.candidate?.name ?? "Bilinmeyen Aday"}
                       </h3>
                       <p className="text-sm text-muted-foreground">
-                        {offer.job?.title ?? "Unknown Role"} · {offer.job?.department}
+                        {offer.job?.title ?? "Bilinmeyen İlan"} · {offer.job?.department}
                       </p>
                       <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
                         <span className="flex items-center gap-1 font-semibold text-foreground text-sm">
@@ -225,7 +225,7 @@ export default function Offers() {
                         size="sm"
                         variant="ghost"
                         className="h-8 w-8 p-0 text-muted-foreground hover:text-red-600"
-                        onClick={() => deleteOffer(offer.id, { onSuccess: () => toast({ title: "Offer deleted" }) })}
+                        onClick={() => deleteOffer(offer.id, { onSuccess: () => toast({ title: "Teklif silindi" }) })}
                         data-testid={`btn-delete-offer-${offer.id}`}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
@@ -260,7 +260,7 @@ function CreateOfferDialog({ open, onOpenChange }: { open: boolean; onOpenChange
 
   const handleSubmit = () => {
     if (!form.applicationId || !form.amount) {
-      toast({ title: "Missing fields", description: "Please select an application and enter an amount.", variant: "destructive" });
+      toast({ title: "Eksik bilgi", description: "Lütfen bir başvuru seçin ve tutar girin.", variant: "destructive" });
       return;
     }
     if (!selectedApp) return;
@@ -275,7 +275,7 @@ function CreateOfferDialog({ open, onOpenChange }: { open: boolean; onOpenChange
       status: "draft",
     }, {
       onSuccess: () => {
-        toast({ title: "Offer created!" });
+        toast({ title: "Teklif oluşturuldu!" });
         onOpenChange(false);
         setForm({ applicationId: "", amount: "", currency: "USD", notes: "" });
       },
@@ -286,17 +286,17 @@ function CreateOfferDialog({ open, onOpenChange }: { open: boolean; onOpenChange
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md" aria-describedby="create-offer-desc">
         <DialogHeader>
-          <DialogTitle>Create Offer</DialogTitle>
+          <DialogTitle>Teklif Oluştur</DialogTitle>
           <p id="create-offer-desc" className="text-sm text-muted-foreground">
-            Draft a compensation offer for a candidate.
+            Aday için bir teklif oluşturun.
           </p>
         </DialogHeader>
         <div className="space-y-4 pt-2">
           <div>
-            <Label className="text-xs font-medium mb-1.5 block">Application *</Label>
+            <Label className="text-xs font-medium mb-1.5 block">Başvuru *</Label>
             <Select value={form.applicationId} onValueChange={(v) => setForm((f) => ({ ...f, applicationId: v }))}>
               <SelectTrigger data-testid="select-offer-application">
-                <SelectValue placeholder="Select candidate application..." />
+                <SelectValue placeholder="Aday başvurusu seçin..." />
               </SelectTrigger>
               <SelectContent>
                 {applications?.filter((a) => a.candidate?.name).map((a) => (
@@ -310,7 +310,7 @@ function CreateOfferDialog({ open, onOpenChange }: { open: boolean; onOpenChange
 
           <div className="grid grid-cols-3 gap-3">
             <div className="col-span-2">
-              <Label className="text-xs font-medium mb-1.5 block">Amount *</Label>
+              <Label className="text-xs font-medium mb-1.5 block">Tutar *</Label>
               <Input
                 type="number"
                 value={form.amount}
@@ -320,7 +320,7 @@ function CreateOfferDialog({ open, onOpenChange }: { open: boolean; onOpenChange
               />
             </div>
             <div>
-              <Label className="text-xs font-medium mb-1.5 block">Currency</Label>
+              <Label className="text-xs font-medium mb-1.5 block">Para Birimi</Label>
               <Select value={form.currency} onValueChange={(v) => setForm((f) => ({ ...f, currency: v }))}>
                 <SelectTrigger data-testid="select-offer-currency">
                   <SelectValue />
@@ -333,18 +333,18 @@ function CreateOfferDialog({ open, onOpenChange }: { open: boolean; onOpenChange
           </div>
 
           <div>
-            <Label className="text-xs font-medium mb-1.5 block">Notes</Label>
+            <Label className="text-xs font-medium mb-1.5 block">Notlar</Label>
             <Textarea
               value={form.notes}
               onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
-              placeholder="e.g. Includes equity, signing bonus..."
+              placeholder="örn. Hisse senedi, imza bonusu..."
               rows={2}
               data-testid="input-offer-notes"
             />
           </div>
 
           <Button onClick={handleSubmit} disabled={isPending} className="w-full" data-testid="btn-submit-offer">
-            {isPending ? "Creating..." : "Create Offer"}
+            {isPending ? "Oluşturuluyor..." : "Teklif Oluştur"}
           </Button>
         </div>
       </DialogContent>

@@ -79,8 +79,8 @@ export default function Reports() {
         {(<>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-2xl font-display font-bold text-foreground">Reports &amp; Analytics</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">Insights into your recruitment pipeline</p>
+            <h1 className="text-2xl font-display font-bold text-foreground">Raporlar &amp; Analitik</h1>
+            <p className="text-sm text-muted-foreground mt-0.5">İşe alım sürecinize dair içgörüler</p>
           </div>
           <div className="flex flex-wrap gap-2 items-center">
             {/* Office filter */}
@@ -149,8 +149,8 @@ export default function Reports() {
         </div>
 
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <MetricCard icon={Users} label="Total Applications" value={stats?.total ?? 0} color="bg-blue-50 text-blue-600" />
-          <MetricCard icon={CheckCircle} label="Hired" value={stats?.hired ?? 0} sub={`${stats?.conversionRate ?? 0}% conversion`} color="bg-emerald-50 text-emerald-600" />
+          <MetricCard icon={Users} label="Toplam Başvuru" value={stats?.total ?? 0} color="bg-blue-50 text-blue-600" />
+          <MetricCard icon={CheckCircle} label="İşe Alındı" value={stats?.hired ?? 0} sub={`%${stats?.conversionRate ?? 0} dönüşüm`} color="bg-emerald-50 text-emerald-600" />
           <MetricCard icon={Clock} label="Ort. Sözleşme Süresi" value={`${stats?.avgTimeToContractSign ?? 0}g`} sub="başvurudan sözleşmeye" color="bg-amber-50 text-amber-600" />
           <MetricCard icon={TrendingUp} label="Ort. İşe Giriş Süresi" value={`${stats?.avgTimeToEmploy ?? 0}g`} sub="başvurudan girişe" color="bg-teal-50 text-teal-600" />
         </div>
@@ -158,8 +158,8 @@ export default function Reports() {
         <div className="grid lg:grid-cols-2 gap-6">
           <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-base font-semibold">Recruitment Funnel</h2>
-              <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-muted text-muted-foreground border border-border">All-time</span>
+              <h2 className="text-base font-semibold">İşe Alım Hunisi</h2>
+              <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-muted text-muted-foreground border border-border">Tüm Zamanlar</span>
             </div>
             {isLoading ? <div className="h-64 bg-muted/40 rounded-lg animate-pulse" /> : (
               <ResponsiveContainer width="100%" height={250}>
@@ -176,9 +176,9 @@ export default function Reports() {
           </div>
 
           <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-            <h2 className="text-base font-semibold mb-4">Applications Over Time</h2>
+            <h2 className="text-base font-semibold mb-4">Zamana Göre Başvurular</h2>
             {isLoading ? <div className="h-64 bg-muted/40 rounded-lg animate-pulse" /> : stats?.weeklyApplications?.length === 0 ? (
-              <div className="h-64 flex items-center justify-center text-muted-foreground text-sm">No data for selected period</div>
+              <div className="h-64 flex items-center justify-center text-muted-foreground text-sm">Seçili dönem için veri yok</div>
             ) : (
               <ResponsiveContainer width="100%" height={250}>
                 <AreaChart data={stats?.weeklyApplications ?? []} margin={{ left: -20 }}>
@@ -189,7 +189,7 @@ export default function Reports() {
                   <XAxis dataKey="week" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
                   <Tooltip contentStyle={{ borderRadius: 8, border: "1px solid #e5e7eb", fontSize: 12 }} />
-                  <Area type="monotone" dataKey="count" name="Applications" stroke="#3b82f6" strokeWidth={2} fill="url(#appGradient)" />
+                  <Area type="monotone" dataKey="count" name="Başvurular" stroke="#3b82f6" strokeWidth={2} fill="url(#appGradient)" />
                 </AreaChart>
               </ResponsiveContainer>
             )}
@@ -201,8 +201,8 @@ export default function Reports() {
           <div className="p-5 border-b border-border flex items-start gap-3">
             <div className="rounded-lg p-2 bg-red-50 text-red-500 shrink-0 mt-0.5"><XCircle className="h-4 w-4" /></div>
             <div>
-              <h2 className="text-base font-semibold text-foreground">Rejection Drop-off by Stage</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">Shows which pipeline stage candidates were in when they were rejected — helps identify where you lose the most people</p>
+              <h2 className="text-base font-semibold text-foreground">Aşamaya Göre Elenme</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">Adayların hangi aşamada elendiğini gösterir — en fazla kayıp yaşanan noktayı tespit etmenize yardımcı olur</p>
             </div>
           </div>
           {isLoading ? (
@@ -210,7 +210,7 @@ export default function Reports() {
               {[1,2,3,4].map(i => <div key={i} className="h-8 bg-muted rounded" />)}
             </div>
           ) : !stats?.rejectionDropoff?.length ? (
-            <div className="px-5 py-8 text-sm text-muted-foreground text-center">No rejections recorded in this period.</div>
+            <div className="px-5 py-8 text-sm text-muted-foreground text-center">Bu dönemde elenme kaydı bulunamadı.</div>
           ) : (
             <div className="p-5 grid sm:grid-cols-2 gap-6 items-start">
               <ResponsiveContainer width="100%" height={220}>
@@ -230,7 +230,7 @@ export default function Reports() {
                       return (
                         <div className="bg-card border border-border rounded-lg shadow-lg p-3 text-sm">
                           <p className="font-semibold text-foreground mb-1">{label}</p>
-                          <p className="text-muted-foreground">{payload[0].value} rejected ({pct}%)</p>
+                          <p className="text-muted-foreground">{payload[0].value} elendi (%{pct})</p>
                         </div>
                       );
                     }}
@@ -266,7 +266,7 @@ export default function Reports() {
                   });
                 })()}
                 <p className="text-xs text-muted-foreground pt-2 border-t border-border">
-                  Total rejected in period: <span className="font-semibold text-foreground">{stats.rejectionDropoff.reduce((s: number, r: any) => s + r.count, 0)}</span>
+                  Dönemde toplam elenme: <span className="font-semibold text-foreground">{stats.rejectionDropoff.reduce((s: number, r: any) => s + r.count, 0)}</span>
                 </p>
               </div>
             </div>
@@ -275,15 +275,15 @@ export default function Reports() {
 
         <div className="grid xl:grid-cols-2 gap-6">
           <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-            <div className="p-5 border-b border-border flex items-center gap-2"><TimerReset className="h-4 w-4 text-primary" /><div><h2 className="text-base font-semibold">Average Time in Stage</h2><p className="text-xs text-muted-foreground mt-0.5">How long candidates spend in each stage on average</p></div></div>
+            <div className="p-5 border-b border-border flex items-center gap-2"><TimerReset className="h-4 w-4 text-primary" /><div><h2 className="text-base font-semibold">Aşamada Ortalama Süre</h2><p className="text-xs text-muted-foreground mt-0.5">Adayların her aşamada ortalama ne kadar süre geçirdiği</p></div></div>
             <div className="divide-y divide-border">
-              {isLoading ? [1, 2, 3, 4, 5, 6].map((i) => <div key={i} className="h-14 px-5 animate-pulse flex items-center gap-4"><div className="h-3 w-24 bg-muted rounded" /><div className="flex-1 h-2 bg-muted/50 rounded-full" /><div className="h-3 w-12 bg-muted rounded" /></div>) : stageTimes.length === 0 ? <div className="px-5 py-6 text-sm text-muted-foreground">No stage history yet.</div> : stageTimes.map((s: any) => {
+              {isLoading ? [1, 2, 3, 4, 5, 6].map((i) => <div key={i} className="h-14 px-5 animate-pulse flex items-center gap-4"><div className="h-3 w-24 bg-muted rounded" /><div className="flex-1 h-2 bg-muted/50 rounded-full" /><div className="h-3 w-12 bg-muted rounded" /></div>) : stageTimes.length === 0 ? <div className="px-5 py-6 text-sm text-muted-foreground">Henüz aşama geçmişi yok.</div> : stageTimes.map((s: any) => {
                 const width = maxStage > 0 ? (s.avgDays / maxStage) * 100 : 0;
                 return (
                   <div key={s.stage} className="flex items-center gap-4 px-5 py-4">
                     <div className="w-28 text-sm font-medium text-foreground">{STAGE_LABELS[s.stage] ?? s.stage}</div>
                     <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden"><div className="h-full rounded-full transition-all duration-500" style={{ width: `${width}%`, backgroundColor: STAGE_COLORS[s.stage] ?? "#94a3b8" }} /></div>
-                    <div className="w-16 text-right text-sm text-muted-foreground">{s.avgDays > 0 ? `${s.avgDays}d` : "—"}</div>
+                    <div className="w-16 text-right text-sm text-muted-foreground">{s.avgDays > 0 ? `${s.avgDays}g` : "—"}</div>
                   </div>
                 );
               })}

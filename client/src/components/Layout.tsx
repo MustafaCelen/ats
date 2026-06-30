@@ -2,7 +2,7 @@ import { Link, useLocation } from "wouter";
 import {
   LayoutDashboard, Users, Briefcase, BarChart2, ChevronRight, Menu, X,
   Calendar, Shield, LogOut, ClipboardList, UserCheck, KanbanSquare, DollarSign, GraduationCap,
-  Receipt, TrendingUp, Building2, Trophy, ShieldAlert,
+  Receipt, TrendingUp, Building2, Trophy, ShieldAlert, Users2,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { useState } from "react";
@@ -74,7 +74,8 @@ const adminNavItems: NavEntry[] = [
   { icon: Building2,       label: "Portal İlanları", href: "/listings"   },
   { icon: Receipt,         label: "Masraflar & Ek Gelirler", href: "/expenses"   },
   reportsGroupAdmin,
-  { icon: Shield,          label: "Users",          href: "/users"      },
+  { icon: Users2,          label: "Takımlar",       href: "/teams"      },
+  { icon: Shield,          label: "Kullanıcılar",   href: "/users"      },
 ];
 
 const assistantNavItems: NavEntry[] = [
@@ -97,7 +98,7 @@ function resolveCurrentLabel(items: NavEntry[], location: string): string {
       if (isLeafActive(item, location)) return item.label;
     }
   }
-  return "Page";
+  return "Sayfa";
 }
 
 // ── Layout ────────────────────────────────────────────────────────────────────

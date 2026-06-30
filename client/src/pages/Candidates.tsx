@@ -103,7 +103,7 @@ export default function Candidates() {
         {/* Header */}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-2xl font-display font-bold text-foreground">Talent Pool</h1>
+            <h1 className="text-2xl font-display font-bold text-foreground">Aday Havuzu</h1>
             <p className="text-sm text-muted-foreground mt-0.5">Keller Williams Platin & Karma — Aday Havuzu</p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -172,7 +172,7 @@ export default function Candidates() {
             <div>Üretim Bandı</div>
             <div>Konum</div>
             <div>Ofis</div>
-            <div>Exp</div>
+            <div>Deneyim</div>
             <div className="text-right">Eylemler</div>
           </div>
 
