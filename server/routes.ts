@@ -2942,23 +2942,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.get("/api/tmp-cap-count", async (_req, res) => {
-    try {
-      const result = await db.execute(sql`SELECT count(*) FROM employees WHERE cap_value IN ('540000.00','435000.00','540000','435000')`);
-      res.json(result.rows[0]);
-    } catch (err: any) {
-      res.status(500).json({ message: err.message });
-    }
-  });
-
-  app.post("/api/tmp-cap-null", async (_req, res) => {
-    try {
-      const result = await db.execute(sql`UPDATE employees SET cap_value = NULL WHERE cap_value IN ('540000.00','435000.00','540000','435000')`);
-      res.json({ updated: result.rowCount });
-    } catch (err: any) {
-      res.status(500).json({ message: err.message });
-    }
-  });
 
   return httpServer;
 }
