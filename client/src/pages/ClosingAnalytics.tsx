@@ -351,22 +351,43 @@ export default function ClosingAnalytics() {
               ),
             },
             {
-              id: "priceRange", icon: Building2, title: "Fiyat Aralığı Kompozisyonu", subtitle: "Aylık işlem sayısı · yığılmış",
+              id: "priceRange", icon: Building2, title: "Fiyat Aralığı Kompozisyonu", subtitle: "Aylık işlem sayısı · yığılmış bar",
               hasData: (data?.priceRangeTrend?.data?.length ?? 0) > 0,
-              render: (h) => (
-                <ResponsiveContainer width="100%" height={h}>
-                  <AreaChart data={data!.priceRangeTrend.data} margin={{ left: -10, right: 10 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                    <XAxis dataKey="month" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={fmtMonth} />
-                    <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
-                    <Tooltip contentStyle={{ borderRadius: 8, border: "1px solid #e5e7eb", fontSize: 12 }} labelFormatter={fmtMonthLong} />
-                    <Legend wrapperStyle={{ fontSize: 11 }} />
-                    {data!.priceRangeTrend.series.map((s) => (
-                      <Area key={s} type="monotone" dataKey={s} stackId="p" stroke={PRICE_COLORS[s] ?? "#9ca3af"} fill={PRICE_COLORS[s] ?? "#9ca3af"} fillOpacity={0.65} />
-                    ))}
-                  </AreaChart>
-                </ResponsiveContainer>
-              ),
+              render: (h) => {
+                const series = data!.priceRangeTrend.series;
+                const priceTooltip = ({ active, payload, label }: any) => {
+                  if (!active || !payload?.length) return null;
+                  const total = payload.reduce((s: number, p: any) => s + (Number(p.value) || 0), 0);
+                  return (
+                    <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, padding: "8px 12px", fontSize: 12 }}>
+                      <p className="font-medium mb-1">{fmtMonthLong(label)}</p>
+                      {[...payload].reverse().map((p: any) => (
+                        <div key={p.dataKey} className="flex items-center gap-2">
+                          <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: p.fill }} />
+                          <span>{p.dataKey}:</span>
+                          <span className="font-medium">{p.value}</span>
+                          <span className="text-muted-foreground">({total > 0 ? Math.round((p.value / total) * 100) : 0}%)</span>
+                        </div>
+                      ))}
+                      <div className="border-t mt-1 pt-1 font-medium">Toplam: {total}</div>
+                    </div>
+                  );
+                };
+                return (
+                  <ResponsiveContainer width="100%" height={h}>
+                    <BarChart data={data!.priceRangeTrend.data} margin={{ left: -10, right: 10 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                      <XAxis dataKey="month" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={fmtMonth} />
+                      <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
+                      <Tooltip content={priceTooltip} />
+                      <Legend wrapperStyle={{ fontSize: 11 }} />
+                      {series.map((s) => (
+                        <Bar key={s} dataKey={s} stackId="p" fill={PRICE_COLORS[s] ?? "#9ca3af"} />
+                      ))}
+                    </BarChart>
+                  </ResponsiveContainer>
+                );
+              },
             },
             {
               id: "category", icon: Layers, title: "Kategori Kompozisyonu", subtitle: "Aylık işlem sayısı · yığılmış (Satış / Kiralık / Yönlendirme)",
