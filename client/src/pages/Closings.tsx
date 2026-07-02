@@ -116,7 +116,7 @@ function calcAgentBreakdown(
   capUsedSoFar: number,
   capAmount: number | null, // null = unlimited (no cap configured)
   commissionRatePct: number = 2, // e.g. 2 → 2%
-  bmKdvRatePct: number = 0.40, // % of BHB share, e.g. 0.40 → 0.40%
+  bmKdvRatePct: number = 0, // % of BM payı, e.g. 20 → 20%
 ): AgentBreakdown {
   const sideBHB = saleValue * (commissionRatePct / 100);
   const bhbShare = sideBHB * (splitPct / 100);
@@ -134,7 +134,7 @@ function calcAgentBreakdown(
     : Math.min(marketCenterDue, Math.max(0, capAmount - capUsedSoFar));
   const capUsedAfter = capUsedSoFar + marketCenterActual;
 
-  const bmKdv = marketCenterActual > 0 ? bhbShare * (bmKdvRatePct / 100) : 0;
+  const bmKdv = marketCenterActual > 0 ? marketCenterActual * (bmKdvRatePct / 100) : 0;
 
   let ukShare = 0;
   if (employee?.uretkenlikKoclugu && employee?.uretkenlikKocluguOran) {
@@ -302,7 +302,7 @@ function newAgent(): AgentInputRow {
     kwtrKdv: "",
     marketCenterActual: "",
     bmKdv: "",
-    bmKdvRatePct: "0.40",
+    bmKdvRatePct: "0",
     ukShare: "",
     employeeNet: "",
     closingDate: "",
@@ -526,10 +526,9 @@ function SideSection({
             const updateField = (field: keyof AgentInputRow, val: string) => {
               if (field === "bmKdvRatePct") {
                 const rate = parseFloat(val) || 0;
-                const bhb = parseFloat(agent.bhbShare || "0");
                 const bm = parseFloat(agent.marketCenterActual || "0");
                 const updated = { ...agent, bmKdvRatePct: val, isManuallyEdited: true };
-                updated.bmKdv = bm > 0 ? (bhb * rate / 100).toFixed(2) : "0";
+                updated.bmKdv = bm > 0 ? (bm * rate / 100).toFixed(2) : "0";
                 updated.employeeNet = deriveNet(updated);
                 const dk = deriveKasaNakitBanka(updated);
                 updated.kasa = dk.kasa; updated.nakit = dk.nakit; updated.banka = dk.banka;
@@ -542,9 +541,8 @@ function SideSection({
                 const bm = parseFloat(val || "0");
                 if (bm === 0) updated.bmKdv = "0";
                 else {
-                  const bhb = parseFloat(agent.bhbShare || "0");
-                  const rate = parseFloat(agent.bmKdvRatePct || "0.40");
-                  updated.bmKdv = (bhb * rate / 100).toFixed(2);
+                  const rate = parseFloat(agent.bmKdvRatePct || "0");
+                  updated.bmKdv = (bm * rate / 100).toFixed(2);
                 }
               }
               if (field !== "employeeNet") {
@@ -683,7 +681,7 @@ function SideSection({
                     <BreakdownField label="KWTR + KDV (toplam)" prefix="−" value={agent.kwtrKdv} onChange={(v) => updateField("kwtrKdv", v)} />
                     <BreakdownField label="BM (27%)" prefix="−" value={agent.marketCenterActual} onChange={(v) => updateField("marketCenterActual", v)} />
                     <div className="flex items-center justify-between text-xs">
-                      <span className="text-muted-foreground">BM KDV Oranı (% BHB)</span>
+                      <span className="text-muted-foreground">BM KDV Oranı (% BM)</span>
                       <div className="flex items-center gap-1">
                         <Input
                           type="number"
@@ -1573,6 +1571,9 @@ export default function Closings() {
   const [yearFilter, setYearFilter] = useState("all");
   const [monthFilter, setMonthFilter] = useState("all");
   const [officeFilter, setOfficeFilter] = useState<"all" | "Akatlar" | "Zekeriyaköy">("all");
+  const [advisorFilter, setAdvisorFilter] = useState("");
+  const [advisorDropdownOpen, setAdvisorDropdownOpen] = useState(false);
+  const [selectedAgentIds, setSelectedAgentIds] = useState<Set<number>>(new Set());
   // null sortKey = default order (closingId DESC)
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -1688,8 +1689,15 @@ export default function Closings() {
     if (officeFilter !== "all") {
       rows = rows.filter(r => employeeOfficeMap[(r.agent as any).employeeId] === officeFilter);
     }
+    if (advisorFilter) {
+      const q = advisorFilter.toLowerCase();
+      rows = rows.filter(r => {
+        const name: string = (r.agent as any).candidateName ?? (r.agent as any).employeeName ?? "";
+        return name.toLowerCase().includes(q);
+      });
+    }
     return rows;
-  }, [agentRowsAll, yearFilter, monthFilter, officeFilter, employeeOfficeMap]);
+  }, [agentRowsAll, yearFilter, monthFilter, officeFilter, advisorFilter, employeeOfficeMap]);
 
   const completedAgentRows = yearFilteredAgentRows.filter(r => r.effectiveStatus !== "expected");
   const expectedAgentRows  = yearFilteredAgentRows.filter(r => r.effectiveStatus === "expected");
@@ -1825,6 +1833,10 @@ export default function Closings() {
       return matchYear && matchMonth;
     });
     if (officeFilter !== "all") rows = rows.filter(r => employeeOfficeMap[r.employeeId] === officeFilter);
+    if (advisorFilter) {
+      const q = advisorFilter.toLowerCase();
+      rows = rows.filter(r => r.employeeName.toLowerCase().includes(q));
+    }
     const q = search.trim().toLowerCase();
     if (q) {
       rows = rows.filter((row) =>
@@ -1873,10 +1885,10 @@ export default function Closings() {
       if (first) seenClosings.add(row.closingId);
       return first === row.isFirstOfClosing ? row : { ...row, isFirstOfClosing: first };
     });
-  }, [flatRows, search, statusFilter, yearFilter, monthFilter, officeFilter, sortKey, sortDir, employeeOfficeMap]);
+  }, [flatRows, search, statusFilter, yearFilter, monthFilter, officeFilter, advisorFilter, sortKey, sortDir, employeeOfficeMap]);
 
   // Reset to page 1 when filters or sort change
-  useEffect(() => { setCurrentPage(1); }, [search, statusFilter, yearFilter, monthFilter, officeFilter, sortKey, sortDir]);
+  useEffect(() => { setCurrentPage(1); }, [search, statusFilter, yearFilter, monthFilter, officeFilter, advisorFilter, sortKey, sortDir]);
 
   // Click handler for column headers: cycle through asc → desc → default
   const handleColumnSort = (key: string) => {
@@ -2029,6 +2041,40 @@ export default function Closings() {
     } catch {
       toast({ title: "Hata", description: "Bildirim gönderilemedi (ağ hatası).", variant: "destructive" });
     }
+  };
+
+  const advisorNames = useMemo(() => {
+    const names = new Set<string>();
+    for (const r of flatRows) if (r.employeeName) names.add(r.employeeName);
+    return [...names].sort((a, b) => a.localeCompare(b, "tr"));
+  }, [flatRows]);
+
+  const handleBulkApprove = async () => {
+    if (selectedAgentIds.size === 0) return;
+    const def = new Date().toISOString().split("T")[0];
+    const date = window.prompt(`${selectedAgentIds.size} işlemi onaylamak için tarih girin (GG.AA.YYYY veya YYYY-AA-GG):`, def);
+    if (!date) return;
+    const parsed = parseUserDate(date);
+    if (!parsed) {
+      toast({ title: "Hata", description: "Geçersiz tarih. Örnek: 07.06.2026", variant: "destructive" });
+      return;
+    }
+    let success = 0;
+    for (const agentId of selectedAgentIds) {
+      try {
+        const res = await fetch(`/api/closing-agents/${agentId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ status: "completed", closingDate: parsed.toISOString(), paymentCollected: true }),
+        });
+        if (res.ok) success++;
+      } catch { /* continue */ }
+    }
+    queryClient.invalidateQueries({ queryKey: ["/api/closings"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/employees/cap-statuses"] });
+    setSelectedAgentIds(new Set());
+    toast({ title: "Onaylandı", description: `${success} / ${selectedAgentIds.size} işlem onaylandı.` });
   };
 
   const handleExport = () => {
@@ -2377,15 +2423,59 @@ export default function Closings() {
               </button>
             ))}
           </div>
+          {/* Advisor combobox */}
+          <div className="relative">
+            <Input
+              placeholder="Danışman filtrele..."
+              value={advisorFilter}
+              onChange={(e) => { setAdvisorFilter(e.target.value); setAdvisorDropdownOpen(true); }}
+              onFocus={() => setAdvisorDropdownOpen(true)}
+              onBlur={() => setTimeout(() => setAdvisorDropdownOpen(false), 150)}
+              className="h-8 text-sm w-44"
+            />
+            {advisorFilter && (
+              <button
+                onClick={() => { setAdvisorFilter(""); setCurrentPage(1); }}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-sm leading-none"
+              >
+                ×
+              </button>
+            )}
+            {advisorDropdownOpen && (
+              <div className="absolute top-full mt-1 left-0 z-50 bg-popover border border-border rounded-md shadow-md max-h-48 overflow-y-auto w-44">
+                {advisorNames
+                  .filter(n => !advisorFilter || n.toLowerCase().includes(advisorFilter.toLowerCase()))
+                  .slice(0, 12)
+                  .map(name => (
+                    <button
+                      key={name}
+                      type="button"
+                      className="w-full text-left px-3 py-1.5 text-xs hover:bg-muted"
+                      onMouseDown={() => { setAdvisorFilter(name); setAdvisorDropdownOpen(false); setCurrentPage(1); }}
+                    >
+                      {name}
+                    </button>
+                  ))}
+              </div>
+            )}
+          </div>
           <Input
-            placeholder="Ara: adres, danışman, alıcı, satıcı, il, tarih..."
+            placeholder="Ara: adres, alıcı, satıcı, il, tarih..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="h-8 text-sm max-w-sm"
+            className="h-8 text-sm max-w-xs"
           />
           {search && (
             <button onClick={() => setSearch("")} className="text-xs text-muted-foreground hover:text-foreground">
               Temizle
+            </button>
+          )}
+          {selectedAgentIds.size > 0 && (
+            <button
+              onClick={handleBulkApprove}
+              className="h-8 px-3 text-xs rounded-md bg-emerald-600 hover:bg-emerald-700 text-white font-semibold transition-colors"
+            >
+              {selectedAgentIds.size} işlemi onayla
             </button>
           )}
           <span className="text-xs text-muted-foreground ml-auto">
@@ -2484,6 +2574,18 @@ export default function Closings() {
                       <tr key={row.agentId} className={`border-b border-border/50 hover:bg-muted/30 ${row.isFirstOfClosing ? "border-t-2 border-t-border" : ""}`}>
                         <td className="px-2 py-1 whitespace-nowrap">
                           <div className="flex items-center gap-1">
+                            {row.status === "expected" && (
+                              <input
+                                type="checkbox"
+                                checked={selectedAgentIds.has(row.agentId)}
+                                onChange={(e) => {
+                                  const next = new Set(selectedAgentIds);
+                                  if (e.target.checked) next.add(row.agentId); else next.delete(row.agentId);
+                                  setSelectedAgentIds(next);
+                                }}
+                                className="h-3.5 w-3.5 shrink-0"
+                              />
+                            )}
                             {row.status === "expected" ? (
                               <button
                                 onClick={() => handleApproveAgent(row.agentId, row.closingDate)}
