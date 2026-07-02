@@ -6,10 +6,7 @@ import {
   Line, Legend, LineChart,
 } from "recharts";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { format } from "date-fns";
-import { tr } from "date-fns/locale";
 import { TrendingUp, MapPin, Home, DollarSign, Percent, Clock, Layers, Building2, Maximize2 } from "lucide-react";
 
 const OFFICE_OPTIONS = [
@@ -39,11 +36,6 @@ function formatYMD(d: Date) {
   return `${y}-${m}-${day}`;
 }
 
-function fmtMonthLong(m: string) {
-  const [y, mm] = m.split("-");
-  return format(new Date(Number(y), Number(mm) - 1, 1), "MMMM yyyy", { locale: tr });
-}
-
 const CURRENCY_SYMBOL: Record<Currency, string> = { TL: "₺", USD: "$", GOLD: "gr" };
 const CURRENCY_LABEL: Record<Currency, string> = { TL: "TL", USD: "USD", GOLD: "Altın (gr)" };
 
@@ -58,6 +50,14 @@ function fmtMoneyFull(v: number, currency: Currency) {
   const sym = CURRENCY_SYMBOL[currency];
   const n = new Intl.NumberFormat("tr-TR", { maximumFractionDigits: currency === "GOLD" ? 2 : 0 }).format(v);
   return currency === "TL" ? `${n} ${sym}` : currency === "USD" ? `${sym}${n}` : `${n} ${sym}`;
+}
+
+// Filter rows to only include months in [startMo, endMo] (1-based)
+function filterByMonths<T extends { month: string }>(rows: T[], startMo: number, endMo: number): T[] {
+  return rows.filter((r) => {
+    const mo = parseInt((r.month as string).split("-")[1], 10);
+    return startMo <= endMo ? mo >= startMo && mo <= endMo : mo >= startMo || mo <= endMo;
+  });
 }
 
 // Pivot [{month:"2024-01", value:X}, ...] → [{mo:"01", label:"Oca", "2024":X, "2025":Y}, ...]
@@ -152,17 +152,19 @@ function EmptyState() {
   return <div className="h-64 flex items-center justify-center text-muted-foreground text-sm">Seçili dönem için veri yok</div>;
 }
 
-const QUICK_RANGES = [
-  { label: "Son 6 ay",  months: 6  },
-  { label: "Son 12 ay", months: 12 },
-  { label: "Son 24 ay", months: 24 },
-  { label: "Son 36 ay", months: 36 },
+const MONTH_OPTIONS = [
+  { value: 1, label: "Ocak" }, { value: 2, label: "Şubat" }, { value: 3, label: "Mart" },
+  { value: 4, label: "Nisan" }, { value: 5, label: "Mayıs" }, { value: 6, label: "Haziran" },
+  { value: 7, label: "Temmuz" }, { value: 8, label: "Ağustos" }, { value: 9, label: "Eylül" },
+  { value: 10, label: "Ekim" }, { value: 11, label: "Kasım" }, { value: 12, label: "Aralık" },
 ] as const;
 
+// Wide fixed range — fetch all years' data; month filter is applied on the frontend
+const WIDE_FROM = "2020-01-01";
+
 export default function ClosingAnalytics() {
-  const now = new Date();
-  const [fromDate, setFromDate] = useState(formatYMD(new Date(now.getFullYear() - 2, now.getMonth(), 1)));
-  const [toDate, setToDate] = useState(formatYMD(now));
+  const [startMonth, setStartMonth] = useState(1);   // Ocak
+  const [endMonth, setEndMonth] = useState(12);       // Aralık
   const [officeFilter, setOfficeFilter] = useState<string | undefined>(undefined);
   const [categoryFilter, setCategoryFilter] = useState<string | undefined>(undefined);
   const [ilFilter, setIlFilter] = useState<string | undefined>(undefined);
@@ -171,15 +173,10 @@ export default function ClosingAnalytics() {
   const [currency, setCurrency] = useState<Currency>("TL");
   const [expandedChart, setExpandedChart] = useState<string | null>(null);
 
-  const applyQuickRange = (months: number) => {
-    const end = new Date();
-    const start = new Date(end.getFullYear(), end.getMonth() - (months - 1), 1);
-    setFromDate(formatYMD(start));
-    setToDate(formatYMD(end));
-  };
+  const wideTo = useMemo(() => formatYMD(new Date()), []);
 
   const { data, isLoading } = useClosingAnalytics(
-    fromDate, toDate, officeFilter, categoryFilter, ilFilter, ilceFilter, mahalleFilter, currency,
+    WIDE_FROM, wideTo, officeFilter, categoryFilter, ilFilter, ilceFilter, mahalleFilter, currency,
   );
   const { data: locations = [] } = useClosingLocations();
 
@@ -267,22 +264,26 @@ export default function ClosingAnalytics() {
           </div>
         </div>
 
-        {/* Date range + location controls */}
+        {/* Month range + location controls */}
         <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-3 shadow-sm">
           <div className="flex flex-wrap gap-3 items-center">
-            <div className="flex items-center gap-2 text-sm">
-              <span className="text-muted-foreground">Dönem:</span>
-              <Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="h-8 w-[140px]" />
-              <span className="text-muted-foreground">→</span>
-              <Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="h-8 w-[140px]" />
-            </div>
-            <div className="flex items-center gap-1">
-              {QUICK_RANGES.map((r) => (
-                <Button key={r.label} size="sm" variant="outline" className="h-8 text-xs" onClick={() => applyQuickRange(r.months)}>
-                  {r.label}
-                </Button>
-              ))}
-            </div>
+            <span className="text-sm text-muted-foreground">Ay aralığı:</span>
+            <select
+              value={startMonth}
+              onChange={(e) => setStartMonth(Number(e.target.value))}
+              className="h-8 text-xs border border-input rounded bg-background px-2 min-w-[120px]"
+            >
+              {MONTH_OPTIONS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+            </select>
+            <span className="text-sm text-muted-foreground">→</span>
+            <select
+              value={endMonth}
+              onChange={(e) => setEndMonth(Number(e.target.value))}
+              className="h-8 text-xs border border-input rounded bg-background px-2 min-w-[120px]"
+            >
+              {MONTH_OPTIONS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+            </select>
+            <span className="text-xs text-muted-foreground">· Tüm yıllar karşılaştırılır</span>
           </div>
           <div className="flex flex-wrap gap-3 items-center">
             <span className="text-sm text-muted-foreground">Konum:</span>
@@ -321,6 +322,16 @@ export default function ClosingAnalytics() {
         {(() => {
           type ChartDef = { id: string; icon: any; title: string; subtitle: string; hasData: boolean; render: (h: number) => JSX.Element };
 
+          // Pre-filter data to selected month range before YoY pivots
+          const fVol   = filterByMonths(data?.monthlyVolume ?? [], startMonth, endMonth);
+          const fPrice = filterByMonths(data?.monthlyAvgPrice ?? [], startMonth, endMonth);
+          const fDist  = { series: data?.districtsTrend?.series ?? [],    data: filterByMonths(data?.districtsTrend?.data ?? [], startMonth, endMonth) };
+          const fNeigh = { series: data?.neighborhoodsTrend?.series ?? [], data: filterByMonths(data?.neighborhoodsTrend?.data ?? [], startMonth, endMonth) };
+          const fRange = { series: data?.priceRangeTrend?.series ?? [],    data: filterByMonths(data?.priceRangeTrend?.data ?? [], startMonth, endMonth) };
+          const fCat   = { series: data?.categoryTrend?.series ?? [],      data: filterByMonths(data?.categoryTrend?.data ?? [], startMonth, endMonth) };
+          const fComm  = { series: data?.commissionTrend?.series ?? [],    data: filterByMonths(data?.commissionTrend?.data ?? [], startMonth, endMonth) };
+          const fDur   = { series: data?.durationTrend?.series ?? [],      data: filterByMonths(data?.durationTrend?.data ?? [], startMonth, endMonth) };
+
           const chartDefs: ChartDef[] = [
             // ── 1. İşlem adedi: X=ay, lines per year
             {
@@ -328,9 +339,9 @@ export default function ClosingAnalytics() {
               icon: TrendingUp,
               title: "Aylık Kapanış Adedi",
               subtitle: "Aylar bazında yıllık karşılaştırma",
-              hasData: (data?.monthlyVolume?.length ?? 0) > 0,
+              hasData: fVol.length > 0,
               render: (h) => {
-                const { data: yoy, years } = yoyMonthly(data!.monthlyVolume, "count");
+                const { data: yoy, years } = yoyMonthly(fVol, "count");
                 return (
                   <ResponsiveContainer width="100%" height={h}>
                     <LineChart data={yoy} margin={{ left: -10, right: 10 }}>
@@ -354,9 +365,9 @@ export default function ClosingAnalytics() {
               icon: DollarSign,
               title: "Ortalama Satış Fiyatı",
               subtitle: `Aylar bazında yıllık karşılaştırma · ${CURRENCY_LABEL[currency]}`,
-              hasData: (data?.monthlyAvgPrice?.length ?? 0) > 0,
+              hasData: fPrice.length > 0,
               render: (h) => {
-                const { data: yoy, years } = yoyMonthly(data!.monthlyAvgPrice, "avgPrice");
+                const { data: yoy, years } = yoyMonthly(fPrice, "avgPrice");
                 return (
                   <ResponsiveContainer width="100%" height={h}>
                     <LineChart data={yoy} margin={{ left: -10, right: 10 }}>
@@ -383,9 +394,9 @@ export default function ClosingAnalytics() {
               icon: MapPin,
               title: "İlçe Bazlı Karşılaştırma",
               subtitle: "Seçilen dönem toplamı · yıllık",
-              hasData: (data?.districtsTrend?.data?.length ?? 0) > 0,
+              hasData: fDist.data.length > 0,
               render: (h) => {
-                const { data: yoy, years } = aggregateByYear(data!.districtsTrend, "sum");
+                const { data: yoy, years } = aggregateByYear(fDist, "sum");
                 return (
                   <ResponsiveContainer width="100%" height={h}>
                     <BarChart data={yoy} margin={{ left: -10, right: 10, bottom: 20 }}>
@@ -409,9 +420,9 @@ export default function ClosingAnalytics() {
               icon: Home,
               title: "Mahalle Bazlı Karşılaştırma",
               subtitle: "Seçilen dönem toplamı · yıllık",
-              hasData: (data?.neighborhoodsTrend?.data?.length ?? 0) > 0,
+              hasData: fNeigh.data.length > 0,
               render: (h) => {
-                const { data: yoy, years } = aggregateByYear(data!.neighborhoodsTrend, "sum");
+                const { data: yoy, years } = aggregateByYear(fNeigh, "sum");
                 return (
                   <ResponsiveContainer width="100%" height={h}>
                     <BarChart data={yoy} margin={{ left: -10, right: 10, bottom: 20 }}>
@@ -435,9 +446,9 @@ export default function ClosingAnalytics() {
               icon: Building2,
               title: "Fiyat Aralığı Dağılımı",
               subtitle: "Fiyat dilimine göre işlem sayısı · yıllık karşılaştırma",
-              hasData: (data?.priceRangeTrend?.data?.length ?? 0) > 0,
+              hasData: fRange.data.length > 0,
               render: (h) => {
-                const { data: yoy, years } = aggregateByYear(data!.priceRangeTrend, "sum");
+                const { data: yoy, years } = aggregateByYear(fRange, "sum");
                 return (
                   <ResponsiveContainer width="100%" height={h}>
                     <BarChart data={yoy} margin={{ left: -10, right: 10, bottom: 20 }}>
@@ -461,9 +472,9 @@ export default function ClosingAnalytics() {
               icon: Layers,
               title: "Kategori Karşılaştırması",
               subtitle: "Satış / Kiralık / Yönlendirme · yıllık",
-              hasData: (data?.categoryTrend?.data?.length ?? 0) > 0,
+              hasData: fCat.data.length > 0,
               render: (h) => {
-                const { data: yoy, years } = aggregateByYear(data!.categoryTrend, "sum");
+                const { data: yoy, years } = aggregateByYear(fCat, "sum");
                 return (
                   <ResponsiveContainer width="100%" height={h}>
                     <BarChart data={yoy} margin={{ left: -10, right: 10 }}>
@@ -487,9 +498,9 @@ export default function ClosingAnalytics() {
               icon: Percent,
               title: "Ortalama Komisyon Oranı",
               subtitle: "Kategori başına ortalama · yıllık karşılaştırma",
-              hasData: (data?.commissionTrend?.data?.length ?? 0) > 0,
+              hasData: fComm.data.length > 0,
               render: (h) => {
-                const { data: yoy, years } = aggregateByYear(data!.commissionTrend, "avg");
+                const { data: yoy, years } = aggregateByYear(fComm, "avg");
                 return (
                   <ResponsiveContainer width="100%" height={h}>
                     <BarChart data={yoy} margin={{ left: -10, right: 10 }}>
@@ -516,9 +527,9 @@ export default function ClosingAnalytics() {
               icon: Clock,
               title: "Ortalama İşlem Süresi",
               subtitle: "Kategori başına ortalama gün · yıllık karşılaştırma",
-              hasData: (data?.durationTrend?.data?.length ?? 0) > 0,
+              hasData: fDur.data.length > 0,
               render: (h) => {
-                const { data: yoy, years } = aggregateByYear(data!.durationTrend, "avg");
+                const { data: yoy, years } = aggregateByYear(fDur, "avg");
                 return (
                   <ResponsiveContainer width="100%" height={h}>
                     <BarChart data={yoy} margin={{ left: -10, right: 10 }}>
