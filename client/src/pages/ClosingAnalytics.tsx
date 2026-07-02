@@ -2,8 +2,8 @@ import { useState, useMemo } from "react";
 import { Layout } from "@/components/Layout";
 import { useClosingAnalytics, useClosingLocations, type Currency } from "@/hooks/use-stats";
 import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid,
-  ComposedChart, Line, Legend, AreaChart, Area, LineChart,
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
+  Line, Legend, LineChart,
 } from "recharts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,26 +25,12 @@ const CATEGORY_OPTIONS = [
   { label: "Yönlendirme", value: "Yönlendirme" },
 ] as const;
 
-const CATEGORY_COLORS: Record<string, string> = {
-  "Satış":       "#3b82f6",
-  "Kiralık":     "#10b981",
-  "Yönlendirme": "#f59e0b",
-  "Belirtilmemiş": "#9ca3af",
-};
+// Year-over-year color palette: each year gets a distinct color
+const YEAR_PALETTE = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4"];
+const colorForYear = (i: number) => YEAR_PALETTE[i % YEAR_PALETTE.length];
 
-// Series palette (used for districts, neighborhoods, price ranges)
-const PALETTE = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444", "#06b6d4", "#94a3b8"];
-const colorFor = (i: number) => PALETTE[i % PALETTE.length];
-
-// Price range palette: cool→warm as price grows
-const PRICE_COLORS: Record<string, string> = {
-  "0 - 2M":   "#0ea5e9",
-  "2 - 5M":   "#22c55e",
-  "5 - 10M":  "#eab308",
-  "10 - 25M": "#f97316",
-  "25 - 50M": "#ef4444",
-  "50M+":     "#a855f7",
-};
+const MONTH_ABBR = ["Oca", "Şub", "Mar", "Nis", "May", "Haz", "Tem", "Ağu", "Eyl", "Eki", "Kas", "Ara"];
+const fmtMonNum = (num: string) => MONTH_ABBR[parseInt(num, 10) - 1] ?? num;
 
 function formatYMD(d: Date) {
   const y = d.getFullYear();
@@ -53,10 +39,6 @@ function formatYMD(d: Date) {
   return `${y}-${m}-${day}`;
 }
 
-function fmtMonth(m: string) {
-  const [y, mm] = m.split("-");
-  return format(new Date(Number(y), Number(mm) - 1, 1), "MMM yy", { locale: tr });
-}
 function fmtMonthLong(m: string) {
   const [y, mm] = m.split("-");
   return format(new Date(Number(y), Number(mm) - 1, 1), "MMMM yyyy", { locale: tr });
@@ -78,7 +60,68 @@ function fmtMoneyFull(v: number, currency: Currency) {
   return currency === "TL" ? `${n} ${sym}` : currency === "USD" ? `${sym}${n}` : `${n} ${sym}`;
 }
 
-function Card({ icon: Icon, title, subtitle, onExpand, children }: { icon: any; title: string; subtitle?: string; onExpand?: () => void; children: React.ReactNode }) {
+// Pivot [{month:"2024-01", value:X}, ...] → [{mo:"01", label:"Oca", "2024":X, "2025":Y}, ...]
+function yoyMonthly<T extends { month: string }>(
+  rows: T[],
+  valueKey: keyof T,
+): { data: Record<string, any>[]; years: string[] } {
+  const years = new Set<string>();
+  const byMonth: Record<string, Record<string, number>> = {};
+  for (const row of rows) {
+    const [yr, mo] = (row.month as string).split("-");
+    years.add(yr);
+    if (!byMonth[mo]) byMonth[mo] = {};
+    byMonth[mo][yr] = Number(row[valueKey]) || 0;
+  }
+  const sortedYears = [...years].sort();
+  return {
+    data: Object.keys(byMonth)
+      .sort()
+      .map((mo) => ({ mo, label: fmtMonNum(mo), ...byMonth[mo] })),
+    years: sortedYears,
+  };
+}
+
+// Aggregate TrendSeries [{month, seriesA:v, seriesB:v}] by year → [{name:seriesA, "2024":total, ...}]
+function aggregateByYear(
+  trend: { series: string[]; data: Record<string, any>[] },
+  mode: "sum" | "avg" = "sum",
+): { data: Record<string, any>[]; years: string[] } {
+  const years = new Set<string>();
+  const acc: Record<string, Record<string, number>> = {};
+  const cnt: Record<string, Record<string, number>> = {};
+  for (const row of trend.data) {
+    const yr = (row.month as string).split("-")[0];
+    years.add(yr);
+    for (const s of trend.series) {
+      if (!acc[s]) { acc[s] = {}; cnt[s] = {}; }
+      acc[s][yr] = (acc[s][yr] ?? 0) + (Number(row[s]) || 0);
+      cnt[s][yr] = (cnt[s][yr] ?? 0) + 1;
+    }
+  }
+  const sortedYears = [...years].sort();
+  return {
+    data: trend.series.map((s) => ({
+      name: s,
+      ...Object.fromEntries(
+        sortedYears.map((yr) => [
+          yr,
+          mode === "avg" && cnt[s]?.[yr]
+            ? acc[s][yr] / cnt[s][yr]
+            : (acc[s]?.[yr] ?? 0),
+        ]),
+      ),
+    })),
+    years: sortedYears,
+  };
+}
+
+const TOOLTIP_STYLE = { borderRadius: 8, border: "1px solid #e5e7eb", fontSize: 12 };
+const AXIS_PROPS = { axisLine: false, tickLine: false, tick: { fontSize: 11 } } as const;
+
+function Card({ icon: Icon, title, subtitle, onExpand, children }: {
+  icon: any; title: string; subtitle?: string; onExpand?: () => void; children: React.ReactNode;
+}) {
   return (
     <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
       <div className="flex items-start justify-between gap-2 mb-1">
@@ -118,7 +161,7 @@ const QUICK_RANGES = [
 
 export default function ClosingAnalytics() {
   const now = new Date();
-  const [fromDate, setFromDate] = useState(formatYMD(new Date(now.getFullYear(), now.getMonth() - 11, 1)));
+  const [fromDate, setFromDate] = useState(formatYMD(new Date(now.getFullYear() - 2, now.getMonth(), 1)));
   const [toDate, setToDate] = useState(formatYMD(now));
   const [officeFilter, setOfficeFilter] = useState<string | undefined>(undefined);
   const [categoryFilter, setCategoryFilter] = useState<string | undefined>(undefined);
@@ -135,14 +178,15 @@ export default function ClosingAnalytics() {
     setToDate(formatYMD(end));
   };
 
-  const { data, isLoading } = useClosingAnalytics(fromDate, toDate, officeFilter, categoryFilter, ilFilter, ilceFilter, mahalleFilter, currency);
+  const { data, isLoading } = useClosingAnalytics(
+    fromDate, toDate, officeFilter, categoryFilter, ilFilter, ilceFilter, mahalleFilter, currency,
+  );
   const { data: locations = [] } = useClosingLocations();
 
-  // Cascading location dropdowns — Il → Ilce → Mahalle
   const ilOptions = useMemo(() => {
     const set = new Set<string>();
     for (const l of locations) if (l.il) set.add(l.il);
-    return Array.from(set).sort((a, b) => a.localeCompare(b, "tr"));
+    return [...set].sort((a, b) => a.localeCompare(b, "tr"));
   }, [locations]);
   const ilceOptions = useMemo(() => {
     const set = new Set<string>();
@@ -151,7 +195,7 @@ export default function ClosingAnalytics() {
       if (ilFilter && l.il !== ilFilter) continue;
       set.add(l.ilce);
     }
-    return Array.from(set).sort((a, b) => a.localeCompare(b, "tr"));
+    return [...set].sort((a, b) => a.localeCompare(b, "tr"));
   }, [locations, ilFilter]);
   const mahalleOptions = useMemo(() => {
     const set = new Set<string>();
@@ -161,7 +205,7 @@ export default function ClosingAnalytics() {
       if (ilceFilter && l.ilce !== ilceFilter) continue;
       set.add(l.mahalle);
     }
-    return Array.from(set).sort((a, b) => a.localeCompare(b, "tr"));
+    return [...set].sort((a, b) => a.localeCompare(b, "tr"));
   }, [locations, ilFilter, ilceFilter]);
 
   const skel = <div className="h-64 bg-muted/40 rounded-lg animate-pulse" />;
@@ -173,7 +217,7 @@ export default function ClosingAnalytics() {
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-2xl font-display font-bold text-foreground">Kapanış Analitiği</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">Coğrafi dağılım, fiyat trendleri ve işlem kırılımı</p>
+            <p className="text-sm text-muted-foreground mt-0.5">Yıllık karşılaştırmalı trend raporları</p>
           </div>
           <div className="flex flex-wrap gap-2 items-center">
             <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-1">
@@ -184,7 +228,6 @@ export default function ClosingAnalytics() {
                   variant={officeFilter === o.value ? "default" : "ghost"}
                   className="h-7 text-xs px-3"
                   onClick={() => setOfficeFilter(o.value as string | undefined)}
-                  data-testid={`btn-office-${o.label.replace(/\s/g, "-")}`}
                 >
                   {o.label}
                 </Button>
@@ -203,7 +246,6 @@ export default function ClosingAnalytics() {
                 </Button>
               ))}
             </div>
-            {/* Currency toggle */}
             <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-1">
               {(["TL", "USD", "GOLD"] as Currency[]).map((c) => {
                 const disabled = c !== "TL" && data?.currencyAvailable && !data.currencyAvailable[c];
@@ -277,177 +319,230 @@ export default function ClosingAnalytics() {
         </div>
 
         {(() => {
-          type ChartDef = { id: string; icon: any; title: string; subtitle: string; hasData: boolean; render: (height: number) => JSX.Element };
+          type ChartDef = { id: string; icon: any; title: string; subtitle: string; hasData: boolean; render: (h: number) => JSX.Element };
+
           const chartDefs: ChartDef[] = [
+            // ── 1. İşlem adedi: X=ay, lines per year
             {
-              id: "volume", icon: TrendingUp, title: "Aylık Kapanış Hacmi", subtitle: `İşlem adedi (bar) ve toplam ${CURRENCY_LABEL[currency]} (çizgi)`,
+              id: "volume",
+              icon: TrendingUp,
+              title: "Aylık Kapanış Adedi",
+              subtitle: "Aylar bazında yıllık karşılaştırma",
               hasData: (data?.monthlyVolume?.length ?? 0) > 0,
-              render: (h) => (
-                <ResponsiveContainer width="100%" height={h}>
-                  <ComposedChart data={data!.monthlyVolume} margin={{ left: -10, right: 10 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                    <XAxis dataKey="month" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={fmtMonth} />
-                    <YAxis yAxisId="left" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
-                    <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v) => fmtMoney(v, currency)} />
-                    <Tooltip contentStyle={{ borderRadius: 8, border: "1px solid #e5e7eb", fontSize: 12 }} labelFormatter={fmtMonthLong}
-                      formatter={(v: number, n: string) => n.startsWith("Toplam") ? [fmtMoneyFull(v, currency), n] : [v, n]} />
-                    <Legend wrapperStyle={{ fontSize: 12 }} />
-                    <Bar yAxisId="left" dataKey="count" name="Adet" fill="#3b82f6" />
-                    <Line yAxisId="right" type="monotone" dataKey="totalValue" name={`Toplam ${CURRENCY_LABEL[currency]}`} stroke="#10b981" strokeWidth={2} dot={{ r: 2 }} />
-                  </ComposedChart>
-                </ResponsiveContainer>
-              ),
-            },
-            {
-              id: "avgPrice", icon: DollarSign, title: "Ortalama Satış Fiyatı Trendi", subtitle: `Aylık ortalama (${CURRENCY_LABEL[currency]})`,
-              hasData: (data?.monthlyAvgPrice?.length ?? 0) > 0,
-              render: (h) => (
-                <ResponsiveContainer width="100%" height={h}>
-                  <ComposedChart data={data!.monthlyAvgPrice} margin={{ left: -10, right: 10 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                    <XAxis dataKey="month" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={fmtMonth} />
-                    <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v) => fmtMoney(v, currency)} />
-                    <Tooltip contentStyle={{ borderRadius: 8, border: "1px solid #e5e7eb", fontSize: 12 }} labelFormatter={fmtMonthLong}
-                      formatter={(v: number) => [fmtMoneyFull(v, currency), "Ortalama"]} />
-                    <Line type="monotone" dataKey="avgPrice" name="Ortalama" stroke="#8b5cf6" strokeWidth={2} dot={{ r: 3 }} />
-                  </ComposedChart>
-                </ResponsiveContainer>
-              ),
-            },
-            {
-              id: "districts", icon: MapPin, title: "İlçe Trend", subtitle: "Aylık işlem adedi · Top 6 ilçe + Diğer",
-              hasData: (data?.districtsTrend?.data?.length ?? 0) > 0,
-              render: (h) => (
-                <ResponsiveContainer width="100%" height={h}>
-                  <LineChart data={data!.districtsTrend.data} margin={{ left: -10, right: 10 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                    <XAxis dataKey="month" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={fmtMonth} />
-                    <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
-                    <Tooltip contentStyle={{ borderRadius: 8, border: "1px solid #e5e7eb", fontSize: 12 }} labelFormatter={fmtMonthLong} />
-                    <Legend wrapperStyle={{ fontSize: 11 }} />
-                    {data!.districtsTrend.series.map((s, i) => (
-                      <Line key={s} type="monotone" dataKey={s} stroke={colorFor(i)} strokeWidth={2} dot={{ r: 2 }} activeDot={{ r: 4 }} />
-                    ))}
-                  </LineChart>
-                </ResponsiveContainer>
-              ),
-            },
-            {
-              id: "neighborhoods", icon: Home, title: "Mahalle Trend", subtitle: "Aylık işlem adedi · Top 6 mahalle + Diğer",
-              hasData: (data?.neighborhoodsTrend?.data?.length ?? 0) > 0,
-              render: (h) => (
-                <ResponsiveContainer width="100%" height={h}>
-                  <LineChart data={data!.neighborhoodsTrend.data} margin={{ left: -10, right: 10 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                    <XAxis dataKey="month" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={fmtMonth} />
-                    <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
-                    <Tooltip contentStyle={{ borderRadius: 8, border: "1px solid #e5e7eb", fontSize: 12 }} labelFormatter={fmtMonthLong} />
-                    <Legend wrapperStyle={{ fontSize: 11 }} />
-                    {data!.neighborhoodsTrend.series.map((s, i) => (
-                      <Line key={s} type="monotone" dataKey={s} stroke={colorFor(i)} strokeWidth={2} dot={{ r: 2 }} activeDot={{ r: 4 }} />
-                    ))}
-                  </LineChart>
-                </ResponsiveContainer>
-              ),
-            },
-            {
-              id: "priceRange", icon: Building2, title: "Fiyat Aralığı Kompozisyonu", subtitle: "Aylık işlem sayısı · yığılmış bar",
-              hasData: (data?.priceRangeTrend?.data?.length ?? 0) > 0,
               render: (h) => {
-                const series = data!.priceRangeTrend.series;
-                const priceTooltip = ({ active, payload, label }: any) => {
-                  if (!active || !payload?.length) return null;
-                  const total = payload.reduce((s: number, p: any) => s + (Number(p.value) || 0), 0);
-                  return (
-                    <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, padding: "8px 12px", fontSize: 12 }}>
-                      <p className="font-medium mb-1">{fmtMonthLong(label)}</p>
-                      {[...payload].reverse().map((p: any) => (
-                        <div key={p.dataKey} className="flex items-center gap-2">
-                          <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: p.fill }} />
-                          <span>{p.dataKey}:</span>
-                          <span className="font-medium">{p.value}</span>
-                          <span className="text-muted-foreground">({total > 0 ? Math.round((p.value / total) * 100) : 0}%)</span>
-                        </div>
-                      ))}
-                      <div className="border-t mt-1 pt-1 font-medium">Toplam: {total}</div>
-                    </div>
-                  );
-                };
+                const { data: yoy, years } = yoyMonthly(data!.monthlyVolume, "count");
                 return (
                   <ResponsiveContainer width="100%" height={h}>
-                    <BarChart data={data!.priceRangeTrend.data} margin={{ left: -10, right: 10 }}>
+                    <LineChart data={yoy} margin={{ left: -10, right: 10 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                      <XAxis dataKey="label" {...AXIS_PROPS} />
+                      <YAxis {...AXIS_PROPS} allowDecimals={false} />
+                      <Tooltip contentStyle={TOOLTIP_STYLE} />
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                      {years.map((yr, i) => (
+                        <Line key={yr} type="monotone" dataKey={yr} name={yr} stroke={colorForYear(i)} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                      ))}
+                    </LineChart>
+                  </ResponsiveContainer>
+                );
+              },
+            },
+
+            // ── 2. Ortalama fiyat: X=ay, lines per year
+            {
+              id: "avgPrice",
+              icon: DollarSign,
+              title: "Ortalama Satış Fiyatı",
+              subtitle: `Aylar bazında yıllık karşılaştırma · ${CURRENCY_LABEL[currency]}`,
+              hasData: (data?.monthlyAvgPrice?.length ?? 0) > 0,
+              render: (h) => {
+                const { data: yoy, years } = yoyMonthly(data!.monthlyAvgPrice, "avgPrice");
+                return (
+                  <ResponsiveContainer width="100%" height={h}>
+                    <LineChart data={yoy} margin={{ left: -10, right: 10 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                      <XAxis dataKey="label" {...AXIS_PROPS} />
+                      <YAxis {...AXIS_PROPS} tickFormatter={(v) => fmtMoney(v, currency)} />
+                      <Tooltip
+                        contentStyle={TOOLTIP_STYLE}
+                        formatter={(v: number, name: string) => [fmtMoneyFull(v, currency), name]}
+                      />
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                      {years.map((yr, i) => (
+                        <Line key={yr} type="monotone" dataKey={yr} name={yr} stroke={colorForYear(i)} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                      ))}
+                    </LineChart>
+                  </ResponsiveContainer>
+                );
+              },
+            },
+
+            // ── 3. İlçe: X=ilçe, grouped bars per year
+            {
+              id: "districts",
+              icon: MapPin,
+              title: "İlçe Bazlı Karşılaştırma",
+              subtitle: "Seçilen dönem toplamı · yıllık",
+              hasData: (data?.districtsTrend?.data?.length ?? 0) > 0,
+              render: (h) => {
+                const { data: yoy, years } = aggregateByYear(data!.districtsTrend, "sum");
+                return (
+                  <ResponsiveContainer width="100%" height={h}>
+                    <BarChart data={yoy} margin={{ left: -10, right: 10, bottom: 20 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-                      <XAxis dataKey="month" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={fmtMonth} />
-                      <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
-                      <Tooltip content={priceTooltip} />
-                      <Legend wrapperStyle={{ fontSize: 11 }} />
-                      {series.map((s) => (
-                        <Bar key={s} dataKey={s} stackId="p" fill={PRICE_COLORS[s] ?? "#9ca3af"} />
+                      <XAxis dataKey="name" {...AXIS_PROPS} angle={-15} textAnchor="end" interval={0} />
+                      <YAxis {...AXIS_PROPS} allowDecimals={false} />
+                      <Tooltip contentStyle={TOOLTIP_STYLE} />
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                      {years.map((yr, i) => (
+                        <Bar key={yr} dataKey={yr} name={yr} fill={colorForYear(i)} radius={[3, 3, 0, 0]} maxBarSize={32} />
                       ))}
                     </BarChart>
                   </ResponsiveContainer>
                 );
               },
             },
+
+            // ── 4. Mahalle: X=mahalle, grouped bars per year
             {
-              id: "category", icon: Layers, title: "Kategori Kompozisyonu", subtitle: "Aylık işlem sayısı · yığılmış (Satış / Kiralık / Yönlendirme)",
+              id: "neighborhoods",
+              icon: Home,
+              title: "Mahalle Bazlı Karşılaştırma",
+              subtitle: "Seçilen dönem toplamı · yıllık",
+              hasData: (data?.neighborhoodsTrend?.data?.length ?? 0) > 0,
+              render: (h) => {
+                const { data: yoy, years } = aggregateByYear(data!.neighborhoodsTrend, "sum");
+                return (
+                  <ResponsiveContainer width="100%" height={h}>
+                    <BarChart data={yoy} margin={{ left: -10, right: 10, bottom: 20 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                      <XAxis dataKey="name" {...AXIS_PROPS} angle={-15} textAnchor="end" interval={0} />
+                      <YAxis {...AXIS_PROPS} allowDecimals={false} />
+                      <Tooltip contentStyle={TOOLTIP_STYLE} />
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                      {years.map((yr, i) => (
+                        <Bar key={yr} dataKey={yr} name={yr} fill={colorForYear(i)} radius={[3, 3, 0, 0]} maxBarSize={32} />
+                      ))}
+                    </BarChart>
+                  </ResponsiveContainer>
+                );
+              },
+            },
+
+            // ── 5. Fiyat aralığı: X=fiyat dilimi, grouped bars per year
+            {
+              id: "priceRange",
+              icon: Building2,
+              title: "Fiyat Aralığı Dağılımı",
+              subtitle: "Fiyat dilimine göre işlem sayısı · yıllık karşılaştırma",
+              hasData: (data?.priceRangeTrend?.data?.length ?? 0) > 0,
+              render: (h) => {
+                const { data: yoy, years } = aggregateByYear(data!.priceRangeTrend, "sum");
+                return (
+                  <ResponsiveContainer width="100%" height={h}>
+                    <BarChart data={yoy} margin={{ left: -10, right: 10, bottom: 20 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                      <XAxis dataKey="name" {...AXIS_PROPS} angle={-15} textAnchor="end" interval={0} />
+                      <YAxis {...AXIS_PROPS} allowDecimals={false} />
+                      <Tooltip contentStyle={TOOLTIP_STYLE} />
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                      {years.map((yr, i) => (
+                        <Bar key={yr} dataKey={yr} name={yr} fill={colorForYear(i)} radius={[3, 3, 0, 0]} maxBarSize={32} />
+                      ))}
+                    </BarChart>
+                  </ResponsiveContainer>
+                );
+              },
+            },
+
+            // ── 6. Kategori: X=kategori, grouped bars per year
+            {
+              id: "category",
+              icon: Layers,
+              title: "Kategori Karşılaştırması",
+              subtitle: "Satış / Kiralık / Yönlendirme · yıllık",
               hasData: (data?.categoryTrend?.data?.length ?? 0) > 0,
-              render: (h) => (
-                <ResponsiveContainer width="100%" height={h}>
-                  <AreaChart data={data!.categoryTrend.data} margin={{ left: -10, right: 10 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                    <XAxis dataKey="month" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={fmtMonth} />
-                    <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
-                    <Tooltip contentStyle={{ borderRadius: 8, border: "1px solid #e5e7eb", fontSize: 12 }} labelFormatter={fmtMonthLong} />
-                    <Legend wrapperStyle={{ fontSize: 11 }} />
-                    {data!.categoryTrend.series.map((s) => (
-                      <Area key={s} type="monotone" dataKey={s} stackId="c" stroke={CATEGORY_COLORS[s] ?? "#9ca3af"} fill={CATEGORY_COLORS[s] ?? "#9ca3af"} fillOpacity={0.65} />
-                    ))}
-                  </AreaChart>
-                </ResponsiveContainer>
-              ),
+              render: (h) => {
+                const { data: yoy, years } = aggregateByYear(data!.categoryTrend, "sum");
+                return (
+                  <ResponsiveContainer width="100%" height={h}>
+                    <BarChart data={yoy} margin={{ left: -10, right: 10 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                      <XAxis dataKey="name" {...AXIS_PROPS} />
+                      <YAxis {...AXIS_PROPS} allowDecimals={false} />
+                      <Tooltip contentStyle={TOOLTIP_STYLE} />
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                      {years.map((yr, i) => (
+                        <Bar key={yr} dataKey={yr} name={yr} fill={colorForYear(i)} radius={[3, 3, 0, 0]} maxBarSize={40} />
+                      ))}
+                    </BarChart>
+                  </ResponsiveContainer>
+                );
+              },
             },
+
+            // ── 7. Komisyon: X=kategori, grouped bars per year (avg %)
             {
-              id: "commission", icon: Percent, title: "Ortalama Komisyon Oranı Trendi", subtitle: "Kategori başına aylık ortalama (%)",
+              id: "commission",
+              icon: Percent,
+              title: "Ortalama Komisyon Oranı",
+              subtitle: "Kategori başına ortalama · yıllık karşılaştırma",
               hasData: (data?.commissionTrend?.data?.length ?? 0) > 0,
-              render: (h) => (
-                <ResponsiveContainer width="100%" height={h}>
-                  <LineChart data={data!.commissionTrend.data} margin={{ left: -10, right: 10 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                    <XAxis dataKey="month" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={fmtMonth} />
-                    <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v) => `${v}%`} />
-                    <Tooltip contentStyle={{ borderRadius: 8, border: "1px solid #e5e7eb", fontSize: 12 }} labelFormatter={fmtMonthLong}
-                      formatter={(v: number) => `${Number(v).toFixed(2)}%`} />
-                    <Legend wrapperStyle={{ fontSize: 11 }} />
-                    {data!.commissionTrend.series.map((s) => (
-                      <Line key={s} type="monotone" dataKey={s} stroke={CATEGORY_COLORS[s] ?? "#9ca3af"} strokeWidth={2} dot={{ r: 2 }} activeDot={{ r: 4 }} />
-                    ))}
-                  </LineChart>
-                </ResponsiveContainer>
-              ),
+              render: (h) => {
+                const { data: yoy, years } = aggregateByYear(data!.commissionTrend, "avg");
+                return (
+                  <ResponsiveContainer width="100%" height={h}>
+                    <BarChart data={yoy} margin={{ left: -10, right: 10 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                      <XAxis dataKey="name" {...AXIS_PROPS} />
+                      <YAxis {...AXIS_PROPS} tickFormatter={(v) => `${Number(v).toFixed(1)}%`} />
+                      <Tooltip
+                        contentStyle={TOOLTIP_STYLE}
+                        formatter={(v: number) => `${Number(v).toFixed(2)}%`}
+                      />
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                      {years.map((yr, i) => (
+                        <Bar key={yr} dataKey={yr} name={yr} fill={colorForYear(i)} radius={[3, 3, 0, 0]} maxBarSize={40} />
+                      ))}
+                    </BarChart>
+                  </ResponsiveContainer>
+                );
+              },
             },
+
+            // ── 8. Süre: X=kategori, grouped bars per year (avg gün)
             {
-              id: "duration", icon: Clock, title: "Ortalama İşlem Süresi Trendi", subtitle: "Kategori başına aylık ortalama (gün)",
+              id: "duration",
+              icon: Clock,
+              title: "Ortalama İşlem Süresi",
+              subtitle: "Kategori başına ortalama gün · yıllık karşılaştırma",
               hasData: (data?.durationTrend?.data?.length ?? 0) > 0,
-              render: (h) => (
-                <ResponsiveContainer width="100%" height={h}>
-                  <LineChart data={data!.durationTrend.data} margin={{ left: -10, right: 10 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                    <XAxis dataKey="month" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={fmtMonth} />
-                    <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
-                    <Tooltip contentStyle={{ borderRadius: 8, border: "1px solid #e5e7eb", fontSize: 12 }} labelFormatter={fmtMonthLong}
-                      formatter={(v: number) => `${Math.round(Number(v))} gün`} />
-                    <Legend wrapperStyle={{ fontSize: 11 }} />
-                    {data!.durationTrend.series.map((s) => (
-                      <Line key={s} type="monotone" dataKey={s} stroke={CATEGORY_COLORS[s] ?? "#9ca3af"} strokeWidth={2} dot={{ r: 2 }} activeDot={{ r: 4 }} />
-                    ))}
-                  </LineChart>
-                </ResponsiveContainer>
-              ),
+              render: (h) => {
+                const { data: yoy, years } = aggregateByYear(data!.durationTrend, "avg");
+                return (
+                  <ResponsiveContainer width="100%" height={h}>
+                    <BarChart data={yoy} margin={{ left: -10, right: 10 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                      <XAxis dataKey="name" {...AXIS_PROPS} />
+                      <YAxis {...AXIS_PROPS} allowDecimals={false} tickFormatter={(v) => `${Math.round(v)}g`} />
+                      <Tooltip
+                        contentStyle={TOOLTIP_STYLE}
+                        formatter={(v: number) => `${Math.round(Number(v))} gün`}
+                      />
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                      {years.map((yr, i) => (
+                        <Bar key={yr} dataKey={yr} name={yr} fill={colorForYear(i)} radius={[3, 3, 0, 0]} maxBarSize={40} />
+                      ))}
+                    </BarChart>
+                  </ResponsiveContainer>
+                );
+              },
             },
           ];
+
           const active = chartDefs.find((c) => c.id === expandedChart) ?? null;
-          const renderCardBody = (def: ChartDef, height: number) => isLoading ? skel : !def.hasData ? <EmptyState /> : def.render(height);
+          const renderCardBody = (def: ChartDef, height: number) =>
+            isLoading ? skel : !def.hasData ? <EmptyState /> : def.render(height);
 
           return (
             <>
