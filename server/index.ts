@@ -183,6 +183,13 @@ app.use((req, res, next) => {
     );
     CREATE UNIQUE INDEX IF NOT EXISTS "team_members_team_employee_idx" ON "team_members" ("team_id", "employee_id");
 
+    CREATE TABLE IF NOT EXISTS "exchange_rates" (
+      "date" text PRIMARY KEY,
+      "usd_try" numeric(15, 4),
+      "gold_gram_try" numeric(15, 4),
+      "updated_at" timestamp DEFAULT now()
+    );
+
     -- Migrate old single-file agreement data into the new multi-file table
     INSERT INTO listing_agreement_files (listing_id, name, mime, data, uploaded_at)
     SELECT
@@ -219,6 +226,11 @@ app.use((req, res, next) => {
   `);
 
   await registerRoutes(httpServer, app);
+
+  // Kick off exchange-rate refresh in the background — non-blocking, non-fatal.
+  import("./exchange-rates")
+    .then((m) => m.ensureExchangeRatesFresh())
+    .catch((err) => console.warn("[exchange-rates] load failed:", err.message));
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;

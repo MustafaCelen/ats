@@ -25,6 +25,7 @@ import Expenses from "@/pages/Expenses";
 import PLReport from "@/pages/PLReport";
 import Listings from "@/pages/Listings";
 import ListingReports from "@/pages/ListingReports";
+import ClosingAnalytics from "@/pages/ClosingAnalytics";
 import AgentHealth from "@/pages/AgentHealth";
 import PublicListing from "@/pages/PublicListing";
 import AdvisorSelfService from "@/pages/AdvisorSelfService";
@@ -78,6 +79,7 @@ function Router() {
       <Route path="/closings" component={() => <ProtectedRoute adminOnly><Closings /></ProtectedRoute>} />
       <Route path="/listings" component={() => <ProtectedRoute adminOnly><Listings /></ProtectedRoute>} />
       <Route path="/listings/reports" component={() => <ProtectedRoute noAssistant><ListingReports /></ProtectedRoute>} />
+      <Route path="/closing-analytics" component={() => <ProtectedRoute adminOnly><ClosingAnalytics /></ProtectedRoute>} />
       <Route path="/agent-health" component={() => <ProtectedRoute noAssistant><AgentHealth /></ProtectedRoute>} />
       <Route path="/financial-reports" component={() => <ProtectedRoute financialsOnly><FinancialReports /></ProtectedRoute>} />
       <Route path="/cap-report" component={() => <ProtectedRoute adminOnly><CapReport /></ProtectedRoute>} />

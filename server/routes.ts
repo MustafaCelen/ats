@@ -1609,6 +1609,41 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json(await storage.getReportStats(startDate, endDate, jobFilter(req), office));
   });
 
+  app.get(api.stats.employeeTrend.path, requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
+    const months = req.query.months ? Math.max(1, Math.min(240, parseInt(req.query.months as string) || 24)) : 24;
+    const office = req.query.office ? (req.query.office as string) : undefined;
+    res.json(await storage.getEmployeeMonthlyTrend(months, office));
+  });
+
+  app.get(api.stats.closingAnalytics.path, requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
+    try {
+      const now = new Date();
+      const defaultStart = new Date(now.getFullYear(), now.getMonth() - 11, 1);
+      const startDate = req.query.startDate ? new Date(req.query.startDate as string) : defaultStart;
+      const endDate = req.query.endDate ? new Date(req.query.endDate as string) : now;
+      const office = req.query.office ? (req.query.office as string) : undefined;
+      const dealCategory = req.query.dealCategory ? (req.query.dealCategory as string) : undefined;
+      const il = req.query.il ? (req.query.il as string) : undefined;
+      const ilce = req.query.ilce ? (req.query.ilce as string) : undefined;
+      const mahalle = req.query.mahalle ? (req.query.mahalle as string) : undefined;
+      const currencyRaw = req.query.currency as string | undefined;
+      const currency: "TL" | "USD" | "GOLD" = currencyRaw === "USD" || currencyRaw === "GOLD" ? currencyRaw : "TL";
+      res.json(await storage.getClosingAnalytics(startDate, endDate, office, dealCategory, il, ilce, mahalle, currency));
+    } catch (err) {
+      console.error("[GET /api/stats/closing-analytics]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.get(api.stats.closingLocations.path, requireAuth, requireHiringManagerOrAdmin, async (_req, res) => {
+    try {
+      res.json(await storage.getClosingLocations());
+    } catch (err) {
+      console.error("[GET /api/stats/closing-locations]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   app.get("/api/reports/churn", requireAuth, requireHiringManagerOrAdmin, async (_req: any, res: any) => {
     try {
       res.json(await storage.getChurnReport());

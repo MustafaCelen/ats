@@ -40,8 +40,11 @@ export const api = {
     delete: { method: 'DELETE' as const, path: '/api/offers/:id' },
   },
   stats: {
-    dashboard: { method: 'GET' as const, path: '/api/stats/dashboard' },
-    reports:   { method: 'GET' as const, path: '/api/stats/reports' },
+    dashboard:         { method: 'GET' as const, path: '/api/stats/dashboard' },
+    reports:           { method: 'GET' as const, path: '/api/stats/reports' },
+    employeeTrend:     { method: 'GET' as const, path: '/api/stats/employee-trend' },
+    closingAnalytics:  { method: 'GET' as const, path: '/api/stats/closing-analytics' },
+    closingLocations:  { method: 'GET' as const, path: '/api/stats/closing-locations' },
   },
 };
 

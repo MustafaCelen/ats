@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { Layout } from "@/components/Layout";
-import { useReportStats } from "@/hooks/use-stats";
+import { useReportStats, useEmployeeTrend } from "@/hooks/use-stats";
 import { STAGE_COLORS } from "@/components/StatusBadge";
 import { STAGE_LABELS } from "@shared/schema";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, AreaChart, Area, CartesianGrid } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, AreaChart, Area, CartesianGrid, ComposedChart, Line, Legend } from "recharts";
 import { Calendar, Clock, TrendingUp, Users, CheckCircle, DollarSign, Briefcase, Activity, TimerReset, XCircle, UserMinus, UserPlus, ChevronLeft, ChevronRight, FileSignature } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -68,6 +68,8 @@ export default function Reports() {
   const computedStart = useCustomRange ? fromDate : monthStart;
   const computedEnd = useCustomRange ? toDate : monthEnd;
   const { data: stats, isLoading } = useReportStats(computedStart, computedEnd, officeFilter);
+  const [trendMonths, setTrendMonths] = useState<number>(24);
+  const { data: employeeTrend, isLoading: trendLoading } = useEmployeeTrend(trendMonths, officeFilter);
 
   const funnelData = (stats?.funnel ?? []).filter((f: any) => f.stage !== "rejected");
   const stageTimes = (stats?.stageTimes ?? []).filter((s: any) => s.stage !== "rejected");
@@ -194,6 +196,84 @@ export default function Reports() {
               </ResponsiveContainer>
             )}
           </div>
+        </div>
+
+        {/* ── Employee Monthly Trend ────────────────────────────────────────── */}
+        <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between mb-4">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <Users className="h-4 w-4 text-primary" />
+                <h2 className="text-base font-semibold">Aylık Aktif Danışman Sayısı</h2>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Her ayın sonunda aktif olan danışman sayısı{officeFilter ? ` · ${officeFilter}` : ""}
+              </p>
+            </div>
+            <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-1 self-start">
+              {[
+                { label: "12 ay",  value: 12  },
+                { label: "24 ay",  value: 24  },
+                { label: "36 ay",  value: 36  },
+                { label: "60 ay",  value: 60  },
+                { label: "Tümü",   value: 240 },
+              ].map((opt) => (
+                <Button
+                  key={opt.value}
+                  size="sm"
+                  variant={trendMonths === opt.value ? "default" : "ghost"}
+                  className="h-7 text-xs px-3"
+                  onClick={() => setTrendMonths(opt.value)}
+                  data-testid={`btn-trend-range-${opt.value}`}
+                >
+                  {opt.label}
+                </Button>
+              ))}
+            </div>
+          </div>
+          {trendLoading ? <div className="h-64 bg-muted/40 rounded-lg animate-pulse" /> : (employeeTrend?.length ?? 0) === 0 ? (
+            <div className="h-64 flex items-center justify-center text-muted-foreground text-sm">Veri yok</div>
+          ) : (
+            <ResponsiveContainer width="100%" height={300}>
+              <ComposedChart data={employeeTrend ?? []} margin={{ left: -10, right: 10 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                <XAxis
+                  dataKey="month"
+                  tick={{ fontSize: 11 }}
+                  axisLine={false}
+                  tickLine={false}
+                  tickFormatter={(m: string) => {
+                    const [y, mm] = m.split("-");
+                    const d = new Date(Number(y), Number(mm) - 1, 1);
+                    return format(d, "MMM yy", { locale: tr });
+                  }}
+                />
+                <YAxis yAxisId="left" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
+                <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
+                <Tooltip
+                  contentStyle={{ borderRadius: 8, border: "1px solid #e5e7eb", fontSize: 12 }}
+                  labelFormatter={(m: string) => {
+                    const [y, mm] = m.split("-");
+                    const d = new Date(Number(y), Number(mm) - 1, 1);
+                    return format(d, "MMMM yyyy", { locale: tr });
+                  }}
+                  formatter={(value: number, name: string, item: any) => {
+                    if (name === "Aktif toplam") return [value, name];
+                    const p = item?.payload;
+                    if (name === "Net değişim" && p) return [`${value >= 0 ? "+" : ""}${value} (giren ${p.joined}, çıkan ${p.left})`, name];
+                    return [value, name];
+                  }}
+                />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Bar yAxisId="left" dataKey="net" name="Net değişim">
+                  {(employeeTrend ?? []).map((d, i) => (
+                    <Cell key={i} fill={d.net >= 0 ? "#10b981" : "#ef4444"} />
+                  ))}
+                </Bar>
+                <Line yAxisId="right" type="monotone" dataKey="count" name="Aktif toplam" stroke="#3b82f6" strokeWidth={2} dot={{ r: 2 }} activeDot={{ r: 4 }} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          )}
         </div>
 
         {/* ── Rejection Drop-off ───────────────────────────────────────────── */}

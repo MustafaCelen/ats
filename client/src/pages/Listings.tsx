@@ -11,7 +11,7 @@ import { apiRequest } from "@/lib/queryClient";
 import {
   Building2, Upload, Search, FileCheck2, FileWarning, HelpCircle,
   CheckCircle2, Clock, Send, ExternalLink, ChevronLeft, ChevronRight, Download, Plus,
-  RefreshCw, MessageSquare, Link2, Bell, BellOff, Mail, Trash2,
+  RefreshCw, MessageSquare, Link2, Bell, BellOff, Mail, Trash2, ArrowUp, ArrowDown, ArrowUpDown, X,
 } from "lucide-react";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -65,6 +65,36 @@ interface NotifyStatusRow {
   lastNotifiedAt: string | null;
   notifyMsgId: string | null;
   lastEmailNotifiedAt: string | null;
+}
+
+// ── Sortable table header ───────────────────────────────────────────────────────
+
+function SortableTh<K extends string>({
+  label, sortKey, activeKey, dir, onClick, align,
+}: {
+  label: string;
+  sortKey: K;
+  activeKey: K;
+  dir: "asc" | "desc";
+  onClick: (k: K) => void;
+  align?: "left" | "center" | "right";
+}) {
+  const isActive = sortKey === activeKey;
+  const alignCls = align === "center" ? "text-center" : align === "right" ? "text-right" : "text-left";
+  return (
+    <th className={`px-3 py-2.5 font-medium ${alignCls}`}>
+      <button
+        type="button"
+        onClick={() => onClick(sortKey)}
+        className={`inline-flex items-center gap-1 hover:text-foreground transition-colors ${isActive ? "text-foreground" : ""}`}
+      >
+        {label}
+        {isActive
+          ? (dir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />)
+          : <ArrowUpDown className="h-3 w-3 opacity-40" />}
+      </button>
+    </th>
+  );
 }
 
 // ── CSV helpers ─────────────────────────────────────────────────────────────────
@@ -415,6 +445,18 @@ export default function Listings() {
   const [notifyFilter, setNotifyFilter] = useState<"overdue" | "all">("overdue");
   const [cooldownDays, setCooldownDays] = useState(5);
   const [notifyChannelFilter, setNotifyChannelFilter] = useState<"wa" | "email" | "both">("both");
+  const [notifyNameFilter, setNotifyNameFilter] = useState("");
+  type NotifySortKey = "name" | "totalPending" | "activePending" | "passivePending" | "lastNotifiedAt" | "lastEmailNotifiedAt";
+  const [notifySortKey, setNotifySortKey] = useState<NotifySortKey>("totalPending");
+  const [notifySortDir, setNotifySortDir] = useState<"asc" | "desc">("desc");
+  const toggleNotifySort = (key: NotifySortKey) => {
+    if (notifySortKey === key) {
+      setNotifySortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setNotifySortKey(key);
+      setNotifySortDir(key === "name" ? "asc" : "desc");
+    }
+  };
   const [emailSendingIds, setEmailSendingIds] = useState<Set<number>>(new Set());
 
   const NOTIFY_COOLDOWN_MS = cooldownDays * 24 * 60 * 60 * 1000;
@@ -512,17 +554,37 @@ export default function Listings() {
   const pageCount = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
   const pageRows = filteredRows.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
 
-  const filteredNotifyRows = notifyStatusRows.filter((r) => {
-    if (r.totalPending === 0) return false;
-    if (notifyFilter === "overdue") {
-      const waOverdue = !r.lastNotifiedAt || (Date.now() - new Date(r.lastNotifiedAt).getTime()) > NOTIFY_COOLDOWN_MS;
-      const emailOverdue = !r.lastEmailNotifiedAt || (Date.now() - new Date(r.lastEmailNotifiedAt).getTime()) > NOTIFY_COOLDOWN_MS;
-      if (notifyChannelFilter === "wa") return waOverdue;
-      if (notifyChannelFilter === "email") return emailOverdue;
-      return waOverdue || emailOverdue;
-    }
-    return true;
-  });
+  const filteredNotifyRows = (() => {
+    const nameQ = notifyNameFilter.trim().toLowerCase();
+    const filtered = notifyStatusRows.filter((r) => {
+      if (r.totalPending === 0) return false;
+      if (nameQ && !r.name.toLowerCase().includes(nameQ)) return false;
+      if (notifyFilter === "overdue") {
+        const waOverdue = !r.lastNotifiedAt || (Date.now() - new Date(r.lastNotifiedAt).getTime()) > NOTIFY_COOLDOWN_MS;
+        const emailOverdue = !r.lastEmailNotifiedAt || (Date.now() - new Date(r.lastEmailNotifiedAt).getTime()) > NOTIFY_COOLDOWN_MS;
+        if (notifyChannelFilter === "wa") return waOverdue;
+        if (notifyChannelFilter === "email") return emailOverdue;
+        return waOverdue || emailOverdue;
+      }
+      return true;
+    });
+    const dir = notifySortDir === "asc" ? 1 : -1;
+    const cmp = (a: NotifyStatusRow, b: NotifyStatusRow) => {
+      const key = notifySortKey;
+      if (key === "name") return a.name.localeCompare(b.name, "tr") * dir;
+      if (key === "totalPending" || key === "activePending" || key === "passivePending") {
+        return ((a[key] ?? 0) - (b[key] ?? 0)) * dir;
+      }
+      // date fields — null goes to bottom regardless of direction
+      const av = a[key] ? new Date(a[key] as string).getTime() : null;
+      const bv = b[key] ? new Date(b[key] as string).getTime() : null;
+      if (av === null && bv === null) return 0;
+      if (av === null) return 1;
+      if (bv === null) return -1;
+      return (av - bv) * dir;
+    };
+    return [...filtered].sort(cmp);
+  })();
 
   const uniqueAdvisorIds = [...new Set(filteredRows.filter((l) => !!l.employeeId).map((l) => l.employeeId!))];
   const bulkNotifyCount = uniqueAdvisorIds.length;
@@ -1418,6 +1480,26 @@ export default function Listings() {
                         Tümü ({notifyStatusRows.filter((r) => r.totalPending > 0).length})
                       </button>
                     </div>
+                    {/* Name filter */}
+                    <div className="relative">
+                      <Search className="h-3.5 w-3.5 text-muted-foreground absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <input
+                        type="text"
+                        value={notifyNameFilter}
+                        onChange={(e) => setNotifyNameFilter(e.target.value)}
+                        placeholder="Danışman adı ara..."
+                        className="h-7 pl-7 pr-7 text-xs border border-input rounded bg-background w-52"
+                      />
+                      {notifyNameFilter && (
+                        <button
+                          onClick={() => setNotifyNameFilter("")}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                          aria-label="Temizle"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <div className="flex items-center gap-2">
                     <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5" onClick={() => { refetchNotifyStatus(); setWpStatuses({}); }}>
@@ -1438,12 +1520,12 @@ export default function Listings() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border bg-muted/40 text-left text-xs text-muted-foreground">
-                      <th className="px-3 py-2.5 font-medium">Danışman</th>
+                      <SortableTh label="Danışman" sortKey="name"                 activeKey={notifySortKey} dir={notifySortDir} onClick={toggleNotifySort} />
                       <th className="px-3 py-2.5 font-medium">Telefon</th>
                       <th className="px-3 py-2.5 font-medium">Email</th>
-                      <th className="px-3 py-2.5 font-medium text-center">Bekleyen İlan</th>
-                      <th className="px-3 py-2.5 font-medium">Son WA Bildirimi</th>
-                      <th className="px-3 py-2.5 font-medium">Son Email Bildirimi</th>
+                      <SortableTh label="Bekleyen İlan" sortKey="totalPending"    activeKey={notifySortKey} dir={notifySortDir} onClick={toggleNotifySort} align="center" />
+                      <SortableTh label="Son WA Bildirimi" sortKey="lastNotifiedAt"      activeKey={notifySortKey} dir={notifySortDir} onClick={toggleNotifySort} />
+                      <SortableTh label="Son Email Bildirimi" sortKey="lastEmailNotifiedAt" activeKey={notifySortKey} dir={notifySortDir} onClick={toggleNotifySort} />
                       <th className="px-3 py-2.5 font-medium">WP Durumu</th>
                       <th className="px-3 py-2.5 font-medium text-right">İşlem</th>
                     </tr>

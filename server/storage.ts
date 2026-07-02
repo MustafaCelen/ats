@@ -170,6 +170,9 @@ export interface IStorage {
   deleteOffer(id: number): Promise<void>;
   getDashboardStats(jobIds?: number[]): Promise<DashboardStats>;
   getReportStats(startDate?: Date, endDate?: Date, jobIds?: number[], office?: string): Promise<ReportStats>;
+  getEmployeeMonthlyTrend(months: number, office?: string): Promise<{ month: string; count: number; joined: number; left: number; net: number }[]>;
+  getClosingAnalytics(startDate: Date, endDate: Date, office?: string, dealCategory?: string, il?: string, ilce?: string, mahalle?: string, currency?: "TL" | "USD" | "GOLD"): Promise<any>;
+  getClosingLocations(): Promise<{ il: string; ilce: string; mahalle: string }[]>;
   getApplicationDocuments(applicationId: number): Promise<ApplicationDocuments | null>;
   upsertApplicationDocuments(applicationId: number, receivedDocs: string[]): Promise<ApplicationDocuments>;
   getTasks(options: { assignedToUserId?: number; createdByUserId?: number }): Promise<TaskWithRelations[]>;
@@ -691,6 +694,343 @@ export class DatabaseStorage implements IStorage {
       inPipeline, interviews: interviewsCount, offers: offersCount, hired,
       funnel, recentApplications: recent, upcomingInterviews, staleJobs,
       offerAcceptanceRate,
+    };
+  }
+
+  async getEmployeeMonthlyTrend(months: number, office?: string): Promise<{ month: string; count: number; joined: number; left: number; net: number }[]> {
+    const m = Math.max(1, Math.min(months, 240));
+    const officeFilter = office
+      ? sql`AND e.candidate_id IN (SELECT id FROM candidates WHERE office = ${office})`
+      : sql``;
+    const result = await db.execute(sql`
+      WITH months AS (
+        SELECT generate_series(
+          date_trunc('month', CURRENT_DATE) - ((${m - 1})::int * interval '1 month'),
+          date_trunc('month', CURRENT_DATE),
+          interval '1 month'
+        )::date AS month_start
+      )
+      SELECT
+        TO_CHAR(mo.month_start, 'YYYY-MM') AS month,
+        COALESCE((
+          SELECT COUNT(*) FROM employees e
+          WHERE e.start_date IS NOT NULL
+            AND e.start_date <= (mo.month_start + interval '1 month' - interval '1 second')
+            AND (e.passive_at IS NULL OR e.passive_at > (mo.month_start + interval '1 month' - interval '1 second'))
+            ${officeFilter}
+        ), 0)::int AS count,
+        COALESCE((
+          SELECT COUNT(*) FROM employees e
+          WHERE e.start_date IS NOT NULL
+            AND e.start_date >= mo.month_start
+            AND e.start_date < (mo.month_start + interval '1 month')
+            ${officeFilter}
+        ), 0)::int AS joined,
+        COALESCE((
+          SELECT COUNT(*) FROM employees e
+          WHERE e.passive_at IS NOT NULL
+            AND e.passive_at >= mo.month_start
+            AND e.passive_at < (mo.month_start + interval '1 month')
+            ${officeFilter}
+        ), 0)::int AS left_count
+      FROM months mo
+      ORDER BY mo.month_start
+    `);
+    return (result.rows as any[]).map((r) => {
+      const joined = Number(r.joined);
+      const left = Number(r.left_count);
+      return { month: r.month, count: Number(r.count), joined, left, net: joined - left };
+    });
+  }
+
+  async getClosingLocations(): Promise<{ il: string; ilce: string; mahalle: string }[]> {
+    const rows = (await db.execute(sql`
+      SELECT DISTINCT
+        COALESCE(NULLIF(TRIM(c.il), ''), '') AS il,
+        COALESCE(NULLIF(TRIM(c.ilce), ''), '') AS ilce,
+        COALESCE(NULLIF(TRIM(c.mahalle), ''), '') AS mahalle
+      FROM closings c
+      WHERE c.status = 'completed'
+      ORDER BY il, ilce, mahalle
+    `)).rows;
+    return rows as any;
+  }
+
+  async getClosingAnalytics(startDate: Date, endDate: Date, office?: string, dealCategory?: string, il?: string, ilce?: string, mahalle?: string, currency: "TL" | "USD" | "GOLD" = "TL"): Promise<any> {
+    const start = new Date(startDate); start.setHours(0, 0, 0, 0);
+    const end = new Date(endDate); end.setHours(23, 59, 59, 999);
+
+    // Currency conversion: divide sale_value by the rate on closing_date.
+    // TL → sale_value as-is. USD → sale_value / usd_try. GOLD → sale_value / gold_gram_try.
+    // If the rate row is missing for a date, the row is EXCLUDED from monetary metrics only.
+    const rateCol =
+      currency === "USD" ? sql`er.usd_try`
+      : currency === "GOLD" ? sql`er.gold_gram_try`
+      : null;
+    const rateJoin = rateCol
+      ? sql`LEFT JOIN exchange_rates er ON er.date = TO_CHAR(c.closing_date, 'YYYY-MM-DD')`
+      : sql``;
+    // Expression yielding converted value (or NULL if the rate is missing / currency = TL means "as-is")
+    const convertedValue = rateCol
+      ? sql`CASE WHEN ${rateCol} IS NOT NULL AND ${rateCol}::numeric > 0 THEN c.sale_value::numeric / ${rateCol}::numeric ELSE NULL END`
+      : sql`c.sale_value::numeric`;
+
+    const officeFilter = office
+      ? sql`AND EXISTS (
+          SELECT 1 FROM closing_sides cs
+          JOIN closing_agents ca ON ca.closing_side_id = cs.id
+          JOIN employees e ON e.id = ca.employee_id
+          JOIN candidates cand ON cand.id = e.candidate_id
+          WHERE cs.closing_id = c.id AND cand.office = ${office}
+        )`
+      : sql``;
+    const categoryFilter = dealCategory ? sql`AND c.deal_category = ${dealCategory}` : sql``;
+    const ilFilter = il ? sql`AND TRIM(COALESCE(c.il, '')) = ${il}` : sql``;
+    const ilceFilter = ilce ? sql`AND TRIM(COALESCE(c.ilce, '')) = ${ilce}` : sql``;
+    const mahalleFilter = mahalle ? sql`AND TRIM(COALESCE(c.mahalle, '')) = ${mahalle}` : sql``;
+
+    const baseWhere = sql`
+      c.status = 'completed'
+      AND c.closing_date >= ${start}
+      AND c.closing_date <= ${end}
+      ${officeFilter}
+      ${categoryFilter}
+      ${ilFilter}
+      ${ilceFilter}
+      ${mahalleFilter}
+    `;
+
+    // Helper: pivot long-form rows [{month, key, value}] → wide [{month, [key1]: v, [key2]: v}]
+    const pivot = (rows: any[], keyField: string, valueField: string, seriesOrder?: string[]) => {
+      const monthMap = new Map<string, Record<string, any>>();
+      const keys = new Set<string>();
+      for (const r of rows) {
+        const m = r.month;
+        const k = r[keyField];
+        const v = Number(r[valueField]);
+        if (!monthMap.has(m)) monthMap.set(m, { month: m });
+        monthMap.get(m)![k] = v;
+        keys.add(k);
+      }
+      const series = seriesOrder ? seriesOrder.filter(s => keys.has(s)) : Array.from(keys);
+      // Ensure every month has 0 for missing series
+      const data = Array.from(monthMap.values()).sort((a, b) => a.month.localeCompare(b.month));
+      for (const row of data) {
+        for (const s of series) if (row[s] == null) row[s] = 0;
+      }
+      return { series, data };
+    };
+
+    // 1. Monthly volume (count + total value in selected currency)
+    const monthlyVolume = (await db.execute(sql`
+      SELECT
+        TO_CHAR(DATE_TRUNC('month', c.closing_date), 'YYYY-MM') AS month,
+        COUNT(*)::int AS count,
+        COALESCE(SUM(${convertedValue}), 0)::numeric AS "totalValue"
+      FROM closings c
+      ${rateJoin}
+      WHERE ${baseWhere}
+      GROUP BY DATE_TRUNC('month', c.closing_date)
+      ORDER BY DATE_TRUNC('month', c.closing_date)
+    `)).rows;
+
+    // 2. Monthly average sale price (in selected currency)
+    const monthlyAvgPrice = (await db.execute(sql`
+      SELECT
+        TO_CHAR(DATE_TRUNC('month', c.closing_date), 'YYYY-MM') AS month,
+        COALESCE(AVG(${convertedValue}), 0)::numeric AS "avgPrice"
+      FROM closings c
+      ${rateJoin}
+      WHERE ${baseWhere} AND c.sale_value IS NOT NULL AND c.sale_value::numeric > 0
+      GROUP BY DATE_TRUNC('month', c.closing_date)
+      ORDER BY DATE_TRUNC('month', c.closing_date)
+    `)).rows;
+
+    // 3+4. District & Neighborhood TRENDS: fuzzy cluster (Turkish-aware) + min-count filter
+    const buildLocationTrend = async (col: "ilce" | "mahalle", topN: number, minCount: number, threshold: number) => {
+      const rawRows = (await db.execute(sql`
+        SELECT
+          TO_CHAR(DATE_TRUNC('month', c.closing_date), 'YYYY-MM') AS month,
+          COALESCE(NULLIF(TRIM(c.${sql.raw(col)}), ''), 'Belirtilmemiş') AS name,
+          COUNT(*)::int AS count
+        FROM closings c
+        WHERE ${baseWhere}
+        GROUP BY DATE_TRUNC('month', c.closing_date), 2
+        ORDER BY DATE_TRUNC('month', c.closing_date)
+      `)).rows as { month: string; name: string; count: number }[];
+
+      // Step 1: total per raw name (across the period)
+      const totalByName = new Map<string, number>();
+      for (const r of rawRows) totalByName.set(r.name, (totalByName.get(r.name) ?? 0) + Number(r.count));
+
+      // Step 2: normalize helper (lower + Turkish→ASCII + trim + collapse spaces)
+      const norm = (s: string) => s.toLowerCase().trim()
+        .replace(/i̇/g, "i").replace(/ş/g, "s").replace(/ı/g, "i").replace(/ğ/g, "g")
+        .replace(/ç/g, "c").replace(/ö/g, "o").replace(/ü/g, "u")
+        .replace(/\s+/g, " ");
+
+      // Step 3: trigram similarity (Dice coefficient)
+      const trigrams = (s: string) => {
+        const padded = `  ${s}  `;
+        const set = new Set<string>();
+        for (let i = 0; i <= padded.length - 3; i++) set.add(padded.slice(i, i + 3));
+        return set;
+      };
+      const sim = (a: Set<string>, b: Set<string>) => {
+        if (a.size === 0 && b.size === 0) return 1;
+        let inter = 0;
+        for (const t of a) if (b.has(t)) inter++;
+        return (2 * inter) / (a.size + b.size);
+      };
+
+      // Step 4: fuzzy cluster — process by count desc so most-common variant becomes canonical
+      const sortedNames = [...totalByName.entries()].sort((a, b) => b[1] - a[1]);
+      const canonicals: { name: string; normalized: string; trigrams: Set<string> }[] = [];
+      const nameToCanonical = new Map<string, string>();
+      for (const [name] of sortedNames) {
+        if (name === "Belirtilmemiş") { nameToCanonical.set(name, name); continue; }
+        const normalized = norm(name);
+        const tg = trigrams(normalized);
+        let matched: string | null = null;
+        for (const c of canonicals) {
+          if (sim(tg, c.trigrams) >= threshold) { matched = c.name; break; }
+        }
+        if (matched) {
+          nameToCanonical.set(name, matched);
+        } else {
+          canonicals.push({ name, normalized, trigrams: tg });
+          nameToCanonical.set(name, name);
+        }
+      }
+
+      // Step 5: aggregate rows by canonical (month × canonical)
+      const grouped = new Map<string, Map<string, number>>();
+      const totalByCanonical = new Map<string, number>();
+      for (const r of rawRows) {
+        const canonical = nameToCanonical.get(r.name) ?? r.name;
+        if (!grouped.has(canonical)) grouped.set(canonical, new Map());
+        const monthMap = grouped.get(canonical)!;
+        monthMap.set(r.month, (monthMap.get(r.month) ?? 0) + Number(r.count));
+        totalByCanonical.set(canonical, (totalByCanonical.get(canonical) ?? 0) + Number(r.count));
+      }
+
+      // Step 6: filter canonicals with total < minCount, then pick top N; the rest go to "Diğer"
+      const eligible = [...totalByCanonical.entries()]
+        .filter(([, total]) => total >= minCount)
+        .sort((a, b) => b[1] - a[1]);
+      const topSet = new Set(eligible.slice(0, topN).map(([name]) => name));
+
+      // Step 7: build long-form pivotable rows (top + "Diğer" bucket for eligible-but-not-top)
+      const outRows: { month: string; name: string; count: number }[] = [];
+      for (const [canonical, monthMap] of grouped) {
+        if (!eligible.find(([n]) => n === canonical)) continue; // < minCount → skip entirely
+        const targetName = topSet.has(canonical) ? canonical : "Diğer";
+        for (const [month, count] of monthMap) {
+          outRows.push({ month, name: targetName, count });
+        }
+      }
+      const seriesOrder = [...eligible.slice(0, topN).map(([n]) => n), "Diğer"];
+      return pivot(outRows, "name", "count", seriesOrder);
+    };
+
+    const districtsTrend = await buildLocationTrend("ilce", 6, 3, 0.65);
+    const neighborhoodsTrend = await buildLocationTrend("mahalle", 6, 3, 0.65);
+
+    // 5. Price range TREND: buckets vary by currency
+    const PRICE_BUCKETS: Record<"TL" | "USD" | "GOLD", { thresholds: number[]; labels: string[] }> = {
+      TL:   { thresholds: [2_000_000, 5_000_000, 10_000_000, 25_000_000, 50_000_000],
+              labels:     ["0 - 2M", "2 - 5M", "5 - 10M", "10 - 25M", "25 - 50M", "50M+"] },
+      USD:  { thresholds: [50_000, 150_000, 300_000, 700_000, 1_500_000],
+              labels:     ["0 - 50K", "50 - 150K", "150 - 300K", "300 - 700K", "700K - 1.5M", "1.5M+"] },
+      GOLD: { thresholds: [500, 1_500, 3_000, 7_000, 15_000],
+              labels:     ["0 - 500 gr", "500 - 1500 gr", "1.5 - 3K gr", "3 - 7K gr", "7 - 15K gr", "15K+ gr"] },
+    };
+    const bucket = PRICE_BUCKETS[currency];
+    const priceRangeRows = (await db.execute(sql`
+      SELECT
+        TO_CHAR(DATE_TRUNC('month', c.closing_date), 'YYYY-MM') AS month,
+        CASE
+          WHEN ${convertedValue} < ${bucket.thresholds[0]} THEN ${bucket.labels[0]}
+          WHEN ${convertedValue} < ${bucket.thresholds[1]} THEN ${bucket.labels[1]}
+          WHEN ${convertedValue} < ${bucket.thresholds[2]} THEN ${bucket.labels[2]}
+          WHEN ${convertedValue} < ${bucket.thresholds[3]} THEN ${bucket.labels[3]}
+          WHEN ${convertedValue} < ${bucket.thresholds[4]} THEN ${bucket.labels[4]}
+          ELSE ${bucket.labels[5]}
+        END AS range,
+        COUNT(*)::int AS count
+      FROM closings c
+      ${rateJoin}
+      WHERE ${baseWhere} AND c.sale_value IS NOT NULL AND c.sale_value::numeric > 0 AND ${convertedValue} IS NOT NULL
+      GROUP BY DATE_TRUNC('month', c.closing_date), range
+      ORDER BY DATE_TRUNC('month', c.closing_date)
+    `)).rows;
+    const priceRangeTrend = pivot(priceRangeRows, "range", "count", bucket.labels);
+
+    // 6. Category TREND: monthly count per deal_category
+    const categoryRows = (await db.execute(sql`
+      SELECT
+        TO_CHAR(DATE_TRUNC('month', c.closing_date), 'YYYY-MM') AS month,
+        COALESCE(NULLIF(TRIM(c.deal_category), ''), 'Belirtilmemiş') AS category,
+        COUNT(*)::int AS count
+      FROM closings c
+      WHERE ${baseWhere}
+      GROUP BY DATE_TRUNC('month', c.closing_date), 2
+      ORDER BY DATE_TRUNC('month', c.closing_date)
+    `)).rows;
+    const CATEGORY_ORDER = ["Satış", "Kiralık", "Yönlendirme", "Belirtilmemiş"];
+    const categoryTrend = pivot(categoryRows, "category", "count", CATEGORY_ORDER);
+
+    // 7. Commission TREND: monthly avg rate per category
+    const commissionRows = (await db.execute(sql`
+      SELECT
+        TO_CHAR(DATE_TRUNC('month', c.closing_date), 'YYYY-MM') AS month,
+        COALESCE(NULLIF(TRIM(c.deal_category), ''), 'Belirtilmemiş') AS category,
+        COALESCE(AVG(c.commission_rate::numeric), 0)::numeric AS "avgRate"
+      FROM closings c
+      WHERE ${baseWhere} AND c.commission_rate IS NOT NULL
+      GROUP BY DATE_TRUNC('month', c.closing_date), 2
+      ORDER BY DATE_TRUNC('month', c.closing_date)
+    `)).rows;
+    const commissionTrend = pivot(commissionRows, "category", "avgRate", CATEGORY_ORDER);
+
+    // 8. Duration TREND: monthly avg days per category
+    const durationRows = (await db.execute(sql`
+      SELECT
+        TO_CHAR(DATE_TRUNC('month', c.closing_date), 'YYYY-MM') AS month,
+        COALESCE(NULLIF(TRIM(c.deal_category), ''), 'Belirtilmemiş') AS category,
+        COALESCE(AVG(c.duration_days::numeric), 0)::numeric AS "avgDays"
+      FROM closings c
+      WHERE ${baseWhere} AND c.duration_days IS NOT NULL AND c.duration_days > 0
+      GROUP BY DATE_TRUNC('month', c.closing_date), 2
+      ORDER BY DATE_TRUNC('month', c.closing_date)
+    `)).rows;
+    const durationTrend = pivot(durationRows, "category", "avgDays", CATEGORY_ORDER);
+
+    // Availability flags for currency options — UI uses these to enable/disable toggles.
+    const availRows = (await db.execute(sql`
+      SELECT
+        COUNT(*) FILTER (WHERE usd_try IS NOT NULL) AS usd_count,
+        COUNT(*) FILTER (WHERE gold_gram_try IS NOT NULL) AS gold_count
+      FROM exchange_rates
+    `)).rows[0] as any;
+    const currencyAvailable = {
+      TL: true,
+      USD: Number(availRows?.usd_count ?? 0) > 0,
+      GOLD: Number(availRows?.gold_count ?? 0) > 0,
+    };
+
+    const num = (v: any) => v == null ? 0 : Number(v);
+    return {
+      currency,
+      currencyAvailable,
+      monthlyVolume: monthlyVolume.map((r: any) => ({ month: r.month, count: num(r.count), totalValue: num(r.totalValue) })),
+      monthlyAvgPrice: monthlyAvgPrice.map((r: any) => ({ month: r.month, avgPrice: num(r.avgPrice) })),
+      districtsTrend,
+      neighborhoodsTrend,
+      priceRangeTrend,
+      categoryTrend,
+      commissionTrend,
+      durationTrend,
     };
   }
 

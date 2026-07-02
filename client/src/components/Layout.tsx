@@ -48,6 +48,7 @@ const reportsGroupAdmin: NavGroup = {
     { icon: ShieldAlert,   label: "Danışman Sağlığı",       href: "/agent-health"      },
     { icon: GraduationCap, label: "ÜK & DÜA Raporları",    href: "/coaching"          },
     { icon: Building2,     label: "İlan Raporları",         href: "/listings/reports"  },
+    { icon: TrendingUp,    label: "Kapanış Analitiği",      href: "/closing-analytics" },
   ],
 };
 

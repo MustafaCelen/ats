@@ -647,6 +647,15 @@ export type Listing = typeof listings.$inferSelect;
 export type ListingWithEmployee = Listing & { employeeName?: string; employeePhone?: string };
 
 // ── Teams ─────────────────────────────────────────────────────────────────────
+// ── Exchange Rates ─────────────────────────────────────────────────────────────
+export const exchangeRates = pgTable("exchange_rates", {
+  date: text("date").primaryKey(),                              // YYYY-MM-DD
+  usdTry: numeric("usd_try", { precision: 15, scale: 4 }),      // TL per 1 USD
+  goldGramTry: numeric("gold_gram_try", { precision: 15, scale: 4 }), // TL per 1 gr gold
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+export type ExchangeRate = typeof exchangeRates.$inferSelect;
+
 export const teams = pgTable("teams", {
   id: serial("id").primaryKey(),
   name: text("name").notNull().unique(),
