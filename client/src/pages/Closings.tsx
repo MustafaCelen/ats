@@ -748,8 +748,10 @@ interface SummaryRow {
 
 function SummaryTable({ rows }: { rows: SummaryRow[] }) {
   if (rows.length === 0) return null;
-  const totalNet = rows.reduce((s, r) => s + r.net, 0);
-  const totalKdv = rows.reduce((s, r) => s + r.bmKdv, 0);
+  const totalKwtrKdv = rows.reduce((s, r) => s + r.kwtrKdv, 0);
+  const totalBm      = rows.reduce((s, r) => s + r.mcActual, 0);
+  const totalBmKdv   = rows.reduce((s, r) => s + r.bmKdv, 0);
+  const totalUk      = rows.reduce((s, r) => s + r.uk, 0);
   return (
     <div className="rounded-lg border overflow-hidden">
       <Table>
@@ -763,7 +765,6 @@ function SummaryTable({ rows }: { rows: SummaryRow[] }) {
             <TableHead className="text-xs text-right">BM</TableHead>
             <TableHead className="text-xs text-right text-amber-600">BM KDV</TableHead>
             <TableHead className="text-xs text-right">UK</TableHead>
-            <TableHead className="text-xs text-right font-semibold">Net</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -781,14 +782,14 @@ function SummaryTable({ rows }: { rows: SummaryRow[] }) {
               <TableCell className="text-xs text-right text-muted-foreground">{fmtTRY(r.mcActual)}</TableCell>
               <TableCell className="text-xs text-right text-amber-600">{fmtTRY(r.bmKdv)}</TableCell>
               <TableCell className="text-xs text-right text-muted-foreground">{fmtTRY(r.uk)}</TableCell>
-              <TableCell className="text-xs text-right font-semibold text-emerald-700">{fmtTRY(r.net)}</TableCell>
             </TableRow>
           ))}
           <TableRow className="bg-muted/30 font-semibold">
-            <TableCell colSpan={6} className="text-xs">Toplam</TableCell>
-            <TableCell className="text-xs text-right text-amber-600">{fmtTRY(totalKdv)}</TableCell>
-            <TableCell />
-            <TableCell className="text-xs text-right text-emerald-700">{fmtTRY(totalNet)}</TableCell>
+            <TableCell colSpan={4} className="text-xs">Toplam</TableCell>
+            <TableCell className="text-xs text-right">{fmtTRY(totalKwtrKdv)}</TableCell>
+            <TableCell className="text-xs text-right">{fmtTRY(totalBm)}</TableCell>
+            <TableCell className="text-xs text-right text-amber-600">{fmtTRY(totalBmKdv)}</TableCell>
+            <TableCell className="text-xs text-right">{fmtTRY(totalUk)}</TableCell>
           </TableRow>
         </TableBody>
       </Table>
@@ -1317,40 +1318,10 @@ function NewClosingDialog({
         </DialogHeader>
 
         <div className="space-y-5 py-2">
-          {/* Mülk Bilgileri */}
+          {/* ── 1. İşlem Bilgileri — en üstte */}
           <section>
-            <h3 className="text-sm font-semibold mb-3 text-foreground">Mülk Bilgileri</h3>
+            <h3 className="text-sm font-semibold mb-3 text-foreground">İşlem Bilgileri</h3>
             <div className="grid grid-cols-2 gap-3">
-              <div className="col-span-2">
-                <Label className="text-xs">Mülk Adresi</Label>
-                <Input
-                  className="mt-1 h-8 text-sm"
-                  placeholder="Adres..."
-                  value={propertyAddress}
-                  onChange={(e) => setPropertyAddress(e.target.value)}
-                />
-              </div>
-              <div>
-                <Label className="text-xs">İl</Label>
-                <Input
-                  className="mt-1 h-8 text-sm"
-                  placeholder="İl..."
-                  value={il}
-                  onChange={(e) => setIl(e.target.value)}
-                />
-              </div>
-              <div>
-                <Label className="text-xs">İlçe</Label>
-                <Input className="mt-1 h-8 text-sm" placeholder="İlçe..." value={ilce} onChange={(e) => setIlce(e.target.value)} />
-              </div>
-              <div>
-                <Label className="text-xs">Semt/Mahalle</Label>
-                <Input className="mt-1 h-8 text-sm" placeholder="Mahalle..." value={mahalle} onChange={(e) => setMahalle(e.target.value)} />
-              </div>
-              <div className="col-span-2">
-                <Label className="text-xs">Mülkle İlgili Detay Bilgiler</Label>
-                <Input className="mt-1 h-8 text-sm" placeholder="Detay bilgiler..." value={propertyDetails} onChange={(e) => setPropertyDetails(e.target.value)} />
-              </div>
               <div>
                 <Label className="text-xs">Tür</Label>
                 <Select value={dealCategory} onValueChange={(v) => {
@@ -1432,67 +1403,15 @@ function NewClosingDialog({
                 </div>
               </div>
               {!isExpected && (
-              <div>
-                <Label className="text-xs">Kapanış Tarihi</Label>
-                <Input type="date" className="mt-1 h-8 text-sm" value={closingDate} onChange={(e) => setClosingDate(e.target.value)} />
-              </div>
+                <div>
+                  <Label className="text-xs">Kapanış Tarihi</Label>
+                  <Input type="date" className="mt-1 h-8 text-sm" value={closingDate} onChange={(e) => setClosingDate(e.target.value)} />
+                </div>
               )}
-              <div>
-                <Label className="text-xs">Açılış Rakamı (₺)</Label>
-                <Input type="number" min="0" className="mt-1 h-8 text-sm" placeholder="Liste fiyatı..." value={openingPrice} onChange={(e) => setOpeningPrice(e.target.value)} />
-              </div>
-              <div>
-                <Label className="text-xs">Süre/Gün</Label>
-                <Input type="number" min="0" className="mt-1 h-8 text-sm" placeholder="Pazarlama süresi..." value={durationDays} onChange={(e) => setDurationDays(e.target.value)} />
-              </div>
-              <div>
-                <Label className="text-xs">Sözleşme Başlangıç Tarihi</Label>
-                <Input type="date" className="mt-1 h-8 text-sm" value={contractStartDate} onChange={(e) => setContractStartDate(e.target.value)} />
-              </div>
-              <div>
-                <Label className="text-xs">Sözleşme Bitiş Tarihi</Label>
-                <Input type="date" className="mt-1 h-8 text-sm" value={contractEndDate} onChange={(e) => setContractEndDate(e.target.value)} />
-              </div>
-              <div>
-                <Label className="text-xs">Müşteri nereden buldu?</Label>
-                <Input className="mt-1 h-8 text-sm" placeholder="Sosyal medya, tavsiye..." value={customerSource} onChange={(e) => setCustomerSource(e.target.value)} />
-              </div>
-              <div>
-                <Label className="text-xs">Yönlendirme Bilgisi</Label>
-                <Input className="mt-1 h-8 text-sm" placeholder="Kim yönlendirdi..." value={referralInfo} onChange={(e) => setReferralInfo(e.target.value)} />
-              </div>
-              <div>
-                <Label className="text-xs">Alıcı Adı</Label>
-                <Input
-                  className="mt-1 h-8 text-sm"
-                  placeholder="Alıcı adı..."
-                  value={buyerName}
-                  onChange={(e) => setBuyerName(e.target.value)}
-                />
-              </div>
-              <div>
-                <Label className="text-xs">Satıcı Adı</Label>
-                <Input
-                  className="mt-1 h-8 text-sm"
-                  placeholder="Satıcı adı..."
-                  value={sellerName}
-                  onChange={(e) => setSellerName(e.target.value)}
-                />
-              </div>
-              <div className="col-span-2">
-                <Label className="text-xs">Notlar</Label>
-                <Textarea
-                  className="mt-1 text-sm resize-none"
-                  rows={2}
-                  placeholder="Ek notlar..."
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                />
-              </div>
             </div>
           </section>
 
-          {/* Temsil Tarafları */}
+          {/* ── 2. Temsil Tarafları */}
           <section>
             <h3 className="text-sm font-semibold mb-3 text-foreground">Temsil Tarafları</h3>
             {saleValueNum <= 0 && (
@@ -1543,13 +1462,87 @@ function NewClosingDialog({
             </div>
           </section>
 
-          {/* Summary */}
+          {/* ── 3. Hesap Özeti */}
           {summaryRows.length > 0 && (
             <section>
               <h3 className="text-sm font-semibold mb-3 text-foreground">Hesap Özeti</h3>
               <SummaryTable rows={summaryRows} />
             </section>
           )}
+
+          {/* ── 4. Mülk & Diğer Bilgiler */}
+          <section>
+            <h3 className="text-sm font-semibold mb-3 text-foreground">Mülk Bilgileri</h3>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="col-span-2">
+                <Label className="text-xs">Mülk Adresi</Label>
+                <Input
+                  className="mt-1 h-8 text-sm"
+                  placeholder="Adres..."
+                  value={propertyAddress}
+                  onChange={(e) => setPropertyAddress(e.target.value)}
+                />
+              </div>
+              <div>
+                <Label className="text-xs">İl</Label>
+                <Input className="mt-1 h-8 text-sm" placeholder="İl..." value={il} onChange={(e) => setIl(e.target.value)} />
+              </div>
+              <div>
+                <Label className="text-xs">İlçe</Label>
+                <Input className="mt-1 h-8 text-sm" placeholder="İlçe..." value={ilce} onChange={(e) => setIlce(e.target.value)} />
+              </div>
+              <div>
+                <Label className="text-xs">Semt/Mahalle</Label>
+                <Input className="mt-1 h-8 text-sm" placeholder="Mahalle..." value={mahalle} onChange={(e) => setMahalle(e.target.value)} />
+              </div>
+              <div className="col-span-2">
+                <Label className="text-xs">Mülkle İlgili Detay Bilgiler</Label>
+                <Input className="mt-1 h-8 text-sm" placeholder="Detay bilgiler..." value={propertyDetails} onChange={(e) => setPropertyDetails(e.target.value)} />
+              </div>
+              <div>
+                <Label className="text-xs">Açılış Rakamı (₺)</Label>
+                <Input type="number" min="0" className="mt-1 h-8 text-sm" placeholder="Liste fiyatı..." value={openingPrice} onChange={(e) => setOpeningPrice(e.target.value)} />
+              </div>
+              <div>
+                <Label className="text-xs">Süre/Gün</Label>
+                <Input type="number" min="0" className="mt-1 h-8 text-sm" placeholder="Pazarlama süresi..." value={durationDays} onChange={(e) => setDurationDays(e.target.value)} />
+              </div>
+              <div>
+                <Label className="text-xs">Sözleşme Başlangıç Tarihi</Label>
+                <Input type="date" className="mt-1 h-8 text-sm" value={contractStartDate} onChange={(e) => setContractStartDate(e.target.value)} />
+              </div>
+              <div>
+                <Label className="text-xs">Sözleşme Bitiş Tarihi</Label>
+                <Input type="date" className="mt-1 h-8 text-sm" value={contractEndDate} onChange={(e) => setContractEndDate(e.target.value)} />
+              </div>
+              <div>
+                <Label className="text-xs">Müşteri nereden buldu?</Label>
+                <Input className="mt-1 h-8 text-sm" placeholder="Sosyal medya, tavsiye..." value={customerSource} onChange={(e) => setCustomerSource(e.target.value)} />
+              </div>
+              <div>
+                <Label className="text-xs">Yönlendirme Bilgisi</Label>
+                <Input className="mt-1 h-8 text-sm" placeholder="Kim yönlendirdi..." value={referralInfo} onChange={(e) => setReferralInfo(e.target.value)} />
+              </div>
+              <div>
+                <Label className="text-xs">Alıcı Adı</Label>
+                <Input className="mt-1 h-8 text-sm" placeholder="Alıcı adı..." value={buyerName} onChange={(e) => setBuyerName(e.target.value)} />
+              </div>
+              <div>
+                <Label className="text-xs">Satıcı Adı</Label>
+                <Input className="mt-1 h-8 text-sm" placeholder="Satıcı adı..." value={sellerName} onChange={(e) => setSellerName(e.target.value)} />
+              </div>
+              <div className="col-span-2">
+                <Label className="text-xs">Notlar</Label>
+                <Textarea
+                  className="mt-1 text-sm resize-none"
+                  rows={2}
+                  placeholder="Ek notlar..."
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                />
+              </div>
+            </div>
+          </section>
         </div>
 
         <DialogFooter>
