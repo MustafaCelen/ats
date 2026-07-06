@@ -452,6 +452,8 @@ export const closingAgents = pgTable("closing_agents", {
   status: text("status"),  // "completed" | "expected" | NULL → fallback to parent
   // Payment collection flag: true = paid to office, false = still pending
   paymentCollected: boolean("payment_collected").notNull().default(false),
+  // Reporting month override (YYYY-MM). NULL ⇒ derived from createdAt on the frontend.
+  ilgiliAy: text("ilgili_ay"),
   createdAt: timestamp("created_at").defaultNow(),
 }, (t) => ({
   sideIdIdx: index("closing_agents_side_id_idx").on(t.closingSideId),

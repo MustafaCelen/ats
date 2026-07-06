@@ -101,6 +101,7 @@ app.use((req, res, next) => {
     ALTER TABLE "closing_agents" ADD COLUMN IF NOT EXISTS "closing_date" timestamp;
     ALTER TABLE "closing_agents" ADD COLUMN IF NOT EXISTS "status" text;
     ALTER TABLE "closing_agents" ADD COLUMN IF NOT EXISTS "payment_collected" boolean NOT NULL DEFAULT false;
+    ALTER TABLE "closing_agents" ADD COLUMN IF NOT EXISTS "ilgili_ay" text;
     CREATE INDEX IF NOT EXISTS "closing_agents_closing_date_idx" ON "closing_agents" ("closing_date");
     CREATE INDEX IF NOT EXISTS "closing_agents_status_idx" ON "closing_agents" ("status");
 

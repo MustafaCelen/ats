@@ -2350,6 +2350,7 @@ export class DatabaseStorage implements IStorage {
     kwtrKdv: string; marketCenterActual: string; bmKdv: string;
     ukShare: string; employeeNet: string; kasa: string; nakit: string; banka: string;
     closingDate: Date | null; status: string | null; paymentCollected: boolean;
+    ilgiliAy: string | null;
   }>): Promise<void> {
     if (Object.keys(data).length === 0) return;
     await db.update(closingAgents).set(data as any).where(eq(closingAgents.id, id));

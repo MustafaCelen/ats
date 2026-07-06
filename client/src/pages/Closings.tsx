@@ -109,6 +109,37 @@ function InlineSelect({ value, className = "" }: {
   );
 }
 
+function MonthCell({ value, onSave }: { value: string; onSave: (v: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const display = value ? `${value.slice(5)}/${value.slice(0, 4)}` : "—";
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        className="w-[75px] text-xs border border-primary rounded px-1 py-0 bg-background"
+        value={draft}
+        placeholder="YYYY-MM"
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => { setEditing(false); if (draft !== value) onSave(draft); }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur();
+          if (e.key === "Escape") { setDraft(value); setEditing(false); }
+        }}
+      />
+    );
+  }
+  return (
+    <span
+      className="block cursor-pointer hover:bg-muted/60 rounded px-1 py-0 text-xs whitespace-nowrap"
+      title="Tıklayarak ayı değiştirebilirsiniz"
+      onClick={() => { setDraft(value); setEditing(true); }}
+    >
+      {display}
+    </span>
+  );
+}
+
 function calcAgentBreakdown(
   saleValue: number,
   splitPct: number,
@@ -697,7 +728,7 @@ function SideSection({
                     </div>
                     <BreakdownField label="BM KDV" prefix="−" value={agent.bmKdv} onChange={(v) => updateField("bmKdv", v)} />
                     <BreakdownField label="Üretkenlik Koçluğu" prefix="−" value={agent.ukShare} onChange={(v) => updateField("ukShare", v)} />
-                    <BreakdownField label="Kasa" value={agent.kasa} onChange={(v) => updateField("kasa", v)} />
+                    <BreakdownField label="Kasa" value={agent.kasa} onChange={(v) => updateField("kasa", v)} highlight />
                     <BreakdownField label="Nakit" value={agent.nakit} onChange={(v) => updateField("nakit", v)} />
                     <BreakdownField label="Banka" value={agent.banka} onChange={(v) => updateField("banka", v)} />
                     <div className="border-t border-border mt-1 pt-1.5">
@@ -746,10 +777,11 @@ interface SummaryRow {
 
 function SummaryTable({ rows }: { rows: SummaryRow[] }) {
   if (rows.length === 0) return null;
-  const totalKwtrKdv = rows.reduce((s, r) => s + r.kwtrKdv, 0);
-  const totalBm      = rows.reduce((s, r) => s + r.mcActual, 0);
-  const totalBmKdv   = rows.reduce((s, r) => s + r.bmKdv, 0);
-  const totalUk      = rows.reduce((s, r) => s + r.uk, 0);
+  const totalKwtrKdv  = rows.reduce((s, r) => s + r.kwtrKdv, 0);
+  const totalBm       = rows.reduce((s, r) => s + r.mcActual, 0);
+  const totalBmKdv    = rows.reduce((s, r) => s + r.bmKdv, 0);
+  const totalUk       = rows.reduce((s, r) => s + r.uk, 0);
+  const totalTahsilat = totalKwtrKdv + totalBm + totalBmKdv + totalUk;
   return (
     <div className="rounded-lg border overflow-hidden">
       <Table>
@@ -763,31 +795,37 @@ function SummaryTable({ rows }: { rows: SummaryRow[] }) {
             <TableHead className="text-xs text-right">BM</TableHead>
             <TableHead className="text-xs text-right text-amber-600">BM KDV</TableHead>
             <TableHead className="text-xs text-right">UK</TableHead>
+            <TableHead className="text-xs text-right font-semibold">Toplam Tahsilat</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.map((r, i) => (
-            <TableRow key={i}>
-              <TableCell className="text-xs font-medium">{r.name}</TableCell>
-              <TableCell className="text-xs">
-                <Badge variant="outline" className="text-[10px]">
-                  {r.side === "buyer" ? "Alıcı" : r.side === "referral" ? "Yönlendirme" : "Satıcı"}
-                </Badge>
-              </TableCell>
-              <TableCell className="text-xs text-right">%{r.splitPct.toFixed(2)}</TableCell>
-              <TableCell className="text-xs text-right">{fmtTRY(r.bhbShare)}</TableCell>
-              <TableCell className="text-xs text-right text-muted-foreground">{fmtTRY(r.kwtrKdv)}</TableCell>
-              <TableCell className="text-xs text-right text-muted-foreground">{fmtTRY(r.mcActual)}</TableCell>
-              <TableCell className="text-xs text-right text-amber-600">{fmtTRY(r.bmKdv)}</TableCell>
-              <TableCell className="text-xs text-right text-muted-foreground">{fmtTRY(r.uk)}</TableCell>
-            </TableRow>
-          ))}
+          {rows.map((r, i) => {
+            const tahsilat = r.kwtrKdv + r.mcActual + r.bmKdv + r.uk;
+            return (
+              <TableRow key={i}>
+                <TableCell className="text-xs font-medium">{r.name}</TableCell>
+                <TableCell className="text-xs">
+                  <Badge variant="outline" className="text-[10px]">
+                    {r.side === "buyer" ? "Alıcı" : r.side === "referral" ? "Yönlendirme" : "Satıcı"}
+                  </Badge>
+                </TableCell>
+                <TableCell className="text-xs text-right">%{r.splitPct.toFixed(2)}</TableCell>
+                <TableCell className="text-xs text-right">{fmtTRY(r.bhbShare)}</TableCell>
+                <TableCell className="text-xs text-right text-muted-foreground">{fmtTRY(r.kwtrKdv)}</TableCell>
+                <TableCell className="text-xs text-right text-muted-foreground">{fmtTRY(r.mcActual)}</TableCell>
+                <TableCell className="text-xs text-right text-amber-600">{fmtTRY(r.bmKdv)}</TableCell>
+                <TableCell className="text-xs text-right text-muted-foreground">{fmtTRY(r.uk)}</TableCell>
+                <TableCell className="text-xs text-right font-semibold text-emerald-700">{fmtTRY(tahsilat)}</TableCell>
+              </TableRow>
+            );
+          })}
           <TableRow className="bg-muted/30 font-semibold">
             <TableCell colSpan={4} className="text-xs">Toplam</TableCell>
             <TableCell className="text-xs text-right">{fmtTRY(totalKwtrKdv)}</TableCell>
             <TableCell className="text-xs text-right">{fmtTRY(totalBm)}</TableCell>
             <TableCell className="text-xs text-right text-amber-600">{fmtTRY(totalBmKdv)}</TableCell>
             <TableCell className="text-xs text-right">{fmtTRY(totalUk)}</TableCell>
+            <TableCell className="text-xs text-right text-emerald-700">{fmtTRY(totalTahsilat)}</TableCell>
           </TableRow>
         </TableBody>
       </Table>
@@ -1757,6 +1795,7 @@ export default function Closings() {
     kwtrKdv: string; marketCenterActual: string; marketCenterDue: string;
     bmKdv: string; ukShare: string; employeeNet: string;
     paymentCollected: boolean;
+    ilgiliAy: string;
     isFirstOfClosing: boolean;
     closingAgentCount: number;
   };
@@ -1813,6 +1852,7 @@ export default function Closings() {
             ukShare: agent.ukShare ?? "0",
             employeeNet: agent.employeeNet ?? "0",
             paymentCollected: !!(agent as any).paymentCollected,
+            ilgiliAy: (agent as any).ilgiliAy ?? ((c as any).createdAt ? new Date((c as any).createdAt).toISOString().slice(0, 7) : ""),
             isFirstOfClosing: firstOfClosing,
             closingAgentCount: agentCount,
           });
@@ -1917,7 +1957,7 @@ export default function Closings() {
   const saveClosingField = useCallback(async (closingId: number, field: string, value: string) => {
     try {
       let body: Record<string, any> = { [field]: value };
-      if (field === "closingDate") body = { closingDate: new Date(value).toISOString() };
+      if (field === "closingDate") body = { closingDate: value }; // send YYYY-MM-DD directly
       await fetch(`/api/closings/${closingId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -1952,6 +1992,14 @@ export default function Closings() {
     }
   };
 
+  // Format a Date as "YYYY-MM-DD" using local time (avoids UTC offset shifting the day).
+  const fmtDateLocal = (d: Date): string => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  };
+
   // Accepts YYYY-MM-DD, DD.MM.YYYY, DD/MM/YYYY (and single-digit day/month). Returns Date or null.
   const parseUserDate = (input: string): Date | null => {
     const s = input.trim();
@@ -1978,7 +2026,7 @@ export default function Closings() {
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         // Approval implies payment was collected — admin can flag pending separately if needed.
-        body: JSON.stringify({ status: "completed", closingDate: parsed.toISOString(), paymentCollected: true }),
+        body: JSON.stringify({ status: "completed", closingDate: fmtDateLocal(parsed), paymentCollected: true }),
       });
       if (!res.ok) {
         toast({ title: "Onaylanamadı", description: `Sunucu hatası (${res.status})`, variant: "destructive" });
@@ -2008,7 +2056,7 @@ export default function Closings() {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ closingDate: parsed.toISOString(), status: "completed" }),
+        body: JSON.stringify({ closingDate: fmtDateLocal(parsed), status: "completed" }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -2066,7 +2114,7 @@ export default function Closings() {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
-          body: JSON.stringify({ status: "completed", closingDate: parsed.toISOString(), paymentCollected: true }),
+          body: JSON.stringify({ status: "completed", closingDate: fmtDateLocal(parsed), paymentCollected: true }),
         });
         if (res.ok) success++;
       } catch { /* continue */ }
@@ -2123,7 +2171,7 @@ export default function Closings() {
         "",                             // (empty)
         r.employeeName,                 // Danışman
         kwuid,                          // KWUID
-        fmtMonth(r.closingDate),        // İlgili Ay
+        fmtMonth(r.ilgiliAy),           // İlgili Ay
         r.dealCategory,                 // İşlem
         r.dealType,                     // İşlem Tipi
         sideLabel(r.sideType),          // Taraf
@@ -2512,7 +2560,7 @@ export default function Closings() {
                 <p className="text-xs mt-1">Yeni bir kapanış ekleyin</p>
               </div>
             ) : (
-              <table className="w-full text-xs border-collapse min-w-[2880px]">
+              <table className="w-full text-xs border-collapse min-w-[2960px]">
                 <thead>
                   <tr className="border-b border-border bg-muted/40">
                     {([
@@ -2522,6 +2570,7 @@ export default function Closings() {
                       { label: "İşlem Tipi",          sk: "dealType" },
                       { label: "Taraf",               sk: "sideType" },
                       { label: "İşlem Tarihi",        sk: "closingDate" },
+                      { label: "Ay",                  sk: "ilgiliAy" },
                       { label: "İşlem Değeri",        sk: "saleValue" },
                       { label: "BHB",                 sk: "bhbShare" },
                       { label: "İşlem Adedi",         sk: "islemAdedi" },
@@ -2644,6 +2693,7 @@ export default function Closings() {
                           </Badge>
                         </td>
                         <td className="px-2 py-1"><InlineCell value={row.closingDate} type="date" onSave={sa("closingDate")} /></td>
+                        <td className="px-2 py-1 min-w-[75px]"><MonthCell value={row.ilgiliAy} onSave={sa("ilgiliAy")} /></td>
                         <td className="px-2 py-1 min-w-[90px]"><InlineCell value={row.saleValue} type="number" onSave={sc("saleValue")} /></td>
                         <td className="px-2 py-1 min-w-[80px]"><InlineCell value={row.bhbShare} type="number" onSave={sa("bhbShare")} /></td>
                         <td className="px-2 py-1 min-w-[70px] text-center font-medium text-blue-700" title={row.dealCategory === "Kiralık" ? "Kiralık: BHB / (İşlem Değeri / 2)" : "BHB / (İşlem Değeri × BHB Oranı / 100)"}>

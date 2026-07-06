@@ -2,7 +2,7 @@ import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import bcrypt from "bcrypt";
 import { storage } from "./storage";
-import { db } from "./db";
+import { db, pool } from "./db";
 import { sql } from "drizzle-orm";
 import { requireAuth, requireAdmin, requireHiringManagerOrAdmin, requireFinancialsAccess } from "./auth";
 import { api } from "@shared/routes";
@@ -2637,14 +2637,36 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       await storage.updateClosingAgent(agentId, body);
       res.status(204).send();
 
-      // Fire-and-forget WhatsApp notification for the freshly approved agent
+      // Fire-and-forget: auto-close + WhatsApp notification
       if (becameCompleted) {
         (async () => {
           try {
             const closingId = await storage.getClosingIdForAgent(agentId);
-            if (closingId) await sendClosingNotifications(closingId, agentId);
+            if (!closingId) return;
+
+            // Check if every agent of this closing is now "completed"
+            const { rows: agentRows } = await pool.query<{ status: string | null; closing_date: Date | null }>(
+              `SELECT ca.status, ca.closing_date
+               FROM closing_agents ca
+               JOIN closing_sides cs ON cs.id = ca.closing_side_id
+               WHERE cs.closing_id = $1`,
+              [closingId],
+            );
+            const allDone = agentRows.length > 0 && agentRows.every((r) => r.status === "completed");
+            if (allDone) {
+              const maxDate = agentRows.reduce<Date | null>((best, r) => {
+                if (!r.closing_date) return best;
+                return !best || r.closing_date > best ? r.closing_date : best;
+              }, null);
+              await pool.query(
+                `UPDATE closings SET status = 'completed', closing_date = $1 WHERE id = $2`,
+                [maxDate, closingId],
+              );
+            }
+
+            await sendClosingNotifications(closingId, agentId);
           } catch (err) {
-            console.warn("[WhatsApp notify (agent)]", err);
+            console.warn("[auto-close / WhatsApp notify (agent)]", err);
           }
         })();
       }
