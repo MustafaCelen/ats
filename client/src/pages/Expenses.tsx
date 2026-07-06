@@ -53,6 +53,7 @@ type ImportRow = {
   category: string;
   notes: string;
   included: boolean;
+  selected: boolean;
 };
 
 function parseGarantiCSV(text: string): ImportRow[] {
@@ -85,6 +86,7 @@ function parseGarantiCSV(text: string): ImportRow[] {
       category: "",
       notes: description.trim(),
       included: true,
+      selected: false,
     });
   }
   return rows;
@@ -417,6 +419,7 @@ function BankStatementImportDialog({
   const fileRef = useRef<HTMLInputElement>(null);
   const [rows, setRows] = useState<ImportRow[]>([]);
   const [importing, setImporting] = useState(false);
+  const [bulkCategory, setBulkCategory] = useState("");
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -436,9 +439,11 @@ function BankStatementImportDialog({
     e.target.value = "";
   };
 
-  const selected = rows.filter((r) => r.included);
-  const allCategorized = selected.length > 0 && selected.every((r) => r.category);
-  const totalAmount = selected.reduce((s, r) => s + r.amount, 0);
+  const included = rows.filter((r) => r.included);
+  const selectedRows = rows.filter((r) => r.selected);
+  const allCategorized = included.length > 0 && included.every((r) => r.category);
+  const totalAmount = included.reduce((s, r) => s + r.amount, 0);
+  const allIncludedSelected = included.length > 0 && included.every((r) => r.selected);
 
   const updateRow = (uid: string, patch: Partial<ImportRow>) =>
     setRows((prev) => prev.map((r) => r.uid === uid ? { ...r, ...patch } : r));
@@ -448,10 +453,25 @@ function BankStatementImportDialog({
     setRows((prev) => prev.map((r) => ({ ...r, included: !allOn })));
   };
 
+  const toggleSelectAll = () => {
+    setRows((prev) => prev.map((r) => r.included ? { ...r, selected: !allIncludedSelected } : r));
+  };
+
+  const applyBulkCategory = () => {
+    if (!bulkCategory) return;
+    setRows((prev) => prev.map((r) => r.selected ? { ...r, category: bulkCategory, selected: false } : r));
+    setBulkCategory("");
+  };
+
+  const clearSelection = () => {
+    setRows((prev) => prev.map((r) => ({ ...r, selected: false })));
+    setBulkCategory("");
+  };
+
   const handleImport = async () => {
     setImporting(true);
     let success = 0;
-    for (const row of selected) {
+    for (const row of included) {
       try {
         const res = await fetch("/api/office-expenses", {
           method: "POST",
@@ -471,7 +491,7 @@ function BankStatementImportDialog({
   };
 
   const handleClose = (v: boolean) => {
-    if (!v) setRows([]);
+    if (!v) { setRows([]); setBulkCategory(""); }
     onOpenChange(v);
   };
 
@@ -502,15 +522,48 @@ function BankStatementImportDialog({
           <>
             <div className="flex items-center justify-between text-sm">
               <span className="text-muted-foreground">{rows.length} gider işlemi bulundu</span>
-              <span className="font-semibold">{selected.length} seçili — <span className="text-red-700">{fmtTRY(totalAmount)}</span></span>
+              <span className="font-semibold">{included.length} dahil — <span className="text-red-700">{fmtTRY(totalAmount)}</span></span>
             </div>
+
+            {/* Bulk assign toolbar */}
+            {selectedRows.length > 0 && (
+              <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+                <span className="text-xs font-semibold text-blue-700 whitespace-nowrap">{selectedRows.length} satır seçildi</span>
+                <div className="flex-1">
+                  <Select value={bulkCategory} onValueChange={setBulkCategory}>
+                    <SelectTrigger className="h-7 text-xs bg-white">
+                      <SelectValue placeholder="Kategori seçin..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {EXPENSE_CATEGORY_GROUPS.map((g) => (
+                        <SelectGroup key={g.group}>
+                          <SelectLabel className="text-xs font-bold text-muted-foreground">{g.group}</SelectLabel>
+                          {g.items.map((item) => <SelectItem key={item} value={item} className="text-xs">{item}</SelectItem>)}
+                        </SelectGroup>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button size="sm" className="h-7 text-xs" disabled={!bulkCategory} onClick={applyBulkCategory}>
+                  Uygula
+                </Button>
+                <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={clearSelection}>
+                  Temizle
+                </Button>
+              </div>
+            )}
 
             <div className="overflow-auto flex-1 border border-border rounded-lg">
               <table className="w-full text-sm min-w-[700px]">
                 <thead className="bg-muted/30 sticky top-0 z-10">
                   <tr>
-                    <th className="px-3 py-2 text-left w-8">
-                      <button onClick={toggleAll} className="text-muted-foreground hover:text-foreground">
+                    <th className="px-2 py-2 text-left w-8">
+                      <button onClick={toggleSelectAll} className="text-muted-foreground hover:text-blue-600" title="Tümünü seç / bırak">
+                        {allIncludedSelected ? <CheckSquare className="h-4 w-4 text-blue-600" /> : <Square className="h-4 w-4" />}
+                      </button>
+                    </th>
+                    <th className="px-2 py-2 text-left w-8">
+                      <button onClick={toggleAll} className="text-muted-foreground hover:text-foreground" title="Tümünü dahil et / çıkar">
                         {rows.every((r) => r.included) ? <CheckSquare className="h-4 w-4 text-primary" /> : <Square className="h-4 w-4" />}
                       </button>
                     </th>
@@ -523,9 +576,28 @@ function BankStatementImportDialog({
                 </thead>
                 <tbody className="divide-y divide-border">
                   {rows.map((row) => (
-                    <tr key={row.uid} className={`transition-colors hover:bg-muted/10 ${!row.included ? "opacity-35" : ""}`}>
-                      <td className="px-3 py-1.5">
-                        <button onClick={() => updateRow(row.uid, { included: !row.included })} className="text-muted-foreground hover:text-foreground">
+                    <tr
+                      key={row.uid}
+                      className={`transition-colors hover:bg-muted/10 cursor-pointer ${!row.included ? "opacity-35" : ""} ${row.selected ? "bg-blue-50/60" : ""}`}
+                      onClick={(e) => {
+                        if ((e.target as HTMLElement).closest("button,select,[role='combobox'],input")) return;
+                        if (row.included) updateRow(row.uid, { selected: !row.selected });
+                      }}
+                    >
+                      <td className="px-2 py-1.5">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); if (row.included) updateRow(row.uid, { selected: !row.selected }); }}
+                          className="text-muted-foreground hover:text-blue-600"
+                          disabled={!row.included}
+                        >
+                          {row.selected ? <CheckSquare className="h-4 w-4 text-blue-600" /> : <Square className="h-4 w-4" />}
+                        </button>
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); updateRow(row.uid, { included: !row.included, selected: false }); }}
+                          className="text-muted-foreground hover:text-foreground"
+                        >
                           {row.included ? <CheckSquare className="h-4 w-4 text-primary" /> : <Square className="h-4 w-4" />}
                         </button>
                       </td>
@@ -538,7 +610,7 @@ function BankStatementImportDialog({
                       <td className="px-3 py-1.5 text-right font-semibold text-red-700 whitespace-nowrap text-xs">
                         {fmtTRY(row.amount)}
                       </td>
-                      <td className="px-3 py-1.5">
+                      <td className="px-3 py-1.5" onClick={(e) => e.stopPropagation()}>
                         <Select value={row.category} onValueChange={(v) => updateRow(row.uid, { category: v })}>
                           <SelectTrigger className="h-7 text-xs">
                             <SelectValue placeholder="Seçin..." />
@@ -553,7 +625,7 @@ function BankStatementImportDialog({
                           </SelectContent>
                         </Select>
                       </td>
-                      <td className="px-3 py-1.5">
+                      <td className="px-3 py-1.5" onClick={(e) => e.stopPropagation()}>
                         <Input className="h-7 text-xs" value={row.notes} onChange={(e) => updateRow(row.uid, { notes: e.target.value })} placeholder="Not..." />
                       </td>
                     </tr>
@@ -562,9 +634,9 @@ function BankStatementImportDialog({
               </table>
             </div>
 
-            {!allCategorized && selected.length > 0 && (
+            {!allCategorized && included.length > 0 && (
               <p className="text-xs text-amber-600 flex items-center gap-1">
-                <AlertCircle className="h-3 w-3" /> Tüm seçili satırlar için kategori seçin.
+                <AlertCircle className="h-3 w-3" /> Tüm dahil edilen satırlar için kategori seçin.
               </p>
             )}
 
@@ -575,7 +647,7 @@ function BankStatementImportDialog({
                 onClick={handleImport}
                 disabled={importing || !allCategorized}
               >
-                {importing ? "Aktarılıyor..." : `${selected.length} Kaydı İçe Aktar`}
+                {importing ? "Aktarılıyor..." : `${included.length} Kaydı İçe Aktar`}
               </Button>
             </div>
           </>
