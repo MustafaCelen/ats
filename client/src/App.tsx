@@ -77,7 +77,7 @@ function Router() {
       <Route path="/employees" component={() => <ProtectedRoute><Employees /></ProtectedRoute>} />
       <Route path="/onboarding" component={() => <ProtectedRoute><OnboardingBoard /></ProtectedRoute>} />
       <Route path="/closings" component={() => <ProtectedRoute adminOnly><Closings /></ProtectedRoute>} />
-      <Route path="/listings" component={() => <ProtectedRoute adminOnly><Listings /></ProtectedRoute>} />
+      <Route path="/listings" component={() => <ProtectedRoute><Listings /></ProtectedRoute>} />
       <Route path="/listings/reports" component={() => <ProtectedRoute noAssistant><ListingReports /></ProtectedRoute>} />
       <Route path="/closing-analytics" component={() => <ProtectedRoute adminOnly><ClosingAnalytics /></ProtectedRoute>} />
       <Route path="/agent-health" component={() => <ProtectedRoute noAssistant><AgentHealth /></ProtectedRoute>} />

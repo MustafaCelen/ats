@@ -135,12 +135,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.get("/api/listings/summary", requireAuth, requireAdmin, async (_req, res) => {
+  app.get("/api/listings/summary", requireAuth, async (_req, res) => {
     try { res.json(await storage.getListingsSummary()); }
     catch { res.status(500).json({ message: "Internal server error" }); }
   });
 
-  app.get("/api/listings", requireAuth, requireAdmin, async (req, res) => {
+  app.get("/api/listings", requireAuth, async (req, res) => {
     try {
       const q = req.query;
       res.json(await storage.getListings({
@@ -355,14 +355,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     })();
   });
 
-  app.get("/api/listings/:id/agreement-files", requireAuth, requireAdmin, async (req, res) => {
+  app.get("/api/listings/:id/agreement-files", requireAuth, async (req, res) => {
     try {
       const files = await storage.getListingAgreementFileMetas(Number(req.params.id));
       res.json(files);
     } catch { res.status(500).json({ message: "Internal server error" }); }
   });
 
-  app.get("/api/listings/:id/agreement-files/:fileId", requireAuth, requireAdmin, async (req, res) => {
+  app.get("/api/listings/:id/agreement-files/:fileId", requireAuth, async (req, res) => {
     try {
       const file = await storage.getListingAgreementFileById(Number(req.params.fileId));
       if (!file) return res.status(404).json({ message: "Dosya yok" });
@@ -380,7 +380,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // Download the uploaded yetki sözleşmesi
-  app.get("/api/listings/:id/agreement", requireAuth, requireAdmin, async (req, res) => {
+  app.get("/api/listings/:id/agreement", requireAuth, async (req, res) => {
     try {
       const f = await storage.getListingAgreementFile(Number(req.params.id));
       if (!f) return res.status(404).json({ message: "Dosya yok" });

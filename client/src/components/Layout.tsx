@@ -80,12 +80,13 @@ const adminNavItems: NavEntry[] = [
 ];
 
 const assistantNavItems: NavEntry[] = [
-  { icon: Briefcase,     label: "Üretim Bandı", href: "/jobs"       },
-  { icon: Users,         label: "Adaylar",      href: "/candidates" },
-  { icon: UserCheck,     label: "Danışmanlar",  href: "/employees"  },
-  { icon: Calendar,      label: "Randevular",   href: "/interviews" },
-  { icon: KanbanSquare,  label: "Onboarding",   href: "/onboarding" },
-  { icon: ClipboardList, label: "Görevler",     href: "/tasks"      },
+  { icon: Briefcase,     label: "Üretim Bandı",   href: "/jobs"       },
+  { icon: Users,         label: "Adaylar",        href: "/candidates" },
+  { icon: UserCheck,     label: "Danışmanlar",    href: "/employees"  },
+  { icon: Calendar,      label: "Randevular",     href: "/interviews" },
+  { icon: KanbanSquare,  label: "Onboarding",     href: "/onboarding" },
+  { icon: ClipboardList, label: "Görevler",       href: "/tasks"      },
+  { icon: Building2,     label: "Portal İlanları", href: "/listings"  },
 ];
 
 // ── Helper: find the label for the current location ───────────────────────────
