@@ -399,6 +399,7 @@ export const closings = pgTable("closings", {
   nakit: numeric("nakit", { precision: 15, scale: 2 }).default("0"),
   banka: numeric("banka", { precision: 15, scale: 2 }).default("0"),
   closingDate: timestamp("closing_date"),
+  ilgiliAy: text("ilgili_ay"),
   status: text("status").notNull().default("completed"), // "completed" | "expected"
   buyerName: text("buyer_name"),
   sellerName: text("seller_name"),

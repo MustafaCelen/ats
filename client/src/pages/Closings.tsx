@@ -684,7 +684,6 @@ function SideSection({
                     {agent.paymentCollected ? "💰 Tahsil Edildi" : "💸 Bekliyor"}
                   </button>
                 </div>
-
                 {/* Editable breakdown */}
                 {showBreakdown && agent.bhbShare !== "" && (
                   <div className="ml-5 p-2 bg-muted/50 rounded space-y-1.5">
@@ -1077,7 +1076,8 @@ function NewClosingDialog({
   const [contractStartDate, setContractStartDate] = useState("");
   const [contractEndDate, setContractEndDate] = useState("");
   const [closingDate, setClosingDate] = useState(new Date().toISOString().split("T")[0]);
-  const [isExpected, setIsExpected] = useState(false);
+  const [ilgiliAy, setIlgiliAy] = useState("");
+  const [isExpected, setIsExpected] = useState(true);
   const [buyerName, setBuyerName] = useState("");
   const [sellerName, setSellerName] = useState("");
   const [notes, setNotes] = useState("");
@@ -1179,7 +1179,8 @@ function NewClosingDialog({
     setSaleValue(""); setCommissionRate("2"); setOpeningPrice(""); setDurationDays("");
     setCustomerSource(""); setReferralInfo(""); setContractStartDate(""); setContractEndDate("");
     setClosingDate(new Date().toISOString().split("T")[0]);
-    setIsExpected(false);
+    setIlgiliAy("");
+    setIsExpected(true);
     setBuyerName(""); setSellerName(""); setNotes("");
     setBuyerSide({ enabled: false, agents: [newAgent()] });
     setSellerSide({ enabled: false, agents: [newAgent()] });
@@ -1206,6 +1207,7 @@ function NewClosingDialog({
     setContractStartDate(e.contractStartDate ? new Date(e.contractStartDate).toISOString().split("T")[0] : "");
     setContractEndDate(e.contractEndDate ? new Date(e.contractEndDate).toISOString().split("T")[0] : "");
     setClosingDate(e.closingDate ? new Date(e.closingDate).toISOString().split("T")[0] : "");
+    setIlgiliAy(e.ilgiliAy ?? "");
     setIsExpected(e.status === "expected");
     setBuyerName(e.buyerName ?? "");
     setSellerName(e.sellerName ?? "");
@@ -1321,6 +1323,7 @@ function NewClosingDialog({
       contractStartDate: contractStartDate ? new Date(contractStartDate).toISOString() : null,
       contractEndDate: contractEndDate ? new Date(contractEndDate).toISOString() : null,
       closingDate: (!isExpected && closingDate) ? new Date(closingDate).toISOString() : null,
+      ilgiliAy: ilgiliAy || null,
       status: isExpected ? "expected" : "completed",
       buyerName: buyerName.trim() || null,
       sellerName: sellerName.trim() || null,
@@ -1444,6 +1447,10 @@ function NewClosingDialog({
                   <Input type="date" className="mt-1 h-8 text-sm" value={closingDate} onChange={(e) => setClosingDate(e.target.value)} />
                 </div>
               )}
+              <div>
+                <Label className="text-xs">İlgili Ay</Label>
+                <Input type="month" className="mt-1 h-8 text-sm" value={ilgiliAy} onChange={(e) => setIlgiliAy(e.target.value)} placeholder="YYYY-MM" />
+              </div>
             </div>
           </section>
 
@@ -1466,7 +1473,7 @@ function NewClosingDialog({
                 employees={employees}
                 capStatuses={capStatuses}
                 runningCapUsed={buyerRunningCap}
-                defaultClosingDate={closingDate}
+                defaultClosingDate={isExpected ? "" : closingDate}
                 defaultStatus={isExpected ? "expected" : "completed"}
               />
               <SideSection
@@ -1479,7 +1486,7 @@ function NewClosingDialog({
                 employees={employees}
                 capStatuses={capStatuses}
                 runningCapUsed={sellerRunningCap}
-                defaultClosingDate={closingDate}
+                defaultClosingDate={isExpected ? "" : closingDate}
                 defaultStatus={isExpected ? "expected" : "completed"}
               />
               <SideSection
@@ -1492,7 +1499,7 @@ function NewClosingDialog({
                 employees={employees}
                 capStatuses={capStatuses}
                 runningCapUsed={referralRunningCap}
-                defaultClosingDate={closingDate}
+                defaultClosingDate={isExpected ? "" : closingDate}
                 defaultStatus={isExpected ? "expected" : "completed"}
               />
             </div>
@@ -1852,7 +1859,11 @@ export default function Closings() {
             ukShare: agent.ukShare ?? "0",
             employeeNet: agent.employeeNet ?? "0",
             paymentCollected: !!(agent as any).paymentCollected,
-            ilgiliAy: (agent as any).ilgiliAy ?? ((c as any).createdAt ? new Date((c as any).createdAt).toISOString().slice(0, 7) : ""),
+            ilgiliAy: (c as any).ilgiliAy ?? (
+              effectiveDate
+                ? new Date(effectiveDate).toISOString().slice(0, 7)
+                : ((c as any).createdAt ? new Date((c as any).createdAt).toISOString().slice(0, 7) : "")
+            ),
             isFirstOfClosing: firstOfClosing,
             closingAgentCount: agentCount,
           });
@@ -2693,7 +2704,7 @@ export default function Closings() {
                           </Badge>
                         </td>
                         <td className="px-2 py-1"><InlineCell value={row.closingDate} type="date" onSave={sa("closingDate")} /></td>
-                        <td className="px-2 py-1 min-w-[75px]"><MonthCell value={row.ilgiliAy} onSave={sa("ilgiliAy")} /></td>
+                        <td className="px-2 py-1 min-w-[75px]"><MonthCell value={row.ilgiliAy} onSave={sc("ilgiliAy")} /></td>
                         <td className="px-2 py-1 min-w-[90px]"><InlineCell value={row.saleValue} type="number" onSave={sc("saleValue")} /></td>
                         <td className="px-2 py-1 min-w-[80px]"><InlineCell value={row.bhbShare} type="number" onSave={sa("bhbShare")} /></td>
                         <td className="px-2 py-1 min-w-[70px] text-center font-medium text-blue-700" title={row.dealCategory === "Kiralık" ? "Kiralık: BHB / (İşlem Değeri / 2)" : "BHB / (İşlem Değeri × BHB Oranı / 100)"}>

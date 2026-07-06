@@ -2339,6 +2339,7 @@ export class DatabaseStorage implements IStorage {
     propertyAddress: string; il: string | null; ilce: string | null;
     dealCategory: string; dealType: string; saleValue: string;
     commissionRate: string; closingDate: Date | null; status: string;
+    ilgiliAy: string | null;
     buyerName: string | null; sellerName: string | null; notes: string | null;
   }>): Promise<void> {
     if (Object.keys(data).length === 0) return;
@@ -2388,6 +2389,7 @@ export class DatabaseStorage implements IStorage {
     contractStartDate?: Date | null;
     contractEndDate?: Date | null;
     closingDate?: Date | null;
+    ilgiliAy?: string | null;
     status?: string;
     buyerName?: string | null;
     sellerName?: string | null;
@@ -2410,6 +2412,7 @@ export class DatabaseStorage implements IStorage {
         nakit?: string;
         banka?: string;
         closingDate?: Date | null;
+        ilgiliAy?: string | null;
         status?: string | null;
         paymentCollected?: boolean;
       }>;
@@ -2459,6 +2462,7 @@ export class DatabaseStorage implements IStorage {
         contractStartDate: data.contractStartDate ?? null,
         contractEndDate: data.contractEndDate ?? null,
         closingDate: data.closingDate ?? null,
+        ilgiliAy: data.ilgiliAy ?? null,
         status: data.status ?? (data.closingDate ? "completed" : "expected"),
         buyerName: data.buyerName ?? null,
         sellerName: data.sellerName ?? null,
@@ -2569,6 +2573,7 @@ export class DatabaseStorage implements IStorage {
             capAmountApplied: capAmount !== null ? String(capAmount) : null,
             capUsedBefore: String(capUsedSoFar),
             closingDate: agentInput.closingDate ?? null,
+            ilgiliAy: agentInput.ilgiliAy ?? null,
             status: agentInput.status ?? null,
             paymentCollected: agentInput.paymentCollected ?? false,
           });
@@ -2604,6 +2609,7 @@ export class DatabaseStorage implements IStorage {
       nakit?: string;
       banka?: string;
       closingDate?: Date | null;
+      ilgiliAy?: string | null;
       status?: string | null;
       paymentCollected?: boolean;
     }>;
@@ -2718,6 +2724,7 @@ export class DatabaseStorage implements IStorage {
             capAmountApplied: capAmount !== null ? String(capAmount) : null,
             capUsedBefore: String(capUsedSoFar),
             closingDate: agentInput.closingDate ?? null,
+            ilgiliAy: agentInput.ilgiliAy ?? null,
             status: agentInput.status ?? null,
             paymentCollected: agentInput.paymentCollected ?? false,
           });
