@@ -2618,14 +2618,15 @@ export class DatabaseStorage implements IStorage {
     const commissionRateNum = parseFloat(commissionRate ?? "2") / 100;
 
     const allEmployeeIds = Array.from(new Set(sides.flatMap((s) => s.agents.map((a) => a.employeeId))));
+    const [capStatuses, employees] = await Promise.all([
+      Promise.all(allEmployeeIds.map((id) => this.getEmployeeCapStatus(id))),
+      Promise.all(allEmployeeIds.map((id) => this.getEmployee(id))),
+    ]);
     const capStatusMap: Record<number, CapStatus | null> = {};
-    for (const empId of allEmployeeIds) {
-      capStatusMap[empId] = await this.getEmployeeCapStatus(empId);
-    }
     const empMap: Record<number, EmployeeWithRelations> = {};
-    for (const empId of allEmployeeIds) {
-      const emp = await this.getEmployee(empId);
-      if (emp) empMap[empId] = emp;
+    for (let i = 0; i < allEmployeeIds.length; i++) {
+      capStatusMap[allEmployeeIds[i]] = capStatuses[i];
+      if (employees[i]) empMap[allEmployeeIds[i]] = employees[i]!;
     }
     const runningCapUsed: Record<number, number> = {};
     for (const empId of allEmployeeIds) {

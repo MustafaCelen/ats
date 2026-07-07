@@ -428,16 +428,20 @@ function BreakdownField({
   highlight?: boolean;
   prefix?: string;
 }) {
+  const [focused, setFocused] = useState(false);
+  const displayValue = focused ? value : fmtNumberCell(value);
   return (
     <div className={`flex items-center justify-between gap-2 text-xs ${highlight ? "font-semibold" : "text-muted-foreground"}`}>
       <span className="shrink-0 w-36">{label}</span>
       <div className="flex items-center gap-1">
         {prefix && <span className="text-muted-foreground">{prefix}</span>}
         <Input
-          type="number"
-          step="0.01"
-          value={value}
+          type="text"
+          inputMode="decimal"
+          value={displayValue}
           onChange={(e) => onChange(e.target.value)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
           className={`h-6 w-32 text-xs text-right px-1.5 ${highlight ? "font-semibold" : ""}`}
         />
         <span className="text-muted-foreground shrink-0">₺</span>
@@ -1068,6 +1072,7 @@ function NewClosingDialog({
   const [dealCategory, setDealCategory] = useState<DealCategory>("Satış");
   const [dealType, setDealType] = useState<string>("Konut");
   const [saleValue, setSaleValue] = useState("");
+  const [saleValueFocused, setSaleValueFocused] = useState(false);
   const [commissionRate, setCommissionRate] = useState("2");
   const [openingPrice, setOpeningPrice] = useState("");
   const [durationDays, setDurationDays] = useState("");
@@ -1407,13 +1412,14 @@ function NewClosingDialog({
               <div>
                 <Label className="text-xs">{saleValueLabel}</Label>
                 <Input
-                  type="number"
-                  min="0"
-                  step="1"
+                  type="text"
+                  inputMode="decimal"
                   className="mt-1 h-8 text-sm"
                   placeholder="0"
-                  value={saleValue}
-                  onChange={(e) => setSaleValue(e.target.value)}
+                  value={saleValueFocused ? saleValue : fmtNumberCell(saleValue)}
+                  onFocus={() => setSaleValueFocused(true)}
+                  onBlur={() => setSaleValueFocused(false)}
+                  onChange={(e) => setSaleValue(e.target.value.replace(/\./g, "").replace(",", "."))}
                 />
               </div>
               <div className="flex items-end">
