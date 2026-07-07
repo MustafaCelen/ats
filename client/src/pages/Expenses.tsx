@@ -1,4 +1,5 @@
 import { useState, useRef } from "react";
+import * as XLSX from "xlsx";
 import { Layout } from "@/components/Layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,6 +29,19 @@ function fmtTRY(n: number) {
 function todayYMD() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// ── File reader: CSV / XLS / XLSX → plain text ────────────────────────────────
+
+function readFileAsCSVText(buf: ArrayBuffer, filename: string): string {
+  const ext = filename.split(".").pop()?.toLowerCase();
+  if (ext === "xls" || ext === "xlsx") {
+    const wb = XLSX.read(buf, { type: "array" });
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    return XLSX.utils.sheet_to_csv(sheet);
+  }
+  try { return new TextDecoder("utf-8", { fatal: true }).decode(buf); }
+  catch { return new TextDecoder("windows-1254").decode(buf); }
 }
 
 // ── Bank statement CSV parser ──────────────────────────────────────────────────
@@ -169,9 +183,7 @@ function CreditCardImportDialog({
     const reader = new FileReader();
     reader.onload = (ev) => {
       const buf = ev.target?.result as ArrayBuffer;
-      let text: string;
-      try { text = new TextDecoder("utf-8", { fatal: true }).decode(buf); }
-      catch { text = new TextDecoder("windows-1254").decode(buf); }
+      const text = readFileAsCSVText(buf, file.name);
       const parsed = parseCreditCardCSV(text);
       setRows(parsed);
       if (parsed.length === 0)
@@ -427,9 +439,7 @@ function BankStatementImportDialog({
     const reader = new FileReader();
     reader.onload = (ev) => {
       const buf = ev.target?.result as ArrayBuffer;
-      let text: string;
-      try { text = new TextDecoder("utf-8", { fatal: true }).decode(buf); }
-      catch { text = new TextDecoder("windows-1254").decode(buf); }
+      const text = readFileAsCSVText(buf, file.name);
       const parsed = parseGarantiCSV(text);
       setRows(parsed);
       if (parsed.length === 0)
@@ -516,7 +526,7 @@ function BankStatementImportDialog({
             <Button variant="outline" onClick={() => fileRef.current?.click()}>
               <Upload className="mr-2 h-4 w-4" /> Dosya Seç
             </Button>
-            <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={handleFile} />
+            <input ref={fileRef} type="file" accept=".csv,.xls,.xlsx" className="hidden" onChange={handleFile} />
           </div>
         ) : (
           <>
