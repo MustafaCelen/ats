@@ -2228,7 +2228,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             rows.push([
               agent.candidateName ?? agent.employeeName ?? "",
               (agent as any).kwuid ?? "",
-              fmtMonth(c.closingDate),
+              (c as any).ilgiliAy
+                ? `${((c as any).ilgiliAy as string).slice(5)}/${((c as any).ilgiliAy as string).slice(0, 4)}`
+                : fmtMonth(c.closingDate),
               cv.dealCategory ?? "Satış",
               cv.dealType ?? "Konut",
               (side as any).sideType === "buyer" ? "Alıcı" : (side as any).sideType === "referral" ? "Yönlendirme" : "Satıcı",
@@ -2367,6 +2369,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return isNaN(d.getTime()) ? null : d;
       };
 
+      const parseIlgiliAy = (v: string | undefined): string | null => {
+        if (!v) return null;
+        const mm = v.match(/^(\d{1,2})\/(\d{4})$/); // MM/YYYY
+        if (mm) return `${mm[2]}-${mm[1].padStart(2, "0")}`;
+        if (/^\d{4}-\d{2}$/.test(v)) return v;       // YYYY-MM
+        return null;
+      };
+
       // Process in parallel batches of 10
       const groupEntries = Array.from(groups.values());
       const BATCH = 10;
@@ -2466,6 +2476,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             sellerName: first["Satıcı Adı"] || null,
             notes: first["Notlar"] || null,
             closingDate: closingDate ?? null,
+            ilgiliAy: parseIlgiliAy(first["İlgili Ay"]) ?? (closingDate ? `${closingDate.getFullYear()}-${String(closingDate.getMonth() + 1).padStart(2, "0")}` : null),
             status,
             sides,
           });
