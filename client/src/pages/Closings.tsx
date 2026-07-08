@@ -491,8 +491,26 @@ function SideSection({
 
   const bhbMode = side.bhbMode ?? "rate";
   const manualBhbNum = parseFloat(side.manualBhb || "0");
-  const effectiveBHBOverride = bhbMode === "manual" ? manualBhbNum : undefined;
-  const displayBHB = bhbMode === "manual" ? manualBhbNum : saleValue * (commissionRatePct / 100);
+  const rateBHB = saleValue * (commissionRatePct / 100);
+  const displayBHB = bhbMode === "manual" ? manualBhbNum : rateBHB;
+
+  // When manual BHB changes, auto-set the single agent's split% = manualBHB / rateBHB × 100
+  useEffect(() => {
+    if (bhbMode !== "manual" || manualBhbNum <= 0 || rateBHB <= 0) return;
+    if (side.agents.length !== 1) return;
+    const computed = parseFloat(((manualBhbNum / rateBHB) * 100).toFixed(4));
+    const current = parseFloat(side.agents[0].splitPercentage || "0");
+    if (Math.abs(computed - current) < 0.0001) return;
+    setSide({
+      ...side,
+      agents: [{
+        ...newAgentWithDefaults(),
+        ...side.agents[0],
+        splitPercentage: computed.toString(),
+        isManuallyEdited: false,
+      }],
+    });
+  }, [manualBhbNum, rateBHB, bhbMode]);
 
   const toggle = () => {
     if (side.enabled) {
@@ -584,18 +602,16 @@ function SideSection({
 
             const bmKdvRate = parseFloat(agent.bmKdvRatePct || "0.40");
 
-            const effectiveBHBForRecalc = effectiveBHBOverride;
-            const canRecalc = !!emp && splitPct > 0 && (bhbMode === "manual" ? manualBhbNum > 0 : saleValue > 0);
             const recalc = () => {
-              if (!canRecalc) return;
-              const bd = calcAgentBreakdown(saleValue, splitPct, emp, capUsedSoFar, capAmount, commissionRatePct, bmKdvRate, effectiveBHBForRecalc);
+              if (!emp || saleValue <= 0 || splitPct <= 0) return;
+              const bd = calcAgentBreakdown(saleValue, splitPct, emp, capUsedSoFar, capAmount, commissionRatePct, bmKdvRate);
               updateAgent(agent.id, applyBreakdown(agent, bd));
             };
 
             // Auto-fill when agent/split is first set and fields are empty
-            const showBreakdown = !!emp && splitPct > 0 && (bhbMode === "manual" ? manualBhbNum > 0 : saleValue > 0);
+            const showBreakdown = !!emp && saleValue > 0 && splitPct > 0;
             if (showBreakdown && !agent.isManuallyEdited && agent.bhbShare === "") {
-              const bd = calcAgentBreakdown(saleValue, splitPct, emp, capUsedSoFar, capAmount, commissionRatePct, bmKdvRate, effectiveBHBForRecalc);
+              const bd = calcAgentBreakdown(saleValue, splitPct, emp, capUsedSoFar, capAmount, commissionRatePct, bmKdvRate);
               // Trigger in next tick to avoid render-time setState
               setTimeout(() => updateAgent(agent.id, applyBreakdown(agent, bd)), 0);
             }
@@ -661,60 +677,26 @@ function SideSection({
                       triggerClassName="h-8 text-xs"
                     />
                   </div>
-                  {bhbMode === "manual" ? (
-                    <>
-                      <div className="w-28">
-                        <Input
-                          type="text"
-                          inputMode="decimal"
-                          value={splitPct > 0 && manualBhbNum > 0
-                            ? fmtNumberCell((splitPct * manualBhbNum / 100).toFixed(2))
-                            : ""}
-                          onChange={(e) => {
-                            const raw = e.target.value.replace(/\./g, "").replace(",", ".");
-                            const agentBhb = parseFloat(raw) || 0;
-                            const newSplit = manualBhbNum > 0 ? (agentBhb / manualBhbNum * 100).toFixed(4) : "0";
-                            updateAgent(agent.id, {
-                              ...newAgentWithDefaults(),
-                              id: agent.id,
-                              employeeId: agent.employeeId,
-                              splitPercentage: newSplit,
-                              closingDate: agent.closingDate || defaultClosingDate,
-                              status: agent.status || defaultStatus,
-                            });
-                          }}
-                          className="h-8 text-xs text-right"
-                          placeholder="BHB (₺)"
-                        />
-                      </div>
-                      <span className="text-xs text-muted-foreground shrink-0">
-                        {splitPct > 0 ? `%${parseFloat(splitPct.toFixed(2))}` : "₺"}
-                      </span>
-                    </>
-                  ) : (
-                    <>
-                      <div className="w-24">
-                        <Input
-                          type="number"
-                          min="0"
-                          max="100"
-                          step="0.01"
-                          value={agent.splitPercentage}
-                          onChange={(e) => updateAgent(agent.id, {
-                            ...newAgentWithDefaults(),
-                            id: agent.id,
-                            employeeId: agent.employeeId,
-                            splitPercentage: e.target.value,
-                            closingDate: agent.closingDate || defaultClosingDate,
-                            status: agent.status || defaultStatus,
-                          })}
-                          className="h-8 text-xs text-right"
-                          placeholder="% Pay"
-                        />
-                      </div>
-                      <span className="text-xs text-muted-foreground">%</span>
-                    </>
-                  )}
+                  <div className="w-24">
+                    <Input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.01"
+                      value={agent.splitPercentage}
+                      onChange={(e) => updateAgent(agent.id, {
+                        ...newAgentWithDefaults(),
+                        id: agent.id,
+                        employeeId: agent.employeeId,
+                        splitPercentage: e.target.value,
+                        closingDate: agent.closingDate || defaultClosingDate,
+                        status: agent.status || defaultStatus,
+                      })}
+                      className="h-8 text-xs text-right"
+                      placeholder="% Pay"
+                    />
+                  </div>
+                  <span className="text-xs text-muted-foreground">%</span>
                   {side.agents.length > 1 && (
                     <button type="button" onClick={() => removeAgent(agent.id)} className="text-muted-foreground hover:text-destructive transition-colors">
                       <Trash2 className="h-3.5 w-3.5" />
@@ -1193,8 +1175,6 @@ function NewClosingDialog({
       afterBuyer[empId] = dbUsed;
     }
 
-    const buyerBHBOverride = buyerSide.bhbMode === "manual" ? parseFloat(buyerSide.manualBhb || "0") : undefined;
-    const sellerBHBOverride = sellerSide.bhbMode === "manual" ? parseFloat(sellerSide.manualBhb || "0") : undefined;
     if (buyerSide.enabled) {
       for (const agent of buyerSide.agents) {
         if (!agent.employeeId) continue;
@@ -1203,8 +1183,8 @@ function NewClosingDialog({
         const capAmount = capStatuses[agent.employeeId]?.capAmount ?? null;
         const capUsedSoFar = afterBuyer[agent.employeeId] ?? 0;
         const splitPct = parseFloat(agent.splitPercentage || "0");
-        if (splitPct <= 0 || (saleValueNum <= 0 && buyerBHBOverride === undefined)) continue;
-        const bd = calcAgentBreakdown(saleValueNum, splitPct, emp, capUsedSoFar, capAmount, commissionRatePct, 0, buyerBHBOverride);
+        if (splitPct <= 0 || saleValueNum <= 0) continue;
+        const bd = calcAgentBreakdown(saleValueNum, splitPct, emp, capUsedSoFar, capAmount, commissionRatePct);
         afterBuyer[agent.employeeId] = bd.capUsedAfter;
       }
     }
@@ -1218,8 +1198,8 @@ function NewClosingDialog({
         const capAmount = capStatuses[agent.employeeId]?.capAmount ?? null;
         const capUsedSoFar = afterSeller[agent.employeeId] ?? 0;
         const splitPct = parseFloat(agent.splitPercentage || "0");
-        if (splitPct <= 0 || (saleValueNum <= 0 && sellerBHBOverride === undefined)) continue;
-        const bd = calcAgentBreakdown(saleValueNum, splitPct, emp, capUsedSoFar, capAmount, commissionRatePct, 0, sellerBHBOverride);
+        if (splitPct <= 0 || saleValueNum <= 0) continue;
+        const bd = calcAgentBreakdown(saleValueNum, splitPct, emp, capUsedSoFar, capAmount, commissionRatePct);
         afterSeller[agent.employeeId] = bd.capUsedAfter;
       }
     }
@@ -1479,7 +1459,7 @@ function NewClosingDialog({
                 </Select>
               </div>
               <div>
-                <Label className={`text-xs ${anyManualBHB ? "text-muted-foreground" : ""}`}>Komisyon Oranı (%)</Label>
+                <Label className="text-xs">Komisyon Oranı (%)</Label>
                 <Input
                   type="number"
                   min="0"
@@ -1489,7 +1469,6 @@ function NewClosingDialog({
                   placeholder={dealCategory === "Kiralık" ? "50" : "2"}
                   value={commissionRate}
                   onChange={(e) => setCommissionRate(e.target.value)}
-                  disabled={anyManualBHB}
                 />
               </div>
               <div>
