@@ -521,8 +521,10 @@ function SideSection({
     });
   };
 
-  const splitTotal = side.agents.reduce((s, a) => s + parseFloat(a.splitPercentage || "0"), 0);
-  const splitOk = splitTotal <= 100.01;
+  const splitTotal = bhbMode === "manual"
+    ? side.agents.reduce((s, a) => s + (rateBHB > 0 ? (parseFloat(a.agentManualBhb || "0") / rateBHB) * 100 : 0), 0)
+    : side.agents.reduce((s, a) => s + parseFloat(a.splitPercentage || "0"), 0);
+  const splitOk = bhbMode === "manual" || splitTotal <= 100.01;
 
   return (
     <div className={`border rounded-lg p-4 transition-colors ${side.enabled ? "border-primary/30 bg-primary/5" : "border-border bg-muted/30"}`}>
@@ -682,8 +684,11 @@ function SideSection({
                           }}
                           onChange={(e) => {
                             const raw = e.target.value.replace(/\./g, "").replace(",", ".");
+                            const agentBhbNum = parseFloat(raw) || 0;
+                            const newSplit = rateBHB > 0 ? ((agentBhbNum / rateBHB) * 100).toFixed(4) : "0";
                             updateAgent(agent.id, {
                               agentManualBhb: raw,
+                              splitPercentage: newSplit,
                               bhbShare: "",
                               isManuallyEdited: false,
                             });
@@ -1360,20 +1365,26 @@ function NewClosingDialog({
     if (buyerSide.enabled) {
       if (buyerSide.agents.length === 0) return "Alıcı tarafında en az bir danışman olmalıdır.";
       if (buyerSide.agents.some((a) => !a.employeeId)) return "Alıcı tarafındaki tüm danışmanları seçin.";
-      const total = buyerSide.agents.reduce((s, a) => s + parseFloat(a.splitPercentage || "0"), 0);
-      if (total > 100.01) return `Alıcı tarafı pay toplamı %100'ü geçemez (şu an: %${total.toFixed(2)}).`;
+      if (buyerSide.bhbMode !== "manual") {
+        const total = buyerSide.agents.reduce((s, a) => s + parseFloat(a.splitPercentage || "0"), 0);
+        if (total > 100.01) return `Alıcı tarafı pay toplamı %100'ü geçemez (şu an: %${total.toFixed(2)}).`;
+      }
     }
     if (sellerSide.enabled) {
       if (sellerSide.agents.length === 0) return "Satıcı tarafında en az bir danışman olmalıdır.";
       if (sellerSide.agents.some((a) => !a.employeeId)) return "Satıcı tarafındaki tüm danışmanları seçin.";
-      const total = sellerSide.agents.reduce((s, a) => s + parseFloat(a.splitPercentage || "0"), 0);
-      if (total > 100.01) return `Satıcı tarafı pay toplamı %100'ü geçemez (şu an: %${total.toFixed(2)}).`;
+      if (sellerSide.bhbMode !== "manual") {
+        const total = sellerSide.agents.reduce((s, a) => s + parseFloat(a.splitPercentage || "0"), 0);
+        if (total > 100.01) return `Satıcı tarafı pay toplamı %100'ü geçemez (şu an: %${total.toFixed(2)}).`;
+      }
     }
     if (referralSide.enabled) {
       if (referralSide.agents.length === 0) return "Yönlendirme tarafında en az bir danışman olmalıdır.";
       if (referralSide.agents.some((a) => !a.employeeId)) return "Yönlendirme tarafındaki tüm danışmanları seçin.";
-      const total = referralSide.agents.reduce((s, a) => s + parseFloat(a.splitPercentage || "0"), 0);
-      if (total > 100.01) return `Yönlendirme tarafı pay toplamı %100'ü geçemez (şu an: %${total.toFixed(2)}).`;
+      if (referralSide.bhbMode !== "manual") {
+        const total = referralSide.agents.reduce((s, a) => s + parseFloat(a.splitPercentage || "0"), 0);
+        if (total > 100.01) return `Yönlendirme tarafı pay toplamı %100'ü geçemez (şu an: %${total.toFixed(2)}).`;
+      }
     }
     return null;
   };
