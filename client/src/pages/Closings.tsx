@@ -314,14 +314,14 @@ interface AgentInputRow {
   status: string;       // "completed" | "expected" | "" (inherit)
   paymentCollected: boolean; // BM payı tahsil edildi mi
   isManuallyEdited: boolean; // true = user has changed at least one field
+  agentManualBhb: string;        // manual mode: agent's own BHB amount (UI-only)
+  agentManualBhbFocused: boolean;
 }
 
 interface SideState {
   enabled: boolean;
   agents: AgentInputRow[];
   bhbMode?: "rate" | "manual";
-  manualBhb?: string;
-  manualBhbFocused?: boolean;
 }
 
 function newAgent(): AgentInputRow {
@@ -344,6 +344,8 @@ function newAgent(): AgentInputRow {
     status: "",
     paymentCollected: false,
     isManuallyEdited: false,
+    agentManualBhb: "",
+    agentManualBhbFocused: false,
   };
 }
 
@@ -490,27 +492,11 @@ function SideSection({
   });
 
   const bhbMode = side.bhbMode ?? "rate";
-  const manualBhbNum = parseFloat(side.manualBhb || "0");
   const rateBHB = saleValue * (commissionRatePct / 100);
-  const displayBHB = bhbMode === "manual" ? manualBhbNum : rateBHB;
-
-  // When manual BHB changes, auto-set the single agent's split% = manualBHB / rateBHB × 100
-  useEffect(() => {
-    if (bhbMode !== "manual" || manualBhbNum <= 0 || rateBHB <= 0) return;
-    if (side.agents.length !== 1) return;
-    const computed = parseFloat(((manualBhbNum / rateBHB) * 100).toFixed(4));
-    const current = parseFloat(side.agents[0].splitPercentage || "0");
-    if (Math.abs(computed - current) < 0.0001) return;
-    setSide({
-      ...side,
-      agents: [{
-        ...newAgentWithDefaults(),
-        ...side.agents[0],
-        splitPercentage: computed.toString(),
-        isManuallyEdited: false,
-      }],
-    });
-  }, [manualBhbNum, rateBHB, bhbMode]);
+  const agentsManualBhbTotal = bhbMode === "manual"
+    ? side.agents.reduce((s, a) => s + parseFloat(a.agentManualBhb || "0"), 0)
+    : 0;
+  const displayBHB = bhbMode === "manual" ? agentsManualBhbTotal : rateBHB;
 
   const toggle = () => {
     if (side.enabled) {
@@ -558,7 +544,7 @@ function SideSection({
             <div className="flex items-center gap-0.5 border rounded p-0.5 bg-muted/30">
               <button
                 type="button"
-                onClick={() => setSide({ ...side, bhbMode: "rate", manualBhb: "" })}
+                onClick={() => setSide({ ...side, bhbMode: "rate" })}
                 className={`px-2 py-0.5 text-[10px] rounded transition-colors ${bhbMode === "rate" ? "bg-white dark:bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
               >
                 Oran
@@ -571,22 +557,9 @@ function SideSection({
                 Manuel BHB
               </button>
             </div>
-            {bhbMode === "manual" ? (
-              <input
-                type="text"
-                inputMode="decimal"
-                placeholder="BHB tutarı"
-                value={side.manualBhbFocused ? (side.manualBhb ?? "") : (manualBhbNum > 0 ? fmtNumberCell(side.manualBhb ?? "") : (side.manualBhb ?? ""))}
-                onFocus={() => setSide({ ...side, manualBhbFocused: true })}
-                onBlur={() => setSide({ ...side, manualBhbFocused: false })}
-                onChange={(e) => setSide({ ...side, manualBhb: e.target.value.replace(/\./g, "").replace(",", ".") })}
-                className="h-6 w-28 text-xs border rounded px-1.5 text-right bg-background"
-              />
-            ) : (
-              <span className="text-xs text-muted-foreground">
-                BHB: {fmtTRY(displayBHB)}
-              </span>
-            )}
+            <span className="text-xs text-muted-foreground">
+              BHB: {displayBHB > 0 ? fmtTRY(displayBHB) : "—"}
+            </span>
           </div>
         )}
       </div>
@@ -598,22 +571,37 @@ function SideSection({
             const capStatus = agent.employeeId ? capStatuses[agent.employeeId] : null;
             const capAmount = capStatus?.capAmount ?? null;
             const capUsedSoFar = agent.employeeId ? (runningCapUsed[agent.employeeId] ?? capStatus?.capUsed ?? 0) : 0;
-            const splitPct = parseFloat(agent.splitPercentage || "0");
+            const agentManualBhbNum = parseFloat(agent.agentManualBhb || "0");
+            // In manual mode each agent's splitPct = agentBHB / rateBHB × 100 (for cap tracking)
+            const splitPct = bhbMode === "manual"
+              ? (rateBHB > 0 ? (agentManualBhbNum / rateBHB) * 100 : 0)
+              : parseFloat(agent.splitPercentage || "0");
 
             const bmKdvRate = parseFloat(agent.bmKdvRatePct || "0.40");
 
             const recalc = () => {
-              if (!emp || saleValue <= 0 || splitPct <= 0) return;
-              const bd = calcAgentBreakdown(saleValue, splitPct, emp, capUsedSoFar, capAmount, commissionRatePct, bmKdvRate);
-              updateAgent(agent.id, applyBreakdown(agent, bd));
+              if (!emp) return;
+              if (bhbMode === "manual") {
+                if (agentManualBhbNum <= 0) return;
+                const bd = calcAgentBreakdown(saleValue, 100, emp, capUsedSoFar, capAmount, commissionRatePct, bmKdvRate, agentManualBhbNum);
+                updateAgent(agent.id, applyBreakdown(agent, bd));
+              } else {
+                if (saleValue <= 0 || splitPct <= 0) return;
+                const bd = calcAgentBreakdown(saleValue, splitPct, emp, capUsedSoFar, capAmount, commissionRatePct, bmKdvRate);
+                updateAgent(agent.id, applyBreakdown(agent, bd));
+              }
             };
 
-            // Auto-fill when agent/split is first set and fields are empty
-            const showBreakdown = !!emp && saleValue > 0 && splitPct > 0;
+            // Auto-fill when agent is first set and fields are empty
+            const showBreakdown = !!emp && (bhbMode === "manual" ? agentManualBhbNum > 0 : (saleValue > 0 && splitPct > 0));
             if (showBreakdown && !agent.isManuallyEdited && agent.bhbShare === "") {
-              const bd = calcAgentBreakdown(saleValue, splitPct, emp, capUsedSoFar, capAmount, commissionRatePct, bmKdvRate);
-              // Trigger in next tick to avoid render-time setState
-              setTimeout(() => updateAgent(agent.id, applyBreakdown(agent, bd)), 0);
+              if (bhbMode === "manual") {
+                const bd = calcAgentBreakdown(saleValue, 100, emp, capUsedSoFar, capAmount, commissionRatePct, bmKdvRate, agentManualBhbNum);
+                setTimeout(() => updateAgent(agent.id, applyBreakdown(agent, bd)), 0);
+              } else {
+                const bd = calcAgentBreakdown(saleValue, splitPct, emp, capUsedSoFar, capAmount, commissionRatePct, bmKdvRate);
+                setTimeout(() => updateAgent(agent.id, applyBreakdown(agent, bd)), 0);
+              }
             }
 
             const updateField = (field: keyof AgentInputRow, val: string) => {
@@ -677,26 +665,58 @@ function SideSection({
                       triggerClassName="h-8 text-xs"
                     />
                   </div>
-                  <div className="w-24">
-                    <Input
-                      type="number"
-                      min="0"
-                      max="100"
-                      step="0.01"
-                      value={agent.splitPercentage}
-                      onChange={(e) => updateAgent(agent.id, {
-                        ...newAgentWithDefaults(),
-                        id: agent.id,
-                        employeeId: agent.employeeId,
-                        splitPercentage: e.target.value,
-                        closingDate: agent.closingDate || defaultClosingDate,
-                        status: agent.status || defaultStatus,
-                      })}
-                      className="h-8 text-xs text-right"
-                      placeholder="% Pay"
-                    />
-                  </div>
-                  <span className="text-xs text-muted-foreground">%</span>
+                  {bhbMode === "manual" ? (
+                    <>
+                      <div className="w-28">
+                        <Input
+                          type="text"
+                          inputMode="decimal"
+                          placeholder="BHB (₺)"
+                          value={agent.agentManualBhbFocused
+                            ? agent.agentManualBhb
+                            : (agentManualBhbNum > 0 ? fmtNumberCell(agent.agentManualBhb) : agent.agentManualBhb)}
+                          onFocus={() => updateAgent(agent.id, { agentManualBhbFocused: true })}
+                          onBlur={() => {
+                            updateAgent(agent.id, { agentManualBhbFocused: false });
+                            if (agentManualBhbNum > 0 && emp && !agent.isManuallyEdited) recalc();
+                          }}
+                          onChange={(e) => {
+                            const raw = e.target.value.replace(/\./g, "").replace(",", ".");
+                            updateAgent(agent.id, {
+                              agentManualBhb: raw,
+                              bhbShare: "",
+                              isManuallyEdited: false,
+                            });
+                          }}
+                          className="h-8 text-xs text-right"
+                        />
+                      </div>
+                      <span className="text-xs text-muted-foreground shrink-0">₺</span>
+                    </>
+                  ) : (
+                    <>
+                      <div className="w-24">
+                        <Input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.01"
+                          value={agent.splitPercentage}
+                          onChange={(e) => updateAgent(agent.id, {
+                            ...newAgentWithDefaults(),
+                            id: agent.id,
+                            employeeId: agent.employeeId,
+                            splitPercentage: e.target.value,
+                            closingDate: agent.closingDate || defaultClosingDate,
+                            status: agent.status || defaultStatus,
+                          })}
+                          className="h-8 text-xs text-right"
+                          placeholder="% Pay"
+                        />
+                      </div>
+                      <span className="text-xs text-muted-foreground">%</span>
+                    </>
+                  )}
                   {side.agents.length > 1 && (
                     <button type="button" onClick={() => removeAgent(agent.id)} className="text-muted-foreground hover:text-destructive transition-colors">
                       <Trash2 className="h-3.5 w-3.5" />
@@ -1176,31 +1196,47 @@ function NewClosingDialog({
     }
 
     if (buyerSide.enabled) {
+      const buyerManual = buyerSide.bhbMode === "manual";
       for (const agent of buyerSide.agents) {
         if (!agent.employeeId) continue;
         const emp = employees.find((e) => e.id === agent.employeeId);
         if (!emp) continue;
         const capAmount = capStatuses[agent.employeeId]?.capAmount ?? null;
         const capUsedSoFar = afterBuyer[agent.employeeId] ?? 0;
-        const splitPct = parseFloat(agent.splitPercentage || "0");
-        if (splitPct <= 0 || saleValueNum <= 0) continue;
-        const bd = calcAgentBreakdown(saleValueNum, splitPct, emp, capUsedSoFar, capAmount, commissionRatePct);
-        afterBuyer[agent.employeeId] = bd.capUsedAfter;
+        if (buyerManual) {
+          const agentBhb = parseFloat(agent.agentManualBhb || "0");
+          if (agentBhb <= 0) continue;
+          const bd = calcAgentBreakdown(saleValueNum, 100, emp, capUsedSoFar, capAmount, commissionRatePct, 0, agentBhb);
+          afterBuyer[agent.employeeId] = bd.capUsedAfter;
+        } else {
+          const splitPct = parseFloat(agent.splitPercentage || "0");
+          if (splitPct <= 0 || saleValueNum <= 0) continue;
+          const bd = calcAgentBreakdown(saleValueNum, splitPct, emp, capUsedSoFar, capAmount, commissionRatePct);
+          afterBuyer[agent.employeeId] = bd.capUsedAfter;
+        }
       }
     }
 
     for (const empId of allIds) afterSeller[empId] = afterBuyer[empId] ?? 0;
     if (sellerSide.enabled) {
+      const sellerManual = sellerSide.bhbMode === "manual";
       for (const agent of sellerSide.agents) {
         if (!agent.employeeId) continue;
         const emp = employees.find((e) => e.id === agent.employeeId);
         if (!emp) continue;
         const capAmount = capStatuses[agent.employeeId]?.capAmount ?? null;
         const capUsedSoFar = afterSeller[agent.employeeId] ?? 0;
-        const splitPct = parseFloat(agent.splitPercentage || "0");
-        if (splitPct <= 0 || saleValueNum <= 0) continue;
-        const bd = calcAgentBreakdown(saleValueNum, splitPct, emp, capUsedSoFar, capAmount, commissionRatePct);
-        afterSeller[agent.employeeId] = bd.capUsedAfter;
+        if (sellerManual) {
+          const agentBhb = parseFloat(agent.agentManualBhb || "0");
+          if (agentBhb <= 0) continue;
+          const bd = calcAgentBreakdown(saleValueNum, 100, emp, capUsedSoFar, capAmount, commissionRatePct, 0, agentBhb);
+          afterSeller[agent.employeeId] = bd.capUsedAfter;
+        } else {
+          const splitPct = parseFloat(agent.splitPercentage || "0");
+          if (splitPct <= 0 || saleValueNum <= 0) continue;
+          const bd = calcAgentBreakdown(saleValueNum, splitPct, emp, capUsedSoFar, capAmount, commissionRatePct);
+          afterSeller[agent.employeeId] = bd.capUsedAfter;
+        }
       }
     }
 
