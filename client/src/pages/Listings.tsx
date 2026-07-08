@@ -477,6 +477,7 @@ export default function Listings() {
   const { data: summary } = useQuery<Summary>({
     queryKey: ["/api/listings/summary"],
     queryFn: () => fetch("/api/listings/summary", { credentials: "include" }).then((r) => r.json()),
+    staleTime: 0,
   });
 
   const listQuery = (() => {
@@ -498,6 +499,7 @@ export default function Listings() {
   const { data: rowsRaw, isLoading } = useQuery<Listing[]>({
     queryKey: ["/api/listings", listQuery],
     queryFn: () => fetch(`/api/listings?${listQuery}`, { credentials: "include" }).then((r) => r.ok ? r.json() : []),
+    staleTime: 0,
   });
   const rows: Listing[] = Array.isArray(rowsRaw) ? rowsRaw : [];
 
