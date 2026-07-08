@@ -1141,6 +1141,24 @@ function NewClosingDialog({
     (sellerSide.enabled && sellerSide.bhbMode === "manual") ||
     (referralSide.enabled && referralSide.bhbMode === "manual");
 
+  // Auto-compute commission rate from manual BHB when saleValue is known
+  useEffect(() => {
+    if (!anyManualBHB || saleValueNum <= 0) return;
+    const manualSide = [buyerSide, sellerSide, referralSide].find(
+      (s) => s.enabled && s.bhbMode === "manual" && parseFloat(s.manualBhb || "0") > 0,
+    );
+    if (!manualSide) return;
+    const bhb = parseFloat(manualSide.manualBhb || "0");
+    const rate = (bhb / saleValueNum) * 100;
+    const formatted = parseFloat(rate.toFixed(4)).toString();
+    setCommissionRate(formatted);
+  }, [
+    buyerSide.manualBhb, buyerSide.bhbMode, buyerSide.enabled,
+    sellerSide.manualBhb, sellerSide.bhbMode, sellerSide.enabled,
+    referralSide.manualBhb, referralSide.bhbMode, referralSide.enabled,
+    saleValueNum, anyManualBHB,
+  ]);
+
   // Compute per-side starting cap used:
   // buyerRunningCap = DB values (cap used before this closing)
   // sellerRunningCap = DB values + any buyer-side contributions for same employee
