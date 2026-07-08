@@ -1136,6 +1136,10 @@ function NewClosingDialog({
   const commissionRatePct = Math.max(0, parseFloat(commissionRate || (dealCategory === "Kiralık" ? "50" : "2")));
   const sideBHBPreview = saleValueNum > 0 ? saleValueNum * (commissionRatePct / 100) : 0;
   const saleValueLabel = dealCategory === "Kiralık" ? "Aylık Kira Bedeli (₺) *" : "Satış Bedeli (₺) *";
+  const anyManualBHB =
+    (buyerSide.enabled && buyerSide.bhbMode === "manual") ||
+    (sellerSide.enabled && sellerSide.bhbMode === "manual") ||
+    (referralSide.enabled && referralSide.bhbMode === "manual");
 
   // Compute per-side starting cap used:
   // buyerRunningCap = DB values (cap used before this closing)
@@ -1441,7 +1445,7 @@ function NewClosingDialog({
                 </Select>
               </div>
               <div>
-                <Label className="text-xs">Komisyon Oranı (%)</Label>
+                <Label className={`text-xs ${anyManualBHB ? "text-muted-foreground" : ""}`}>Komisyon Oranı (%)</Label>
                 <Input
                   type="number"
                   min="0"
@@ -1451,6 +1455,7 @@ function NewClosingDialog({
                   placeholder={dealCategory === "Kiralık" ? "50" : "2"}
                   value={commissionRate}
                   onChange={(e) => setCommissionRate(e.target.value)}
+                  disabled={anyManualBHB}
                 />
               </div>
               <div>
