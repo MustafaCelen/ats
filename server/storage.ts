@@ -4,7 +4,7 @@ import {
   users, jobAssignments, applicationDocuments, tasks, employees,
   capSettings, closings, closingSides, closingAgents, interviewTargets,
   officeExpenses, listings, financialTargets, listingAgreementFiles,
-  teams, teamMembers,
+  teams, teamMembers, fonzipSyncedDebts,
   APPLICATION_STAGES, BM_PREPAYMENT_CATEGORY,
   type Job, type InsertJob,
   type Candidate, type InsertCandidate,
@@ -24,6 +24,7 @@ import {
   type FinancialTarget,
   type ListingAgreementFile,
   type Team, type TeamWithMembers,
+  type FonzipSyncedDebt,
 } from "@shared/schema";
 import { eq, desc, asc, count, sql, gte, lte, lt, and, or, isNull, isNotNull, inArray, notInArray } from "drizzle-orm";
 import { differenceInDays } from "date-fns";
@@ -5056,6 +5057,125 @@ export class DatabaseStorage implements IStorage {
 
   async removeTeamMember(teamId: number, employeeId: number): Promise<void> {
     await db.delete(teamMembers).where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.employeeId, employeeId)));
+  }
+
+  // ── Fonzip ────────────────────────────────────────────────────────────────
+
+  async upsertFonzipDebt(data: {
+    fonzipId: number; fonzipUserId: number; membershipNo: string | null;
+    userName: string; amount: string; details: string | null; period: string | null;
+    status: number; operationDate: string | null; addedByName: string | null;
+  }): Promise<FonzipSyncedDebt> {
+    const [row] = await db
+      .insert(fonzipSyncedDebts)
+      .values({ ...data, syncedAt: new Date() })
+      .onConflictDoUpdate({
+        target: fonzipSyncedDebts.fonzipId,
+        set: {
+          status: data.status,
+          amount: data.amount,
+          details: data.details,
+          operationDate: data.operationDate,
+          syncedAt: new Date(),
+        },
+      })
+      .returning();
+    return row;
+  }
+
+  async setFonzipDebtEmployee(fonzipId: number, employeeId: number | null): Promise<void> {
+    await db.update(fonzipSyncedDebts).set({ employeeId }).where(eq(fonzipSyncedDebts.fonzipId, fonzipId));
+  }
+
+  async setFonzipDebtExpense(fonzipId: number, expenseId: number): Promise<void> {
+    await db.update(fonzipSyncedDebts).set({ expenseId }).where(eq(fonzipSyncedDebts.fonzipId, fonzipId));
+  }
+
+  async getFonzipSyncedDebts(filters?: { status?: number; unmatched?: boolean }): Promise<(FonzipSyncedDebt & { employeeName?: string | null })[]> {
+    const conditions: any[] = [];
+    if (filters?.status !== undefined) conditions.push(eq(fonzipSyncedDebts.status, filters.status));
+    if (filters?.unmatched) conditions.push(isNull(fonzipSyncedDebts.employeeId));
+
+    const rows = await db
+      .select({ debt: fonzipSyncedDebts, empName: candidates.name })
+      .from(fonzipSyncedDebts)
+      .leftJoin(employees, eq(fonzipSyncedDebts.employeeId, employees.id))
+      .leftJoin(candidates, eq(employees.candidateId, candidates.id))
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(desc(fonzipSyncedDebts.operationDate));
+
+    return rows.map(r => ({ ...r.debt, employeeName: r.empName }));
+  }
+
+  async getFonzipSyncStats(): Promise<{
+    total: number; paid: number; pending: number; matched: number; unmatched: number; syncedToExpenses: number; lastSyncAt: Date | null;
+  }> {
+    const rows = await db.select().from(fonzipSyncedDebts);
+    const lastSync = rows.reduce<Date | null>((max, r) => {
+      if (!r.syncedAt) return max;
+      return max === null || r.syncedAt > max ? r.syncedAt : max;
+    }, null);
+    return {
+      total: rows.length,
+      paid: rows.filter(r => r.status === 1).length,
+      pending: rows.filter(r => r.status === 8).length,
+      matched: rows.filter(r => r.employeeId !== null).length,
+      unmatched: rows.filter(r => r.employeeId === null).length,
+      syncedToExpenses: rows.filter(r => r.expenseId !== null).length,
+      lastSyncAt: lastSync,
+    };
+  }
+
+  async getFonzipDuesReport(): Promise<{
+    employeeId: number; employeeName: string; kwuid: string | null;
+    paidTotal: number; pendingTotal: number; paidCount: number; pendingCount: number;
+    lastPaymentDate: string | null;
+  }[]> {
+    const rows = await db
+      .select({
+        employeeId: fonzipSyncedDebts.employeeId,
+        empName: candidates.name,
+        kwuid: employees.kwuid,
+        status: fonzipSyncedDebts.status,
+        amount: fonzipSyncedDebts.amount,
+        operationDate: fonzipSyncedDebts.operationDate,
+      })
+      .from(fonzipSyncedDebts)
+      .innerJoin(employees, eq(fonzipSyncedDebts.employeeId, employees.id))
+      .innerJoin(candidates, eq(employees.candidateId, candidates.id))
+      .orderBy(desc(fonzipSyncedDebts.operationDate));
+
+    const byEmployee: Record<number, {
+      employeeId: number; employeeName: string; kwuid: string | null;
+      paidTotal: number; pendingTotal: number; paidCount: number; pendingCount: number;
+      lastPaymentDate: string | null;
+    }> = {};
+
+    for (const r of rows) {
+      if (!r.employeeId) continue;
+      if (!byEmployee[r.employeeId]) {
+        byEmployee[r.employeeId] = {
+          employeeId: r.employeeId,
+          employeeName: r.empName ?? "",
+          kwuid: r.kwuid,
+          paidTotal: 0, pendingTotal: 0, paidCount: 0, pendingCount: 0,
+          lastPaymentDate: null,
+        };
+      }
+      const amount = parseFloat(r.amount ?? "0");
+      if (r.status === 1) {
+        byEmployee[r.employeeId].paidTotal += amount;
+        byEmployee[r.employeeId].paidCount++;
+        if (!byEmployee[r.employeeId].lastPaymentDate || (r.operationDate && r.operationDate > byEmployee[r.employeeId].lastPaymentDate!)) {
+          byEmployee[r.employeeId].lastPaymentDate = r.operationDate;
+        }
+      } else {
+        byEmployee[r.employeeId].pendingTotal += amount;
+        byEmployee[r.employeeId].pendingCount++;
+      }
+    }
+
+    return Object.values(byEmployee).sort((a, b) => b.pendingTotal - a.pendingTotal);
   }
 }
 

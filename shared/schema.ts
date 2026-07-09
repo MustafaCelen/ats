@@ -726,3 +726,30 @@ export type InsertOffer = z.infer<typeof insertOfferSchema>;
 export type CandidateNote = typeof candidateNotes.$inferSelect;
 export type InsertCandidateNote = z.infer<typeof insertCandidateNoteSchema>;
 export type ApplicationDocuments = typeof applicationDocuments.$inferSelect;
+
+// ── Fonzip Integration ────────────────────────────────────────────────────────
+
+export const fonzipSyncedDebts = pgTable("fonzip_synced_debts", {
+  id: serial("id").primaryKey(),
+  fonzipId: integer("fonzip_id").notNull().unique(),
+  fonzipUserId: integer("fonzip_user_id").notNull(),
+  employeeId: integer("employee_id").references(() => employees.id),
+  membershipNo: text("membership_no"),
+  userName: text("user_name").notNull(),
+  amount: numeric("amount", { precision: 15, scale: 2 }).notNull(),
+  details: text("details"),
+  period: text("period"),
+  status: integer("status").notNull(),          // 1=ödendi, 8=bekliyor
+  operationDate: text("operation_date"),         // YYYY-MM-DD
+  addedByName: text("added_by_name"),
+  expenseId: integer("expense_id"),             // -> office_expenses.id when synced
+  syncedAt: timestamp("synced_at").defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (t) => ({
+  fonzipIdIdx: index("fonzip_synced_debts_fonzip_id_idx").on(t.fonzipId),
+  employeeIdx: index("fonzip_synced_debts_employee_idx").on(t.employeeId),
+  statusIdx: index("fonzip_synced_debts_status_idx").on(t.status),
+  operationDateIdx: index("fonzip_synced_debts_date_idx").on(t.operationDate),
+}));
+
+export type FonzipSyncedDebt = typeof fonzipSyncedDebts.$inferSelect;

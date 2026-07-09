@@ -11,7 +11,7 @@ import { insertInterviewSchema, insertOfferSchema, type InsertTask, TASK_STATUSE
 import { getAuthUrl, createOAuth2Client, createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from "./google";
 import { sendWhatsApp, sendWhatsAppTemplate, checkWhatsAppStatus, publicBaseUrl } from "./whatsapp";
 import { sendEmail } from "./email";
-import { isFonzipConfigured, fetchFonzipPreview, fetchFonzipMembers, fetchFonzipDues, fetchFonzipDonations } from "./fonzip";
+import { isFonzipConfigured, fetchFonzipPreview, fetchFonzipUsers, fetchFonzipDebts, fetchFonzipDonations, syncFonzipDebts } from "./fonzip";
 
 // Scoping helper:
 //   admin      → undefined (all jobs)
@@ -2945,11 +2945,62 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // ── Fonzip Integration ────────────────────────────────────────────────────────
 
-  app.get("/api/fonzip/status", requireAdmin, (_req, res) => {
+  app.get("/api/fonzip/status", requireAuth, requireAdmin, (_req, res) => {
     res.json({ configured: isFonzipConfigured() });
   });
 
-  app.get("/api/fonzip/preview", requireAdmin, async (_req, res) => {
+  app.post("/api/fonzip/sync", requireAuth, requireAdmin, async (req, res) => {
+    if (!isFonzipConfigured()) return res.status(400).json({ error: "Fonzip yapılandırılmamış." });
+    try {
+      const userId = (req as any).user?.id ?? 0;
+      const result = await syncFonzipDebts(userId);
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/fonzip/sync/stats", requireAuth, requireAdmin, async (_req, res) => {
+    try {
+      const stats = await storage.getFonzipSyncStats();
+      res.json(stats);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/fonzip/synced-debts", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const status = req.query.status !== undefined ? parseInt(req.query.status as string) : undefined;
+      const unmatched = req.query.unmatched === "true";
+      const data = await storage.getFonzipSyncedDebts({ status, unmatched });
+      res.json(data);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.patch("/api/fonzip/synced-debts/:fonzipId/match", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const fonzipId = parseInt(req.params.fonzipId);
+      const { employeeId } = req.body as { employeeId: number | null };
+      await storage.setFonzipDebtEmployee(fonzipId, employeeId);
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/fonzip/dues-report", requireAuth, requireAdmin, async (_req, res) => {
+    try {
+      const data = await storage.getFonzipDuesReport();
+      res.json(data);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/fonzip/preview", requireAuth, requireAdmin, async (_req, res) => {
     if (!isFonzipConfigured()) {
       return res.status(400).json({ error: "Fonzip credentials tanımlı değil. FONZIP_CLIENT_ID ve FONZIP_CLIENT_SECRET env değişkenlerini ekleyin." });
     }
@@ -2961,31 +3012,31 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.get("/api/fonzip/members", requireAdmin, async (req, res) => {
+  app.get("/api/fonzip/users", requireAuth, requireAdmin, async (req, res) => {
     if (!isFonzipConfigured()) return res.status(400).json({ error: "Fonzip yapılandırılmamış." });
     try {
       const page = parseInt(req.query.page as string || "1");
       const perPage = parseInt(req.query.per_page as string || "100");
-      const data = await fetchFonzipMembers(page, perPage);
+      const data = await fetchFonzipUsers(page, perPage);
       res.json(data);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
 
-  app.get("/api/fonzip/dues", requireAdmin, async (req, res) => {
+  app.get("/api/fonzip/debts", requireAuth, requireAdmin, async (req, res) => {
     if (!isFonzipConfigured()) return res.status(400).json({ error: "Fonzip yapılandırılmamış." });
     try {
       const page = parseInt(req.query.page as string || "1");
       const perPage = parseInt(req.query.per_page as string || "100");
-      const data = await fetchFonzipDues(page, perPage);
+      const data = await fetchFonzipDebts(page, perPage);
       res.json(data);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
 
-  app.get("/api/fonzip/donations", requireAdmin, async (req, res) => {
+  app.get("/api/fonzip/donations", requireAuth, requireAdmin, async (req, res) => {
     if (!isFonzipConfigured()) return res.status(400).json({ error: "Fonzip yapılandırılmamış." });
     try {
       const page = parseInt(req.query.page as string || "1");
