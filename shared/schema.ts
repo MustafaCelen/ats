@@ -152,7 +152,11 @@ export const applications = pgTable("applications", {
   notes: text("notes"),
   score: integer("score").default(0),
   appliedAt: timestamp("applied_at").defaultNow(),
-});
+}, (t) => ({
+  jobIdIdx: index("applications_job_id_idx").on(t.jobId),
+  candidateIdIdx: index("applications_candidate_id_idx").on(t.candidateId),
+  statusIdx: index("applications_status_idx").on(t.status),
+}));
 
 // StageHistory — tracks every stage transition (equivalent to reference's StageHistory model)
 export const stageHistory = pgTable("stage_history", {
@@ -163,7 +167,11 @@ export const stageHistory = pgTable("stage_history", {
   fromStatus: text("from_status"),
   toStatus: text("to_status").notNull(),
   enteredAt: timestamp("entered_at").defaultNow(),
-});
+}, (t) => ({
+  applicationIdIdx: index("stage_history_application_id_idx").on(t.applicationId),
+  candidateIdIdx: index("stage_history_candidate_id_idx").on(t.candidateId),
+  jobIdIdx: index("stage_history_job_id_idx").on(t.jobId),
+}));
 
 // Interview — scheduled interviews linked to an application
 export const interviews = pgTable("interviews", {
@@ -181,7 +189,10 @@ export const interviews = pgTable("interviews", {
   calendarEventId: text("calendar_event_id"),
   rescheduleCount: integer("reschedule_count").notNull().default(0),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (t) => ({
+  applicationIdIdx: index("interviews_application_id_idx").on(t.applicationId),
+  candidateIdIdx: index("interviews_candidate_id_idx").on(t.candidateId),
+}));
 
 // Offer — job offers linked to an application
 export const offers = pgTable("offers", {
@@ -194,7 +205,10 @@ export const offers = pgTable("offers", {
   status: text("status").notNull().default("draft"), // draft | pending_approval | approved | sent | accepted | rejected
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (t) => ({
+  applicationIdIdx: index("offers_application_id_idx").on(t.applicationId),
+  candidateIdIdx: index("offers_candidate_id_idx").on(t.candidateId),
+}));
 
 // CandidateNote — notes about a candidate
 export const candidateNotes = pgTable("candidate_notes", {
@@ -203,7 +217,9 @@ export const candidateNotes = pgTable("candidate_notes", {
   content: text("content").notNull(),
   authorName: text("author_name").notNull().default("Recruiter"),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (t) => ({
+  candidateIdIdx: index("candidate_notes_candidate_id_idx").on(t.candidateId),
+}));
 
 // ApplicationDocuments — tracks which of the 6 required docs have been received
 export const applicationDocuments = pgTable("application_documents", {
@@ -260,7 +276,9 @@ export const employees = pgTable("employees", {
   advisorNotifyMsgId: text("advisor_notify_msg_id"),
   advisorLastEmailNotifiedAt: timestamp("advisor_last_email_notified_at"),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (t) => ({
+  statusIdx: index("employees_status_idx").on(t.status),
+}));
 
 export const employeesRelations = relations(employees, ({ one }) => ({
   candidate: one(candidates, { fields: [employees.candidateId], references: [candidates.id] }),
@@ -288,7 +306,11 @@ export const tasks = pgTable("tasks", {
   jobId: integer("job_id"),
   candidateId: integer("candidate_id"),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (t) => ({
+  assignedToIdx: index("tasks_assigned_to_idx").on(t.assignedToUserId),
+  candidateIdIdx: index("tasks_candidate_id_idx").on(t.candidateId),
+  jobIdIdx: index("tasks_job_id_idx").on(t.jobId),
+}));
 
 export const insertTaskSchema = createInsertSchema(tasks).omit({ id: true, createdAt: true });
 export type InsertTask = z.infer<typeof insertTaskSchema>;
@@ -567,7 +589,10 @@ export const officeExpenses = pgTable("office_expenses", {
   employeeId: integer("employee_id"),          // Optional — required for BM_PREPAYMENT_CATEGORY
   createdByUserId: integer("created_by_user_id"),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (t) => ({
+  dateIdx: index("office_expenses_date_idx").on(t.date),
+  typeIdx: index("office_expenses_type_idx").on(t.type),
+}));
 
 export const insertOfficeExpenseSchema = createInsertSchema(officeExpenses).omit({ id: true, createdAt: true });
 export type InsertOfficeExpense = z.infer<typeof insertOfficeExpenseSchema>;

@@ -1,4 +1,5 @@
 import express, { type Request, Response, NextFunction } from "express";
+import compression from "compression";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 import { pool } from "./db";
@@ -10,6 +11,7 @@ const PgStore = connectPgSimple(session);
 
 const app = express();
 app.set("trust proxy", 1);
+app.use(compression());
 const httpServer = createServer(app);
 
 declare module "http" {
@@ -191,6 +193,25 @@ app.use((req, res, next) => {
       "gold_gram_try" numeric(15, 4),
       "updated_at" timestamp DEFAULT now()
     );
+
+    -- Performance indexes
+    CREATE INDEX IF NOT EXISTS "applications_job_id_idx" ON "applications" ("job_id");
+    CREATE INDEX IF NOT EXISTS "applications_candidate_id_idx" ON "applications" ("candidate_id");
+    CREATE INDEX IF NOT EXISTS "applications_status_idx" ON "applications" ("status");
+    CREATE INDEX IF NOT EXISTS "stage_history_application_id_idx" ON "stage_history" ("application_id");
+    CREATE INDEX IF NOT EXISTS "stage_history_candidate_id_idx" ON "stage_history" ("candidate_id");
+    CREATE INDEX IF NOT EXISTS "stage_history_job_id_idx" ON "stage_history" ("job_id");
+    CREATE INDEX IF NOT EXISTS "interviews_application_id_idx" ON "interviews" ("application_id");
+    CREATE INDEX IF NOT EXISTS "interviews_candidate_id_idx" ON "interviews" ("candidate_id");
+    CREATE INDEX IF NOT EXISTS "offers_application_id_idx" ON "offers" ("application_id");
+    CREATE INDEX IF NOT EXISTS "offers_candidate_id_idx" ON "offers" ("candidate_id");
+    CREATE INDEX IF NOT EXISTS "candidate_notes_candidate_id_idx" ON "candidate_notes" ("candidate_id");
+    CREATE INDEX IF NOT EXISTS "office_expenses_date_idx" ON "office_expenses" ("date");
+    CREATE INDEX IF NOT EXISTS "office_expenses_type_idx" ON "office_expenses" ("type");
+    CREATE INDEX IF NOT EXISTS "employees_status_idx" ON "employees" ("status");
+    CREATE INDEX IF NOT EXISTS "tasks_assigned_to_idx" ON "tasks" ("assigned_to_user_id");
+    CREATE INDEX IF NOT EXISTS "tasks_candidate_id_idx" ON "tasks" ("candidate_id");
+    CREATE INDEX IF NOT EXISTS "tasks_job_id_idx" ON "tasks" ("job_id");
 
     -- Migrate old single-file agreement data into the new multi-file table
     INSERT INTO listing_agreement_files (listing_id, name, mime, data, uploaded_at)
