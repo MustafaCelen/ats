@@ -11,6 +11,7 @@ import { insertInterviewSchema, insertOfferSchema, type InsertTask, TASK_STATUSE
 import { getAuthUrl, createOAuth2Client, createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from "./google";
 import { sendWhatsApp, sendWhatsAppTemplate, checkWhatsAppStatus, publicBaseUrl } from "./whatsapp";
 import { sendEmail } from "./email";
+import { isFonzipConfigured, fetchFonzipPreview, fetchFonzipMembers, fetchFonzipDues, fetchFonzipDonations } from "./fonzip";
 
 // Scoping helper:
 //   admin      → undefined (all jobs)
@@ -2939,6 +2940,60 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     } catch (err) {
       console.error("[PUT /api/financial-targets]", err);
       res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Fonzip Integration ────────────────────────────────────────────────────────
+
+  app.get("/api/fonzip/status", requireAdmin, (_req, res) => {
+    res.json({ configured: isFonzipConfigured() });
+  });
+
+  app.get("/api/fonzip/preview", requireAdmin, async (_req, res) => {
+    if (!isFonzipConfigured()) {
+      return res.status(400).json({ error: "Fonzip credentials tanımlı değil. FONZIP_CLIENT_ID ve FONZIP_CLIENT_SECRET env değişkenlerini ekleyin." });
+    }
+    try {
+      const data = await fetchFonzipPreview();
+      res.json(data);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/fonzip/members", requireAdmin, async (req, res) => {
+    if (!isFonzipConfigured()) return res.status(400).json({ error: "Fonzip yapılandırılmamış." });
+    try {
+      const page = parseInt(req.query.page as string || "1");
+      const perPage = parseInt(req.query.per_page as string || "100");
+      const data = await fetchFonzipMembers(page, perPage);
+      res.json(data);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/fonzip/dues", requireAdmin, async (req, res) => {
+    if (!isFonzipConfigured()) return res.status(400).json({ error: "Fonzip yapılandırılmamış." });
+    try {
+      const page = parseInt(req.query.page as string || "1");
+      const perPage = parseInt(req.query.per_page as string || "100");
+      const data = await fetchFonzipDues(page, perPage);
+      res.json(data);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/fonzip/donations", requireAdmin, async (req, res) => {
+    if (!isFonzipConfigured()) return res.status(400).json({ error: "Fonzip yapılandırılmamış." });
+    try {
+      const page = parseInt(req.query.page as string || "1");
+      const perPage = parseInt(req.query.per_page as string || "100");
+      const data = await fetchFonzipDonations(page, perPage);
+      res.json(data);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
     }
   });
 

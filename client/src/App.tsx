@@ -30,6 +30,7 @@ import AgentHealth from "@/pages/AgentHealth";
 import PublicListing from "@/pages/PublicListing";
 import AdvisorSelfService from "@/pages/AdvisorSelfService";
 import Teams from "@/pages/Teams";
+import FonzipPreview from "@/pages/FonzipPreview";
 
 function ProtectedRoute({
   children,
@@ -87,6 +88,7 @@ function Router() {
       <Route path="/expenses" component={() => <ProtectedRoute adminOnly><Expenses /></ProtectedRoute>} />
       <Route path="/pl-report" component={() => <ProtectedRoute adminOnly><PLReport /></ProtectedRoute>} />
       <Route path="/teams" component={() => <ProtectedRoute adminOnly><Teams /></ProtectedRoute>} />
+      <Route path="/fonzip" component={() => <ProtectedRoute adminOnly><FonzipPreview /></ProtectedRoute>} />
       <Route component={NotFound} />
     </Switch>
   );
