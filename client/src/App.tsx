@@ -31,6 +31,7 @@ import PublicListing from "@/pages/PublicListing";
 import AdvisorSelfService from "@/pages/AdvisorSelfService";
 import Teams from "@/pages/Teams";
 import FonzipPreview from "@/pages/FonzipPreview";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 function ProtectedRoute({
   children,
@@ -99,7 +100,9 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <Toaster />
-        <Router />
+        <ErrorBoundary>
+          <Router />
+        </ErrorBoundary>
       </TooltipProvider>
     </QueryClientProvider>
   );

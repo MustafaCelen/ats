@@ -222,9 +222,9 @@ export async function syncFonzipDebts(createdByUserId: number): Promise<{
         data = await fonzipGet("/debts", { page: String(page), per_page: String(perPage), start_date: "2025-01-01" });
         break;
       } catch (e: any) {
-        if (e.message.includes("429") && pageRetry < 6) {
+        if (e.message.includes("429") && pageRetry < 10) {
           pageRetry++;
-          await new Promise(r => setTimeout(r, 10000 * pageRetry)); // 10s, 20s, 30s...
+          await new Promise(r => setTimeout(r, 60000)); // Fonzip rate limit dakikada bir resetleniyor
           continue;
         }
         errors.push(`Page ${page}: ${e.message}`);
@@ -289,7 +289,7 @@ export async function syncFonzipDebts(createdByUserId: number): Promise<{
     if (total > 0 && fetched >= total) break;
     if (data.debt_list.length === 0) break;
     page++;
-    await new Promise(r => setTimeout(r, 500));
+    await new Promise(r => setTimeout(r, 2000));
   }
 
   return { total, upserted, matched, expensesCreated, errors };
@@ -300,4 +300,111 @@ export async function fetchFonzipUsers(page = 1, perPage = 100): Promise<any> {
     search: { start_page: page, how_many: perPage, order_by: "name", filter: { condition: "and", attributes: [] } },
     values_list: ["id", "first_name", "last_name", "phone", "email", "membership_no", "total_financial"],
   });
+}
+
+// Hızlı sync: her Fonzip üyesinin toplam borcunu çeker (total_financial),
+// danışmanla eşleştirir. Bireysel debt kayıtları çekmez — sadece toplam.
+export async function syncFonzipUsersFinancials(): Promise<{
+  totalUsers: number; matched: number; withDebt: number; errors: string[];
+}> {
+  const { storage } = await import("./storage");
+  const { pool } = await import("./db");
+
+  const allEmployees = await storage.getEmployees();
+  const byKwuid: Record<string, number> = {};
+  for (const emp of allEmployees) {
+    if (emp.kwuid) byKwuid[String(emp.kwuid).trim()] = emp.id;
+  }
+
+  await ensureConfigTable();
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS fonzip_user_financials (
+      fonzip_user_id INTEGER PRIMARY KEY,
+      employee_id INTEGER,
+      membership_no TEXT,
+      user_name TEXT NOT NULL,
+      email TEXT,
+      phone TEXT,
+      total_financial NUMERIC(15,2) NOT NULL DEFAULT 0,
+      synced_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  let page = 1;
+  const perPage = 100;
+  let totalUsers = 0;
+  let matched = 0;
+  let withDebt = 0;
+  const errors: string[] = [];
+
+  while (true) {
+    let data: any;
+    let retry = 0;
+    while (true) {
+      try {
+        data = await fetchFonzipUsers(page, perPage);
+        break;
+      } catch (e: any) {
+        if (e.message.includes("429") && retry < 10) {
+          retry++;
+          await new Promise(r => setTimeout(r, 60000));
+          continue;
+        }
+        errors.push(`Page ${page}: ${e.message}`);
+        data = null;
+        break;
+      }
+    }
+    if (!data) break;
+    if (!data.user_list || data.user_list.length === 0) break;
+    if (page === 1) totalUsers = data.total ?? 0;
+
+    for (const u of data.user_list) {
+      try {
+        const membershipNo = u.membership_no != null ? String(u.membership_no) : null;
+        const empId = membershipNo ? byKwuid[membershipNo.trim()] : undefined;
+        const name = `${u.first_name ?? ""} ${u.last_name ?? ""}`.trim();
+        const debt = parseFloat(u.total_financial ?? 0);
+        if (empId) matched++;
+        if (debt > 0) withDebt++;
+        await pool.query(
+          `INSERT INTO fonzip_user_financials (fonzip_user_id, employee_id, membership_no, user_name, email, phone, total_financial, synced_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+           ON CONFLICT (fonzip_user_id) DO UPDATE SET
+             employee_id = EXCLUDED.employee_id,
+             membership_no = EXCLUDED.membership_no,
+             user_name = EXCLUDED.user_name,
+             email = EXCLUDED.email,
+             phone = EXCLUDED.phone,
+             total_financial = EXCLUDED.total_financial,
+             synced_at = NOW()`,
+          [u.id, empId ?? null, membershipNo, name, u.email ?? null, u.phone ?? null, String(debt)]
+        );
+      } catch (e: any) {
+        errors.push(`User #${u.id}: ${e.message}`);
+      }
+    }
+
+    if (data.user_list.length < perPage) break;
+    if (totalUsers > 0 && page * perPage >= totalUsers) break;
+    page++;
+    await new Promise(r => setTimeout(r, 2000));
+  }
+
+  return { totalUsers, matched, withDebt, errors };
+}
+
+export async function getFonzipUserFinancialsReport(): Promise<any[]> {
+  const { pool } = await import("./db");
+  const res = await pool.query(`
+    SELECT f.fonzip_user_id, f.employee_id, f.membership_no, f.user_name, f.email, f.phone,
+           f.total_financial, f.synced_at,
+           c.name as employee_name, c.email as employee_email
+    FROM fonzip_user_financials f
+    LEFT JOIN employees e ON e.id = f.employee_id
+    LEFT JOIN candidates c ON c.id = e.candidate_id
+    WHERE f.total_financial > 0
+    ORDER BY f.total_financial DESC
+  `);
+  return res.rows;
 }

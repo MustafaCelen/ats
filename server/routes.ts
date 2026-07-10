@@ -11,7 +11,7 @@ import { insertInterviewSchema, insertOfferSchema, type InsertTask, TASK_STATUSE
 import { getAuthUrl, createOAuth2Client, createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from "./google";
 import { sendWhatsApp, sendWhatsAppTemplate, checkWhatsAppStatus, publicBaseUrl } from "./whatsapp";
 import { sendEmail } from "./email";
-import { isFonzipConfigured, fetchFonzipPreview, fetchFonzipUsers, fetchFonzipDebts, fetchFonzipDonations, syncFonzipDebts } from "./fonzip";
+import { isFonzipConfigured, fetchFonzipPreview, fetchFonzipUsers, fetchFonzipDebts, fetchFonzipDonations, syncFonzipDebts, syncFonzipUsersFinancials, getFonzipUserFinancialsReport } from "./fonzip";
 
 // Scoping helper:
 //   admin      → undefined (all jobs)
@@ -211,7 +211,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // Check Green API delivery status for a sent notification
-  app.get("/api/listings/:id/notify-status", requireAuth, requireAdmin, async (req, res) => {
+  app.get("/api/listings/:id/notify-status", requireAuth, async (req, res) => {
     try {
       const id = Number(req.params.id);
       const kind = (req.query.kind as string) === "passive" ? "passive" : "new";
@@ -251,7 +251,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // (Re)send the advisor self-service notification for one listing
-  app.post("/api/listings/:id/notify", requireAuth, requireAdmin, async (req, res) => {
+  app.post("/api/listings/:id/notify", requireAuth, async (req, res) => {
     try {
       const l = await storage.getListing(Number(req.params.id));
       if (!l) return res.status(404).json({ message: "İlan bulunamadı" });
@@ -294,12 +294,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     startedAt: null as Date | null,
   };
 
-  app.get("/api/listings/notify-bulk/status", requireAuth, requireAdmin, (_req, res) => {
+  app.get("/api/listings/notify-bulk/status", requireAuth, (_req, res) => {
     res.json({ ...bulkNotifyState });
   });
 
   // Bulk WhatsApp notify for a set of listing IDs (fire-and-forget, random 45-60 s delay)
-  app.post("/api/listings/notify-bulk", requireAuth, requireAdmin, async (req, res) => {
+  app.post("/api/listings/notify-bulk", requireAuth, async (req, res) => {
     if (bulkNotifyState.active)
       return res.status(409).json({ message: "Zaten bir gönderim devam ediyor. Bitmesini bekleyin." });
     const { ids } = req.body as { ids: number[] };
@@ -803,7 +803,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // ── Notify a single advisor (one WhatsApp with link to all their pending listings) ──
 
-  app.post("/api/listings/notify-advisor/:employeeId", requireAuth, requireAdmin, async (req, res) => {
+  app.post("/api/listings/notify-advisor/:employeeId", requireAuth, async (req, res) => {
     try {
       const employeeId = Number(req.params.employeeId);
       const channel: "wa" | "email" = req.body?.channel === "email" ? "email" : "wa";
@@ -2949,12 +2949,47 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json({ configured: isFonzipConfigured() });
   });
 
+  let syncRunning = false;
+  let lastSyncResult: any = null;
+
   app.post("/api/fonzip/sync", requireAuth, requireAdmin, async (req, res) => {
     if (!isFonzipConfigured()) return res.status(400).json({ error: "Fonzip yapılandırılmamış." });
+    if (syncRunning) return res.json({ running: true, message: "Sync zaten devam ediyor." });
+    const userId = (req as any).user?.id ?? 0;
+    syncRunning = true;
+    res.json({ running: true, message: "Sync başlatıldı, istatistikleri takip edin." });
+    syncFonzipDebts(userId)
+      .then(result => { lastSyncResult = result; })
+      .catch(err => { lastSyncResult = { error: err.message }; })
+      .finally(() => { syncRunning = false; });
+  });
+
+  app.get("/api/fonzip/sync/status", requireAuth, requireAdmin, (_req, res) => {
+    res.json({ running: syncRunning, lastResult: lastSyncResult });
+  });
+
+  let usersFinancialsSyncRunning = false;
+  let lastUsersFinancialsResult: any = null;
+
+  app.post("/api/fonzip/sync-users", requireAuth, requireAdmin, (_req, res) => {
+    if (!isFonzipConfigured()) return res.status(400).json({ error: "Fonzip yapılandırılmamış." });
+    if (usersFinancialsSyncRunning) return res.json({ running: true, message: "Kullanıcı sync'i zaten devam ediyor." });
+    usersFinancialsSyncRunning = true;
+    res.json({ running: true, message: "Kullanıcı sync'i başlatıldı." });
+    syncFonzipUsersFinancials()
+      .then(result => { lastUsersFinancialsResult = result; })
+      .catch(err => { lastUsersFinancialsResult = { error: err.message }; })
+      .finally(() => { usersFinancialsSyncRunning = false; });
+  });
+
+  app.get("/api/fonzip/sync-users/status", requireAuth, requireAdmin, (_req, res) => {
+    res.json({ running: usersFinancialsSyncRunning, lastResult: lastUsersFinancialsResult });
+  });
+
+  app.get("/api/fonzip/user-financials", requireAuth, requireAdmin, async (_req, res) => {
     try {
-      const userId = (req as any).user?.id ?? 0;
-      const result = await syncFonzipDebts(userId);
-      res.json(result);
+      const report = await getFonzipUserFinancialsReport();
+      res.json(report);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

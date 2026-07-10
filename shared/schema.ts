@@ -753,3 +753,25 @@ export const fonzipSyncedDebts = pgTable("fonzip_synced_debts", {
 }));
 
 export type FonzipSyncedDebt = typeof fonzipSyncedDebts.$inferSelect;
+
+export const fonzipUserFinancials = pgTable("fonzip_user_financials", {
+  fonzipUserId: integer("fonzip_user_id").primaryKey(),
+  employeeId: integer("employee_id").references(() => employees.id),
+  membershipNo: text("membership_no"),
+  userName: text("user_name").notNull(),
+  email: text("email"),
+  phone: text("phone"),
+  totalFinancial: numeric("total_financial", { precision: 15, scale: 2 }).notNull().default("0"),
+  syncedAt: timestamp("synced_at", { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  employeeIdx: index("fonzip_user_financials_employee_idx").on(t.employeeId),
+  debtIdx: index("fonzip_user_financials_debt_idx").on(t.totalFinancial),
+}));
+
+export type FonzipUserFinancial = typeof fonzipUserFinancials.$inferSelect;
+
+export const fonzipConfig = pgTable("_fonzip_config", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+});

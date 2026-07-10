@@ -80,6 +80,13 @@ export default function FonzipPreview() {
     retry: false,
   });
 
+  const { data: syncStatus, refetch: refetchSyncStatus } = useQuery<{ running: boolean; lastResult: any }>({
+    queryKey: ["/api/fonzip/sync/status"],
+    queryFn: () => fetch("/api/fonzip/sync/status", { credentials: "include" }).then(r => r.json()),
+    refetchInterval: (q) => q.state.data?.running ? 3000 : false,
+    staleTime: 0,
+  });
+
   const syncMutation = useMutation({
     mutationFn: () => fetch("/api/fonzip/sync", { method: "POST", credentials: "include" }).then(r => r.json()),
     onSuccess: (data) => {
@@ -87,16 +94,49 @@ export default function FonzipPreview() {
         toast({ title: "Sync hatası", description: data.error, variant: "destructive" });
         return;
       }
-      toast({
-        title: "Senkronizasyon tamamlandı",
-        description: `${data.upserted} kayıt güncellendi, ${data.matched} danışman eşleştirildi, ${data.expensesCreated} gelir kaydı oluşturuldu.`,
-      });
-      qc.invalidateQueries({ queryKey: ["/api/fonzip"] });
-      qc.invalidateQueries({ queryKey: ["/api/office-expenses"] });
-      refetchStats();
+      toast({ title: "Sync başlatıldı", description: "Arka planda çalışıyor. İstatistikler otomatik güncellenir." });
+      refetchSyncStatus();
+      const interval = setInterval(() => {
+        refetchStats();
+        refetchSyncStatus().then(r => { if (!r.data?.running) clearInterval(interval); });
+      }, 5000);
     },
     onError: () => toast({ title: "Hata", description: "Senkronizasyon başarısız.", variant: "destructive" }),
   });
+
+  const isSyncRunning = syncMutation.isPending || syncStatus?.running;
+
+  const { data: usersSyncStatus, refetch: refetchUsersSyncStatus } = useQuery<{ running: boolean; lastResult: any }>({
+    queryKey: ["/api/fonzip/sync-users/status"],
+    queryFn: () => fetch("/api/fonzip/sync-users/status", { credentials: "include" }).then(r => r.json()),
+    refetchInterval: (q) => q.state.data?.running ? 3000 : false,
+    staleTime: 0,
+  });
+
+  const { data: userFinancials, refetch: refetchUserFinancials } = useQuery<any[]>({
+    queryKey: ["/api/fonzip/user-financials"],
+    queryFn: () => fetch("/api/fonzip/user-financials", { credentials: "include" }).then(r => r.json()),
+    staleTime: 0,
+  });
+
+  const usersSyncMutation = useMutation({
+    mutationFn: () => fetch("/api/fonzip/sync-users", { method: "POST", credentials: "include" }).then(r => r.json()),
+    onSuccess: (data) => {
+      if (data.error) {
+        toast({ title: "Sync hatası", description: data.error, variant: "destructive" });
+        return;
+      }
+      toast({ title: "Kullanıcı borç sync'i başlatıldı", description: "~1 dakika sürer." });
+      refetchUsersSyncStatus();
+      const interval = setInterval(() => {
+        refetchUserFinancials();
+        refetchUsersSyncStatus().then(r => { if (!r.data?.running) clearInterval(interval); });
+      }, 5000);
+    },
+    onError: () => toast({ title: "Hata", description: "Kullanıcı sync'i başarısız.", variant: "destructive" }),
+  });
+
+  const isUsersSyncRunning = usersSyncMutation.isPending || usersSyncStatus?.running;
 
   return (
     <div className="space-y-6">
@@ -112,13 +152,23 @@ export default function FonzipPreview() {
             </Badge>
           )}
           <Button
+            onClick={() => usersSyncMutation.mutate()}
+            disabled={isUsersSyncRunning || !status?.configured}
+            size="sm"
+            variant="outline"
+          >
+            {isUsersSyncRunning
+              ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Borçlar sync...</>
+              : <><Users className="h-4 w-4 mr-2" />Toplam Borç Sync</>}
+          </Button>
+          <Button
             onClick={() => syncMutation.mutate()}
-            disabled={syncMutation.isPending || !status?.configured}
+            disabled={isSyncRunning || !status?.configured}
             size="sm"
           >
-            {syncMutation.isPending
-              ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Senkronize ediliyor...</>
-              : <><RefreshCw className="h-4 w-4 mr-2" />Fonzip'ten Senkronize Et</>}
+            {isSyncRunning
+              ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Detay sync...</>
+              : <><RefreshCw className="h-4 w-4 mr-2" />Detaylı Sync</>}
           </Button>
         </div>
       </div>
@@ -135,19 +185,25 @@ export default function FonzipPreview() {
         </div>
       )}
 
-      {!stats?.total && (
+      {!stats?.total && !userFinancials?.length && (
         <Card className="border-dashed">
           <CardContent className="flex flex-col items-center justify-center py-10 text-muted-foreground gap-3">
             <RefreshCw className="h-8 w-8 opacity-30" />
-            <p className="text-sm">Henüz senkronizasyon yapılmadı. "Fonzip'ten Senkronize Et" butonuna basın.</p>
+            <p className="text-sm">Henüz senkronizasyon yapılmadı. Hızlı başlangıç için "Toplam Borç Sync" butonuna basın.</p>
           </CardContent>
         </Card>
       )}
 
-      {(stats?.total ?? 0) > 0 && (
-        <Tabs defaultValue="report">
+      {((stats?.total ?? 0) > 0 || (userFinancials?.length ?? 0) > 0) && (
+        <Tabs defaultValue="debts">
           <TabsList>
-            <TabsTrigger value="report"><TrendingUp className="h-3.5 w-3.5 mr-1.5" />Aidat Raporu</TabsTrigger>
+            <TabsTrigger value="debts">
+              <AlertTriangle className="h-3.5 w-3.5 mr-1.5" />Borçlu Danışmanlar
+              {(userFinancials?.length ?? 0) > 0 && (
+                <Badge variant="destructive" className="ml-1.5 h-4 text-[10px]">{userFinancials!.length}</Badge>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="report"><TrendingUp className="h-3.5 w-3.5 mr-1.5" />Aidat Raporu (Detay)</TabsTrigger>
             <TabsTrigger value="unmatched">
               <AlertTriangle className="h-3.5 w-3.5 mr-1.5" />Eşleşmeyenler
               {(unmatched?.length ?? 0) > 0 && (
@@ -156,6 +212,62 @@ export default function FonzipPreview() {
             </TabsTrigger>
             <TabsTrigger value="preview"><Users className="h-3.5 w-3.5 mr-1.5" />Ham Veri</TabsTrigger>
           </TabsList>
+
+          <TabsContent value="debts" className="mt-4">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">
+                  Borçlu Danışman Listesi
+                  {userFinancials && userFinancials.length > 0 && (
+                    <span className="ml-2 text-xs text-muted-foreground font-normal">
+                      Toplam: {formatCurrency(userFinancials.reduce((s, r) => s + parseFloat(r.total_financial), 0))}
+                    </span>
+                  )}
+                </CardTitle>
+                <p className="text-xs text-muted-foreground">
+                  Fonzip'teki tüm üyelerin toplam borç durumu. "Toplam Borç Sync" ile güncellenir.
+                </p>
+              </CardHeader>
+              <CardContent className="p-0">
+                {!userFinancials?.length ? (
+                  <p className="text-sm text-muted-foreground p-4">Henüz borç verisi yok. "Toplam Borç Sync" butonuna basın.</p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Fonzip Adı</TableHead>
+                        <TableHead>Danışman (Sistemde)</TableHead>
+                        <TableHead>KW UID</TableHead>
+                        <TableHead className="text-right">Borç Tutarı</TableHead>
+                        <TableHead>İletişim</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {userFinancials.map((r: any) => (
+                        <TableRow key={r.fonzip_user_id}>
+                          <TableCell className="font-medium">{r.user_name}</TableCell>
+                          <TableCell>
+                            {r.employee_name ? (
+                              <span className="text-green-700">{r.employee_name}</span>
+                            ) : (
+                              <span className="text-muted-foreground text-xs italic">Eşleşmedi</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground text-xs">{r.membership_no ?? "—"}</TableCell>
+                          <TableCell className="text-right text-red-600 font-medium">
+                            {formatCurrency(parseFloat(r.total_financial))}
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {r.phone ?? r.email ?? "—"}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
 
           <TabsContent value="report" className="mt-4">
             <Card>
