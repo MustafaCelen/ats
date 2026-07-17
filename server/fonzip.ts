@@ -22,20 +22,30 @@ async function ensureConfigTable() {
   dbTableReady = true;
 }
 
-async function loadTokenFromDB(): Promise<TokenCache | null> {
+async function loadTokenFromDB(ignoreExpiry = false): Promise<TokenCache | null> {
   try {
     await ensureConfigTable();
     const { pool } = await import("./db");
+    // DB token her zaman getir; Fonzip token'ları takip ettiğimizden uzun ömürlü,
+    // expiry sadece bilgi amaçlı. Gerçek expire tespiti API 401'inde yapılır.
     const res = await pool.query(
-      "SELECT value, expires_at FROM _fonzip_config WHERE key = 'token' AND expires_at > NOW()"
+      ignoreExpiry
+        ? "SELECT value, expires_at FROM _fonzip_config WHERE key = 'token'"
+        : "SELECT value, expires_at FROM _fonzip_config WHERE key = 'token'"
     );
     if (res.rows.length === 0) return null;
-    console.log("[fonzip] Token DB'den yüklendi");
     return { token: res.rows[0].value, expiresAt: new Date(res.rows[0].expires_at).getTime() };
   } catch (e: any) {
     console.error("[fonzip] loadTokenFromDB hatası:", e?.message);
     return null;
   }
+}
+
+async function deleteDBToken() {
+  try {
+    const { pool } = await import("./db");
+    await pool.query("DELETE FROM _fonzip_config WHERE key = 'token'");
+  } catch { /* ignore */ }
 }
 
 async function saveTokenToDB(token: string, expiresAt: number) {
@@ -53,13 +63,14 @@ async function saveTokenToDB(token: string, expiresAt: number) {
   }
 }
 
-async function createFreshToken(): Promise<string> {
+async function createFreshToken(retryOn409 = true): Promise<string> {
   const clientId = process.env.FONZIP_CLIENT_ID;
   const clientSecret = process.env.FONZIP_CLIENT_SECRET;
   if (!clientId || !clientSecret) {
     throw new Error("FONZIP_CLIENT_ID ve FONZIP_CLIENT_SECRET env değişkenleri tanımlı değil.");
   }
-  const res = await fetch(`${FONZIP_BASE}/token`, {
+
+  const doCreate = async () => fetch(`${FONZIP_BASE}/token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
@@ -68,8 +79,20 @@ async function createFreshToken(): Promise<string> {
       client_secret: clientSecret,
     }).toString(),
   });
+
+  let res = await doCreate();
+
+  // 409: Fonzip'te aktif token var. Beklet ve retry (max 6 kez × 5 dk = 30 dk).
+  let attempt = 0;
+  while (res.status === 409 && retryOn409 && attempt < 6) {
+    attempt++;
+    console.log(`[fonzip] 409 alındı, ${attempt}/6 - 5 dk bekleniyor...`);
+    await new Promise(r => setTimeout(r, 5 * 60 * 1000));
+    res = await doCreate();
+  }
+
   if (res.status === 409) {
-    throw new Error("Fonzip'te aktif bir token zaten mevcut (409). Fonzip panelinden mevcut token'ı iptal edin ya da ~1 saat bekleyin.");
+    throw new Error("Fonzip'te aktif bir token zaten mevcut (409). 30 dk beklendi hâlâ kilitli.");
   }
   if (!res.ok) {
     const text = await res.text();
@@ -77,9 +100,10 @@ async function createFreshToken(): Promise<string> {
   }
   const data = await res.json();
   const token = data.access_token as string;
-  const expiresAt = Date.now() + 55 * 60 * 1000;
+  // Fonzip token ömrü ~2-3 saat gözlemlendi; 6 saat cache — 401 gelene kadar kullan
+  const expiresAt = Date.now() + 6 * 60 * 60 * 1000;
   tokenCache = { token, expiresAt };
-  console.log("[fonzip] Yeni token alındı:", token);
+  console.log("[fonzip] Yeni token alındı:", token.slice(0, 12) + "...");
   await saveTokenToDB(token, expiresAt);
   return token;
 }
@@ -88,12 +112,10 @@ async function getToken(): Promise<string> {
   const manualToken = process.env.FONZIP_ACCESS_TOKEN;
   if (manualToken && !manualTokenExpired) return manualToken;
 
-  if (tokenCache && Date.now() < tokenCache.expiresAt) {
-    return tokenCache.token;
-  }
+  if (tokenCache) return tokenCache.token; // expire olsa bile önce dene
 
-  // Try to load from DB (survives container restarts)
-  const dbToken = await loadTokenFromDB();
+  // DB'de son kaydedilen token'ı getir (expiry göz ardı — Fonzip uzun tutuyor)
+  const dbToken = await loadTokenFromDB(true);
   if (dbToken) {
     tokenCache = dbToken;
     return dbToken.token;
@@ -119,12 +141,18 @@ async function callFonzip(method: "GET" | "POST", path: string, opts: { params?:
   let token = await getToken();
   let res = await doRequest(token);
 
-  // If 401: manual token expired — fall back to fresh token
-  if (res.status === 401 && process.env.FONZIP_ACCESS_TOKEN && !manualTokenExpired) {
-    manualTokenExpired = true;
+  // If 401: mevcut token gerçekten expired. Yeni token dene; başarılı olursa retry.
+  // Yeni token oluşturulamazsa (409 kilit), DB'deki token'ı SİLME — sonraki denemede tekrar kullansın.
+  if (res.status === 401) {
+    if (process.env.FONZIP_ACCESS_TOKEN) manualTokenExpired = true;
     tokenCache = null;
-    token = await getToken();
-    res = await doRequest(token);
+    try {
+      token = await createFreshToken(true); // retry 409 (30 dk'ya kadar)
+      res = await doRequest(token);
+    } catch (e: any) {
+      // Yeni token alınamadı → DB'yi silme, sonraki denemede tekrar dener
+      throw e;
+    }
   }
 
   // If 429: rate limited — wait and retry up to 3 times
