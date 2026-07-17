@@ -323,12 +323,12 @@ export default function FonzipPreview() {
 
       {stats && (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-          <StatCard label="Toplam Kayıt" value={stats.total.toLocaleString("tr-TR")} />
-          <StatCard label="Ödendi" value={stats.paid.toLocaleString("tr-TR")} />
-          <StatCard label="Bekliyor" value={stats.pending.toLocaleString("tr-TR")} />
-          <StatCard label="Eşleşti" value={stats.matched.toLocaleString("tr-TR")} />
-          <StatCard label="Eşleşmedi" value={stats.unmatched.toLocaleString("tr-TR")} />
-          <StatCard label="Gelir Kaydı" value={stats.syncedToExpenses.toLocaleString("tr-TR")}
+          <StatCard label="Toplam Kayıt" value={(stats.total ?? 0).toLocaleString("tr-TR")} />
+          <StatCard label="Ödendi" value={(stats.paid ?? 0).toLocaleString("tr-TR")} />
+          <StatCard label="Bekliyor" value={(stats.pending ?? 0).toLocaleString("tr-TR")} />
+          <StatCard label="Eşleşti" value={(stats.matched ?? 0).toLocaleString("tr-TR")} />
+          <StatCard label="Eşleşmedi" value={(stats.unmatched ?? 0).toLocaleString("tr-TR")} />
+          <StatCard label="Gelir Kaydı" value={(stats.syncedToExpenses ?? 0).toLocaleString("tr-TR")}
             sub={stats.lastSyncAt ? `Son: ${new Date(stats.lastSyncAt).toLocaleDateString("tr-TR")}` : "Henüz sync yok"} />
         </div>
       )}
