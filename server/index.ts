@@ -2,10 +2,12 @@ import express, { type Request, Response, NextFunction } from "express";
 import compression from "compression";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
+import cron from "node-cron";
 import { pool } from "./db";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+import { isFonzipConfigured, syncFonzipRecentDebts, syncFonzipUsersFinancials } from "./fonzip";
 
 const PgStore = connectPgSimple(session);
 
@@ -22,7 +24,7 @@ declare module "http" {
 
 app.use(
   express.json({
-    limit: "10mb",
+    limit: "50mb",
     verify: (req, _res, buf) => {
       req.rawBody = buf;
     },
@@ -293,4 +295,24 @@ app.use((req, res, next) => {
       log(`serving on port ${port}`);
     },
   );
+
+  // ── Günlük Fonzip sync scheduler (her gece 03:00 TR saati) ─────────────────
+  if (isFonzipConfigured()) {
+    cron.schedule("0 3 * * *", async () => {
+      log("[cron] Fonzip günlük sync başlıyor");
+      try {
+        const debtsResult = await syncFonzipRecentDebts(1, 3); // son 3 gün, admin userId=1
+        log(`[cron] Borç sync: ${JSON.stringify(debtsResult)}`);
+      } catch (e: any) {
+        log(`[cron] Borç sync hata: ${e.message}`);
+      }
+      try {
+        const usersResult = await syncFonzipUsersFinancials();
+        log(`[cron] Bakiye sync: ${JSON.stringify(usersResult)}`);
+      } catch (e: any) {
+        log(`[cron] Bakiye sync hata: ${e.message}`);
+      }
+    }, { timezone: "Europe/Istanbul" });
+    log("[cron] Fonzip günlük sync planlandı: her gün 03:00");
+  }
 })();

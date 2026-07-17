@@ -29,6 +29,9 @@ services:
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:5000}
       GMAIL_USER: ${GMAIL_USER:-}
       GMAIL_APP_PASSWORD: ${GMAIL_APP_PASSWORD:-}
+      FONZIP_CLIENT_ID: ${FONZIP_CLIENT_ID:-}
+      FONZIP_CLIENT_SECRET: ${FONZIP_CLIENT_SECRET:-}
+      FONZIP_ACCESS_TOKEN: ${FONZIP_ACCESS_TOKEN:-}
     depends_on:
       postgres:
         condition: service_healthy

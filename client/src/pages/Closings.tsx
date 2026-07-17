@@ -817,9 +817,6 @@ function SideSection({
                     <BreakdownField label="Kasa" value={agent.kasa} onChange={(v) => updateField("kasa", v)} highlight />
                     <BreakdownField label="Nakit" value={agent.nakit} onChange={(v) => updateField("nakit", v)} />
                     <BreakdownField label="Banka" value={agent.banka} onChange={(v) => updateField("banka", v)} />
-                    <div className="border-t border-border mt-1 pt-1.5">
-                      <BreakdownField label="Danışman Net" value={agent.employeeNet} onChange={(v) => updateField("employeeNet", v)} highlight />
-                    </div>
                   </div>
                 )}
               </div>
@@ -867,6 +864,27 @@ function SummaryTable({ rows }: { rows: SummaryRow[] }) {
   const totalBm       = rows.reduce((s, r) => s + r.mcActual, 0);
   const totalBmKdv    = rows.reduce((s, r) => s + r.bmKdv, 0);
   const totalUk       = rows.reduce((s, r) => s + r.uk, 0);
+
+  // Aynı danışman hem alıcı hem satıcı tarafta olabilir → isim bazında toplayalım
+  const perAdvisor = new Map<string, {
+    name: string; sides: Set<string>; bhbShare: number; kwtrKdv: number; mcActual: number; bmKdv: number; uk: number;
+  }>();
+  for (const r of rows) {
+    const key = r.name.trim();
+    if (!perAdvisor.has(key)) {
+      perAdvisor.set(key, { name: r.name, sides: new Set(), bhbShare: 0, kwtrKdv: 0, mcActual: 0, bmKdv: 0, uk: 0 });
+    }
+    const agg = perAdvisor.get(key)!;
+    agg.sides.add(r.side);
+    agg.bhbShare += r.bhbShare;
+    agg.kwtrKdv  += r.kwtrKdv;
+    agg.mcActual += r.mcActual;
+    agg.bmKdv    += r.bmKdv;
+    agg.uk       += r.uk;
+  }
+  const perAdvisorRows = Array.from(perAdvisor.values())
+    .filter(a => a.sides.size > 1) // sadece birden fazla tarafta olan danışmanları göster
+    .map(a => ({ ...a, tahsilat: a.kwtrKdv + a.mcActual + a.bmKdv + a.uk }));
   const totalTahsilat = totalKwtrKdv + totalBm + totalBmKdv + totalUk;
   return (
     <div className="rounded-lg border overflow-hidden">
@@ -913,6 +931,32 @@ function SummaryTable({ rows }: { rows: SummaryRow[] }) {
             <TableCell className="text-xs text-right">{fmtTRY(totalUk)}</TableCell>
             <TableCell className="text-xs text-right text-emerald-700">{fmtTRY(totalTahsilat)}</TableCell>
           </TableRow>
+          {perAdvisorRows.length > 0 && (
+            <>
+              <TableRow className="bg-blue-50/70 border-t-2 border-blue-200">
+                <TableCell colSpan={9} className="text-[11px] font-semibold text-blue-800 py-2">
+                  Danışman Bazlı Toplam (birden fazla tarafta olanlar)
+                </TableCell>
+              </TableRow>
+              {perAdvisorRows.map((a) => (
+                <TableRow key={`agg-${a.name}`} className="bg-blue-50/40">
+                  <TableCell className="text-xs font-medium">{a.name}</TableCell>
+                  <TableCell className="text-xs">
+                    <Badge variant="outline" className="text-[10px] bg-blue-100 border-blue-300 text-blue-800">
+                      {Array.from(a.sides).map(s => s === "buyer" ? "Alıcı" : s === "seller" ? "Satıcı" : "Yönlendirme").join(" + ")}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-xs text-right">—</TableCell>
+                  <TableCell className="text-xs text-right">{fmtTRY(a.bhbShare)}</TableCell>
+                  <TableCell className="text-xs text-right text-muted-foreground">{fmtTRY(a.kwtrKdv)}</TableCell>
+                  <TableCell className="text-xs text-right text-muted-foreground">{fmtTRY(a.mcActual)}</TableCell>
+                  <TableCell className="text-xs text-right text-amber-600">{fmtTRY(a.bmKdv)}</TableCell>
+                  <TableCell className="text-xs text-right text-muted-foreground">{fmtTRY(a.uk)}</TableCell>
+                  <TableCell className="text-xs text-right font-semibold text-emerald-700">{fmtTRY(a.tahsilat)}</TableCell>
+                </TableRow>
+              ))}
+            </>
+          )}
         </TableBody>
       </Table>
     </div>
