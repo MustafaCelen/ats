@@ -1,12 +1,25 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { RefreshCw, CheckCircle2, XCircle, Loader2, AlertTriangle, TrendingUp, Users, Clock } from "lucide-react";
+import { RefreshCw, CheckCircle2, XCircle, Loader2, AlertTriangle, TrendingUp, Users, Clock, Upload } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import * as XLSX from "xlsx";
+
+// Excel tarih (Date obj veya "YYYY-MM-DD HH:mm:ss" string) → YYYY-MM-DD
+function normalizeDate(v: any): string | null {
+  if (!v) return null;
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  const s = String(v).trim();
+  if (!s) return null;
+  const m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) return `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+}
 
 const formatCurrency = (n: number) =>
   new Intl.NumberFormat("tr-TR", { style: "currency", currency: "TRY" }).format(n);
@@ -138,6 +151,110 @@ export default function FonzipPreview() {
 
   const isUsersSyncRunning = usersSyncMutation.isPending || usersSyncStatus?.running;
 
+  const { data: recentSyncStatus, refetch: refetchRecentSyncStatus } = useQuery<{ running: boolean; lastResult: any }>({
+    queryKey: ["/api/fonzip/sync-recent/status"],
+    queryFn: () => fetch("/api/fonzip/sync-recent/status", { credentials: "include" }).then(r => r.json()),
+    refetchInterval: (q) => q.state.data?.running ? 3000 : false,
+    staleTime: 0,
+  });
+
+  const recentSyncMutation = useMutation({
+    mutationFn: (days: number = 3) => fetch("/api/fonzip/sync-recent", {
+      method: "POST", credentials: "include",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ days }),
+    }).then(r => r.json()),
+    onSuccess: (data) => {
+      if (data.error) { toast({ title: "Sync hatası", description: data.error, variant: "destructive" }); return; }
+      toast({ title: "Günlük sync başlatıldı", description: "Son 3 gün taranıyor, ~30 saniye." });
+      refetchRecentSyncStatus();
+      const interval = setInterval(() => {
+        refetchStats();
+        refetchRecentSyncStatus().then(r => { if (!r.data?.running) clearInterval(interval); });
+      }, 3000);
+    },
+    onError: () => toast({ title: "Hata", description: "Günlük sync başarısız.", variant: "destructive" }),
+  });
+
+  const isRecentSyncRunning = recentSyncMutation.isPending || recentSyncStatus?.running;
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const importMutation = useMutation({
+    mutationFn: async ({ rows, mode }: { rows: any[]; mode: "payments" | "debts" }) => {
+      const res = await fetch("/api/fonzip/import-excel", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rows, mode }),
+      });
+      return res.json();
+    },
+    onSuccess: (data) => {
+      if (data.error) {
+        toast({ title: "Import hatası", description: data.error, variant: "destructive" });
+        return;
+      }
+      const modeLabel = data.mode === "debts" ? "Borçlar" : "Ödemeler";
+      const detailPart = data.mode === "debts"
+        ? `${data.detailsUpdated} açıklama güncellendi, ${data.upserted} yeni borç`
+        : `${data.upserted} kayıt, ${data.expensesCreated} gelir`;
+      toast({
+        title: `${modeLabel} import tamamlandı`,
+        description: `${detailPart}, ${data.matched} eşleşme, ${data.skipped} atlandı.`,
+      });
+      qc.invalidateQueries({ queryKey: ["/api/fonzip"] });
+      qc.invalidateQueries({ queryKey: ["/api/office-expenses"] });
+    },
+    onError: (e: any) => toast({ title: "Import hatası", description: e?.message, variant: "destructive" }),
+  });
+
+  const handleExcelUpload = async (file: File) => {
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: "array", cellDates: true });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const raw: any[] = XLSX.utils.sheet_to_json(sheet, { defval: null });
+
+      // Dosya tipini algıla: "Durum" ve "Kart Bankası" varsa ödemeler dosyası → uyarı
+      const firstRow = raw[0] ?? {};
+      const isPayments = "Durum" in firstRow || "Kart Bankası" in firstRow;
+      if (isPayments) {
+        toast({
+          title: "Bu dosya 'Ödemeler' dosyası",
+          description: "Yalnızca 'Borçlar/Aidatlar' dosyasını yüklemelisin. Gelir kayıtları borçlardan oluşturuluyor.",
+          variant: "destructive",
+        });
+        return;
+      }
+      const mode: "payments" | "debts" = "debts";
+
+      const rows = raw.map((r) => {
+        const amount = r["Ödeme Miktarı"] ?? r["Odeme Miktari"];
+        const status = String(r["Durum"] ?? "").toLowerCase().includes("başarı") ? 1 : 8;
+        return {
+          fonzipId: Number(r["Aidat Kayıt No"] ?? r["Aidat Kayit No"]),
+          fonzipUserId: r["Üyelik > Kişi/Kurum Kayıt No"] ?? r["Kişi/Kurum Kayıt No"] ?? null,
+          membershipNo: r["Üyelik > Üye No"] != null ? String(r["Üyelik > Üye No"]) : (r["Üye No"] != null ? String(r["Üye No"]) : null),
+          userName: r["Kişisel > Ad Soyad"] ?? r["Ad Soyad"] ?? r["Üye Adı"] ?? "",
+          amount: amount != null ? String(amount) : "0",
+          operationDate: normalizeDate(r["İşlem Tarihi"] ?? r["Islem Tarihi"]),
+          details: r["Açıklama"] ?? r["Aciklama"] ?? null,
+          period: r["Dönem"] ?? r["Donem"] ?? null,
+          addedByName: r["Ekleyen Kişi"] ?? r["Ekleyen Kisi"] ?? null,
+          ...(isPayments ? { status } : {}),
+        };
+      }).filter((r) => r.fonzipId && !isNaN(r.fonzipId));
+
+      if (rows.length === 0) {
+        toast({ title: "Excel okundu ama uygun kayıt bulunamadı", description: "Kolon başlıklarını kontrol edin.", variant: "destructive" });
+        return;
+      }
+      toast({ title: `${rows.length} satır (${mode === "payments" ? "Ödemeler" : "Borçlar"})`, description: "İçe aktarılıyor..." });
+      importMutation.mutate({ rows, mode });
+    } catch (e: any) {
+      toast({ title: "Excel okunamadı", description: e?.message, variant: "destructive" });
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -151,6 +268,37 @@ export default function FonzipPreview() {
               {status.configured ? <><CheckCircle2 className="h-3 w-3" /> Bağlı</> : <><XCircle className="h-3 w-3" /> Yapılandırılmamış</>}
             </Badge>
           )}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) handleExcelUpload(f);
+              if (e.target) e.target.value = "";
+            }}
+          />
+          <Button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={importMutation.isPending}
+            size="sm"
+            variant="outline"
+          >
+            {importMutation.isPending
+              ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />İçe aktarılıyor...</>
+              : <><Upload className="h-4 w-4 mr-2" />Excel İçe Aktar</>}
+          </Button>
+          <Button
+            onClick={() => recentSyncMutation.mutate(3)}
+            disabled={isRecentSyncRunning || !status?.configured}
+            size="sm"
+            variant="outline"
+          >
+            {isRecentSyncRunning
+              ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Günlük sync...</>
+              : <><Clock className="h-4 w-4 mr-2" />Günlük Sync (3 gün)</>}
+          </Button>
           <Button
             onClick={() => usersSyncMutation.mutate()}
             disabled={isUsersSyncRunning || !status?.configured}

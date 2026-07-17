@@ -11,7 +11,7 @@ import { insertInterviewSchema, insertOfferSchema, type InsertTask, TASK_STATUSE
 import { getAuthUrl, createOAuth2Client, createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from "./google";
 import { sendWhatsApp, sendWhatsAppTemplate, checkWhatsAppStatus, publicBaseUrl } from "./whatsapp";
 import { sendEmail } from "./email";
-import { isFonzipConfigured, fetchFonzipPreview, fetchFonzipUsers, fetchFonzipDebts, fetchFonzipDonations, syncFonzipDebts, syncFonzipUsersFinancials, getFonzipUserFinancialsReport } from "./fonzip";
+import { isFonzipConfigured, fetchFonzipPreview, fetchFonzipUsers, fetchFonzipDebts, fetchFonzipDonations, syncFonzipDebts, syncFonzipUsersFinancials, getFonzipUserFinancialsReport, importFonzipExcel, syncFonzipRecentDebts } from "./fonzip";
 
 // Scoping helper:
 //   admin      → undefined (all jobs)
@@ -2990,6 +2990,39 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const report = await getFonzipUserFinancialsReport();
       res.json(report);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  let recentSyncRunning = false;
+  let lastRecentSyncResult: any = null;
+
+  app.post("/api/fonzip/sync-recent", requireAuth, requireAdmin, (req, res) => {
+    if (!isFonzipConfigured()) return res.status(400).json({ error: "Fonzip yapılandırılmamış." });
+    if (recentSyncRunning) return res.json({ running: true, message: "Sync zaten devam ediyor." });
+    const days = Math.max(1, Math.min(30, Number(req.body?.days ?? 3)));
+    const userId = (req as any).user?.id ?? 0;
+    recentSyncRunning = true;
+    res.json({ running: true, message: `Son ${days} gün sync başlatıldı.` });
+    syncFonzipRecentDebts(userId, days)
+      .then(result => { lastRecentSyncResult = { ...result, finishedAt: new Date().toISOString() }; })
+      .catch(err => { lastRecentSyncResult = { error: err.message, finishedAt: new Date().toISOString() }; })
+      .finally(() => { recentSyncRunning = false; });
+  });
+
+  app.get("/api/fonzip/sync-recent/status", requireAuth, requireAdmin, (_req, res) => {
+    res.json({ running: recentSyncRunning, lastResult: lastRecentSyncResult });
+  });
+
+  app.post("/api/fonzip/import-excel", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const rows = req.body?.rows;
+      const mode = req.body?.mode === "debts" ? "debts" : "payments";
+      if (!Array.isArray(rows)) return res.status(400).json({ error: "rows array bekleniyor" });
+      const userId = (req as any).user?.id ?? 0;
+      const result = await importFonzipExcel(rows, userId, mode);
+      res.json(result);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

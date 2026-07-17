@@ -295,6 +295,302 @@ export async function syncFonzipDebts(createdByUserId: number): Promise<{
   return { total, upserted, matched, expensesCreated, errors };
 }
 
+// ── Günlük Rolling Window Sync (son N günün borçlarını çeker) ────────────────
+// Fonzip API pagination bozuk olduğu için gün gün çekiyoruz.
+// Her gün için start_date=end_date=aynı gün → o günün tüm borçları döner.
+export async function syncFonzipRecentDebts(
+  createdByUserId: number,
+  daysBack: number = 3,
+): Promise<{
+  daysScanned: number; total: number; upserted: number; updated: number;
+  matched: number; expensesCreated: number; errors: string[];
+}> {
+  const { storage } = await import("./storage");
+  const { pool } = await import("./db");
+
+  const allEmployees = await storage.getEmployees();
+  const byKwuid: Record<string, number> = {};
+  for (const emp of allEmployees) {
+    if (emp.kwuid) byKwuid[String(emp.kwuid).trim()] = emp.id;
+  }
+
+  let total = 0, upserted = 0, updated = 0, matched = 0, expensesCreated = 0;
+  const errors: string[] = [];
+
+  for (let d = 0; d < daysBack; d++) {
+    const day = new Date(Date.now() - d * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    let data: any;
+    let retry = 0;
+    while (true) {
+      try {
+        data = await fonzipGet("/debts", { start_date: day, end_date: day, per_page: "100" });
+        break;
+      } catch (e: any) {
+        if (e.message.includes("429") && retry < 5) {
+          retry++;
+          await new Promise(r => setTimeout(r, 60000));
+          continue;
+        }
+        errors.push(`${day}: ${e.message}`);
+        data = null;
+        break;
+      }
+    }
+    if (!data || !data.debt_list) continue;
+    total += data.debt_list.length;
+
+    for (const debt of data.debt_list) {
+      try {
+        const membershipNo = debt.user__membership_no != null ? String(debt.user__membership_no) : null;
+        const operationDate = debt.operation_date
+          ? debt.operation_date.slice(0, 10)
+          : (debt.create_date ? debt.create_date.slice(0, 10) : null);
+        const empId = membershipNo ? byKwuid[membershipNo.trim()] : undefined;
+        const category = classifyFonzipCategory(debt.details);
+
+        const existing = await pool.query(
+          "SELECT id, expense_id FROM fonzip_synced_debts WHERE fonzip_id = $1",
+          [debt.id]
+        );
+
+        if (existing.rows.length > 0) {
+          await pool.query(
+            `UPDATE fonzip_synced_debts SET
+               details = COALESCE($2, details), period = COALESCE($3, period),
+               user_name = $4, membership_no = COALESCE($5, membership_no),
+               amount = $6, operation_date = COALESCE($7, operation_date),
+               added_by_name = COALESCE($8, added_by_name),
+               employee_id = COALESCE($9, employee_id), synced_at = NOW()
+             WHERE fonzip_id = $1`,
+            [debt.id, debt.details, debt.period, debt.user__name ?? "", membershipNo,
+             String(debt.amount ?? 0), operationDate, debt.added_by__name ?? null, empId ?? null]
+          );
+          if (existing.rows[0].expense_id) {
+            await pool.query(
+              `UPDATE office_expenses SET notes = $2, category = $3, amount = $4, date = $5, employee_id = $6 WHERE id = $1`,
+              [existing.rows[0].expense_id,
+               `${debt.user__name ?? ""} — ${debt.details ?? ""} (Fonzip #${debt.id})`,
+               category, String(debt.amount ?? 0),
+               operationDate ?? new Date().toISOString().slice(0, 10), empId ?? null]
+            );
+          }
+          updated++;
+        } else {
+          await storage.upsertFonzipDebt({
+            fonzipId: debt.id, fonzipUserId: debt.user_id, membershipNo,
+            userName: debt.user__name ?? "", amount: String(debt.amount ?? 0),
+            details: debt.details ?? null, period: debt.period ?? null,
+            status: debt.status, operationDate, addedByName: debt.added_by__name ?? null,
+          });
+          if (empId) {
+            await storage.setFonzipDebtEmployee(debt.id, empId);
+            matched++;
+          }
+          const expense = await storage.createOfficeExpense({
+            type: "income", category, amount: String(debt.amount ?? 0),
+            date: operationDate ?? new Date().toISOString().slice(0, 10),
+            notes: `${debt.user__name ?? ""} — ${debt.details ?? ""} (Fonzip #${debt.id})`,
+            employeeId: empId ?? null, createdByUserId,
+          });
+          await storage.setFonzipDebtExpense(debt.id, expense.id);
+          expensesCreated++;
+          upserted++;
+        }
+      } catch (e: any) {
+        errors.push(`Debt #${debt.id}: ${e.message}`);
+      }
+    }
+    await new Promise(r => setTimeout(r, 2000)); // günler arası bekleme
+  }
+
+  return { daysScanned: daysBack, total, upserted, updated, matched, expensesCreated, errors };
+}
+
+// ── Excel Import: Fonzip ödeme geçmişi Excel'inden toplu içe aktarım ─────────
+// Borç açıklamasından otomatik gelir kategorisi çıkar
+function classifyFonzipCategory(details: string | null | undefined): string {
+  const s = String(details ?? "").toLowerCase();
+  if (s.includes("kira")) return "Oda Kira";  // "Kira Bedeli", "Oda Kira", "Ocak 2025 Kira" vs
+  if (s.includes("aidat") || s.includes("yer tahsis")) return "Aidat & Yer Tahsis";
+  if (/sözleşme|giriş bedeli|giris bedeli/.test(s)) return "Giriş Bedeli";
+  if (s.includes("printer")) return "Printer Geliri";
+  if (s.includes("üretkenlik") || /(^|\s)ük(\s|$)/.test(s)) return "ÜK Geliri";
+  if (s.includes("faiz")) return "Faiz Gelirleri";
+  if (s.includes("sahibinden")) return "Sahibinden";
+  if (s.includes("royalty")) return "Royalty Fee (%1,5)";
+  if (s.includes("proje")) return "Proje Ek Geliri";
+  if (s.includes("transfer")) return "Transfer Geliri";
+  return "Diğer Gelirler (Kep Ödemesi vb)";
+}
+
+export interface FonzipExcelRow {
+  fonzipId: number;              // "Aidat Kayıt No"
+  fonzipUserId: number | null;    // "Kişi/Kurum Kayıt No"
+  membershipNo: string | null;    // "Üye No"
+  userName: string;               // "Ad Soyad" veya "Üye Adı"
+  amount: string;                 // "Ödeme Miktarı"
+  operationDate: string | null;   // "İşlem Tarihi" YYYY-MM-DD
+  details: string | null;         // "Açıklama"
+  period: string | null;          // "Dönem"
+  addedByName: string | null;     // "Ekleyen Kişi"
+  status?: number;                // "Durum" → 1 (Başarılı) veya 8. Yoksa "debts" modu.
+}
+
+export async function importFonzipExcel(
+  rows: FonzipExcelRow[],
+  createdByUserId: number,
+  mode: "payments" | "debts" = "payments",
+): Promise<{
+  mode: string; totalRows: number; upserted: number; detailsUpdated: number;
+  matched: number; expensesCreated: number; skipped: number; errors: string[];
+}> {
+  const { storage } = await import("./storage");
+  const { pool } = await import("./db");
+
+  const allEmployees = await storage.getEmployees();
+  const byKwuid: Record<string, number> = {};
+  for (const emp of allEmployees) {
+    if (emp.kwuid) byKwuid[String(emp.kwuid).trim()] = emp.id;
+  }
+
+  let upserted = 0, matched = 0, expensesCreated = 0, skipped = 0, detailsUpdated = 0;
+  const errors: string[] = [];
+
+  for (const r of rows) {
+    if (!r.fonzipId || !r.userName) { skipped++; continue; }
+    try {
+      const empId = r.membershipNo ? byKwuid[r.membershipNo.trim()] : undefined;
+
+      if (mode === "debts") {
+        // BORÇLAR modu: her borç = 1 gelir kaydı, kategori açıklamadan çıkarılır
+        const category = classifyFonzipCategory(r.details);
+        const existing = await pool.query(
+          `SELECT id, expense_id FROM fonzip_synced_debts WHERE fonzip_id = $1`,
+          [r.fonzipId]
+        );
+        if (existing.rows.length > 0) {
+          // Mevcut borcu güncelle
+          await pool.query(
+            `UPDATE fonzip_synced_debts
+             SET details = COALESCE($2, details),
+                 period = COALESCE($3, period),
+                 user_name = $4,
+                 membership_no = COALESCE($5, membership_no),
+                 added_by_name = COALESCE($6, added_by_name),
+                 amount = COALESCE(NULLIF($7, ''), amount),
+                 operation_date = COALESCE($8, operation_date),
+                 synced_at = NOW()
+             WHERE fonzip_id = $1`,
+            [r.fonzipId, r.details, r.period, r.userName, r.membershipNo, r.addedByName, r.amount, r.operationDate]
+          );
+          detailsUpdated++;
+          if (empId) {
+            await storage.setFonzipDebtEmployee(r.fonzipId, empId);
+            matched++;
+          }
+          // İlişkili gelir kaydını da güncelle (notes + category)
+          if (existing.rows[0].expense_id) {
+            await pool.query(
+              `UPDATE office_expenses SET notes = $2, category = $3, amount = $4, date = $5, employee_id = $6 WHERE id = $1`,
+              [
+                existing.rows[0].expense_id,
+                `${r.userName} — ${r.details ?? ""} (Fonzip #${r.fonzipId})`,
+                category,
+                r.amount || "0",
+                r.operationDate ?? new Date().toISOString().slice(0, 10),
+                empId ?? null,
+              ]
+            );
+          } else if (r.amount) {
+            // expense_id yoksa yeni oluştur
+            const expense = await storage.createOfficeExpense({
+              type: "income",
+              category,
+              amount: r.amount,
+              date: r.operationDate ?? new Date().toISOString().slice(0, 10),
+              notes: `${r.userName} — ${r.details ?? ""} (Fonzip #${r.fonzipId})`,
+              employeeId: empId ?? null,
+              createdByUserId,
+            });
+            await storage.setFonzipDebtExpense(r.fonzipId, expense.id);
+            expensesCreated++;
+          }
+        } else {
+          // Yeni borç → borç kaydı + otomatik gelir kaydı
+          await storage.upsertFonzipDebt({
+            fonzipId: r.fonzipId,
+            fonzipUserId: r.fonzipUserId ?? 0,
+            membershipNo: r.membershipNo,
+            userName: r.userName,
+            amount: r.amount || "0",
+            details: r.details,
+            period: r.period,
+            status: 8,
+            operationDate: r.operationDate,
+            addedByName: r.addedByName,
+          });
+          upserted++;
+          if (empId) {
+            await storage.setFonzipDebtEmployee(r.fonzipId, empId);
+            matched++;
+          }
+          if (r.amount) {
+            const expense = await storage.createOfficeExpense({
+              type: "income",
+              category,
+              amount: r.amount,
+              date: r.operationDate ?? new Date().toISOString().slice(0, 10),
+              notes: `${r.userName} — ${r.details ?? ""} (Fonzip #${r.fonzipId})`,
+              employeeId: empId ?? null,
+              createdByUserId,
+            });
+            await storage.setFonzipDebtExpense(r.fonzipId, expense.id);
+            expensesCreated++;
+          }
+        }
+      } else {
+        // ÖDEMELER modu: full upsert (mevcut davranış)
+        if (!r.amount) { skipped++; continue; }
+        const row = await storage.upsertFonzipDebt({
+          fonzipId: r.fonzipId,
+          fonzipUserId: r.fonzipUserId ?? 0,
+          membershipNo: r.membershipNo,
+          userName: r.userName,
+          amount: r.amount,
+          details: r.details,
+          period: r.period,
+          status: r.status ?? 1,
+          operationDate: r.operationDate,
+          addedByName: r.addedByName,
+        });
+        upserted++;
+        if (empId && row.employeeId !== empId) {
+          await storage.setFonzipDebtEmployee(r.fonzipId, empId);
+          matched++;
+        }
+        if ((r.status ?? 1) === 1 && !row.expenseId) {
+          const effectiveEmpId = empId ?? row.employeeId ?? undefined;
+          const expense = await storage.createOfficeExpense({
+            type: "income",
+            category: "Aidat & Yer Tahsis",
+            amount: r.amount,
+            date: r.operationDate ?? new Date().toISOString().slice(0, 10),
+            notes: `${r.userName} — ${r.details ?? ""} (Fonzip #${r.fonzipId})`,
+            employeeId: effectiveEmpId ?? null,
+            createdByUserId,
+          });
+          await storage.setFonzipDebtExpense(r.fonzipId, expense.id);
+          expensesCreated++;
+        }
+      }
+    } catch (e: any) {
+      errors.push(`Kayıt #${r.fonzipId}: ${e.message}`);
+    }
+  }
+
+  return { mode, totalRows: rows.length, upserted, detailsUpdated, matched, expensesCreated, skipped, errors };
+}
+
 export async function fetchFonzipUsers(page = 1, perPage = 100): Promise<any> {
   return fonzipPost("/users", {
     search: { start_page: page, how_many: perPage, order_by: "name", filter: { condition: "and", attributes: [] } },
