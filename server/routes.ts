@@ -3015,17 +3015,31 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json({ running: recentSyncRunning, lastResult: lastRecentSyncResult });
   });
 
+  let excelImportRunning = false;
+  let lastExcelImportResult: any = null;
+
   app.post("/api/fonzip/import-excel", requireAuth, requireAdmin, async (req, res) => {
     try {
       const rows = req.body?.rows;
       const mode = req.body?.mode === "debts" ? "debts" : "payments";
       if (!Array.isArray(rows)) return res.status(400).json({ error: "rows array bekleniyor" });
+      if (excelImportRunning) return res.json({ running: true, message: "Import zaten devam ediyor." });
       const userId = (req as any).user?.id ?? 0;
-      const result = await importFonzipExcel(rows, userId, mode);
-      res.json(result);
+      excelImportRunning = true;
+      lastExcelImportResult = null;
+      res.json({ running: true, message: `${rows.length} satır işleniyor, lütfen bekleyin...` });
+      importFonzipExcel(rows, userId, mode)
+        .then(result => { lastExcelImportResult = { ...result, finishedAt: new Date().toISOString() }; })
+        .catch(err => { lastExcelImportResult = { error: err.message, finishedAt: new Date().toISOString() }; })
+        .finally(() => { excelImportRunning = false; });
     } catch (err: any) {
+      excelImportRunning = false;
       res.status(500).json({ error: err.message });
     }
+  });
+
+  app.get("/api/fonzip/import-excel/status", requireAuth, requireAdmin, (_req, res) => {
+    res.json({ running: excelImportRunning, lastResult: lastExcelImportResult });
   });
 
   app.get("/api/fonzip/sync/stats", requireAuth, requireAdmin, async (_req, res) => {

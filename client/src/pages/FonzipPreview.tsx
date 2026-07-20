@@ -177,6 +177,33 @@ export default function FonzipPreview() {
 
   const isRecentSyncRunning = recentSyncMutation.isPending || recentSyncStatus?.running;
 
+  const [excelImporting, setExcelImporting] = useState(false);
+
+  const { data: excelImportStatus, refetch: refetchExcelStatus } = useQuery<{ running: boolean; lastResult: any }>({
+    queryKey: ["/api/fonzip/import-excel/status"],
+    queryFn: () => fetch("/api/fonzip/import-excel/status", { credentials: "include" }).then(r => r.json()),
+    refetchInterval: (q) => q.state.data?.running ? 2000 : false,
+    staleTime: 0,
+  });
+
+  const showExcelResult = (data: any) => {
+    if (!data) return;
+    if (data.error) {
+      toast({ title: "Import hatası", description: data.error, variant: "destructive" });
+      return;
+    }
+    const modeLabel = data.mode === "debts" ? "Borçlar" : "Ödemeler";
+    const detailPart = data.mode === "debts"
+      ? `${data.detailsUpdated} açıklama güncellendi, ${data.upserted} yeni borç`
+      : `${data.upserted} kayıt, ${data.expensesCreated} gelir`;
+    toast({
+      title: `${modeLabel} import tamamlandı`,
+      description: `${detailPart}, ${data.matched} eşleşme, ${data.skipped} atlandı.`,
+    });
+    qc.invalidateQueries({ queryKey: ["/api/fonzip"] });
+    qc.invalidateQueries({ queryKey: ["/api/office-expenses"] });
+  };
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importMutation = useMutation({
     mutationFn: async ({ rows, mode }: { rows: any[]; mode: "payments" | "debts" }) => {
@@ -191,20 +218,31 @@ export default function FonzipPreview() {
     onSuccess: (data) => {
       if (data.error) {
         toast({ title: "Import hatası", description: data.error, variant: "destructive" });
+        setExcelImporting(false);
         return;
       }
-      const modeLabel = data.mode === "debts" ? "Borçlar" : "Ödemeler";
-      const detailPart = data.mode === "debts"
-        ? `${data.detailsUpdated} açıklama güncellendi, ${data.upserted} yeni borç`
-        : `${data.upserted} kayıt, ${data.expensesCreated} gelir`;
-      toast({
-        title: `${modeLabel} import tamamlandı`,
-        description: `${detailPart}, ${data.matched} eşleşme, ${data.skipped} atlandı.`,
-      });
-      qc.invalidateQueries({ queryKey: ["/api/fonzip"] });
-      qc.invalidateQueries({ queryKey: ["/api/office-expenses"] });
+      if (data.running) {
+        // Arka planda çalışıyor — poll et
+        const interval = setInterval(() => {
+          refetchExcelStatus().then(r => {
+            if (!r.data?.running) {
+              clearInterval(interval);
+              setExcelImporting(false);
+              showExcelResult(r.data?.lastResult);
+              qc.invalidateQueries({ queryKey: ["/api/fonzip"] });
+              qc.invalidateQueries({ queryKey: ["/api/office-expenses"] });
+            }
+          });
+        }, 2000);
+        return;
+      }
+      setExcelImporting(false);
+      showExcelResult(data);
     },
-    onError: (e: any) => toast({ title: "Import hatası", description: e?.message, variant: "destructive" }),
+    onError: (e: any) => {
+      setExcelImporting(false);
+      toast({ title: "Import hatası", description: e?.message, variant: "destructive" });
+    },
   });
 
   const handleExcelUpload = async (file: File) => {
@@ -248,7 +286,8 @@ export default function FonzipPreview() {
         toast({ title: "Excel okundu ama uygun kayıt bulunamadı", description: "Kolon başlıklarını kontrol edin.", variant: "destructive" });
         return;
       }
-      toast({ title: `${rows.length} satır (${mode === "payments" ? "Ödemeler" : "Borçlar"})`, description: "İçe aktarılıyor..." });
+      toast({ title: `${rows.length} satır (${mode === "payments" ? "Ödemeler" : "Borçlar"})`, description: "Arka planda işleniyor, lütfen bekleyin..." });
+      setExcelImporting(true);
       importMutation.mutate({ rows, mode });
     } catch (e: any) {
       toast({ title: "Excel okunamadı", description: e?.message, variant: "destructive" });
@@ -281,12 +320,12 @@ export default function FonzipPreview() {
           />
           <Button
             onClick={() => fileInputRef.current?.click()}
-            disabled={importMutation.isPending}
+            disabled={excelImporting || excelImportStatus?.running}
             size="sm"
             variant="outline"
           >
-            {importMutation.isPending
-              ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />İçe aktarılıyor...</>
+            {(excelImporting || excelImportStatus?.running)
+              ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />İşleniyor...</>
               : <><Upload className="h-4 w-4 mr-2" />Excel İçe Aktar</>}
           </Button>
           <Button
