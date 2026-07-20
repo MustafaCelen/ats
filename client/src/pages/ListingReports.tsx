@@ -136,7 +136,19 @@ function SectionCard({ title, icon: Icon, children }: {
   );
 }
 
-type TabKey = "genel" | "danismanlar" | "yas" | "trend" | "kalkis" | "ayarlar";
+type TabKey = "genel" | "danismanlar" | "yas" | "trend" | "kalkis" | "uk" | "ayarlar";
+
+interface UkBucketRow {
+  bucket: "in_uk" | "not_in_uk" | "unmatched";
+  total: number;
+  active: number;
+  passive: number;
+  agreement_uploaded: number;
+  agreement_pending: number;
+  no_agreement: number;
+  close_reason_submitted: number;
+  close_reason_pending: number;
+}
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
@@ -202,6 +214,11 @@ export default function ListingReports() {
   const { data: ageGroups = [], isLoading: loadingAgeGroups } = useQuery<AgeGroupRow[]>({
     queryKey: ["/api/listings/reports/age-groups"],
     queryFn: () => fetch("/api/listings/reports/age-groups", { credentials: "include" }).then((r) => r.json()),
+  });
+
+  const { data: ukBreakdown = [], isLoading: loadingUk } = useQuery<UkBucketRow[]>({
+    queryKey: ["/api/listings/reports/uk-breakdown"],
+    queryFn: () => fetch("/api/listings/reports/uk-breakdown", { credentials: "include" }).then((r) => r.json()),
   });
 
   const { data: teams = [] } = useQuery<{ id: number; name: string; memberIds: number[] }[]>({
@@ -380,6 +397,7 @@ export default function ListingReports() {
     { key: "yas",         label: "Portföy Yaşı",      icon: Clock },
     { key: "trend",       label: "Trend & Tarih",     icon: TrendingUp },
     { key: "kalkis",      label: "Kalkış Analizi",    icon: TrendingDown },
+    { key: "uk",          label: "ÜK Bazlı",           icon: Users },
     { key: "ayarlar",     label: "Ayarlar",            icon: Settings },
   ];
 
@@ -974,6 +992,82 @@ export default function ListingReports() {
               )}
             </SectionCard>
 
+          </div>
+        )}
+
+        {/* ── Tab: ÜK Bazlı ──────────────────────────────────────────────── */}
+        {activeTab === "uk" && (
+          <div className="space-y-6">
+            <SectionCard
+              title="Üretkenlik Koçluğu Bazlı Dağılım"
+              subtitle="Danışmanın ÜK'da olup olmamasına göre ilan / yetki / kapanış durumu"
+              icon={Users}
+            >
+              {loadingUk ? (
+                <div className="text-sm text-muted-foreground p-4">Yükleniyor...</div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {(["in_uk", "not_in_uk", "unmatched"] as const).map((bucket) => {
+                    const row = ukBreakdown.find(r => r.bucket === bucket) ?? {
+                      bucket, total: 0, active: 0, passive: 0,
+                      agreement_uploaded: 0, agreement_pending: 0, no_agreement: 0,
+                      close_reason_submitted: 0, close_reason_pending: 0,
+                    };
+                    const label = bucket === "in_uk" ? "ÜK'daki Danışmanlar"
+                      : bucket === "not_in_uk" ? "ÜK Dışı Danışmanlar"
+                      : "Eşleşmeyen İlanlar";
+                    const tone = bucket === "in_uk" ? "border-emerald-200 bg-emerald-50/30"
+                      : bucket === "not_in_uk" ? "border-blue-200 bg-blue-50/30"
+                      : "border-slate-200 bg-slate-50/30";
+                    return (
+                      <div key={bucket} className={`rounded-lg border ${tone} p-4 space-y-3`}>
+                        <div>
+                          <p className="text-xs text-muted-foreground">{label}</p>
+                          <p className="text-2xl font-bold">{row.total.toLocaleString("tr-TR")}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {row.active} aktif · {row.passive} pasif
+                          </p>
+                        </div>
+
+                        <div className="border-t pt-3">
+                          <p className="text-xs font-semibold text-foreground mb-1.5">Yetki Sözleşmesi</p>
+                          <div className="text-xs space-y-1">
+                            <div className="flex justify-between">
+                              <span className="text-emerald-700">✓ Yüklendi</span>
+                              <span className="font-medium">{row.agreement_uploaded.toLocaleString("tr-TR")}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-amber-700">⏳ Bekleyen</span>
+                              <span className="font-medium">{row.agreement_pending.toLocaleString("tr-TR")}</span>
+                            </div>
+                            {row.no_agreement > 0 && (
+                              <div className="flex justify-between">
+                                <span className="text-slate-500">✗ Yok Beyanı</span>
+                                <span className="font-medium">{row.no_agreement.toLocaleString("tr-TR")}</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="border-t pt-3">
+                          <p className="text-xs font-semibold text-foreground mb-1.5">Kapanış Sebebi</p>
+                          <div className="text-xs space-y-1">
+                            <div className="flex justify-between">
+                              <span className="text-emerald-700">✓ Girildi</span>
+                              <span className="font-medium">{row.close_reason_submitted.toLocaleString("tr-TR")}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-amber-700">⏳ Bekleyen</span>
+                              <span className="font-medium">{row.close_reason_pending.toLocaleString("tr-TR")}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </SectionCard>
           </div>
         )}
 

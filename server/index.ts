@@ -301,7 +301,7 @@ app.use((req, res, next) => {
     cron.schedule("0 3 * * *", async () => {
       log("[cron] Fonzip günlük sync başlıyor");
       try {
-        const debtsResult = await syncFonzipRecentDebts(1, 3); // son 3 gün, admin userId=1
+        const debtsResult = await syncFonzipRecentDebts(1, 7); // son 7 gün, admin userId=1
         log(`[cron] Borç sync: ${JSON.stringify(debtsResult)}`);
       } catch (e: any) {
         log(`[cron] Borç sync hata: ${e.message}`);

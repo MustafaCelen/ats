@@ -445,6 +445,44 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     catch (err) { console.error("[GET /api/listings/reports/over-90-days]", err); res.status(500).json({ message: "Internal server error" }); }
   });
 
+  // ÜK (Üretkenlik Koçluğu) bazlı ilan raporu
+  app.get("/api/listings/reports/uk-breakdown", requireAuth, requireHiringManagerOrAdmin, async (_req, res) => {
+    try {
+      const rows = await db.execute(sql`
+        WITH grp AS (
+          SELECT
+            CASE WHEN e.uretkenlik_koclugu = true THEN 'in_uk'
+                 WHEN e.uretkenlik_koclugu = false THEN 'not_in_uk'
+                 ELSE 'unmatched' END AS bucket,
+            l.status,
+            l.agreement_uploaded_at,
+            l.agreement_requested_at,
+            l.no_agreement_at,
+            l.close_reason_submitted_at,
+            l.close_reason_requested_at
+          FROM listings l
+          LEFT JOIN employees e ON e.id = l.employee_id
+        )
+        SELECT
+          bucket,
+          COUNT(*)::int AS total,
+          COUNT(*) FILTER (WHERE status = 'active')::int AS active,
+          COUNT(*) FILTER (WHERE status = 'passive')::int AS passive,
+          COUNT(*) FILTER (WHERE agreement_uploaded_at IS NOT NULL)::int AS agreement_uploaded,
+          COUNT(*) FILTER (WHERE agreement_uploaded_at IS NULL AND no_agreement_at IS NULL AND agreement_requested_at IS NOT NULL)::int AS agreement_pending,
+          COUNT(*) FILTER (WHERE no_agreement_at IS NOT NULL)::int AS no_agreement,
+          COUNT(*) FILTER (WHERE close_reason_submitted_at IS NOT NULL)::int AS close_reason_submitted,
+          COUNT(*) FILTER (WHERE status = 'passive' AND close_reason_submitted_at IS NULL AND close_reason_requested_at IS NOT NULL)::int AS close_reason_pending
+        FROM grp
+        GROUP BY bucket
+      `);
+      res.json(rows.rows);
+    } catch (err) {
+      console.error("[GET /api/listings/reports/uk-breakdown]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   // Feature 5 & 6: Otomatik hatırlatma (manual trigger)
   app.post("/api/listings/reminders/run", requireAuth, requireAdmin, async (req, res) => {
     try {

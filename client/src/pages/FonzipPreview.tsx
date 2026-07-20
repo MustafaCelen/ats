@@ -353,14 +353,14 @@ export default function FonzipPreview() {
               : <><Upload className="h-4 w-4 mr-2" />Excel İçe Aktar</>}
           </Button>
           <Button
-            onClick={() => recentSyncMutation.mutate(3)}
+            onClick={() => recentSyncMutation.mutate(7)}
             disabled={isRecentSyncRunning || !status?.configured}
             size="sm"
             variant="outline"
           >
             {isRecentSyncRunning
               ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Günlük sync...</>
-              : <><Clock className="h-4 w-4 mr-2" />Günlük Sync (3 gün)</>}
+              : <><Clock className="h-4 w-4 mr-2" />Günlük Sync (7 gün)</>}
           </Button>
           <Button
             onClick={() => usersSyncMutation.mutate()}
