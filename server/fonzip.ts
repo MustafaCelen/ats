@@ -598,7 +598,7 @@ export async function importFonzipExcel(
           r.membershipNo ?? null, r.addedByName ?? null,
           r.amount && r.amount !== "" ? r.amount : null
         );
-        return `($${base+1}::int, $${base+2}::text, $${base+3}::text, $${base+4}::text, $${base+5}::text, $${base+6}::text, $${base+7}::text)`;
+        return `($${base+1}::int, $${base+2}::text, $${base+3}::text, $${base+4}::text, $${base+5}::text, $${base+6}::text, $${base+7}::numeric)`;
       }).join(",");
 
       await pool.query(
@@ -635,7 +635,7 @@ export async function importFonzipExcel(
             r.operationDate ?? new Date().toISOString().slice(0, 10),
             empId
           );
-          return `($${base+1}::int, $${base+2}::text, $${base+3}::text, $${base+4}::text, $${base+5}::date, $${base+6}::int)`;
+          return `($${base+1}::int, $${base+2}::text, $${base+3}::text, $${base+4}::numeric, $${base+5}::date, $${base+6}::int)`;
         }).join(",");
 
         await pool.query(
