@@ -476,7 +476,7 @@ export async function importFonzipExcel(
   const { pool } = await import("./db");
 
   // Build employee lookup from kwuid → employee id
-  const empRes = await pool.query(`SELECT e.id, c.kwuid FROM employees e JOIN candidates c ON c.id = e.candidate_id WHERE c.kwuid IS NOT NULL`);
+  const empRes = await pool.query(`SELECT id, kwuid FROM employees WHERE kwuid IS NOT NULL`);
   const byKwuid: Record<string, number> = {};
   for (const emp of empRes.rows) {
     if (emp.kwuid) byKwuid[String(emp.kwuid).trim()] = emp.id;
