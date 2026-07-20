@@ -3017,29 +3017,53 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   let excelImportRunning = false;
   let lastExcelImportResult: any = null;
+  let excelImportProgress = { current: 0, total: 0 };
+  let excelImportStartedAt: number | null = null;
 
   app.post("/api/fonzip/import-excel", requireAuth, requireAdmin, async (req, res) => {
     try {
       const rows = req.body?.rows;
       const mode = req.body?.mode === "debts" ? "debts" : "payments";
       if (!Array.isArray(rows)) return res.status(400).json({ error: "rows array bekleniyor" });
-      if (excelImportRunning) return res.json({ running: true, message: "Import zaten devam ediyor." });
+      if (excelImportRunning) {
+        // 30 dakikadan uzun sürüyorsa otomatik reset
+        if (excelImportStartedAt && Date.now() - excelImportStartedAt > 30 * 60 * 1000) {
+          excelImportRunning = false;
+          lastExcelImportResult = { error: "Import 30 dakika zaman aşımına uğradı, otomatik sıfırlandı.", finishedAt: new Date().toISOString() };
+        } else {
+          return res.json({ running: true, message: "Import zaten devam ediyor.", progress: excelImportProgress });
+        }
+      }
       const userId = (req as any).user?.id ?? 0;
       excelImportRunning = true;
+      excelImportStartedAt = Date.now();
+      excelImportProgress = { current: 0, total: rows.length };
       lastExcelImportResult = null;
-      res.json({ running: true, message: `${rows.length} satır işleniyor, lütfen bekleyin...` });
-      importFonzipExcel(rows, userId, mode)
+      res.json({ running: true, message: `${rows.length} satır işleniyor...` });
+      importFonzipExcel(rows, userId, mode, (current, total) => {
+        excelImportProgress = { current, total };
+      })
         .then(result => { lastExcelImportResult = { ...result, finishedAt: new Date().toISOString() }; })
         .catch(err => { lastExcelImportResult = { error: err.message, finishedAt: new Date().toISOString() }; })
-        .finally(() => { excelImportRunning = false; });
+        .finally(() => { excelImportRunning = false; excelImportStartedAt = null; });
     } catch (err: any) {
       excelImportRunning = false;
+      excelImportStartedAt = null;
       res.status(500).json({ error: err.message });
     }
   });
 
   app.get("/api/fonzip/import-excel/status", requireAuth, requireAdmin, (_req, res) => {
-    res.json({ running: excelImportRunning, lastResult: lastExcelImportResult });
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ running: excelImportRunning, lastResult: lastExcelImportResult, progress: excelImportProgress });
+  });
+
+  app.post("/api/fonzip/import-excel/reset", requireAuth, requireAdmin, (_req, res) => {
+    excelImportRunning = false;
+    excelImportStartedAt = null;
+    excelImportProgress = { current: 0, total: 0 };
+    if (!lastExcelImportResult) lastExcelImportResult = { error: "Manuel sıfırlama yapıldı.", finishedAt: new Date().toISOString() };
+    res.json({ ok: true });
   });
 
   app.get("/api/fonzip/sync/stats", requireAuth, requireAdmin, async (_req, res) => {

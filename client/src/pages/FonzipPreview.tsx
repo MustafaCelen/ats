@@ -179,11 +179,19 @@ export default function FonzipPreview() {
 
   const [excelImporting, setExcelImporting] = useState(false);
 
-  const { data: excelImportStatus, refetch: refetchExcelStatus } = useQuery<{ running: boolean; lastResult: any }>({
+  const { data: excelImportStatus, refetch: refetchExcelStatus } = useQuery<{ running: boolean; lastResult: any; progress?: { current: number; total: number } }>({
     queryKey: ["/api/fonzip/import-excel/status"],
-    queryFn: () => fetch("/api/fonzip/import-excel/status", { credentials: "include" }).then(r => r.json()),
+    queryFn: () => fetch("/api/fonzip/import-excel/status", { credentials: "include", cache: "no-store" }).then(r => r.json()),
     refetchInterval: (q) => q.state.data?.running ? 2000 : false,
     staleTime: 0,
+  });
+
+  const resetImportMutation = useMutation({
+    mutationFn: () => fetch("/api/fonzip/import-excel/reset", { method: "POST", credentials: "include" }).then(r => r.json()),
+    onSuccess: () => {
+      toast({ title: "Import sıfırlandı", description: "Tekrar Excel yükleyebilirsiniz." });
+      refetchExcelStatus();
+    },
   });
 
   const showExcelResult = (data: any) => {
@@ -318,6 +326,15 @@ export default function FonzipPreview() {
               if (e.target) e.target.value = "";
             }}
           />
+          {(excelImporting || excelImportStatus?.running) && (
+            <Button
+              onClick={() => resetImportMutation.mutate()}
+              size="sm"
+              variant="destructive"
+            >
+              İptal / Sıfırla
+            </Button>
+          )}
           <Button
             onClick={() => fileInputRef.current?.click()}
             disabled={excelImporting || excelImportStatus?.running}
@@ -325,7 +342,14 @@ export default function FonzipPreview() {
             variant="outline"
           >
             {(excelImporting || excelImportStatus?.running)
-              ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />İşleniyor...</>
+              ? (() => {
+                  const p = excelImportStatus?.progress;
+                  if (p && p.total > 0) {
+                    const pct = Math.round(p.current / p.total * 100);
+                    return <><Loader2 className="h-4 w-4 mr-2 animate-spin" />{pct}% ({p.current}/{p.total})</>;
+                  }
+                  return <><Loader2 className="h-4 w-4 mr-2 animate-spin" />İşleniyor...</>;
+                })()
               : <><Upload className="h-4 w-4 mr-2" />Excel İçe Aktar</>}
           </Button>
           <Button

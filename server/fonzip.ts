@@ -468,154 +468,313 @@ export async function importFonzipExcel(
   rows: FonzipExcelRow[],
   createdByUserId: number,
   mode: "payments" | "debts" = "payments",
+  onProgress?: (current: number, total: number) => void,
 ): Promise<{
   mode: string; totalRows: number; upserted: number; detailsUpdated: number;
   matched: number; expensesCreated: number; skipped: number; errors: string[];
 }> {
-  const { storage } = await import("./storage");
   const { pool } = await import("./db");
 
-  const allEmployees = await storage.getEmployees();
+  // Build employee lookup from kwuid → employee id
+  const empRes = await pool.query(`SELECT e.id, c.kwuid FROM employees e JOIN candidates c ON c.id = e.candidate_id WHERE c.kwuid IS NOT NULL`);
   const byKwuid: Record<string, number> = {};
-  for (const emp of allEmployees) {
+  for (const emp of empRes.rows) {
     if (emp.kwuid) byKwuid[String(emp.kwuid).trim()] = emp.id;
   }
 
-  let upserted = 0, matched = 0, expensesCreated = 0, skipped = 0, detailsUpdated = 0;
+  const validRows = rows.filter(r => r.fonzipId && r.userName);
+  const skipped = rows.length - validRows.length;
+  const total = validRows.length;
+  onProgress?.(0, total);
+
+  let upserted = 0, detailsUpdated = 0, matched = 0, expensesCreated = 0;
   const errors: string[] = [];
 
-  for (const r of rows) {
-    if (!r.fonzipId || !r.userName) { skipped++; continue; }
-    try {
-      const empId = r.membershipNo ? byKwuid[r.membershipNo.trim()] : undefined;
+  const CHUNK = 500;
 
-      if (mode === "debts") {
-        // BORÇLAR modu: her borç = 1 gelir kaydı, kategori açıklamadan çıkarılır
-        const category = classifyFonzipCategory(r.details);
-        const existing = await pool.query(
-          `SELECT id, expense_id FROM fonzip_synced_debts WHERE fonzip_id = $1`,
-          [r.fonzipId]
-        );
-        if (existing.rows.length > 0) {
-          // Mevcut borcu güncelle
-          await pool.query(
-            `UPDATE fonzip_synced_debts
-             SET details = COALESCE($2, details),
-                 period = COALESCE($3, period),
-                 user_name = $4,
-                 membership_no = COALESCE($5, membership_no),
-                 added_by_name = COALESCE($6, added_by_name),
-                 amount = COALESCE(NULLIF($7, ''), amount),
-                 operation_date = COALESCE($8, operation_date),
-                 synced_at = NOW()
-             WHERE fonzip_id = $1`,
-            [r.fonzipId, r.details, r.period, r.userName, r.membershipNo, r.addedByName, r.amount, r.operationDate]
-          );
-          detailsUpdated++;
-          if (empId) {
-            await storage.setFonzipDebtEmployee(r.fonzipId, empId);
-            matched++;
-          }
-          // İlişkili gelir kaydını da güncelle (notes + category)
-          if (existing.rows[0].expense_id) {
-            await pool.query(
-              `UPDATE office_expenses SET notes = $2, category = $3, amount = $4, date = $5, employee_id = $6 WHERE id = $1`,
-              [
-                existing.rows[0].expense_id,
-                `${r.userName} — ${r.details ?? ""} (Fonzip #${r.fonzipId})`,
-                category,
-                r.amount || "0",
-                r.operationDate ?? new Date().toISOString().slice(0, 10),
-                empId ?? null,
-              ]
-            );
-          } else if (r.amount) {
-            // expense_id yoksa yeni oluştur
-            const expense = await storage.createOfficeExpense({
-              type: "income",
-              category,
-              amount: r.amount,
-              date: r.operationDate ?? new Date().toISOString().slice(0, 10),
-              notes: `${r.userName} — ${r.details ?? ""} (Fonzip #${r.fonzipId})`,
-              employeeId: empId ?? null,
-              createdByUserId,
-            });
-            await storage.setFonzipDebtExpense(r.fonzipId, expense.id);
-            expensesCreated++;
-          }
-        } else {
-          // Yeni borç → borç kaydı + otomatik gelir kaydı
-          await storage.upsertFonzipDebt({
-            fonzipId: r.fonzipId,
-            fonzipUserId: r.fonzipUserId ?? 0,
-            membershipNo: r.membershipNo,
-            userName: r.userName,
-            amount: r.amount || "0",
-            details: r.details,
-            period: r.period,
-            status: 8,
-            operationDate: r.operationDate,
-            addedByName: r.addedByName,
-          });
-          upserted++;
-          if (empId) {
-            await storage.setFonzipDebtEmployee(r.fonzipId, empId);
-            matched++;
-          }
-          if (r.amount) {
-            const expense = await storage.createOfficeExpense({
-              type: "income",
-              category,
-              amount: r.amount,
-              date: r.operationDate ?? new Date().toISOString().slice(0, 10),
-              notes: `${r.userName} — ${r.details ?? ""} (Fonzip #${r.fonzipId})`,
-              employeeId: empId ?? null,
-              createdByUserId,
-            });
-            await storage.setFonzipDebtExpense(r.fonzipId, expense.id);
-            expensesCreated++;
-          }
-        }
-      } else {
-        // ÖDEMELER modu: full upsert (mevcut davranış)
-        if (!r.amount) { skipped++; continue; }
-        const row = await storage.upsertFonzipDebt({
-          fonzipId: r.fonzipId,
-          fonzipUserId: r.fonzipUserId ?? 0,
-          membershipNo: r.membershipNo,
-          userName: r.userName,
-          amount: r.amount,
-          details: r.details,
-          period: r.period,
-          status: r.status ?? 1,
-          operationDate: r.operationDate,
-          addedByName: r.addedByName,
-        });
-        upserted++;
-        if (empId && row.employeeId !== empId) {
-          await storage.setFonzipDebtEmployee(r.fonzipId, empId);
-          matched++;
-        }
-        if ((r.status ?? 1) === 1 && !row.expenseId) {
-          const effectiveEmpId = empId ?? row.employeeId ?? undefined;
-          const expense = await storage.createOfficeExpense({
-            type: "income",
-            category: "Aidat & Yer Tahsis",
-            amount: r.amount,
-            date: r.operationDate ?? new Date().toISOString().slice(0, 10),
-            notes: `${r.userName} — ${r.details ?? ""} (Fonzip #${r.fonzipId})`,
-            employeeId: effectiveEmpId ?? null,
-            createdByUserId,
-          });
-          await storage.setFonzipDebtExpense(r.fonzipId, expense.id);
-          expensesCreated++;
-        }
-      }
-    } catch (e: any) {
-      errors.push(`Kayıt #${r.fonzipId}: ${e.message}`);
-    }
+  // Step 1: Fetch ALL existing debts for these fonzip_ids in one query
+  const allFonzipIds = validRows.map(r => r.fonzipId);
+  const existingRes = await pool.query(
+    `SELECT fonzip_id, id, expense_id, employee_id FROM fonzip_synced_debts WHERE fonzip_id = ANY($1::int[])`,
+    [allFonzipIds]
+  );
+  const existingMap = new Map<number, { id: number; expense_id: number | null; employee_id: number | null }>();
+  for (const row of existingRes.rows) {
+    existingMap.set(Number(row.fonzip_id), row);
   }
 
+  const newRows = validRows.filter(r => !existingMap.has(r.fonzipId));
+  const existingRows = validRows.filter(r => existingMap.has(r.fonzipId));
+
+  onProgress?.(Math.round(total * 0.05), total);
+
+  if (mode === "debts") {
+    // ── NEW DEBTS: batch insert in chunks ──────────────────────────────────
+    for (let i = 0; i < newRows.length; i += CHUNK) {
+      const chunk = newRows.slice(i, i + CHUNK);
+      if (chunk.length === 0) break;
+
+      // Build VALUES list for fonzip_synced_debts
+      const debtParams: any[] = [];
+      const debtPlaceholders = chunk.map((r, idx) => {
+        const base = idx * 9;
+        const empId = r.membershipNo ? (byKwuid[r.membershipNo.trim()] ?? null) : null;
+        debtParams.push(
+          r.fonzipId, r.fonzipUserId ?? 0, empId,
+          r.membershipNo ?? null, r.userName, r.amount || "0",
+          r.details ?? null, r.period ?? null,
+          r.operationDate ?? null
+        );
+        return `($${base+1}, $${base+2}, $${base+3}, $${base+4}, $${base+5}, $${base+6}, $${base+7}, $${base+8}, 8, $${base+9}, NOW())`;
+      }).join(",");
+
+      const insertedDebts = await pool.query(
+        `INSERT INTO fonzip_synced_debts
+           (fonzip_id, fonzip_user_id, employee_id, membership_no, user_name, amount, details, period, status, operation_date, synced_at)
+         VALUES ${debtPlaceholders}
+         ON CONFLICT (fonzip_id) DO NOTHING
+         RETURNING fonzip_id, id, employee_id`,
+        debtParams
+      );
+
+      // Batch insert office_expenses for newly inserted debts
+      const insertedDebtMap = new Map<number, number>(); // fonzip_id → debt row id
+      for (const row of insertedDebts.rows) {
+        insertedDebtMap.set(Number(row.fonzip_id), row.id);
+        if (row.employee_id) matched++;
+      }
+      upserted += insertedDebts.rows.length;
+
+      // Build expenses for new debts that have amounts
+      const expChunk = chunk.filter(r => r.amount && insertedDebtMap.has(r.fonzipId));
+      if (expChunk.length > 0) {
+        const expParams: any[] = [];
+        const expPlaceholders = expChunk.map((r, idx) => {
+          const base = idx * 6;
+          const empId = r.membershipNo ? (byKwuid[r.membershipNo.trim()] ?? null) : null;
+          const category = classifyFonzipCategory(r.details);
+          expParams.push(
+            "income", category, r.amount,
+            r.operationDate ?? new Date().toISOString().slice(0, 10),
+            `${r.userName} — ${r.details ?? ""} (Fonzip #${r.fonzipId})`,
+            empId
+          );
+          return `($${base+1}, $${base+2}, $${base+3}, $${base+4}, $${base+5}, $${base+6}, ${createdByUserId})`;
+        }).join(",");
+
+        const insertedExps = await pool.query(
+          `INSERT INTO office_expenses (type, category, amount, date, notes, employee_id, created_by_user_id)
+           VALUES ${expPlaceholders}
+           RETURNING id`,
+          expParams
+        );
+        expensesCreated += insertedExps.rows.length;
+
+        // Link expense_id back to fonzip_synced_debts in batch
+        for (let j = 0; j < expChunk.length && j < insertedExps.rows.length; j++) {
+          const debtRowId = insertedDebtMap.get(expChunk[j].fonzipId);
+          if (debtRowId) {
+            await pool.query(
+              `UPDATE fonzip_synced_debts SET expense_id = $1 WHERE id = $2`,
+              [insertedExps.rows[j].id, debtRowId]
+            );
+          }
+        }
+      }
+
+      onProgress?.(Math.round(total * 0.05 + (i + chunk.length) / newRows.length * 0.45 * total), total);
+    }
+
+    // ── EXISTING DEBTS: batch update in chunks ─────────────────────────────
+    for (let i = 0; i < existingRows.length; i += CHUNK) {
+      const chunk = existingRows.slice(i, i + CHUNK);
+
+      // Build a single UPDATE ... FROM (VALUES ...) for debt metadata
+      const valParams: any[] = [];
+      const valPlaceholders = chunk.map((r, idx) => {
+        const base = idx * 7;
+        valParams.push(
+          r.fonzipId, r.details ?? null, r.period ?? null, r.userName,
+          r.membershipNo ?? null, r.addedByName ?? null,
+          r.amount && r.amount !== "" ? r.amount : null
+        );
+        return `($${base+1}::int, $${base+2}::text, $${base+3}::text, $${base+4}::text, $${base+5}::text, $${base+6}::text, $${base+7}::text)`;
+      }).join(",");
+
+      await pool.query(
+        `UPDATE fonzip_synced_debts AS t
+         SET details        = COALESCE(v.details, t.details),
+             period         = COALESCE(v.period, t.period),
+             user_name      = v.user_name,
+             membership_no  = COALESCE(v.membership_no, t.membership_no),
+             added_by_name  = COALESCE(v.added_by_name, t.added_by_name),
+             amount         = COALESCE(v.amount, t.amount),
+             synced_at      = NOW()
+         FROM (VALUES ${valPlaceholders}) AS v(fonzip_id, details, period, user_name, membership_no, added_by_name, amount)
+         WHERE t.fonzip_id = v.fonzip_id`,
+        valParams
+      );
+      detailsUpdated += chunk.length;
+
+      // Batch update office_expenses for existing debts
+      const withExpense = chunk.filter(r => {
+        const ex = existingMap.get(r.fonzipId);
+        return ex?.expense_id != null;
+      });
+      if (withExpense.length > 0) {
+        const expParams: any[] = [];
+        const expPlaceholders = withExpense.map((r, idx) => {
+          const ex = existingMap.get(r.fonzipId)!;
+          const base = idx * 6;
+          const empId = r.membershipNo ? (byKwuid[r.membershipNo.trim()] ?? null) : null;
+          const category = classifyFonzipCategory(r.details);
+          expParams.push(
+            ex.expense_id, category,
+            `${r.userName} — ${r.details ?? ""} (Fonzip #${r.fonzipId})`,
+            r.amount || "0",
+            r.operationDate ?? new Date().toISOString().slice(0, 10),
+            empId
+          );
+          return `($${base+1}::int, $${base+2}::text, $${base+3}::text, $${base+4}::text, $${base+5}::date, $${base+6}::int)`;
+        }).join(",");
+
+        await pool.query(
+          `UPDATE office_expenses AS t
+           SET category    = v.category,
+               notes       = v.notes,
+               amount      = v.amount,
+               date        = v.date,
+               employee_id = v.employee_id
+           FROM (VALUES ${expPlaceholders}) AS v(id, category, notes, amount, date, employee_id)
+           WHERE t.id = v.id`,
+          expParams
+        );
+      }
+
+      // Create missing expenses for existing debts that have no expense_id yet
+      const missingExp = chunk.filter(r => {
+        const ex = existingMap.get(r.fonzipId);
+        return ex && !ex.expense_id && r.amount;
+      });
+      if (missingExp.length > 0) {
+        const expParams: any[] = [];
+        const expPlaceholders = missingExp.map((r, idx) => {
+          const base = idx * 6;
+          const empId = r.membershipNo ? (byKwuid[r.membershipNo.trim()] ?? null) : null;
+          const category = classifyFonzipCategory(r.details);
+          expParams.push(
+            "income", category, r.amount,
+            r.operationDate ?? new Date().toISOString().slice(0, 10),
+            `${r.userName} — ${r.details ?? ""} (Fonzip #${r.fonzipId})`,
+            empId
+          );
+          return `($${base+1}, $${base+2}, $${base+3}, $${base+4}, $${base+5}, $${base+6}, ${createdByUserId})`;
+        }).join(",");
+        const insertedExps = await pool.query(
+          `INSERT INTO office_expenses (type, category, amount, date, notes, employee_id, created_by_user_id)
+           VALUES ${expPlaceholders}
+           RETURNING id`,
+          expParams
+        );
+        expensesCreated += insertedExps.rows.length;
+        for (let j = 0; j < missingExp.length && j < insertedExps.rows.length; j++) {
+          await pool.query(
+            `UPDATE fonzip_synced_debts SET expense_id = $1 WHERE fonzip_id = $2`,
+            [insertedExps.rows[j].id, missingExp[j].fonzipId]
+          );
+        }
+      }
+
+      onProgress?.(Math.round(total * 0.5 + (i + chunk.length) / existingRows.length * 0.45 * total), total);
+    }
+
+  } else {
+    // ── PAYMENTS MODE: batch upsert ────────────────────────────────────────
+    const payRows = validRows.filter(r => r.amount);
+    const skippedPay = validRows.length - payRows.length;
+
+    for (let i = 0; i < payRows.length; i += CHUNK) {
+      const chunk = payRows.slice(i, i + CHUNK);
+
+      const params: any[] = [];
+      const placeholders = chunk.map((r, idx) => {
+        const base = idx * 9;
+        const empId = r.membershipNo ? (byKwuid[r.membershipNo.trim()] ?? null) : null;
+        params.push(
+          r.fonzipId, r.fonzipUserId ?? 0, empId,
+          r.membershipNo ?? null, r.userName, r.amount,
+          r.details ?? null, r.period ?? null,
+          r.operationDate ?? null
+        );
+        return `($${base+1}, $${base+2}, $${base+3}, $${base+4}, $${base+5}, $${base+6}, $${base+7}, $${base+8}, ${r.status ?? 1}, $${base+9}, NOW())`;
+      }).join(",");
+
+      const result = await pool.query(
+        `INSERT INTO fonzip_synced_debts
+           (fonzip_id, fonzip_user_id, employee_id, membership_no, user_name, amount, details, period, status, operation_date, synced_at)
+         VALUES ${placeholders}
+         ON CONFLICT (fonzip_id) DO UPDATE SET
+           user_name      = EXCLUDED.user_name,
+           amount         = EXCLUDED.amount,
+           details        = COALESCE(EXCLUDED.details, fonzip_synced_debts.details),
+           period         = COALESCE(EXCLUDED.period, fonzip_synced_debts.period),
+           membership_no  = COALESCE(EXCLUDED.membership_no, fonzip_synced_debts.membership_no),
+           employee_id    = COALESCE(EXCLUDED.employee_id, fonzip_synced_debts.employee_id),
+           operation_date = COALESCE(EXCLUDED.operation_date, fonzip_synced_debts.operation_date),
+           synced_at      = NOW()
+         RETURNING fonzip_id, id, expense_id, employee_id, (xmax = 0) AS is_new`,
+        params
+      );
+      upserted += result.rows.length;
+
+      // Create expenses for newly inserted successful payments
+      const needsExpense = result.rows.filter((row: any) => row.is_new && !row.expense_id);
+      const sourceMap = new Map(chunk.map(r => [r.fonzipId, r]));
+
+      if (needsExpense.length > 0) {
+        const expParams: any[] = [];
+        const expPH = needsExpense.map((row: any, idx: number) => {
+          const r = sourceMap.get(Number(row.fonzip_id))!;
+          const base = idx * 6;
+          expParams.push(
+            "income", "Aidat & Yer Tahsis", r.amount,
+            r.operationDate ?? new Date().toISOString().slice(0, 10),
+            `${r.userName} — ${r.details ?? ""} (Fonzip #${r.fonzipId})`,
+            row.employee_id ?? null
+          );
+          return `($${base+1}, $${base+2}, $${base+3}, $${base+4}, $${base+5}, $${base+6}, ${createdByUserId})`;
+        }).join(",");
+        const expResult = await pool.query(
+          `INSERT INTO office_expenses (type, category, amount, date, notes, employee_id, created_by_user_id)
+           VALUES ${expPH}
+           RETURNING id`,
+          expParams
+        );
+        expensesCreated += expResult.rows.length;
+        for (let j = 0; j < needsExpense.length && j < expResult.rows.length; j++) {
+          await pool.query(
+            `UPDATE fonzip_synced_debts SET expense_id = $1 WHERE id = $2`,
+            [expResult.rows[j].id, needsExpense[j].id]
+          );
+        }
+      }
+
+      onProgress?.(Math.round((i + chunk.length) / payRows.length * total), total);
+    }
+
+    // skipped already counted above
+    return {
+      mode, totalRows: rows.length,
+      upserted,
+      detailsUpdated: 0,
+      matched,
+      expensesCreated,
+      skipped: skipped + skippedPay,
+      errors,
+    };
+  }
+
+  onProgress?.(total, total);
   return { mode, totalRows: rows.length, upserted, detailsUpdated, matched, expensesCreated, skipped, errors };
 }
 
