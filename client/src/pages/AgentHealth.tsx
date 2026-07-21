@@ -21,6 +21,7 @@ interface ChurnRow {
   activeListings: number;
   score: number;
   risk: "high" | "medium" | "low";
+  uretkenlikKoclugu: boolean;
 }
 
 function RiskBadge({ risk }: { risk: string }) {
@@ -50,7 +51,9 @@ function rowCls(risk: string) {
 }
 
 export default function AgentHealth() {
-  const { data: churnData = [], isLoading } = useQuery<ChurnRow[]>({
+  const [ukOnly, setUkOnly] = useState(false);
+
+  const { data: rawChurnData = [], isLoading } = useQuery<ChurnRow[]>({
     queryKey: ["/api/reports/churn"],
     queryFn: () => fetch("/api/reports/churn").then((r) => r.json()),
   });
@@ -68,6 +71,11 @@ export default function AgentHealth() {
     return map;
   }, [teams]);
 
+  const churnData = useMemo(
+    () => ukOnly ? rawChurnData.filter(r => r.uretkenlikKoclugu) : rawChurnData,
+    [rawChurnData, ukOnly]
+  );
+
   const hadClosings = churnData.filter((r) => r.lastClosingDate !== null && r.risk === "high");
   const neverClosed = churnData.filter((r) => r.lastClosingDate === null && r.risk === "high");
   const highRisk = churnData.filter((r) => r.risk === "high").length;
@@ -77,15 +85,28 @@ export default function AgentHealth() {
   return (
     <Layout>
       <div className="space-y-6">
-        <div className="flex flex-wrap items-start gap-4">
+        <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-display font-bold text-foreground flex items-center gap-2">
               <ShieldAlert className="h-6 w-6 text-primary" /> Danışman Sağlığı
             </h1>
             <p className="text-sm text-muted-foreground mt-0.5">
               Son işlem tarihi ve aktif ilan varlığına göre risk altındaki danışmanlar
+              {ukOnly && <span className="ml-2 font-semibold text-primary">· Sadece ÜK'daki danışmanlar</span>}
             </p>
           </div>
+          <button
+            onClick={() => setUkOnly(v => !v)}
+            className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+              ukOnly
+                ? "border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                : "border-border bg-card hover:bg-muted"
+            }`}
+          >
+            <span className={`h-2 w-2 rounded-full ${ukOnly ? "bg-emerald-500" : "bg-slate-300"}`} />
+            ÜK Filtresi {ukOnly ? "Açık" : "Kapalı"}
+            {ukOnly && <span className="text-xs text-emerald-600">({churnData.length})</span>}
+          </button>
         </div>
 
         {/* Summary cards */}

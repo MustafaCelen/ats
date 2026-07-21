@@ -2806,6 +2806,73 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // ── Office Expenses ────────────────────────────────────────────────────────
 
+  // Detaylı masraf raporu: ay-ay ve kategori-kategori kırılım
+  app.get("/api/office-expenses/reports/breakdown", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const startMonth = String(req.query.startMonth ?? "");
+      const endMonth = String(req.query.endMonth ?? "");
+      const type = (req.query.type === "income" || req.query.type === "expense") ? req.query.type : null;
+
+      if (!/^\d{4}-\d{2}$/.test(startMonth) || !/^\d{4}-\d{2}$/.test(endMonth)) {
+        return res.status(400).json({ message: "startMonth ve endMonth 'YYYY-MM' formatında olmalı" });
+      }
+
+      const startDate = `${startMonth}-01`;
+      const [ey, em] = endMonth.split("-").map(Number);
+      const endDate = new Date(ey, em, 0).toISOString().slice(0, 10);
+
+      const typeFilter = type ? sql` AND type = ${type}` : sql``;
+      const result = await db.execute(sql`
+        SELECT
+          TO_CHAR(date::date, 'YYYY-MM') AS month,
+          type,
+          category,
+          COUNT(*)::int AS count,
+          SUM(amount)::numeric AS total
+        FROM office_expenses
+        WHERE date::date >= ${startDate}::date AND date::date <= ${endDate}::date ${typeFilter}
+        GROUP BY month, type, category
+        ORDER BY month, type, category
+      `);
+      res.json(result.rows);
+    } catch (err) {
+      console.error("[GET /api/office-expenses/reports/breakdown]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Bir kategori/dönem için en yüksek işlemler (drilldown)
+  app.get("/api/office-expenses/reports/top", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const startMonth = String(req.query.startMonth ?? "");
+      const endMonth = String(req.query.endMonth ?? "");
+      const type = (req.query.type === "income" || req.query.type === "expense") ? req.query.type : null;
+      const category = req.query.category ? String(req.query.category) : null;
+      const limit = Math.max(1, Math.min(100, parseInt(String(req.query.limit ?? "20"))));
+
+      if (!/^\d{4}-\d{2}$/.test(startMonth) || !/^\d{4}-\d{2}$/.test(endMonth)) {
+        return res.status(400).json({ message: "startMonth ve endMonth 'YYYY-MM' formatında olmalı" });
+      }
+      const startDate = `${startMonth}-01`;
+      const [ey, em] = endMonth.split("-").map(Number);
+      const endDate = new Date(ey, em, 0).toISOString().slice(0, 10);
+
+      const typeFilter = type ? sql` AND type = ${type}` : sql``;
+      const catFilter = category ? sql` AND category = ${category}` : sql``;
+      const result = await db.execute(sql`
+        SELECT id, date::date AS date, type, category, amount::numeric AS amount, notes, employee_id
+        FROM office_expenses
+        WHERE date::date >= ${startDate}::date AND date::date <= ${endDate}::date ${typeFilter} ${catFilter}
+        ORDER BY amount DESC
+        LIMIT ${limit}
+      `);
+      res.json(result.rows);
+    } catch (err) {
+      console.error("[GET /api/office-expenses/reports/top]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   app.get("/api/office-expenses/monthly-pl", requireAuth, requireAdmin, async (req, res) => {
     try {
       const year = req.query.year ? parseInt(req.query.year as string) : new Date().getFullYear();

@@ -2,7 +2,7 @@ import { Link, useLocation } from "wouter";
 import {
   LayoutDashboard, Users, Briefcase, BarChart2, ChevronRight, Menu, X,
   Calendar, Shield, LogOut, ClipboardList, UserCheck, KanbanSquare, DollarSign, GraduationCap,
-  Receipt, TrendingUp, Building2, Trophy, ShieldAlert, Users2, Puzzle,
+  Receipt, TrendingUp, Building2, Trophy, ShieldAlert, Users2, Puzzle, BarChart3,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { useState } from "react";
@@ -74,6 +74,7 @@ const adminNavItems: NavEntry[] = [
   { icon: DollarSign,      label: "İşlem Kapanış",  href: "/closings"   },
   { icon: Building2,       label: "Portal İlanları", href: "/listings"   },
   { icon: Receipt,         label: "Masraflar & Ek Gelirler", href: "/expenses"   },
+  { icon: BarChart3,       label: "Masraf Raporları",         href: "/expense-reports" },
   reportsGroupAdmin,
   { icon: Users2,          label: "Takımlar",       href: "/teams"      },
   { icon: Puzzle,          label: "Fonzip",         href: "/fonzip"     },
