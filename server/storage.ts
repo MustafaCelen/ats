@@ -102,6 +102,7 @@ export interface ChurnRow {
   score: number;
   risk: "high" | "medium" | "low";
   uretkenlikKoclugu: boolean;
+  ukEndDate: string | null;
 }
 
 export interface ReportStats {
@@ -2225,6 +2226,7 @@ export class DatabaseStorage implements IStorage {
         startDate: employees.startDate,
         closingDate: effDate,
         uretkenlikKoclugu: employees.uretkenlikKoclugu,
+        ukEndDate: employees.ukEndDate,
       })
       .from(employees)
       .leftJoin(candidates, eq(employees.candidateId, candidates.id))
@@ -2254,6 +2256,7 @@ export class DatabaseStorage implements IStorage {
     const empMap = new Map<number, {
       name: string; kwuid: string | null; category: string | null;
       startDate: Date | null; closingDates: Date[]; uretkenlikKoclugu: boolean;
+      ukEndDate: string | null;
     }>();
 
     for (const r of rows) {
@@ -2262,6 +2265,7 @@ export class DatabaseStorage implements IStorage {
           name: r.name ?? "—", kwuid: r.kwuid ?? null,
           category: r.category ?? null, startDate: r.startDate,
           closingDates: [], uretkenlikKoclugu: !!r.uretkenlikKoclugu,
+          ukEndDate: r.ukEndDate ?? null,
         });
       }
       if (r.closingDate) empMap.get(r.empId)!.closingDates.push(new Date(r.closingDate));
@@ -2333,6 +2337,7 @@ export class DatabaseStorage implements IStorage {
         score,
         risk,
         uretkenlikKoclugu: emp.uretkenlikKoclugu,
+        ukEndDate: emp.ukEndDate,
       });
     }
 

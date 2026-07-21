@@ -5,7 +5,52 @@ import { format } from "date-fns";
 import { tr } from "date-fns/locale";
 import {
   ShieldAlert, AlertTriangle, Minus, CheckCircle, TrendingUp, TrendingDown, Building2,
+  ArrowUp, ArrowDown, ArrowUpDown,
 } from "lucide-react";
+
+type SortKey = "name" | "risk" | "lastClosingDate" | "daysSinceLast" | "closings3m" | "closingsPrev3m" | "activeListings" | "trend" | "tenureMonths" | "category" | "score";
+
+function SortHeader({
+  label, sortKey, currentKey, dir, onSort, align = "left",
+}: {
+  label: string; sortKey: SortKey; currentKey: SortKey; dir: "asc" | "desc"; onSort: (k: SortKey) => void;
+  align?: "left" | "center" | "right";
+}) {
+  const active = currentKey === sortKey;
+  return (
+    <th className={`text-${align} px-5 py-3 cursor-pointer select-none hover:bg-muted/50 transition-colors`} onClick={() => onSort(sortKey)}>
+      <span className={`inline-flex items-center gap-1 ${active ? "text-primary" : ""}`}>
+        {label}
+        {active
+          ? (dir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />)
+          : <ArrowUpDown className="h-3 w-3 opacity-30" />}
+      </span>
+    </th>
+  );
+}
+
+const RISK_ORDER: Record<string, number> = { high: 3, medium: 2, low: 1 };
+const TREND_ORDER: Record<string, number> = { down: 3, flat: 2, up: 1 };
+const CAT_ORDER: Record<string, number> = { K2: 3, K1: 2, K0: 1 };
+
+function sortRows(rows: ChurnRow[], key: SortKey, dir: "asc" | "desc"): ChurnRow[] {
+  const mul = dir === "asc" ? 1 : -1;
+  return [...rows].sort((a, b) => {
+    const va = (a as any)[key], vb = (b as any)[key];
+    if (key === "risk") return (RISK_ORDER[a.risk] - RISK_ORDER[b.risk]) * mul;
+    if (key === "trend") return (TREND_ORDER[a.trend] - TREND_ORDER[b.trend]) * mul;
+    if (key === "category") return ((CAT_ORDER[a.category ?? ""] ?? 0) - (CAT_ORDER[b.category ?? ""] ?? 0)) * mul;
+    if (key === "name") return String(va ?? "").localeCompare(String(vb ?? ""), "tr") * mul;
+    if (key === "lastClosingDate") {
+      const da = a.lastClosingDate ? new Date(a.lastClosingDate).getTime() : 0;
+      const db = b.lastClosingDate ? new Date(b.lastClosingDate).getTime() : 0;
+      return (da - db) * mul;
+    }
+    const na = va == null ? -Infinity : Number(va);
+    const nb = vb == null ? -Infinity : Number(vb);
+    return (na - nb) * mul;
+  });
+}
 
 interface ChurnRow {
   employeeId: number;
@@ -22,6 +67,7 @@ interface ChurnRow {
   score: number;
   risk: "high" | "medium" | "low";
   uretkenlikKoclugu: boolean;
+  ukEndDate: string | null;
 }
 
 function RiskBadge({ risk }: { risk: string }) {
@@ -52,6 +98,13 @@ function rowCls(risk: string) {
 
 export default function AgentHealth() {
   const [ukOnly, setUkOnly] = useState(false);
+  const [sortKey, setSortKey] = useState<SortKey>("score");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
+  const handleSort = (k: SortKey) => {
+    if (k === sortKey) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortKey(k); setSortDir(k === "name" ? "asc" : "desc"); }
+  };
 
   const { data: rawChurnData = [], isLoading } = useQuery<ChurnRow[]>({
     queryKey: ["/api/reports/churn"],
@@ -72,12 +125,20 @@ export default function AgentHealth() {
   }, [teams]);
 
   const churnData = useMemo(
-    () => ukOnly ? rawChurnData.filter(r => r.uretkenlikKoclugu) : rawChurnData,
+    () => ukOnly
+      ? rawChurnData.filter(r => r.uretkenlikKoclugu && !(r.ukEndDate && r.ukEndDate.trim() !== ""))
+      : rawChurnData,
     [rawChurnData, ukOnly]
   );
 
-  const hadClosings = churnData.filter((r) => r.lastClosingDate !== null && r.risk === "high");
-  const neverClosed = churnData.filter((r) => r.lastClosingDate === null && r.risk === "high");
+  const hadClosings = useMemo(
+    () => sortRows(churnData.filter((r) => r.lastClosingDate !== null && r.risk === "high"), sortKey, sortDir),
+    [churnData, sortKey, sortDir]
+  );
+  const neverClosed = useMemo(
+    () => sortRows(churnData.filter((r) => r.lastClosingDate === null && r.risk === "high"), sortKey, sortDir),
+    [churnData, sortKey, sortDir]
+  );
   const highRisk = churnData.filter((r) => r.risk === "high").length;
   const medRisk = churnData.filter((r) => r.risk === "medium").length;
   const lowRisk = churnData.filter((r) => r.risk === "low").length;
@@ -155,17 +216,17 @@ export default function AgentHealth() {
                 <table className="w-full text-sm">
                   <thead className="bg-muted/30 text-xs text-muted-foreground uppercase">
                     <tr>
-                      <th className="text-left px-5 py-3">Danışman</th>
+                      <SortHeader label="Danışman" sortKey="name" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
                       <th className="text-left px-5 py-3">Takım</th>
-                      <th className="text-left px-5 py-3">Risk</th>
-                      <th className="text-left px-5 py-3">Son İşlem</th>
-                      <th className="text-center px-5 py-3">Son 3 Ay</th>
-                      <th className="text-center px-5 py-3">Önceki 3 Ay</th>
-                      <th className="text-center px-5 py-3">Aktif İlan</th>
-                      <th className="text-center px-5 py-3">Trend</th>
-                      <th className="text-left px-5 py-3">Kıdem</th>
-                      <th className="text-left px-5 py-3">Kategori</th>
-                      <th className="text-right px-5 py-3">Skor</th>
+                      <SortHeader label="Risk" sortKey="risk" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
+                      <SortHeader label="Son İşlem" sortKey="lastClosingDate" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
+                      <SortHeader label="Son 3 Ay" sortKey="closings3m" currentKey={sortKey} dir={sortDir} onSort={handleSort} align="center" />
+                      <SortHeader label="Önceki 3 Ay" sortKey="closingsPrev3m" currentKey={sortKey} dir={sortDir} onSort={handleSort} align="center" />
+                      <SortHeader label="Aktif İlan" sortKey="activeListings" currentKey={sortKey} dir={sortDir} onSort={handleSort} align="center" />
+                      <SortHeader label="Trend" sortKey="trend" currentKey={sortKey} dir={sortDir} onSort={handleSort} align="center" />
+                      <SortHeader label="Kıdem" sortKey="tenureMonths" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
+                      <SortHeader label="Kategori" sortKey="category" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
+                      <SortHeader label="Skor" sortKey="score" currentKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
@@ -223,13 +284,13 @@ export default function AgentHealth() {
                 <table className="w-full text-sm">
                   <thead className="bg-muted/30 text-xs text-muted-foreground uppercase">
                     <tr>
-                      <th className="text-left px-5 py-3">Danışman</th>
+                      <SortHeader label="Danışman" sortKey="name" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
                       <th className="text-left px-5 py-3">Takım</th>
-                      <th className="text-left px-5 py-3">Risk</th>
-                      <th className="text-center px-5 py-3">Aktif İlan</th>
-                      <th className="text-left px-5 py-3">Kıdem</th>
-                      <th className="text-left px-5 py-3">Kategori</th>
-                      <th className="text-right px-5 py-3">Skor</th>
+                      <SortHeader label="Risk" sortKey="risk" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
+                      <SortHeader label="Aktif İlan" sortKey="activeListings" currentKey={sortKey} dir={sortDir} onSort={handleSort} align="center" />
+                      <SortHeader label="Kıdem" sortKey="tenureMonths" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
+                      <SortHeader label="Kategori" sortKey="category" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
+                      <SortHeader label="Skor" sortKey="score" currentKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
