@@ -8,7 +8,10 @@ import {
   ArrowUp, ArrowDown, ArrowUpDown,
 } from "lucide-react";
 
-type SortKey = "name" | "risk" | "lastClosingDate" | "daysSinceLast" | "closings3m" | "closingsPrev3m" | "activeListings" | "trend" | "tenureMonths" | "category" | "score";
+type SortKey = "name" | "risk" | "lastClosingDate" | "daysSinceLast" | "closings3m" | "closingsPrev3m" | "activeListings" | "trend" | "tenureMonths" | "category" | "score" | "bhb2025" | "bhb2026";
+
+const fmtTRY = (n: number) => n === 0 ? "—" :
+  new Intl.NumberFormat("tr-TR", { maximumFractionDigits: 0 }).format(n) + " ₺";
 
 function SortHeader({
   label, sortKey, currentKey, dir, onSort, align = "left",
@@ -68,6 +71,8 @@ interface ChurnRow {
   risk: "high" | "medium" | "low";
   uretkenlikKoclugu: boolean;
   ukEndDate: string | null;
+  bhb2025: number;
+  bhb2026: number;
 }
 
 function RiskBadge({ risk }: { risk: string }) {
@@ -226,6 +231,8 @@ export default function AgentHealth() {
                       <SortHeader label="Trend" sortKey="trend" currentKey={sortKey} dir={sortDir} onSort={handleSort} align="center" />
                       <SortHeader label="Kıdem" sortKey="tenureMonths" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
                       <SortHeader label="Kategori" sortKey="category" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
+                      <SortHeader label="BHB 2025" sortKey="bhb2025" currentKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
+                      <SortHeader label="BHB 2026" sortKey="bhb2026" currentKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
                       <SortHeader label="Skor" sortKey="score" currentKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
                     </tr>
                   </thead>
@@ -258,6 +265,8 @@ export default function AgentHealth() {
                         </td>
                         <td className="px-5 py-3 text-muted-foreground">{r.tenureMonths < 1 ? "<1 ay" : `${r.tenureMonths} ay`}</td>
                         <td className="px-5 py-3"><CategoryBadge category={r.category} /></td>
+                        <td className="px-5 py-3 text-right text-xs text-muted-foreground">{fmtTRY(r.bhb2025)}</td>
+                        <td className="px-5 py-3 text-right text-xs font-medium">{fmtTRY(r.bhb2026)}</td>
                         <td className="px-5 py-3 text-right">
                           <span className={`text-sm font-bold ${r.score >= 60 ? "text-red-600" : r.score >= 30 ? "text-amber-600" : "text-emerald-600"}`}>{r.score}</span>
                         </td>
@@ -290,6 +299,8 @@ export default function AgentHealth() {
                       <SortHeader label="Aktif İlan" sortKey="activeListings" currentKey={sortKey} dir={sortDir} onSort={handleSort} align="center" />
                       <SortHeader label="Kıdem" sortKey="tenureMonths" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
                       <SortHeader label="Kategori" sortKey="category" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
+                      <SortHeader label="BHB 2025" sortKey="bhb2025" currentKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
+                      <SortHeader label="BHB 2026" sortKey="bhb2026" currentKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
                       <SortHeader label="Skor" sortKey="score" currentKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
                     </tr>
                   </thead>
@@ -309,6 +320,8 @@ export default function AgentHealth() {
                         <td className="px-5 py-3 text-center"><ActiveListingCell n={r.activeListings} /></td>
                         <td className="px-5 py-3 text-muted-foreground">{r.tenureMonths < 1 ? "<1 ay" : `${r.tenureMonths} ay`}</td>
                         <td className="px-5 py-3"><CategoryBadge category={r.category} /></td>
+                        <td className="px-5 py-3 text-right text-xs text-muted-foreground">{fmtTRY(r.bhb2025)}</td>
+                        <td className="px-5 py-3 text-right text-xs font-medium">{fmtTRY(r.bhb2026)}</td>
                         <td className="px-5 py-3 text-right">
                           <span className={`text-sm font-bold ${r.score >= 60 ? "text-red-600" : r.score >= 30 ? "text-amber-600" : "text-emerald-600"}`}>{r.score}</span>
                         </td>

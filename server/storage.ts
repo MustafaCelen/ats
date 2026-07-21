@@ -103,6 +103,8 @@ export interface ChurnRow {
   risk: "high" | "medium" | "low";
   uretkenlikKoclugu: boolean;
   ukEndDate: string | null;
+  bhb2025: number;
+  bhb2026: number;
 }
 
 export interface ReportStats {
@@ -2227,6 +2229,7 @@ export class DatabaseStorage implements IStorage {
         closingDate: effDate,
         uretkenlikKoclugu: employees.uretkenlikKoclugu,
         ukEndDate: employees.ukEndDate,
+        bhbShare: closingAgents.bhbShare,
       })
       .from(employees)
       .leftJoin(candidates, eq(employees.candidateId, candidates.id))
@@ -2256,7 +2259,7 @@ export class DatabaseStorage implements IStorage {
     const empMap = new Map<number, {
       name: string; kwuid: string | null; category: string | null;
       startDate: Date | null; closingDates: Date[]; uretkenlikKoclugu: boolean;
-      ukEndDate: string | null;
+      ukEndDate: string | null; bhb2025: number; bhb2026: number;
     }>();
 
     for (const r of rows) {
@@ -2265,10 +2268,20 @@ export class DatabaseStorage implements IStorage {
           name: r.name ?? "—", kwuid: r.kwuid ?? null,
           category: r.category ?? null, startDate: r.startDate,
           closingDates: [], uretkenlikKoclugu: !!r.uretkenlikKoclugu,
-          ukEndDate: r.ukEndDate ?? null,
+          ukEndDate: r.ukEndDate ?? null, bhb2025: 0, bhb2026: 0,
         });
       }
-      if (r.closingDate) empMap.get(r.empId)!.closingDates.push(new Date(r.closingDate));
+      if (r.closingDate) {
+        const d = new Date(r.closingDate);
+        empMap.get(r.empId)!.closingDates.push(d);
+        // BHB toplamı yıllara göre
+        if (r.bhbShare != null) {
+          const yr = d.getFullYear();
+          const share = parseFloat(String(r.bhbShare)) || 0;
+          if (yr === 2025) empMap.get(r.empId)!.bhb2025 += share;
+          else if (yr === 2026) empMap.get(r.empId)!.bhb2026 += share;
+        }
+      }
     }
 
     const result: ChurnRow[] = [];
@@ -2338,6 +2351,8 @@ export class DatabaseStorage implements IStorage {
         risk,
         uretkenlikKoclugu: emp.uretkenlikKoclugu,
         ukEndDate: emp.ukEndDate,
+        bhb2025: emp.bhb2025,
+        bhb2026: emp.bhb2026,
       });
     }
 
