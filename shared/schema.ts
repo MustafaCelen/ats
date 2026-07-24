@@ -477,6 +477,8 @@ export const closingAgents = pgTable("closing_agents", {
   paymentCollected: boolean("payment_collected").notNull().default(false),
   // Reporting month override (YYYY-MM). NULL ⇒ derived from createdAt on the frontend.
   ilgiliAy: text("ilgili_ay"),
+  // Auto-synced office_expense id for ÜK share income tracking (null if no ÜK share)
+  ukExpenseId: integer("uk_expense_id"),
   createdAt: timestamp("created_at").defaultNow(),
 }, (t) => ({
   sideIdIdx: index("closing_agents_side_id_idx").on(t.closingSideId),
@@ -597,6 +599,34 @@ export const officeExpenses = pgTable("office_expenses", {
 export const insertOfficeExpenseSchema = createInsertSchema(officeExpenses).omit({ id: true, createdAt: true });
 export type InsertOfficeExpense = z.infer<typeof insertOfficeExpenseSchema>;
 export type OfficeExpense = typeof officeExpenses.$inferSelect;
+
+// Kategori bazlı aylık hedefler (masraf ve ek gelir)
+export const expenseTargets = pgTable("expense_targets", {
+  id: serial("id").primaryKey(),
+  year: integer("year").notNull(),
+  month: integer("month").notNull(), // 1-12
+  type: text("type").notNull(),      // "income" | "expense"
+  category: text("category").notNull(),
+  amount: numeric("amount", { precision: 15, scale: 2 }).notNull(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (t) => ({
+  uq: uniqueIndex("expense_targets_uq").on(t.year, t.month, t.type, t.category),
+  ymIdx: index("expense_targets_ym_idx").on(t.year, t.month),
+}));
+export type ExpenseTarget = typeof expenseTargets.$inferSelect;
+
+// Brüt/Net büyüme hedefleri (aylık)
+export const growthTargets = pgTable("growth_targets", {
+  id: serial("id").primaryKey(),
+  year: integer("year").notNull(),
+  month: integer("month").notNull(),
+  brutTarget: integer("brut_target").notNull().default(0),
+  netTarget: integer("net_target").notNull().default(0),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (t) => ({
+  uq: uniqueIndex("growth_targets_uq").on(t.year, t.month),
+}));
+export type GrowthTarget = typeof growthTargets.$inferSelect;
 
 // ── Listings (Portal İlanları — KW Platin & Karma) ────────────────────────────
 

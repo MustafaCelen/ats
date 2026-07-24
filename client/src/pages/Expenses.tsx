@@ -889,6 +889,8 @@ export default function Expenses() {
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [typeFilter, setTypeFilter] = useState<"all" | "income" | "expense">("all");
+  const [excludeVat, setExcludeVat] = useState(false);
+  const adj = (n: number) => excludeVat ? n / 1.20 : n;
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editItem, setEditItem] = useState<any | null>(null);
   const [importOpen, setImportOpen] = useState(false);
@@ -925,8 +927,8 @@ export default function Expenses() {
 
   const filtered = typeFilter === "all" ? rows : rows.filter((r) => r.type === typeFilter);
 
-  const totalIncome = rows.filter((r) => r.type === "income").reduce((s, r) => s + parseFloat(r.amount), 0);
-  const totalExpense = rows.filter((r) => r.type === "expense").reduce((s, r) => s + parseFloat(r.amount), 0);
+  const totalIncome = rows.filter((r) => r.type === "income").reduce((s, r) => s + adj(parseFloat(r.amount)), 0);
+  const totalExpense = rows.filter((r) => r.type === "expense").reduce((s, r) => s + adj(parseFloat(r.amount)), 0);
   const net = totalIncome - totalExpense;
 
   return (
@@ -984,20 +986,37 @@ export default function Expenses() {
               </button>
             ))}
           </div>
+          <button
+            onClick={() => setExcludeVat(v => !v)}
+            title="Fonzip'ten gelen tutarlar KDV dahil. Bu toggle %20 KDV hariç görünümü açar."
+            className={`ml-auto px-3 py-1.5 text-xs font-medium rounded-full border transition-colors ${
+              excludeVat
+                ? "bg-primary text-primary-foreground border-primary"
+                : "border-border text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            KDV Hariç {excludeVat ? "✓" : ""}
+          </button>
         </div>
 
         {/* Summary cards */}
         <div className="grid grid-cols-3 gap-3">
           <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-            <p className="text-xs text-emerald-700 font-medium mb-1">Toplam Gelir</p>
+            <p className="text-xs text-emerald-700 font-medium mb-1">
+              Toplam Gelir {excludeVat && <span className="text-[10px] opacity-70">(KDV hariç)</span>}
+            </p>
             <p className="text-lg font-bold text-emerald-700">{fmtTRY(totalIncome)}</p>
           </div>
           <div className="rounded-xl border border-red-200 bg-red-50 p-4">
-            <p className="text-xs text-red-700 font-medium mb-1">Toplam Gider</p>
+            <p className="text-xs text-red-700 font-medium mb-1">
+              Toplam Gider {excludeVat && <span className="text-[10px] opacity-70">(KDV hariç)</span>}
+            </p>
             <p className="text-lg font-bold text-red-700">{fmtTRY(totalExpense)}</p>
           </div>
           <div className={`rounded-xl border p-4 ${net >= 0 ? "border-blue-200 bg-blue-50" : "border-orange-200 bg-orange-50"}`}>
-            <p className={`text-xs font-medium mb-1 ${net >= 0 ? "text-blue-700" : "text-orange-700"}`}>Net</p>
+            <p className={`text-xs font-medium mb-1 ${net >= 0 ? "text-blue-700" : "text-orange-700"}`}>
+              Net {excludeVat && <span className="text-[10px] opacity-70">(KDV hariç)</span>}
+            </p>
             <p className={`text-lg font-bold ${net >= 0 ? "text-blue-700" : "text-orange-700"}`}>{fmtTRY(net)}</p>
           </div>
         </div>
@@ -1050,7 +1069,7 @@ export default function Expenses() {
                     )}
                   </div>
                   <div className={`text-right text-sm font-semibold ${row.type === "income" ? "text-emerald-700" : "text-red-700"}`}>
-                    {row.type === "income" ? "+" : "-"}{fmtTRY(parseFloat(row.amount))}
+                    {row.type === "income" ? "+" : "-"}{fmtTRY(adj(parseFloat(row.amount)))}
                   </div>
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button

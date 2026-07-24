@@ -2806,6 +2806,116 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // ── Office Expenses ────────────────────────────────────────────────────────
 
+  // Mevcut tüm closing_agents için ÜK gelir kayıtlarını backfill et
+  app.post("/api/closings/backfill-uk-income", requireAuth, requireAdmin, async (_req, res) => {
+    try {
+      const result = await storage.backfillAllUkIncomes();
+      res.json(result);
+    } catch (err: any) {
+      console.error("[POST /api/closings/backfill-uk-income]", err);
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ── Growth (Brüt / Net büyüme) ───────────────────────────────────────────
+  app.get("/api/growth/stats", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
+    try {
+      const year = parseInt(String(req.query.year ?? new Date().getFullYear()));
+      const month = req.query.month ? parseInt(String(req.query.month)) : null;
+      const ukOnly = req.query.ukOnly === "true";
+      const ukFilter = ukOnly
+        ? sql` AND uretkenlik_koclugu = true AND (uk_end_date IS NULL OR uk_end_date = '')`
+        : sql``;
+      // Belirli ay veya tüm yıl
+      let filter = sql`EXTRACT(YEAR FROM start_date) = ${year}`;
+      let leftFilter = sql`EXTRACT(YEAR FROM passive_at) = ${year}`;
+      if (month) {
+        filter = sql`EXTRACT(YEAR FROM start_date) = ${year} AND EXTRACT(MONTH FROM start_date) = ${month}`;
+        leftFilter = sql`EXTRACT(YEAR FROM passive_at) = ${year} AND EXTRACT(MONTH FROM passive_at) = ${month}`;
+      }
+      const [brutRow] = (await db.execute(sql`SELECT COUNT(*)::int AS c FROM employees WHERE ${filter}${ukFilter}`)).rows as any[];
+      const [leftRow] = (await db.execute(sql`SELECT COUNT(*)::int AS c FROM employees WHERE passive_at IS NOT NULL AND ${leftFilter}${ukFilter}`)).rows as any[];
+      const [tgt] = (await db.execute(sql`SELECT brut_target, net_target FROM growth_targets WHERE year = ${year} AND month = ${month ?? 0}`)).rows as any[];
+      res.json({
+        brut: brutRow?.c ?? 0,
+        left: leftRow?.c ?? 0,
+        net: (brutRow?.c ?? 0) - (leftRow?.c ?? 0),
+        brutTarget: tgt?.brut_target ?? 0,
+        netTarget: tgt?.net_target ?? 0,
+      });
+    } catch (err) {
+      console.error("[GET /api/growth/stats]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.post("/api/growth/targets", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const { year, month, brutTarget, netTarget } = req.body ?? {};
+      if (!year || month == null) return res.status(400).json({ message: "year, month gerekli" });
+      const b = parseInt(String(brutTarget ?? 0)) || 0;
+      const n = parseInt(String(netTarget ?? 0)) || 0;
+      const upsert = await db.execute(sql`
+        INSERT INTO growth_targets (year, month, brut_target, net_target, updated_at)
+        VALUES (${year}, ${month}, ${b}, ${n}, NOW())
+        ON CONFLICT (year, month)
+        DO UPDATE SET brut_target = ${b}, net_target = ${n}, updated_at = NOW()
+        RETURNING *
+      `);
+      res.json(upsert.rows[0]);
+    } catch (err) {
+      console.error("[POST /api/growth/targets]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Expense Targets (kategori bazlı aylık hedefler) ──────────────────────
+  app.get("/api/expense-targets", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const year = parseInt(String(req.query.year ?? ""));
+      const month = req.query.month ? parseInt(String(req.query.month)) : null;
+      if (!year) return res.status(400).json({ message: "year gerekli" });
+      const result = month
+        ? await db.execute(sql`SELECT * FROM expense_targets WHERE year = ${year} AND month = ${month} ORDER BY type, category`)
+        : await db.execute(sql`SELECT * FROM expense_targets WHERE year = ${year} ORDER BY month, type, category`);
+      res.json(result.rows);
+    } catch (err) {
+      console.error("[GET /api/expense-targets]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.post("/api/expense-targets", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const { year, month, type, category, amount } = req.body ?? {};
+      if (!year || !month || !type || !category || amount == null) {
+        return res.status(400).json({ message: "year, month, type, category, amount gerekli" });
+      }
+      const numAmount = String(parseFloat(String(amount)) || 0);
+      const upsert = await db.execute(sql`
+        INSERT INTO expense_targets (year, month, type, category, amount, updated_at)
+        VALUES (${year}, ${month}, ${type}, ${category}, ${numAmount}::numeric, NOW())
+        ON CONFLICT (year, month, type, category)
+        DO UPDATE SET amount = ${numAmount}::numeric, updated_at = NOW()
+        RETURNING *
+      `);
+      res.json(upsert.rows[0]);
+    } catch (err) {
+      console.error("[POST /api/expense-targets]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.delete("/api/expense-targets/:id", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      await db.execute(sql`DELETE FROM expense_targets WHERE id = ${parseInt(req.params.id)}`);
+      res.status(204).send();
+    } catch (err) {
+      console.error("[DELETE /api/expense-targets/:id]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   // Detaylı masraf raporu: ay-ay ve kategori-kategori kırılım
   app.get("/api/office-expenses/reports/breakdown", requireAuth, requireAdmin, async (req, res) => {
     try {

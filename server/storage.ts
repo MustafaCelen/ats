@@ -219,6 +219,8 @@ export interface IStorage {
   }>): Promise<void>;
   updateClosingSide(id: number, data: Partial<{ kasa: string; nakit: string; banka: string }>): Promise<void>;
   getClosingIdForAgent(agentId: number): Promise<number | null>;
+  syncClosingAgentUkIncome(agentId: number): Promise<void>;
+  backfillAllUkIncomes(): Promise<{ synced: number; deleted: number }>;
   createClosing(data: {
     propertyAddress: string;
     il?: string | null;
@@ -2368,6 +2370,17 @@ export class DatabaseStorage implements IStorage {
   }>): Promise<void> {
     if (Object.keys(data).length === 0) return;
     await db.update(closings).set(data as any).where(eq(closings.id, id));
+    // Status veya closing_date değiştiyse tüm agent'ların ÜK gelirini senkronize et
+    if ("status" in data || "closingDate" in data) {
+      const agents = await db.execute(sql`
+        SELECT ca.id FROM closing_agents ca
+        JOIN closing_sides cs ON cs.id = ca.closing_side_id
+        WHERE cs.closing_id = ${id}
+      `);
+      for (const a of agents.rows as any[]) {
+        await this.syncClosingAgentUkIncome(a.id);
+      }
+    }
   }
 
   async updateClosingAgent(id: number, data: Partial<{
@@ -2379,6 +2392,74 @@ export class DatabaseStorage implements IStorage {
   }>): Promise<void> {
     if (Object.keys(data).length === 0) return;
     await db.update(closingAgents).set(data as any).where(eq(closingAgents.id, id));
+    // ÜK share, status veya closing date değişmişse ÜK gelir kaydını senkronize et
+    if ("ukShare" in data || "status" in data || "closingDate" in data) {
+      await this.syncClosingAgentUkIncome(id);
+    }
+  }
+
+  // ÜK share → office_expenses "ÜK Geliri" senkronu (idempotent)
+  async syncClosingAgentUkIncome(agentId: number): Promise<void> {
+    const rows = await db.execute(sql`
+      SELECT ca.id, ca.employee_id, ca.uk_share, ca.uk_expense_id,
+             COALESCE(ca.closing_date, c.closing_date) AS eff_date,
+             COALESCE(ca.status, c.status) AS eff_status,
+             c.property_address, c.id AS closing_id
+      FROM closing_agents ca
+      JOIN closing_sides cs ON cs.id = ca.closing_side_id
+      JOIN closings c ON c.id = cs.closing_id
+      WHERE ca.id = ${agentId}
+    `);
+    const row = rows.rows[0] as any;
+    if (!row) return;
+    const ukShare = parseFloat(row.uk_share ?? "0");
+    const shouldExist = ukShare > 0 && row.eff_status === "completed" && row.eff_date;
+
+    if (!shouldExist) {
+      // Varsa sil
+      if (row.uk_expense_id) {
+        await db.execute(sql`DELETE FROM office_expenses WHERE id = ${row.uk_expense_id}`);
+        await db.execute(sql`UPDATE closing_agents SET uk_expense_id = NULL WHERE id = ${agentId}`);
+      }
+      return;
+    }
+
+    const date = new Date(row.eff_date).toISOString().slice(0, 10);
+    const notes = `ÜK Payı — İşlem #${row.closing_id}${row.property_address ? ` (${row.property_address})` : ""}`;
+
+    if (row.uk_expense_id) {
+      // Güncelle
+      await db.execute(sql`
+        UPDATE office_expenses
+        SET amount = ${String(ukShare)}::numeric, date = ${date}, notes = ${notes}, employee_id = ${row.employee_id}
+        WHERE id = ${row.uk_expense_id}
+      `);
+    } else {
+      // Yarat + bağla
+      const created = await db.execute(sql`
+        INSERT INTO office_expenses (type, category, amount, date, notes, employee_id, created_by_user_id)
+        VALUES ('income', 'ÜK Geliri', ${String(ukShare)}::numeric, ${date}, ${notes}, ${row.employee_id}, 1)
+        RETURNING id
+      `);
+      const expId = (created.rows[0] as any).id;
+      await db.execute(sql`UPDATE closing_agents SET uk_expense_id = ${expId} WHERE id = ${agentId}`);
+    }
+  }
+
+  // Tüm mevcut closing_agents için ÜK gelir kaydını senkronize et (backfill)
+  async backfillAllUkIncomes(): Promise<{ synced: number; deleted: number }> {
+    const rows = await db.execute(sql`SELECT id FROM closing_agents`);
+    let synced = 0, deleted = 0;
+    for (const r of rows.rows as any[]) {
+      const before = await db.execute(sql`SELECT uk_expense_id FROM closing_agents WHERE id = ${r.id}`);
+      const hadBefore = !!(before.rows[0] as any)?.uk_expense_id;
+      await this.syncClosingAgentUkIncome(r.id);
+      const after = await db.execute(sql`SELECT uk_expense_id FROM closing_agents WHERE id = ${r.id}`);
+      const hasAfter = !!(after.rows[0] as any)?.uk_expense_id;
+      if (hasAfter) synced++;
+      if (hadBefore && !hasAfter) deleted++;
+    }
+    return { synced, deleted };
   }
 
   async updateClosingSide(id: number, data: Partial<{ kasa: string; nakit: string; banka: string }>): Promise<void> {
@@ -2468,7 +2549,7 @@ export class DatabaseStorage implements IStorage {
       runningCapUsed[empId] = capStatusMap[empId]?.capUsed ?? 0;
     }
 
-    return db.transaction(async (tx) => {
+    const result = await db.transaction(async (tx) => {
       const [closing] = await tx.insert(closings).values({
         propertyAddress: data.propertyAddress,
         il: data.il ?? null,
@@ -2606,9 +2687,32 @@ export class DatabaseStorage implements IStorage {
 
       return closing;
     });
+    // Transaction sonrası tüm agent'lar için ÜK gelir kaydı senkronu
+    try {
+      const agents = await db.execute(sql`
+        SELECT ca.id FROM closing_agents ca
+        JOIN closing_sides cs ON cs.id = ca.closing_side_id
+        WHERE cs.closing_id = ${result.id}
+      `);
+      for (const a of agents.rows as any[]) {
+        await this.syncClosingAgentUkIncome(a.id);
+      }
+    } catch (e) {
+      console.error("[createClosing UK sync]", e);
+    }
+    return result;
   }
 
   async deleteClosing(id: number): Promise<void> {
+    // Önce ÜK gelir kayıtlarını sil
+    const ukExps = await db.execute(sql`
+      SELECT ca.uk_expense_id FROM closing_agents ca
+      JOIN closing_sides cs ON cs.id = ca.closing_side_id
+      WHERE cs.closing_id = ${id} AND ca.uk_expense_id IS NOT NULL
+    `);
+    for (const r of ukExps.rows as any[]) {
+      await db.execute(sql`DELETE FROM office_expenses WHERE id = ${r.uk_expense_id}`);
+    }
     const sides = await db.select().from(closingSides).where(eq(closingSides.closingId, id));
     for (const side of sides) {
       await db.delete(closingAgents).where(eq(closingAgents.closingSideId, side.id));

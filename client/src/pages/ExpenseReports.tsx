@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Layout } from "@/components/Layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -7,12 +7,14 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { BarChart3, Filter, Receipt, TrendingUp } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { BarChart3, Filter, Receipt, TrendingUp, Target, Pencil } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid,
   LineChart, Line,
 } from "recharts";
-import { EXPENSE_CATEGORY_GROUPS, INCOME_CATEGORIES } from "@shared/schema";
+import { EXPENSE_CATEGORY_GROUPS, EXPENSE_CATEGORIES, INCOME_CATEGORIES } from "@shared/schema";
+import { useToast } from "@/hooks/use-toast";
 
 interface BreakdownRow {
   month: string;
@@ -76,14 +78,56 @@ function currentYM(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
+const VAT_RATE = 0.20;
+
+interface ExpenseTarget {
+  id: number;
+  year: number;
+  month: number;
+  type: "income" | "expense";
+  category: string;
+  amount: string;
+}
+
 export default function ExpenseReports() {
   const today = currentYM();
+  const { toast } = useToast();
+  const qc = useQueryClient();
   const [startMonth, setStartMonth] = useState(shiftYM(today, -4));
   const [endMonth, setEndMonth] = useState(today);
   const [type, setType] = useState<"expense" | "income" | "all">("expense");
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [excludeVat, setExcludeVat] = useState(false);
+  const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
+  const [targetDialogOpen, setTargetDialogOpen] = useState(false);
 
-  const { data: breakdown = [], isLoading } = useQuery<BreakdownRow[]>({
+  const adj = (n: number) => excludeVat ? n / (1 + VAT_RATE) : n;
+
+  // Hedefler için ana yıl/ay (endMonth kullanılır)
+  const [targetY, targetM] = endMonth.split("-").map(Number);
+
+  const { data: targets = [] } = useQuery<ExpenseTarget[]>({
+    queryKey: ["/api/expense-targets", targetY, targetM],
+    queryFn: () => fetch(`/api/expense-targets?year=${targetY}&month=${targetM}`, { credentials: "include" }).then(r => r.json()),
+  });
+
+  const saveTargetMutation = useMutation({
+    mutationFn: async (payload: { category: string; type: "income" | "expense"; amount: number }) => {
+      const res = await fetch("/api/expense-targets", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ year: targetY, month: targetM, ...payload }),
+      });
+      if (!res.ok) throw new Error("Kayıt başarısız");
+      return res.json();
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/expense-targets"] });
+    },
+    onError: () => toast({ title: "Kaydedilemedi", variant: "destructive" }),
+  });
+
+  const { data: rawBreakdown = [], isLoading } = useQuery<BreakdownRow[]>({
     queryKey: ["/api/office-expenses/reports/breakdown", startMonth, endMonth, type],
     queryFn: () => {
       const params = new URLSearchParams({ startMonth, endMonth });
@@ -92,7 +136,7 @@ export default function ExpenseReports() {
     },
   });
 
-  const { data: topTransactions = [] } = useQuery<TopRow[]>({
+  const { data: rawTopTransactions = [] } = useQuery<TopRow[]>({
     queryKey: ["/api/office-expenses/reports/top", startMonth, endMonth, type, selectedCategory],
     queryFn: () => {
       const params = new URLSearchParams({ startMonth, endMonth, limit: "15" });
@@ -101,6 +145,16 @@ export default function ExpenseReports() {
       return fetch(`/api/office-expenses/reports/top?${params}`, { credentials: "include" }).then(r => r.json());
     },
   });
+
+  // KDV dönüşümü — memoize edilmiş
+  const breakdown = useMemo(
+    () => rawBreakdown.map(r => ({ ...r, total: String(adj(parseFloat(r.total))) })),
+    [rawBreakdown, excludeVat]
+  );
+  const topTransactions = useMemo(
+    () => rawTopTransactions.map(t => ({ ...t, amount: String(adj(parseFloat(t.amount))) })),
+    [rawTopTransactions, excludeVat]
+  );
 
   // ── Türetilen veriler ────────────────────────────────────────────────
   const months = useMemo(() => {
@@ -230,31 +284,98 @@ export default function ExpenseReports() {
                 <Button size="sm" variant="outline" onClick={() => { setStartMonth(shiftYM(today, -5)); setEndMonth(today); }}>6 Ay</Button>
                 <Button size="sm" variant="outline" onClick={() => { setStartMonth(shiftYM(today, -11)); setEndMonth(today); }}>1 Yıl</Button>
               </div>
+              <Button
+                size="sm"
+                variant={excludeVat ? "default" : "outline"}
+                onClick={() => setExcludeVat(v => !v)}
+                title="Fonzip verileri KDV dahil geliyor. Bu toggle ile %20 KDV hariç görünür."
+              >
+                KDV Hariç {excludeVat ? "✓" : ""}
+              </Button>
               <div className="ml-auto text-right">
-                <p className="text-xs text-muted-foreground">Toplam</p>
+                <p className="text-xs text-muted-foreground">Toplam {excludeVat && <span className="text-[10px]">(KDV hariç)</span>}</p>
                 <p className="text-lg font-bold">{fmtTRY(grandTotal)}</p>
               </div>
             </div>
           </CardContent>
         </Card>
 
-        {/* Grup Toplam Kartları */}
+        {/* Grup Toplam Kartları — tıklayınca içindeki kategoriler açılır (Katalog) */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-          {groupTotals.map(({ group, total }) => (
-            <Card key={group} className="hover:shadow-md transition-shadow">
-              <CardContent className="pt-3 pb-3">
-                <div className="flex items-center gap-2 mb-1">
-                  <div className="h-2 w-2 rounded-full" style={{ backgroundColor: GROUP_COLORS[group] ?? "#94a3b8" }} />
-                  <p className="text-xs text-muted-foreground truncate">{group}</p>
-                </div>
-                <p className="text-lg font-bold">{fmtTRY(total)}</p>
-                <p className="text-[10px] text-muted-foreground">
-                  {grandTotal > 0 ? `%${((total / grandTotal) * 100).toFixed(1)}` : "—"}
-                </p>
-              </CardContent>
-            </Card>
-          ))}
+          {groupTotals.map(({ group, total }) => {
+            const isOpen = expandedGroup === group;
+            return (
+              <Card
+                key={group}
+                className={`cursor-pointer transition-all ${isOpen ? "ring-2 ring-primary shadow-md" : "hover:shadow-md"}`}
+                onClick={() => setExpandedGroup(isOpen ? null : group)}
+              >
+                <CardContent className="pt-3 pb-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="h-2 w-2 rounded-full" style={{ backgroundColor: GROUP_COLORS[group] ?? "#94a3b8" }} />
+                    <p className="text-xs text-muted-foreground truncate">{group}</p>
+                    <span className="ml-auto text-[10px] text-muted-foreground">
+                      {isOpen ? "▼" : "▶"}
+                    </span>
+                  </div>
+                  <p className="text-lg font-bold">{fmtTRY(total)}</p>
+                  <p className="text-[10px] text-muted-foreground">
+                    {grandTotal > 0 ? `%${((total / grandTotal) * 100).toFixed(1)}` : "—"}
+                  </p>
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
+
+        {/* Açılmış grubun kategori kırılımı (Katalog dip toplam içeriği) */}
+        {expandedGroup && (
+          <Card className="border-primary/40 bg-primary/5">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: GROUP_COLORS[expandedGroup] ?? "#94a3b8" }} />
+                {expandedGroup} — Kategori Kırılımı
+                <button onClick={() => setExpandedGroup(null)} className="ml-auto text-xs underline text-muted-foreground hover:text-foreground">
+                  Kapat
+                </button>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Kategori</TableHead>
+                    <TableHead className="text-right">Adet</TableHead>
+                    <TableHead className="text-right">Toplam</TableHead>
+                    <TableHead className="text-right">% (Grup içi)</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {categoryTotals.filter(c => c.group === expandedGroup).map((c) => {
+                    const groupTotal = groupTotals.find(g => g.group === expandedGroup)?.total ?? 1;
+                    return (
+                      <TableRow
+                        key={c.category}
+                        className="cursor-pointer hover:bg-primary/10"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedCategory(selectedCategory === c.category ? null : c.category);
+                        }}
+                      >
+                        <TableCell className="font-medium">{c.category}</TableCell>
+                        <TableCell className="text-right text-muted-foreground">{c.count}</TableCell>
+                        <TableCell className="text-right font-semibold">{fmtTRY(c.total)}</TableCell>
+                        <TableCell className="text-right text-muted-foreground">
+                          %{((c.total / groupTotal) * 100).toFixed(1)}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Ay Bazlı Stacked Bar Chart */}
         <Card>
@@ -324,6 +445,72 @@ export default function ExpenseReports() {
             </CardContent>
           </Card>
         )}
+
+        {/* Aylık Toplam Hedefler ─ endMonth ayı için */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <Target className="h-4 w-4 text-primary" />
+              Aylık Toplam Hedefler — {targetM.toString().padStart(2, "0")}/{targetY}
+              <button
+                onClick={() => setTargetDialogOpen(true)}
+                className="ml-auto inline-flex items-center gap-1 text-xs text-primary hover:underline"
+              >
+                <Pencil className="h-3 w-3" /> Hedef Düzenle
+              </button>
+            </CardTitle>
+            <p className="text-xs text-muted-foreground">
+              Aylık toplam gelir ve gider hedefleri, gerçekleşen ile karşılaştırma
+            </p>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {(["income", "expense"] as const).map((ttype) => {
+                const target = targets.find(t => t.type === ttype && t.category === "_TOTAL_");
+                const targetAmt = target ? parseFloat(target.amount) : 0;
+                const displayTarget = adj(targetAmt);
+                // O ay için tüm kategorilerin toplamı
+                const actualRow = rawBreakdown
+                  .filter(r => r.month === `${targetY}-${String(targetM).padStart(2, "0")}` && r.type === ttype)
+                  .reduce((s, r) => s + parseFloat(r.total), 0);
+                const actual = adj(actualRow);
+                const pct = displayTarget > 0 ? Math.round((actual / displayTarget) * 100) : 0;
+                const isIncome = ttype === "income";
+                const good = displayTarget === 0 ? true : (isIncome ? actual >= displayTarget : actual <= displayTarget);
+                return (
+                  <div key={ttype} className={`rounded-lg border p-4 ${isIncome ? "border-emerald-200 bg-emerald-50/30" : "border-red-200 bg-red-50/30"}`}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className={`text-xs px-2 py-0.5 rounded font-semibold ${isIncome ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}`}>
+                        {isIncome ? "Aylık Toplam Gelir" : "Aylık Toplam Gider"}
+                      </span>
+                    </div>
+                    <div className="flex items-baseline justify-between mb-2">
+                      <span className="text-2xl font-bold">{fmtTRY(actual)}</span>
+                      {displayTarget > 0 && (
+                        <span className="text-sm text-muted-foreground">/ {fmtTRY(displayTarget)}</span>
+                      )}
+                    </div>
+                    {displayTarget > 0 ? (
+                      <>
+                        <div className="h-2 rounded-full bg-muted overflow-hidden">
+                          <div
+                            className={`h-full transition-all ${good ? "bg-emerald-500" : "bg-red-500"}`}
+                            style={{ width: `${Math.min(100, pct)}%` }}
+                          />
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1.5">
+                          %{pct} · {good ? "✓ hedef içinde" : (isIncome ? "hedefin altında" : "hedefi aştı")}
+                        </p>
+                      </>
+                    ) : (
+                      <p className="text-xs text-muted-foreground italic">Hedef tanımlı değil</p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Kategori Detay Tablosu */}
         <Card>
@@ -415,6 +602,98 @@ export default function ExpenseReports() {
           </CardContent>
         </Card>
       </div>
+
+      {targetDialogOpen && (
+        <TargetEditor
+          open={targetDialogOpen}
+          onOpenChange={setTargetDialogOpen}
+          year={targetY}
+          month={targetM}
+          existingTargets={targets}
+          onSave={(payload) => saveTargetMutation.mutate(payload)}
+        />
+      )}
     </Layout>
+  );
+}
+
+// ── Hedef Düzenle Dialog (aylık toplam hedef) ────────────────────────────
+function TargetEditor({
+  open, onOpenChange, year, month, existingTargets, onSave,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  year: number;
+  month: number;
+  existingTargets: ExpenseTarget[];
+  onSave: (p: { category: string; type: "income" | "expense"; amount: number }) => void;
+}) {
+  const currentIncome = existingTargets.find(t => t.type === "income" && t.category === "_TOTAL_");
+  const currentExpense = existingTargets.find(t => t.type === "expense" && t.category === "_TOTAL_");
+
+  const [incomeAmount, setIncomeAmount] = useState(currentIncome?.amount ?? "");
+  const [expenseAmount, setExpenseAmount] = useState(currentExpense?.amount ?? "");
+
+  const handleSave = () => {
+    const inc = parseFloat(String(incomeAmount).replace(",", "."));
+    const exp = parseFloat(String(expenseAmount).replace(",", "."));
+    if (!isNaN(inc) && inc >= 0) onSave({ category: "_TOTAL_", type: "income", amount: inc });
+    if (!isNaN(exp) && exp >= 0) onSave({ category: "_TOTAL_", type: "expense", amount: exp });
+    onOpenChange(false);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>
+            Aylık Hedef — {String(month).padStart(2, "0")}/{year}
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4 py-2">
+          <p className="text-xs text-muted-foreground">
+            Aylık toplam hedefler (KDV dahil tutar girin). Boş bırakırsan mevcut değer korunur.
+          </p>
+
+          <div>
+            <Label className="text-xs">Aylık Toplam Gelir Hedefi (₺)</Label>
+            <Input
+              type="text" inputMode="decimal"
+              value={incomeAmount}
+              onChange={(e) => setIncomeAmount(e.target.value)}
+              placeholder="ör. 500000"
+              className="mt-1"
+            />
+            {currentIncome && (
+              <p className="text-[10px] text-muted-foreground mt-1">
+                Mevcut: {new Intl.NumberFormat("tr-TR", { maximumFractionDigits: 0 }).format(parseFloat(currentIncome.amount))} ₺
+              </p>
+            )}
+          </div>
+
+          <div>
+            <Label className="text-xs">Aylık Toplam Gider Hedefi (₺)</Label>
+            <Input
+              type="text" inputMode="decimal"
+              value={expenseAmount}
+              onChange={(e) => setExpenseAmount(e.target.value)}
+              placeholder="ör. 350000"
+              className="mt-1"
+            />
+            {currentExpense && (
+              <p className="text-[10px] text-muted-foreground mt-1">
+                Mevcut: {new Intl.NumberFormat("tr-TR", { maximumFractionDigits: 0 }).format(parseFloat(currentExpense.amount))} ₺
+              </p>
+            )}
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>İptal</Button>
+          <Button onClick={handleSave}>Kaydet</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
