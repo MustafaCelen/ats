@@ -6,6 +6,11 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
 
 COPY package*.json ./
+# package-lock.json is generated on Replit, where 10 packages resolve through the
+# internal package-firewall.replit.local proxy. Rewrite those to the public registry
+# so npm install works outside Replit. Done at build time so the committed lock file
+# stays byte-identical to Replit's (no merge conflicts).
+RUN sed -i 's|https\?://package-firewall.replit.local/npm/|https://registry.npmjs.org/|g' package-lock.json
 RUN npm install
 
 COPY . .
@@ -23,6 +28,9 @@ COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/drizzle.config.ts ./
 COPY --from=builder /app/shared ./shared
 COPY --from=builder /app/script ./script
+# Normalize shell-script line endings (Windows checkouts can introduce CRLF,
+# which breaks sh/dash parsing). Belt-and-suspenders alongside .gitattributes.
+RUN sed -i 's/\r$//' script/*.sh
 
 ENV NODE_ENV=production
 ENV PORT=5000
