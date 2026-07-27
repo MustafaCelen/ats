@@ -198,6 +198,45 @@ app.use((req, res, next) => {
       "updated_at" timestamp DEFAULT now()
     );
 
+    CREATE TABLE IF NOT EXISTS employee_office_history (
+      id SERIAL PRIMARY KEY,
+      employee_id INTEGER NOT NULL,
+      office TEXT NOT NULL,
+      effective_from TEXT NOT NULL,
+      notes TEXT,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS employee_office_history_emp_idx ON employee_office_history(employee_id);
+    CREATE INDEX IF NOT EXISTS employee_office_history_eff_idx ON employee_office_history(employee_id, effective_from);
+
+    CREATE TABLE IF NOT EXISTS expense_targets (
+      id SERIAL PRIMARY KEY, year INTEGER NOT NULL, month INTEGER NOT NULL,
+      type TEXT NOT NULL, category TEXT NOT NULL,
+      amount NUMERIC(15,2) NOT NULL, updated_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS expense_targets_uq ON expense_targets(year, month, type, category);
+    CREATE INDEX IF NOT EXISTS expense_targets_ym_idx ON expense_targets(year, month);
+
+    CREATE TABLE IF NOT EXISTS growth_targets (
+      id SERIAL PRIMARY KEY, year INTEGER NOT NULL, month INTEGER NOT NULL,
+      brut_target INTEGER NOT NULL DEFAULT 0, net_target INTEGER NOT NULL DEFAULT 0,
+      updated_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS growth_targets_uq ON growth_targets(year, month);
+
+    CREATE TABLE IF NOT EXISTS candidate_merge_log (
+      id SERIAL PRIMARY KEY, source_id INTEGER NOT NULL, target_id INTEGER NOT NULL,
+      source_snapshot TEXT NOT NULL, performed_by_user_id INTEGER,
+      performed_at TIMESTAMP DEFAULT NOW(), undone_at TIMESTAMP, notes TEXT
+    );
+    CREATE INDEX IF NOT EXISTS candidate_merge_log_target_idx ON candidate_merge_log(target_id);
+    CREATE INDEX IF NOT EXISTS candidate_merge_log_performed_idx ON candidate_merge_log(performed_at);
+
+    ALTER TABLE closing_agents ADD COLUMN IF NOT EXISTS uk_expense_id INTEGER;
+    ALTER TABLE closing_agents ADD COLUMN IF NOT EXISTS office_snapshot TEXT;
+    CREATE INDEX IF NOT EXISTS closing_agents_uk_expense_idx ON closing_agents(uk_expense_id);
+    CREATE INDEX IF NOT EXISTS closing_agents_office_snapshot_idx ON closing_agents(office_snapshot);
+
     -- Performance indexes
     CREATE INDEX IF NOT EXISTS "applications_job_id_idx" ON "applications" ("job_id");
     CREATE INDEX IF NOT EXISTS "applications_candidate_id_idx" ON "applications" ("candidate_id");
