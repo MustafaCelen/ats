@@ -10,7 +10,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Pencil } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   CONTRACT_TYPES, URETKENLIK_ORANLAR, TURKEY_CITIES, CANDIDATE_CATEGORIES,
   type PublicUser,
@@ -323,7 +323,7 @@ export function EmployeeEditDialog({ emp, open, onOpenChange }: Props) {
             <SectionHeader label="Konum" />
             <div className="grid grid-cols-2 gap-3">
               <div className="col-span-2">
-                <Field label="KW Ofis">
+                <Field label="KW Ofis (mevcut)">
                   <Select value={office} onValueChange={setOffice}>
                     <SelectTrigger><SelectValue placeholder="Ofis seçin..." /></SelectTrigger>
                     <SelectContent>
@@ -332,6 +332,9 @@ export function EmployeeEditDialog({ emp, open, onOpenChange }: Props) {
                     </SelectContent>
                   </Select>
                 </Field>
+              </div>
+              <div className="col-span-2">
+                <OfficeTransferSection employeeId={emp.id} candidateId={emp.candidateId} onCurrentOfficeChange={setOffice} />
               </div>
               <Field label="Şehir">
                 <Select value={city} onValueChange={setCity}>
@@ -588,5 +591,131 @@ export function EmployeeEditDialog({ emp, open, onOpenChange }: Props) {
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ── Ofis Transfer Bölümü ─────────────────────────────────────────────────
+interface OfficeHistoryRow {
+  id: number;
+  employee_id: number;
+  office: string;
+  effective_from: string;
+  notes: string | null;
+  created_at: string;
+}
+
+function OfficeTransferSection({ employeeId, candidateId, onCurrentOfficeChange }: {
+  employeeId: number; candidateId?: number; onCurrentOfficeChange?: (office: string) => void;
+}) {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const [newOffice, setNewOffice] = useState<string>("");
+  const [newDate, setNewDate] = useState<string>(new Date().toISOString().slice(0, 10));
+  const [newNotes, setNewNotes] = useState<string>("");
+
+  const { data: history = [] } = useQuery<OfficeHistoryRow[]>({
+    queryKey: [`/api/employees/${employeeId}/office-history`],
+    queryFn: async () => {
+      const r = await fetch(`/api/employees/${employeeId}/office-history`, { credentials: "include" });
+      if (!r.ok) return [];
+      const data = await r.json();
+      return Array.isArray(data) ? data : [];
+    },
+    enabled: !!employeeId,
+  });
+  const safeHistory = Array.isArray(history) ? history : [];
+
+  const addMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/employees/${employeeId}/office-history`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ office: newOffice, effectiveFrom: newDate, notes: newNotes || null }),
+      });
+      if (!res.ok) throw new Error("Kaydedilemedi");
+      return res.json();
+    },
+    onSuccess: (created: any) => {
+      toast({ title: "Transfer eklendi" });
+      qc.invalidateQueries({ queryKey: [`/api/employees/${employeeId}/office-history`] });
+      qc.invalidateQueries({ queryKey: ["/api/candidates"] });
+      qc.invalidateQueries({ queryKey: ["/api/employees"] });
+      // Transfer tarihi bugüne ≤ ise "mevcut ofis" dropdown'ını da güncelle
+      const today = new Date().toISOString().slice(0, 10);
+      if (created?.effective_from && created.effective_from <= today && onCurrentOfficeChange) {
+        onCurrentOfficeChange(created.office);
+      }
+      setNewOffice(""); setNewNotes("");
+    },
+    onError: () => toast({ title: "Eklenemedi", variant: "destructive" }),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (hid: number) => {
+      const res = await fetch(`/api/employees/office-history/${hid}`, { method: "DELETE", credentials: "include" });
+      if (!res.ok) throw new Error("Silinemedi");
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [`/api/employees/${employeeId}/office-history`] });
+      qc.invalidateQueries({ queryKey: ["/api/candidates"] });
+      qc.invalidateQueries({ queryKey: ["/api/employees"] });
+    },
+  });
+
+  return (
+    <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-3">
+      <p className="text-xs font-semibold flex items-center gap-2">
+        Ofis Transfer Geçmişi
+        <span className="text-[10px] text-muted-foreground font-normal">
+          — geçmiş kapanışlar transfer öncesi ofiste kalır
+        </span>
+      </p>
+
+      {/* Yeni transfer formu */}
+      <div className="grid grid-cols-[1fr_1fr_2fr_auto] gap-2 items-end">
+        <div>
+          <Label className="text-[10px]">Yeni Ofis</Label>
+          <Select value={newOffice} onValueChange={setNewOffice}>
+            <SelectTrigger className="h-8"><SelectValue placeholder="Seç..." /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="Akatlar">Akatlar</SelectItem>
+              <SelectItem value="Zekeriyaköy">Zekeriyaköy</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <Label className="text-[10px]">Transfer Tarihi</Label>
+          <Input type="date" value={newDate} onChange={e => setNewDate(e.target.value)} className="h-8 text-xs" />
+        </div>
+        <div>
+          <Label className="text-[10px]">Not (opsiyonel)</Label>
+          <Input value={newNotes} onChange={e => setNewNotes(e.target.value)} placeholder="ör: Akatlar'a transfer" className="h-8 text-xs" />
+        </div>
+        <Button size="sm" onClick={() => addMutation.mutate()} disabled={!newOffice || !newDate || addMutation.isPending}>
+          Ekle
+        </Button>
+      </div>
+
+      {/* Mevcut geçmiş */}
+      <div className="space-y-1">
+        {safeHistory.length === 0 ? (
+          <p className="text-xs text-muted-foreground italic">Henüz transfer kaydı yok</p>
+        ) : (
+          safeHistory.map((h) => (
+            <div key={h.id} className="flex items-center gap-2 text-xs bg-background rounded px-2 py-1.5 border border-border">
+              <span className="font-mono text-muted-foreground">{h.effective_from}</span>
+              <span className="font-semibold">→ {h.office}</span>
+              {h.notes && <span className="text-muted-foreground italic">· {h.notes}</span>}
+              <button
+                className="ml-auto text-red-600 hover:text-red-800 text-[10px] underline"
+                onClick={() => { if (confirm("Bu transfer kaydı silinsin mi?")) deleteMutation.mutate(h.id); }}
+              >
+                Sil
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
   );
 }

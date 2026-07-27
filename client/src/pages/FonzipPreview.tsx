@@ -1,11 +1,11 @@
 import { useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Layout } from "@/components/Layout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { RefreshCw, CheckCircle2, XCircle, Loader2, AlertTriangle, TrendingUp, Users, Clock, Upload } from "lucide-react";
+import { Wallet, RefreshCw, CheckCircle2, XCircle, Loader2, AlertTriangle, TrendingUp, Users, Clock, Upload } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import * as XLSX from "xlsx";
 
@@ -48,10 +48,13 @@ function JsonViewer({ data }: { data: any }) {
   );
 }
 
+type MainTab = "debts" | "report" | "unmatched" | "preview";
+
 export default function FonzipPreview() {
   const { toast } = useToast();
   const qc = useQueryClient();
   const [previewEnabled, setPreviewEnabled] = useState(false);
+  const [mainTab, setMainTab] = useState<MainTab>("debts");
 
   const { data: status } = useQuery<{ configured: boolean }>({
     queryKey: ["/api/fonzip/status"],
@@ -302,316 +305,341 @@ export default function FonzipPreview() {
     }
   };
 
+  const unmatchedBadge = unmatched?.length ?? 0;
+  const hasData = (stats?.total ?? 0) > 0 || (userFinancials?.length ?? 0) > 0;
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Fonzip Entegrasyonu</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Aidat ve ödeme takibi</p>
-        </div>
-        <div className="flex items-center gap-3">
-          {status && (
-            <Badge variant={status.configured ? "default" : "destructive"} className="gap-1">
-              {status.configured ? <><CheckCircle2 className="h-3 w-3" /> Bağlı</> : <><XCircle className="h-3 w-3" /> Yapılandırılmamış</>}
-            </Badge>
-          )}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".xlsx,.xls,.csv"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) handleExcelUpload(f);
-              if (e.target) e.target.value = "";
-            }}
-          />
-          {(excelImporting || excelImportStatus?.running) && (
+    <Layout>
+      <div className="space-y-6">
+        {/* Header */}
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-bold flex items-center gap-2">
+              <Wallet className="h-6 w-6 text-primary" />
+              Fonzip Entegrasyonu
+              {status && (
+                <Badge variant={status.configured ? "default" : "destructive"} className="gap-1 ml-1">
+                  {status.configured ? <><CheckCircle2 className="h-3 w-3" /> Bağlı</> : <><XCircle className="h-3 w-3" /> Yapılandırılmamış</>}
+                </Badge>
+              )}
+            </h1>
+            <p className="text-sm text-muted-foreground mt-0.5">Aidat ve ödeme takibi</p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) handleExcelUpload(f);
+                if (e.target) e.target.value = "";
+              }}
+            />
+            {(excelImporting || excelImportStatus?.running) && (
+              <Button onClick={() => resetImportMutation.mutate()} size="sm" variant="destructive">
+                İptal / Sıfırla
+              </Button>
+            )}
             <Button
-              onClick={() => resetImportMutation.mutate()}
-              size="sm"
-              variant="destructive"
+              variant="outline" className="gap-1.5"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={excelImporting || excelImportStatus?.running}
             >
-              İptal / Sıfırla
+              {(excelImporting || excelImportStatus?.running)
+                ? (() => {
+                    const p = excelImportStatus?.progress;
+                    if (p && p.total > 0) {
+                      const pct = Math.round(p.current / p.total * 100);
+                      return <><Loader2 className="h-4 w-4 animate-spin" />{pct}% ({p.current}/{p.total})</>;
+                    }
+                    return <><Loader2 className="h-4 w-4 animate-spin" />İşleniyor...</>;
+                  })()
+                : <><Upload className="h-4 w-4" />Excel İçe Aktar</>}
             </Button>
-          )}
-          <Button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={excelImporting || excelImportStatus?.running}
-            size="sm"
-            variant="outline"
-          >
-            {(excelImporting || excelImportStatus?.running)
-              ? (() => {
-                  const p = excelImportStatus?.progress;
-                  if (p && p.total > 0) {
-                    const pct = Math.round(p.current / p.total * 100);
-                    return <><Loader2 className="h-4 w-4 mr-2 animate-spin" />{pct}% ({p.current}/{p.total})</>;
-                  }
-                  return <><Loader2 className="h-4 w-4 mr-2 animate-spin" />İşleniyor...</>;
-                })()
-              : <><Upload className="h-4 w-4 mr-2" />Excel İçe Aktar</>}
-          </Button>
-          <Button
-            onClick={() => recentSyncMutation.mutate(7)}
-            disabled={isRecentSyncRunning || !status?.configured}
-            size="sm"
-            variant="outline"
-          >
-            {isRecentSyncRunning
-              ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Günlük sync...</>
-              : <><Clock className="h-4 w-4 mr-2" />Günlük Sync (7 gün)</>}
-          </Button>
-          <Button
-            onClick={() => usersSyncMutation.mutate()}
-            disabled={isUsersSyncRunning || !status?.configured}
-            size="sm"
-            variant="outline"
-          >
-            {isUsersSyncRunning
-              ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Borçlar sync...</>
-              : <><Users className="h-4 w-4 mr-2" />Toplam Borç Sync</>}
-          </Button>
-          <Button
-            onClick={() => syncMutation.mutate()}
-            disabled={isSyncRunning || !status?.configured}
-            size="sm"
-          >
-            {isSyncRunning
-              ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Detay sync...</>
-              : <><RefreshCw className="h-4 w-4 mr-2" />Detaylı Sync</>}
-          </Button>
+            <Button
+              variant="outline" className="gap-1.5"
+              onClick={() => recentSyncMutation.mutate(7)}
+              disabled={isRecentSyncRunning || !status?.configured}
+            >
+              {isRecentSyncRunning
+                ? <><Loader2 className="h-4 w-4 animate-spin" />Günlük sync...</>
+                : <><Clock className="h-4 w-4" />Günlük Sync (7 gün)</>}
+            </Button>
+            <Button
+              variant="outline" className="gap-1.5"
+              onClick={() => usersSyncMutation.mutate()}
+              disabled={isUsersSyncRunning || !status?.configured}
+            >
+              {isUsersSyncRunning
+                ? <><Loader2 className="h-4 w-4 animate-spin" />Borçlar sync...</>
+                : <><Users className="h-4 w-4" />Toplam Borç Sync</>}
+            </Button>
+            <Button
+              className="gap-1.5"
+              onClick={() => syncMutation.mutate()}
+              disabled={isSyncRunning || !status?.configured}
+            >
+              {isSyncRunning
+                ? <><Loader2 className="h-4 w-4 animate-spin" />Detay sync...</>
+                : <><RefreshCw className="h-4 w-4" />Detaylı Sync</>}
+            </Button>
+          </div>
         </div>
-      </div>
 
-      {stats && (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-          <StatCard label="Toplam Kayıt" value={(stats.total ?? 0).toLocaleString("tr-TR")} />
-          <StatCard label="Ödendi" value={(stats.paid ?? 0).toLocaleString("tr-TR")} />
-          <StatCard label="Bekliyor" value={(stats.pending ?? 0).toLocaleString("tr-TR")} />
-          <StatCard label="Eşleşti" value={(stats.matched ?? 0).toLocaleString("tr-TR")} />
-          <StatCard label="Eşleşmedi" value={(stats.unmatched ?? 0).toLocaleString("tr-TR")} />
-          <StatCard label="Gelir Kaydı" value={(stats.syncedToExpenses ?? 0).toLocaleString("tr-TR")}
-            sub={stats.lastSyncAt ? `Son: ${new Date(stats.lastSyncAt).toLocaleDateString("tr-TR")}` : "Henüz sync yok"} />
-        </div>
-      )}
+        {/* Stat cards */}
+        {stats && (
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+            <StatCard label="Toplam Kayıt" value={(stats.total ?? 0).toLocaleString("tr-TR")} />
+            <StatCard label="Ödendi" value={(stats.paid ?? 0).toLocaleString("tr-TR")} />
+            <StatCard label="Bekliyor" value={(stats.pending ?? 0).toLocaleString("tr-TR")} />
+            <StatCard label="Eşleşti" value={(stats.matched ?? 0).toLocaleString("tr-TR")} />
+            <StatCard label="Eşleşmedi" value={(stats.unmatched ?? 0).toLocaleString("tr-TR")} />
+            <StatCard label="Gelir Kaydı" value={(stats.syncedToExpenses ?? 0).toLocaleString("tr-TR")}
+              sub={stats.lastSyncAt ? `Son: ${new Date(stats.lastSyncAt).toLocaleDateString("tr-TR")}` : "Henüz sync yok"} />
+          </div>
+        )}
 
-      {!stats?.total && !userFinancials?.length && (
-        <Card className="border-dashed">
-          <CardContent className="flex flex-col items-center justify-center py-10 text-muted-foreground gap-3">
-            <RefreshCw className="h-8 w-8 opacity-30" />
-            <p className="text-sm">Henüz senkronizasyon yapılmadı. Hızlı başlangıç için "Toplam Borç Sync" butonuna basın.</p>
-          </CardContent>
-        </Card>
-      )}
+        {!hasData && (
+          <Card className="border-dashed">
+            <CardContent className="flex flex-col items-center justify-center py-10 text-muted-foreground gap-3">
+              <RefreshCw className="h-8 w-8 opacity-30" />
+              <p className="text-sm">Henüz senkronizasyon yapılmadı. Hızlı başlangıç için "Toplam Borç Sync" butonuna basın.</p>
+            </CardContent>
+          </Card>
+        )}
 
-      {((stats?.total ?? 0) > 0 || (userFinancials?.length ?? 0) > 0) && (
-        <Tabs defaultValue="debts">
-          <TabsList>
-            <TabsTrigger value="debts">
-              <AlertTriangle className="h-3.5 w-3.5 mr-1.5" />Borçlu Danışmanlar
-              {(userFinancials?.length ?? 0) > 0 && (
-                <Badge variant="destructive" className="ml-1.5 h-4 text-[10px]">{userFinancials!.length}</Badge>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="report"><TrendingUp className="h-3.5 w-3.5 mr-1.5" />Aidat Raporu (Detay)</TabsTrigger>
-            <TabsTrigger value="unmatched">
-              <AlertTriangle className="h-3.5 w-3.5 mr-1.5" />Eşleşmeyenler
-              {(unmatched?.length ?? 0) > 0 && (
-                <Badge variant="destructive" className="ml-1.5 h-4 text-[10px]">{unmatched!.length}</Badge>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="preview"><Users className="h-3.5 w-3.5 mr-1.5" />Ham Veri</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="debts" className="mt-4">
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">
-                  Borçlu Danışman Listesi
-                  {userFinancials && userFinancials.length > 0 && (
-                    <span className="ml-2 text-xs text-muted-foreground font-normal">
-                      Toplam: {formatCurrency(userFinancials.reduce((s, r) => s + parseFloat(r.total_financial), 0))}
+        {hasData && (
+          <>
+            {/* Main Tab Bar */}
+            <div className="flex items-center gap-1 border-b border-border">
+              {([
+                { key: "debts" as const, label: "Borçlu Danışmanlar", badge: userFinancials?.length ?? 0 },
+                { key: "report" as const, label: "Aidat Raporu (Detay)" },
+                { key: "unmatched" as const, label: "Eşleşmeyenler", badge: unmatchedBadge },
+                { key: "preview" as const, label: "Ham Veri" },
+              ]).map((t) => (
+                <button
+                  key={t.key}
+                  onClick={() => setMainTab(t.key)}
+                  className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
+                    mainTab === t.key
+                      ? "border-primary text-primary"
+                      : "border-transparent text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {t.label}
+                  {"badge" in t && (t.badge ?? 0) > 0 && (
+                    <span className="inline-flex items-center justify-center rounded-full bg-amber-100 text-amber-700 text-[10px] font-bold px-1.5 min-w-[18px] h-[18px]">
+                      {t.badge}
                     </span>
                   )}
-                </CardTitle>
-                <p className="text-xs text-muted-foreground">
-                  Fonzip'teki tüm üyelerin toplam borç durumu. "Toplam Borç Sync" ile güncellenir.
-                </p>
-              </CardHeader>
-              <CardContent className="p-0">
-                {!userFinancials?.length ? (
-                  <p className="text-sm text-muted-foreground p-4">Henüz borç verisi yok. "Toplam Borç Sync" butonuna basın.</p>
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Fonzip Adı</TableHead>
-                        <TableHead>Danışman (Sistemde)</TableHead>
-                        <TableHead>KW UID</TableHead>
-                        <TableHead className="text-right">Borç Tutarı</TableHead>
-                        <TableHead>İletişim</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {userFinancials.map((r: any) => (
-                        <TableRow key={r.fonzip_user_id}>
-                          <TableCell className="font-medium">{r.user_name}</TableCell>
-                          <TableCell>
-                            {r.employee_name ? (
-                              <span className="text-green-700">{r.employee_name}</span>
-                            ) : (
-                              <span className="text-muted-foreground text-xs italic">Eşleşmedi</span>
-                            )}
-                          </TableCell>
-                          <TableCell className="text-muted-foreground text-xs">{r.membership_no ?? "—"}</TableCell>
-                          <TableCell className="text-right text-red-600 font-medium">
-                            {formatCurrency(parseFloat(r.total_financial))}
-                          </TableCell>
-                          <TableCell className="text-xs text-muted-foreground">
-                            {r.phone ?? r.email ?? "—"}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="report" className="mt-4">
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">Danışman Bazlı Aidat Özeti</CardTitle>
-              </CardHeader>
-              <CardContent className="p-0">
-                {!duesReport?.length ? (
-                  <p className="text-sm text-muted-foreground p-4">Eşleşmiş kayıt yok.</p>
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Danışman</TableHead>
-                        <TableHead>KW UID</TableHead>
-                        <TableHead className="text-right">Ödendi</TableHead>
-                        <TableHead className="text-right">Bekliyor</TableHead>
-                        <TableHead className="text-right">Ödeme Sayısı</TableHead>
-                        <TableHead>Son Ödeme</TableHead>
-                        <TableHead>Durum</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {duesReport.map(r => (
-                        <TableRow key={r.employeeId}>
-                          <TableCell className="font-medium">{r.employeeName}</TableCell>
-                          <TableCell className="text-muted-foreground text-xs">{r.kwuid ?? "—"}</TableCell>
-                          <TableCell className="text-right text-green-700 font-medium">
-                            {r.paidTotal > 0 ? formatCurrency(r.paidTotal) : "—"}
-                          </TableCell>
-                          <TableCell className="text-right text-red-600 font-medium">
-                            {r.pendingTotal > 0 ? formatCurrency(r.pendingTotal) : "—"}
-                          </TableCell>
-                          <TableCell className="text-right text-muted-foreground">{r.paidCount}</TableCell>
-                          <TableCell className="text-muted-foreground text-xs">
-                            {r.lastPaymentDate ? new Date(r.lastPaymentDate).toLocaleDateString("tr-TR") : "—"}
-                          </TableCell>
-                          <TableCell>
-                            {r.pendingTotal > 0 ? (
-                              <Badge variant="destructive" className="text-[10px]">Borçlu</Badge>
-                            ) : (
-                              <Badge variant="default" className="text-[10px] bg-green-600">Temiz</Badge>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="unmatched" className="mt-4">
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">Eşleştirilemeyen Fonzip Kayıtları</CardTitle>
-                <p className="text-xs text-muted-foreground">
-                  Bu kayıtlar için sistemde kwuid eşleşmesi bulunamadı. Danışmanların kwuid alanını doldurun.
-                </p>
-              </CardHeader>
-              <CardContent className="p-0">
-                {!unmatched?.length ? (
-                  <p className="text-sm text-muted-foreground p-4">Eşleşmeyen kayıt yok.</p>
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Fonzip Adı</TableHead>
-                        <TableHead>Üye No</TableHead>
-                        <TableHead className="text-right">Tutar</TableHead>
-                        <TableHead>Detay</TableHead>
-                        <TableHead>Tarih</TableHead>
-                        <TableHead>Durum</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {unmatched.slice(0, 100).map((d: any) => (
-                        <TableRow key={d.id}>
-                          <TableCell className="font-medium">{d.userName}</TableCell>
-                          <TableCell className="text-muted-foreground text-xs">{d.membershipNo ?? "—"}</TableCell>
-                          <TableCell className="text-right">{formatCurrency(parseFloat(d.amount))}</TableCell>
-                          <TableCell className="text-xs text-muted-foreground max-w-48 truncate">{d.details ?? "—"}</TableCell>
-                          <TableCell className="text-xs text-muted-foreground">
-                            {d.operationDate ? new Date(d.operationDate).toLocaleDateString("tr-TR") : "—"}
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant={d.status === 1 ? "default" : "secondary"} className="text-[10px]">
-                              {d.status === 1 ? "Ödendi" : "Bekliyor"}
-                            </Badge>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="preview" className="mt-4">
-            <div className="flex justify-end mb-3">
-              <Button
-                size="sm" variant="outline"
-                onClick={() => { if (previewEnabled) refetchPreview(); else setPreviewEnabled(true); }}
-                disabled={previewLoading}
-              >
-                {previewLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
-                Ham Veriyi Çek
-              </Button>
+                </button>
+              ))}
             </div>
-            {preview && (
-              <Tabs defaultValue="users">
-                <TabsList>
-                  <TabsTrigger value="users">Üyeler</TabsTrigger>
-                  <TabsTrigger value="debts">Aidatlar</TabsTrigger>
-                  <TabsTrigger value="donations">Bağışlar</TabsTrigger>
-                </TabsList>
-                <TabsContent value="users"><Card><CardContent className="pt-4"><JsonViewer data={preview.users} /></CardContent></Card></TabsContent>
-                <TabsContent value="debts"><Card><CardContent className="pt-4"><JsonViewer data={preview.debts} /></CardContent></Card></TabsContent>
-                <TabsContent value="donations"><Card><CardContent className="pt-4"><JsonViewer data={preview.donations} /></CardContent></Card></TabsContent>
-              </Tabs>
-            )}
-            {!preview && !previewLoading && (
-              <Card className="border-dashed">
-                <CardContent className="flex items-center justify-center py-8 text-muted-foreground text-sm">
-                  Ham veriyi görmek için "Ham Veriyi Çek" butonuna basın.
+
+            {/* ── Tab: Borçlu Danışmanlar ── */}
+            {mainTab === "debts" && (
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium">
+                    Borçlu Danışman Listesi
+                    {userFinancials && userFinancials.length > 0 && (
+                      <span className="ml-2 text-xs text-muted-foreground font-normal">
+                        Toplam: {formatCurrency(userFinancials.reduce((s, r) => s + parseFloat(r.total_financial), 0))}
+                      </span>
+                    )}
+                  </CardTitle>
+                  <p className="text-xs text-muted-foreground">
+                    Fonzip'teki tüm üyelerin toplam borç durumu. "Toplam Borç Sync" ile güncellenir.
+                  </p>
+                </CardHeader>
+                <CardContent className="p-0">
+                  {!userFinancials?.length ? (
+                    <p className="text-sm text-muted-foreground p-4">Henüz borç verisi yok. "Toplam Borç Sync" butonuna basın.</p>
+                  ) : (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Fonzip Adı</TableHead>
+                          <TableHead>Danışman (Sistemde)</TableHead>
+                          <TableHead>KW UID</TableHead>
+                          <TableHead className="text-right">Borç Tutarı</TableHead>
+                          <TableHead>İletişim</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {userFinancials.map((r: any) => (
+                          <TableRow key={r.fonzip_user_id}>
+                            <TableCell className="font-medium">{r.user_name}</TableCell>
+                            <TableCell>
+                              {r.employee_name ? (
+                                <span className="text-green-700">{r.employee_name}</span>
+                              ) : (
+                                <span className="text-muted-foreground text-xs italic">Eşleşmedi</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-muted-foreground text-xs">{r.membership_no ?? "—"}</TableCell>
+                            <TableCell className="text-right text-red-600 font-medium">
+                              {formatCurrency(parseFloat(r.total_financial))}
+                            </TableCell>
+                            <TableCell className="text-xs text-muted-foreground">
+                              {r.phone ?? r.email ?? "—"}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
                 </CardContent>
               </Card>
             )}
-          </TabsContent>
-        </Tabs>
-      )}
-    </div>
+
+            {/* ── Tab: Aidat Raporu (Detay) ── */}
+            {mainTab === "report" && (
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium">Danışman Bazlı Aidat Özeti</CardTitle>
+                </CardHeader>
+                <CardContent className="p-0">
+                  {!duesReport?.length ? (
+                    <p className="text-sm text-muted-foreground p-4">Eşleşmiş kayıt yok.</p>
+                  ) : (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Danışman</TableHead>
+                          <TableHead>KW UID</TableHead>
+                          <TableHead className="text-right">Ödendi</TableHead>
+                          <TableHead className="text-right">Bekliyor</TableHead>
+                          <TableHead className="text-right">Ödeme Sayısı</TableHead>
+                          <TableHead>Son Ödeme</TableHead>
+                          <TableHead>Durum</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {duesReport.map(r => (
+                          <TableRow key={r.employeeId}>
+                            <TableCell className="font-medium">{r.employeeName}</TableCell>
+                            <TableCell className="text-muted-foreground text-xs">{r.kwuid ?? "—"}</TableCell>
+                            <TableCell className="text-right text-green-700 font-medium">
+                              {r.paidTotal > 0 ? formatCurrency(r.paidTotal) : "—"}
+                            </TableCell>
+                            <TableCell className="text-right text-red-600 font-medium">
+                              {r.pendingTotal > 0 ? formatCurrency(r.pendingTotal) : "—"}
+                            </TableCell>
+                            <TableCell className="text-right text-muted-foreground">{r.paidCount}</TableCell>
+                            <TableCell className="text-muted-foreground text-xs">
+                              {r.lastPaymentDate ? new Date(r.lastPaymentDate).toLocaleDateString("tr-TR") : "—"}
+                            </TableCell>
+                            <TableCell>
+                              {r.pendingTotal > 0 ? (
+                                <Badge variant="destructive" className="text-[10px]">Borçlu</Badge>
+                              ) : (
+                                <Badge variant="default" className="text-[10px] bg-green-600">Temiz</Badge>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* ── Tab: Eşleşmeyenler ── */}
+            {mainTab === "unmatched" && (
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium">Eşleştirilemeyen Fonzip Kayıtları</CardTitle>
+                  <p className="text-xs text-muted-foreground">
+                    Bu kayıtlar için sistemde kwuid eşleşmesi bulunamadı. Danışmanların kwuid alanını doldurun.
+                  </p>
+                </CardHeader>
+                <CardContent className="p-0">
+                  {!unmatched?.length ? (
+                    <p className="text-sm text-muted-foreground p-4">Eşleşmeyen kayıt yok.</p>
+                  ) : (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Fonzip Adı</TableHead>
+                          <TableHead>Üye No</TableHead>
+                          <TableHead className="text-right">Tutar</TableHead>
+                          <TableHead>Detay</TableHead>
+                          <TableHead>Tarih</TableHead>
+                          <TableHead>Durum</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {unmatched.slice(0, 100).map((d: any) => (
+                          <TableRow key={d.id}>
+                            <TableCell className="font-medium">{d.userName}</TableCell>
+                            <TableCell className="text-muted-foreground text-xs">{d.membershipNo ?? "—"}</TableCell>
+                            <TableCell className="text-right">{formatCurrency(parseFloat(d.amount))}</TableCell>
+                            <TableCell className="text-xs text-muted-foreground max-w-48 truncate">{d.details ?? "—"}</TableCell>
+                            <TableCell className="text-xs text-muted-foreground">
+                              {d.operationDate ? new Date(d.operationDate).toLocaleDateString("tr-TR") : "—"}
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant={d.status === 1 ? "default" : "secondary"} className="text-[10px]">
+                                {d.status === 1 ? "Ödendi" : "Bekliyor"}
+                              </Badge>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* ── Tab: Ham Veri ── */}
+            {mainTab === "preview" && (
+              <div className="space-y-4">
+                <div className="flex justify-end">
+                  <Button
+                    size="sm" variant="outline" className="gap-1.5"
+                    onClick={() => { if (previewEnabled) refetchPreview(); else setPreviewEnabled(true); }}
+                    disabled={previewLoading}
+                  >
+                    {previewLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                    Ham Veriyi Çek
+                  </Button>
+                </div>
+
+                {preview && (
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                    <Card>
+                      <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">Üyeler</CardTitle></CardHeader>
+                      <CardContent><JsonViewer data={preview.users} /></CardContent>
+                    </Card>
+                    <Card>
+                      <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">Aidatlar</CardTitle></CardHeader>
+                      <CardContent><JsonViewer data={preview.debts} /></CardContent>
+                    </Card>
+                    <Card>
+                      <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">Bağışlar</CardTitle></CardHeader>
+                      <CardContent><JsonViewer data={preview.donations} /></CardContent>
+                    </Card>
+                  </div>
+                )}
+                {!preview && !previewLoading && (
+                  <Card className="border-dashed">
+                    <CardContent className="flex items-center justify-center py-8 text-muted-foreground text-sm">
+                      Ham veriyi görmek için "Ham Veriyi Çek" butonuna basın.
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </Layout>
   );
 }

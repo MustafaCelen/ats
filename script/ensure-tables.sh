@@ -1,0 +1,75 @@
+#!/bin/sh
+# Drizzle-kit push bazen özel indeksleri/tabloları silebiliyor.
+# Bu script startup'ta çalışıp eksik olanları garanti oluşturur.
+
+if [ -z "$DATABASE_URL" ]; then
+  echo "[ensure-tables] DATABASE_URL yok, atlanıyor"
+  exit 0
+fi
+
+# psql wrapper (docker container'da olmayabilir; node-postgres via node kullanıyoruz)
+node -e "
+const { Pool } = require('pg');
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+
+async function run() {
+  const sql = \`
+    CREATE TABLE IF NOT EXISTS employee_office_history (
+      id SERIAL PRIMARY KEY,
+      employee_id INTEGER NOT NULL,
+      office TEXT NOT NULL,
+      effective_from TEXT NOT NULL,
+      notes TEXT,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS employee_office_history_emp_idx ON employee_office_history(employee_id);
+    CREATE INDEX IF NOT EXISTS employee_office_history_eff_idx ON employee_office_history(employee_id, effective_from);
+
+    CREATE TABLE IF NOT EXISTS expense_targets (
+      id SERIAL PRIMARY KEY, year INTEGER NOT NULL, month INTEGER NOT NULL,
+      type TEXT NOT NULL, category TEXT NOT NULL,
+      amount NUMERIC(15,2) NOT NULL, updated_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS expense_targets_uq ON expense_targets(year, month, type, category);
+    CREATE INDEX IF NOT EXISTS expense_targets_ym_idx ON expense_targets(year, month);
+
+    CREATE TABLE IF NOT EXISTS growth_targets (
+      id SERIAL PRIMARY KEY, year INTEGER NOT NULL, month INTEGER NOT NULL,
+      brut_target INTEGER NOT NULL DEFAULT 0, net_target INTEGER NOT NULL DEFAULT 0,
+      updated_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS growth_targets_uq ON growth_targets(year, month);
+
+    CREATE TABLE IF NOT EXISTS fonzip_user_financials (
+      fonzip_user_id INTEGER PRIMARY KEY,
+      employee_id INTEGER, membership_no TEXT, user_name TEXT NOT NULL,
+      email TEXT, phone TEXT,
+      total_financial NUMERIC(15,2) NOT NULL DEFAULT 0,
+      synced_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS fonzip_user_financials_employee_idx ON fonzip_user_financials(employee_id);
+
+    CREATE TABLE IF NOT EXISTS _fonzip_config (
+      key TEXT PRIMARY KEY, value TEXT NOT NULL, expires_at TIMESTAMPTZ
+    );
+
+    ALTER TABLE closing_agents ADD COLUMN IF NOT EXISTS uk_expense_id INTEGER;
+    ALTER TABLE closing_agents ADD COLUMN IF NOT EXISTS office_snapshot TEXT;
+    CREATE INDEX IF NOT EXISTS closing_agents_uk_expense_idx ON closing_agents(uk_expense_id);
+    CREATE INDEX IF NOT EXISTS closing_agents_office_snapshot_idx ON closing_agents(office_snapshot);
+
+    CREATE TABLE IF NOT EXISTS candidate_merge_log (
+      id SERIAL PRIMARY KEY, source_id INTEGER NOT NULL, target_id INTEGER NOT NULL,
+      source_snapshot TEXT NOT NULL, performed_by_user_id INTEGER,
+      performed_at TIMESTAMP DEFAULT NOW(), undone_at TIMESTAMP, notes TEXT
+    );
+    CREATE INDEX IF NOT EXISTS candidate_merge_log_target_idx ON candidate_merge_log(target_id);
+    CREATE INDEX IF NOT EXISTS candidate_merge_log_performed_idx ON candidate_merge_log(performed_at);
+  \`;
+  await pool.query(sql);
+  console.log('[ensure-tables] OK');
+  await pool.end();
+}
+
+run().catch(e => { console.error('[ensure-tables]', e.message); process.exit(0); });
+"

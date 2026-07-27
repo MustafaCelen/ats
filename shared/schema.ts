@@ -479,6 +479,8 @@ export const closingAgents = pgTable("closing_agents", {
   ilgiliAy: text("ilgili_ay"),
   // Auto-synced office_expense id for ÜK share income tracking (null if no ÜK share)
   ukExpenseId: integer("uk_expense_id"),
+  // Snapshot of employee's office at time of closing (for transfer support)
+  officeSnapshot: text("office_snapshot"),
   createdAt: timestamp("created_at").defaultNow(),
 }, (t) => ({
   sideIdIdx: index("closing_agents_side_id_idx").on(t.closingSideId),
@@ -627,6 +629,36 @@ export const growthTargets = pgTable("growth_targets", {
   uq: uniqueIndex("growth_targets_uq").on(t.year, t.month),
 }));
 export type GrowthTarget = typeof growthTargets.$inferSelect;
+
+// Danışman ofis geçmişi — transferleri takip eder
+export const employeeOfficeHistory = pgTable("employee_office_history", {
+  id: serial("id").primaryKey(),
+  employeeId: integer("employee_id").notNull(),
+  office: text("office").notNull(), // "Akatlar" | "Zekeriyaköy"
+  effectiveFrom: text("effective_from").notNull(), // YYYY-MM-DD
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (t) => ({
+  empIdx: index("employee_office_history_emp_idx").on(t.employeeId),
+  effIdx: index("employee_office_history_eff_idx").on(t.employeeId, t.effectiveFrom),
+}));
+export type EmployeeOfficeHistory = typeof employeeOfficeHistory.$inferSelect;
+
+// Danışman merge log — geri alma için snapshot
+export const candidateMergeLog = pgTable("candidate_merge_log", {
+  id: serial("id").primaryKey(),
+  sourceId: integer("source_id").notNull(),      // silinen candidate id
+  targetId: integer("target_id").notNull(),      // korunan candidate id
+  sourceSnapshot: text("source_snapshot").notNull(), // JSON: full candidate + related data
+  performedByUserId: integer("performed_by_user_id"),
+  performedAt: timestamp("performed_at").defaultNow(),
+  undoneAt: timestamp("undone_at"), // dolu ise geri alınmış
+  notes: text("notes"),
+}, (t) => ({
+  targetIdx: index("candidate_merge_log_target_idx").on(t.targetId),
+  performedAtIdx: index("candidate_merge_log_performed_idx").on(t.performedAt),
+}));
+export type CandidateMergeLog = typeof candidateMergeLog.$inferSelect;
 
 // ── Listings (Portal İlanları — KW Platin & Karma) ────────────────────────────
 

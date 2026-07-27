@@ -23,6 +23,7 @@ import CapReport from "@/pages/CapReport";
 import Coaching from "@/pages/Coaching";
 import Expenses from "@/pages/Expenses";
 import ExpenseReports from "@/pages/ExpenseReports";
+import DuplicateMerge from "@/pages/DuplicateMerge";
 import PLReport from "@/pages/PLReport";
 import Listings from "@/pages/Listings";
 import ListingReports from "@/pages/ListingReports";
@@ -89,6 +90,7 @@ function Router() {
       <Route path="/coaching" component={() => <ProtectedRoute noAssistant><Coaching /></ProtectedRoute>} />
       <Route path="/expenses" component={() => <ProtectedRoute adminOnly><Expenses /></ProtectedRoute>} />
       <Route path="/expense-reports" component={() => <ProtectedRoute adminOnly><ExpenseReports /></ProtectedRoute>} />
+      <Route path="/duplicate-merge" component={() => <ProtectedRoute adminOnly><DuplicateMerge /></ProtectedRoute>} />
       <Route path="/pl-report" component={() => <ProtectedRoute adminOnly><PLReport /></ProtectedRoute>} />
       <Route path="/teams" component={() => <ProtectedRoute adminOnly><Teams /></ProtectedRoute>} />
       <Route path="/fonzip" component={() => <ProtectedRoute adminOnly><FonzipPreview /></ProtectedRoute>} />

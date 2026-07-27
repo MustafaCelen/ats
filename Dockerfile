@@ -22,10 +22,12 @@ COPY --from=builder /app/package*.json ./
 # drizzle-kit needs the config and schema to push migrations
 COPY --from=builder /app/drizzle.config.ts ./
 COPY --from=builder /app/shared ./shared
+COPY --from=builder /app/script ./script
 
 ENV NODE_ENV=production
 ENV PORT=5000
 EXPOSE 5000
 
-# Push schema (creates/updates tables) then start the server
-CMD ["sh", "-c", "echo 'No' | npx drizzle-kit push --force && node dist/index.cjs"]
+# Push schema, ensure custom tables exist (drizzle-kit sometimes drops them),
+# then start the server
+CMD ["sh", "-c", "echo 'No' | npx drizzle-kit push --force; sh script/ensure-tables.sh; node dist/index.cjs"]

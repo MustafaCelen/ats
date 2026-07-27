@@ -1213,6 +1213,47 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // ── Candidates ──────────────────────────────────────────────────────────────
 
+  // Duplicate merge routes ÖNCE tanımlanmalı (yoksa /:id "duplicates"/"merge" yakalıyor)
+  app.get("/api/candidates/duplicates", requireAuth, requireAdmin, async (_req, res) => {
+    try { res.json(await storage.findCandidateDuplicates()); }
+    catch (err: any) { console.error("[duplicates]", err); res.status(500).json({ message: err.message }); }
+  });
+
+  app.get("/api/candidates/merge/log", requireAuth, requireAdmin, async (_req, res) => {
+    try {
+      const rows = await db.execute(sql`
+        SELECT id, source_id, target_id, performed_by_user_id, performed_at, undone_at, notes
+        FROM candidate_merge_log ORDER BY performed_at DESC LIMIT 100
+      `);
+      res.json(rows.rows);
+    } catch (err: any) { res.status(500).json({ message: err.message }); }
+  });
+
+  app.post("/api/candidates/merge/preview", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const { sourceId, targetId } = req.body ?? {};
+      if (!sourceId || !targetId) return res.status(400).json({ message: "sourceId ve targetId gerekli" });
+      res.json(await storage.previewCandidateMerge(Number(sourceId), Number(targetId)));
+    } catch (err: any) { console.error("[merge preview]", err); res.status(500).json({ message: err.message }); }
+  });
+
+  app.post("/api/candidates/merge/:logId/undo", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      await storage.undoMerge(parseInt(req.params.logId));
+      res.json({ ok: true });
+    } catch (err: any) { console.error("[undo merge]", err); res.status(500).json({ message: err.message }); }
+  });
+
+  app.post("/api/candidates/merge", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const { sourceId, targetId } = req.body ?? {};
+      if (!sourceId || !targetId) return res.status(400).json({ message: "sourceId ve targetId gerekli" });
+      const userId = (req as any).user?.id ?? 0;
+      const result = await storage.mergeCandidates(Number(sourceId), Number(targetId), userId);
+      res.json(result);
+    } catch (err: any) { console.error("[merge]", err); res.status(500).json({ message: err.message }); }
+  });
+
   app.get(api.candidates.list.path, requireAuth, async (req, res) => {
     const { role, id: userId } = req.user!;
     if (role === "assistant") {
@@ -2805,6 +2846,77 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // ── Office Expenses ────────────────────────────────────────────────────────
+
+  // ── Employee Office History (transferler) ────────────────────────────────
+  app.get("/api/employees/:id/office-history", requireAuth, async (req, res) => {
+    try {
+      const empId = parseInt(req.params.id);
+      const rows = await db.execute(sql`
+        SELECT id, employee_id, office, effective_from, notes, created_at
+        FROM employee_office_history
+        WHERE employee_id = ${empId}
+        ORDER BY effective_from DESC, id DESC
+      `);
+      res.json(rows.rows);
+    } catch (err: any) {
+      console.error("[GET /api/employees/:id/office-history]", err);
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Bir danışmanın "şu anki" ofisini history'den hesapla ve candidates.office'a yaz
+  async function syncCandidateOfficeFromHistory(empId: number) {
+    const today = new Date().toISOString().slice(0, 10);
+    const row = await db.execute(sql`
+      SELECT office FROM employee_office_history
+      WHERE employee_id = ${empId} AND effective_from <= ${today}
+      ORDER BY effective_from DESC, id DESC LIMIT 1
+    `);
+    const currentOffice = (row.rows[0] as any)?.office;
+    if (!currentOffice) return;
+    await db.execute(sql`
+      UPDATE candidates SET office = ${currentOffice}
+      WHERE id = (SELECT candidate_id FROM employees WHERE id = ${empId})
+    `);
+  }
+
+  app.post("/api/employees/:id/office-history", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const empId = parseInt(req.params.id);
+      const { office, effectiveFrom, notes } = req.body ?? {};
+      if (!office || !effectiveFrom) {
+        return res.status(400).json({ message: "office ve effectiveFrom gerekli" });
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(effectiveFrom)) {
+        return res.status(400).json({ message: "effectiveFrom YYYY-MM-DD formatında olmalı" });
+      }
+      const created = await db.execute(sql`
+        INSERT INTO employee_office_history (employee_id, office, effective_from, notes)
+        VALUES (${empId}, ${office}, ${effectiveFrom}, ${notes ?? null})
+        RETURNING *
+      `);
+      await syncCandidateOfficeFromHistory(empId);
+      res.json(created.rows[0]);
+    } catch (err: any) {
+      console.error("[POST /api/employees/:id/office-history]", err);
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.delete("/api/employees/office-history/:historyId", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const hid = parseInt(req.params.historyId);
+      // Silmeden önce hangi employee'ye ait olduğunu al
+      const row = await db.execute(sql`SELECT employee_id FROM employee_office_history WHERE id = ${hid}`);
+      const empId = (row.rows[0] as any)?.employee_id;
+      await db.execute(sql`DELETE FROM employee_office_history WHERE id = ${hid}`);
+      if (empId) await syncCandidateOfficeFromHistory(empId);
+      res.status(204).send();
+    } catch (err: any) {
+      console.error("[DELETE /api/employees/office-history/:historyId]", err);
+      res.status(500).json({ message: err.message });
+    }
+  });
 
   // Mevcut tüm closing_agents için ÜK gelir kayıtlarını backfill et
   app.post("/api/closings/backfill-uk-income", requireAuth, requireAdmin, async (_req, res) => {

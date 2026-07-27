@@ -1,4 +1,4 @@
-import { db } from "./db";
+import { db, pool } from "./db";
 import {
   jobs, candidates, applications, stageHistory, interviews, offers, candidateNotes,
   users, jobAssignments, applicationDocuments, tasks, employees,
@@ -221,6 +221,10 @@ export interface IStorage {
   getClosingIdForAgent(agentId: number): Promise<number | null>;
   syncClosingAgentUkIncome(agentId: number): Promise<void>;
   backfillAllUkIncomes(): Promise<{ synced: number; deleted: number }>;
+  findCandidateDuplicates(): Promise<any[]>;
+  previewCandidateMerge(sourceId: number, targetId: number): Promise<any>;
+  mergeCandidates(sourceId: number, targetId: number, performedByUserId: number): Promise<{ logId: number }>;
+  undoMerge(logId: number): Promise<void>;
   createClosing(data: {
     propertyAddress: string;
     il?: string | null;
@@ -788,7 +792,8 @@ export class DatabaseStorage implements IStorage {
           JOIN closing_agents ca ON ca.closing_side_id = cs.id
           JOIN employees e ON e.id = ca.employee_id
           JOIN candidates cand ON cand.id = e.candidate_id
-          WHERE cs.closing_id = c.id AND cand.office = ${office}
+          WHERE cs.closing_id = c.id
+            AND COALESCE(ca.office_snapshot, cand.office) = ${office}
         )`
       : sql``;
     const categoryFilter = dealCategory ? sql`AND c.deal_category = ${dealCategory}` : sql``;
@@ -2398,6 +2403,204 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
+  // ── Candidate Merge (duplicate temizleme) ───────────────────────────────
+  // Snapshot al: kaynak candidate + tüm ilişkili kayıtlar
+  async snapshotCandidate(candidateId: number): Promise<any> {
+    const c = await db.execute(sql`SELECT * FROM candidates WHERE id = ${candidateId}`);
+    if (c.rows.length === 0) throw new Error("Candidate bulunamadı");
+    const emp = await db.execute(sql`SELECT * FROM employees WHERE candidate_id = ${candidateId}`);
+    const empIds = emp.rows.map((r: any) => r.id);
+    const relTables = ["applications", "candidate_notes", "interviews", "offers", "stage_history", "tasks"];
+    const related: Record<string, any[]> = {};
+    for (const t of relTables) {
+      const r = await db.execute(sql.raw(`SELECT * FROM ${t} WHERE candidate_id = ${candidateId}`));
+      related[t] = r.rows;
+    }
+    const empTables = ["closing_agents", "employee_office_history", "fonzip_synced_debts", "fonzip_user_financials", "listings", "office_expenses", "team_members"];
+    const empRelated: Record<string, any[]> = {};
+    if (empIds.length > 0) {
+      for (const t of empTables) {
+        const r = await db.execute(sql.raw(`SELECT * FROM ${t} WHERE employee_id IN (${empIds.join(",")})`));
+        empRelated[t] = r.rows;
+      }
+    }
+    return { candidate: c.rows[0], employees: emp.rows, related, empRelated };
+  }
+
+  // Merge önizleme — ne kadar veri aktarılacak
+  async previewCandidateMerge(sourceId: number, targetId: number): Promise<any> {
+    if (sourceId === targetId) throw new Error("Kaynak ve hedef aynı olamaz");
+    const snap = await this.snapshotCandidate(sourceId);
+    const target = await db.execute(sql`SELECT id, name, email, phone, office FROM candidates WHERE id = ${targetId}`);
+    if (target.rows.length === 0) throw new Error("Hedef bulunamadı");
+    const targetEmp = await db.execute(sql`SELECT id FROM employees WHERE candidate_id = ${targetId}`);
+    const counts: Record<string, number> = {};
+    for (const [k, v] of Object.entries(snap.related)) counts[k] = (v as any[]).length;
+    for (const [k, v] of Object.entries(snap.empRelated)) counts[`emp:${k}`] = (v as any[]).length;
+    return {
+      source: snap.candidate,
+      sourceEmployees: snap.employees.length,
+      target: target.rows[0],
+      targetHasEmployee: targetEmp.rows.length > 0,
+      counts,
+    };
+  }
+
+  // Merge işlemi — transaction içinde, snapshot al, ilişkileri taşı, kaynağı sil
+  async mergeCandidates(sourceId: number, targetId: number, performedByUserId: number): Promise<{ logId: number }> {
+    if (sourceId === targetId) throw new Error("Kaynak ve hedef aynı olamaz");
+    const snap = await this.snapshotCandidate(sourceId);
+    const targetCheck = await db.execute(sql`SELECT id FROM candidates WHERE id = ${targetId}`);
+    if (targetCheck.rows.length === 0) throw new Error("Hedef bulunamadı");
+
+    const sourceEmpIds: number[] = snap.employees.map((e: any) => e.id);
+    const targetEmp = await db.execute(sql`SELECT id FROM employees WHERE candidate_id = ${targetId}`);
+    const targetEmpId = (targetEmp.rows[0] as any)?.id;
+
+    return await db.transaction(async (tx) => {
+      // 1) Snapshot log'a yaz
+      const logRow = await tx.execute(sql`
+        INSERT INTO candidate_merge_log (source_id, target_id, source_snapshot, performed_by_user_id, performed_at)
+        VALUES (${sourceId}, ${targetId}, ${JSON.stringify(snap)}, ${performedByUserId}, NOW())
+        RETURNING id
+      `);
+      const logId = (logRow.rows[0] as any).id;
+
+      // 2) Employee-level FK taşı
+      if (sourceEmpIds.length > 0) {
+        if (targetEmpId) {
+          // Case D: her ikisi de employee → source_emp'in tüm FK'lerini target_emp'e taşı, source_emp'i sil
+          for (const seid of sourceEmpIds) {
+            const empTables = ["closing_agents", "employee_office_history", "fonzip_synced_debts", "fonzip_user_financials", "listings", "office_expenses"];
+            for (const t of empTables) {
+              await tx.execute(sql.raw(`UPDATE ${t} SET employee_id = ${targetEmpId} WHERE employee_id = ${seid}`));
+            }
+            // team_members: unique(team_id, employee_id) olabilir → çakışma varsa source'u sil
+            await tx.execute(sql`DELETE FROM team_members WHERE employee_id = ${seid} AND team_id IN (SELECT team_id FROM team_members WHERE employee_id = ${targetEmpId})`);
+            await tx.execute(sql`UPDATE team_members SET employee_id = ${targetEmpId} WHERE employee_id = ${seid}`);
+            await tx.execute(sql`DELETE FROM employees WHERE id = ${seid}`);
+          }
+        } else {
+          // Case C: sadece source'un employee'si var → candidate_id'sini target'a çevir
+          await tx.execute(sql`UPDATE employees SET candidate_id = ${targetId} WHERE candidate_id = ${sourceId}`);
+        }
+      }
+
+      // 3) Candidate-level FK taşı
+      const candTables = ["applications", "candidate_notes", "interviews", "offers", "stage_history", "tasks"];
+      for (const t of candTables) {
+        await tx.execute(sql.raw(`UPDATE ${t} SET candidate_id = ${targetId} WHERE candidate_id = ${sourceId}`));
+      }
+
+      // 4) Boş alanları kaynaktakiyle doldur (data kaybı yok)
+      const src = snap.candidate;
+      await tx.execute(sql`
+        UPDATE candidates SET
+          resume_text = COALESCE(NULLIF(TRIM(resume_text), ''), ${src.resume_text ?? null}),
+          email = COALESCE(NULLIF(TRIM(email), ''), ${src.email ?? null}),
+          phone = COALESCE(NULLIF(TRIM(phone), ''), ${src.phone ?? null}),
+          address = COALESCE(NULLIF(TRIM(address), ''), ${src.address ?? null}),
+          office = COALESCE(NULLIF(TRIM(office), ''), ${src.office ?? null}),
+          social_media = COALESCE(NULLIF(TRIM(social_media), ''), ${src.social_media ?? null}),
+          referred_by = COALESCE(NULLIF(TRIM(referred_by), ''), ${src.referred_by ?? null}),
+          license_number = COALESCE(NULLIF(TRIM(license_number), ''), ${src.license_number ?? null}),
+          current_brand = COALESCE(NULLIF(TRIM(current_brand), ''), ${src.current_brand ?? null}),
+          city = COALESCE(NULLIF(TRIM(city), ''), ${src.city ?? null}),
+          district = COALESCE(NULLIF(TRIM(district), ''), ${src.district ?? null})
+        WHERE id = ${targetId}
+      `);
+
+      // 5) Kaynak candidate'i sil
+      await tx.execute(sql`DELETE FROM candidates WHERE id = ${sourceId}`);
+
+      return { logId };
+    });
+  }
+
+  // Merge geri alma — snapshot'tan geri yükle
+  async undoMerge(logId: number): Promise<void> {
+    const log = await db.execute(sql`SELECT * FROM candidate_merge_log WHERE id = ${logId} AND undone_at IS NULL`);
+    if (log.rows.length === 0) throw new Error("Log bulunamadı veya zaten geri alınmış");
+    const row = log.rows[0] as any;
+    const snap = JSON.parse(row.source_snapshot);
+    const src = snap.candidate;
+
+    const insertRow = async (tbl: string, rec: any) => {
+      const cols = Object.keys(rec);
+      const vals = cols.map(c => rec[c]);
+      const placeholders = cols.map((_, i) => `$${i + 1}`).join(",");
+      const sqlStr = `INSERT INTO ${tbl} (${cols.join(",")}) VALUES (${placeholders}) ON CONFLICT (id) DO NOTHING`;
+      await pool.query(sqlStr, vals);
+    };
+
+    // 1) Candidate'i geri oluştur
+    await insertRow("candidates", src);
+    // 2) Employee'leri geri oluştur
+    for (const e of snap.employees) await insertRow("employees", e);
+    // 3) Related tablolara geri yaz
+    const allTables: Record<string, any[]> = { ...snap.related, ...snap.empRelated };
+    for (const [tbl, rows] of Object.entries(allTables)) {
+      for (const rec of rows) {
+        try { await insertRow(tbl, rec); }
+        catch (e: any) { console.warn(`[undo] ${tbl}#${rec.id} skip:`, e?.message); }
+      }
+    }
+    // 4) Log'u undone olarak işaretle
+    await db.execute(sql`UPDATE candidate_merge_log SET undone_at = NOW() WHERE id = ${logId}`);
+  }
+
+  // Otomatik duplicate önerici — isim/telefon/email eşleşmeleri
+  async findCandidateDuplicates(): Promise<any[]> {
+    // Node tarafında normalize et — SQL regex eşleşme sorununu önler
+    const all = await pool.query(`SELECT id, name, email, phone FROM candidates`);
+    const byName = new Map<string, number[]>();
+    const byPhone = new Map<string, number[]>();
+    const byEmail = new Map<string, number[]>();
+
+    for (const r of all.rows) {
+      const nameNorm = String(r.name ?? "").toLowerCase().trim().replace(/\s+/g, " ");
+      if (nameNorm) {
+        if (!byName.has(nameNorm)) byName.set(nameNorm, []);
+        byName.get(nameNorm)!.push(r.id);
+      }
+      const phoneDigits = String(r.phone ?? "").replace(/[^0-9]/g, "");
+      const phoneNorm = phoneDigits.slice(-10);
+      if (phoneNorm.length === 10) {
+        if (!byPhone.has(phoneNorm)) byPhone.set(phoneNorm, []);
+        byPhone.get(phoneNorm)!.push(r.id);
+      }
+      const emailNorm = String(r.email ?? "").toLowerCase().trim();
+      if (emailNorm) {
+        if (!byEmail.has(emailNorm)) byEmail.set(emailNorm, []);
+        byEmail.get(emailNorm)!.push(r.id);
+      }
+    }
+
+    const groups: any[] = [];
+    for (const [key, ids] of byName) if (ids.length > 1) groups.push({ key, reason: "name", ids });
+    for (const [key, ids] of byPhone) if (ids.length > 1) groups.push({ key, reason: "phone", ids });
+    for (const [key, ids] of byEmail) if (ids.length > 1) groups.push({ key, reason: "email", ids });
+    return groups.sort((a, b) => a.reason.localeCompare(b.reason) || a.key.localeCompare(b.key));
+  }
+
+  // Bir danışmanın belirli tarihteki ofisini döner (transfer geçmişine göre)
+  // Öncelik: effective_from ≤ date olan en yeni kayıt → yoksa candidates.office
+  async getEmployeeOfficeAt(employeeId: number, date: Date | string): Promise<string | null> {
+    const dateStr = typeof date === "string" ? date : date.toISOString().slice(0, 10);
+    const hist = await db.execute(sql`
+      SELECT office FROM employee_office_history
+      WHERE employee_id = ${employeeId} AND effective_from <= ${dateStr}
+      ORDER BY effective_from DESC, id DESC LIMIT 1
+    `);
+    if (hist.rows.length > 0) return (hist.rows[0] as any).office;
+    // Fallback: candidates.office
+    const fallback = await db.execute(sql`
+      SELECT c.office FROM employees e JOIN candidates c ON c.id = e.candidate_id
+      WHERE e.id = ${employeeId} LIMIT 1
+    `);
+    return (fallback.rows[0] as any)?.office ?? null;
+  }
+
   // ÜK share → office_expenses "ÜK Geliri" senkronu (idempotent)
   async syncClosingAgentUkIncome(agentId: number): Promise<void> {
     const rows = await db.execute(sql`
@@ -2687,18 +2890,24 @@ export class DatabaseStorage implements IStorage {
 
       return closing;
     });
-    // Transaction sonrası tüm agent'lar için ÜK gelir kaydı senkronu
+    // Transaction sonrası: office_snapshot + ÜK gelir kaydı senkronu
     try {
       const agents = await db.execute(sql`
-        SELECT ca.id FROM closing_agents ca
+        SELECT ca.id, ca.employee_id, COALESCE(ca.closing_date, ${result.closingDate}::timestamp) AS eff_date
+        FROM closing_agents ca
         JOIN closing_sides cs ON cs.id = ca.closing_side_id
         WHERE cs.closing_id = ${result.id}
       `);
       for (const a of agents.rows as any[]) {
+        // office_snapshot ata (transfer geçmişine göre)
+        const office = await this.getEmployeeOfficeAt(a.employee_id, new Date(a.eff_date));
+        if (office) {
+          await db.execute(sql`UPDATE closing_agents SET office_snapshot = ${office} WHERE id = ${a.id}`);
+        }
         await this.syncClosingAgentUkIncome(a.id);
       }
     } catch (e) {
-      console.error("[createClosing UK sync]", e);
+      console.error("[createClosing snapshot+UK sync]", e);
     }
     return result;
   }
