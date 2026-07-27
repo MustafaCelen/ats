@@ -225,6 +225,15 @@ export interface IStorage {
   previewCandidateMerge(sourceId: number, targetId: number): Promise<any>;
   mergeCandidates(sourceId: number, targetId: number, performedByUserId: number): Promise<{ logId: number }>;
   undoMerge(logId: number): Promise<void>;
+  getCampaigns(): Promise<any[]>;
+  getCampaign(id: number): Promise<any>;
+  createCampaign(data: any): Promise<any>;
+  updateCampaign(id: number, data: any): Promise<void>;
+  deleteCampaign(id: number): Promise<void>;
+  getCampaignExpenses(campaignId: number): Promise<any[]>;
+  createCampaignExpense(data: any): Promise<any>;
+  deleteCampaignExpense(id: number): Promise<void>;
+  getCampaignLeads(campaignId: number): Promise<any[]>;
   createClosing(data: {
     propertyAddress: string;
     il?: string | null;
@@ -2583,6 +2592,96 @@ export class DatabaseStorage implements IStorage {
     return groups.sort((a, b) => a.reason.localeCompare(b.reason) || a.key.localeCompare(b.key));
   }
 
+  // ── Kampanya Modülü ──────────────────────────────────────────────────────
+  async getCampaigns(): Promise<any[]> {
+    const result = await db.execute(sql`
+      SELECT c.*,
+        (SELECT COUNT(*) FROM candidates WHERE campaign_id = c.id)::int as lead_count,
+        (SELECT COUNT(*) FROM candidates cd
+           JOIN employees e ON e.candidate_id = cd.id
+           WHERE cd.campaign_id = c.id)::int as converted_count,
+        (SELECT COALESCE(SUM(amount), 0) FROM campaign_expenses WHERE campaign_id = c.id)::numeric as total_expense
+      FROM campaigns c
+      ORDER BY c.created_at DESC
+    `);
+    return result.rows;
+  }
+
+  async getCampaign(id: number): Promise<any> {
+    const result = await db.execute(sql`
+      SELECT c.*,
+        (SELECT COUNT(*) FROM candidates WHERE campaign_id = c.id)::int as lead_count,
+        (SELECT COUNT(*) FROM candidates cd
+           JOIN employees e ON e.candidate_id = cd.id
+           WHERE cd.campaign_id = c.id)::int as converted_count,
+        (SELECT COALESCE(SUM(amount), 0) FROM campaign_expenses WHERE campaign_id = c.id)::numeric as total_expense
+      FROM campaigns c WHERE c.id = ${id}
+    `);
+    return result.rows[0] ?? null;
+  }
+
+  async createCampaign(data: { name: string; description?: string | null; status?: string; platform?: string; externalId?: string | null; startDate?: string | null; endDate?: string | null; createdByUserId?: number | null }): Promise<any> {
+    const result = await db.execute(sql`
+      INSERT INTO campaigns (name, description, status, platform, external_id, start_date, end_date, created_by_user_id)
+      VALUES (${data.name}, ${data.description ?? null}, ${data.status ?? "active"}, ${data.platform ?? "manual"},
+              ${data.externalId ?? null}, ${data.startDate ?? null}, ${data.endDate ?? null}, ${data.createdByUserId ?? null})
+      RETURNING *
+    `);
+    return result.rows[0];
+  }
+
+  async updateCampaign(id: number, data: Partial<{ name: string; description: string | null; status: string; startDate: string | null; endDate: string | null }>): Promise<void> {
+    const sets: string[] = [];
+    const values: any[] = [];
+    let i = 1;
+    for (const [k, v] of Object.entries(data)) {
+      const col = k.replace(/[A-Z]/g, m => "_" + m.toLowerCase());
+      sets.push(`${col} = $${i++}`);
+      values.push(v);
+    }
+    if (sets.length === 0) return;
+    values.push(id);
+    await pool.query(`UPDATE campaigns SET ${sets.join(", ")} WHERE id = $${i}`, values);
+  }
+
+  async deleteCampaign(id: number): Promise<void> {
+    await db.execute(sql`UPDATE candidates SET campaign_id = NULL WHERE campaign_id = ${id}`);
+    await db.execute(sql`DELETE FROM campaign_expenses WHERE campaign_id = ${id}`);
+    await db.execute(sql`DELETE FROM campaigns WHERE id = ${id}`);
+  }
+
+  async getCampaignExpenses(campaignId: number): Promise<any[]> {
+    const result = await db.execute(sql`
+      SELECT * FROM campaign_expenses WHERE campaign_id = ${campaignId} ORDER BY date DESC, id DESC
+    `);
+    return result.rows;
+  }
+
+  async createCampaignExpense(data: { campaignId: number; amount: string; date: string; notes?: string | null; createdByUserId?: number | null }): Promise<any> {
+    const result = await db.execute(sql`
+      INSERT INTO campaign_expenses (campaign_id, amount, date, notes, created_by_user_id)
+      VALUES (${data.campaignId}, ${data.amount}::numeric, ${data.date}, ${data.notes ?? null}, ${data.createdByUserId ?? null})
+      RETURNING *
+    `);
+    return result.rows[0];
+  }
+
+  async deleteCampaignExpense(id: number): Promise<void> {
+    await db.execute(sql`DELETE FROM campaign_expenses WHERE id = ${id}`);
+  }
+
+  async getCampaignLeads(campaignId: number): Promise<any[]> {
+    const result = await db.execute(sql`
+      SELECT cd.id, cd.name, cd.email, cd.phone, cd.category, cd.office, cd.created_at,
+        e.id as employee_id, e.status as employee_status
+      FROM candidates cd
+      LEFT JOIN employees e ON e.candidate_id = cd.id
+      WHERE cd.campaign_id = ${campaignId}
+      ORDER BY cd.created_at DESC
+    `);
+    return result.rows;
+  }
+
   // Bir danışmanın belirli tarihteki ofisini döner (transfer geçmişine göre)
   // Öncelik: effective_from ≤ date olan en yeni kayıt → yoksa candidates.office
   async getEmployeeOfficeAt(employeeId: number, date: Date | string): Promise<string | null> {
@@ -3512,6 +3611,426 @@ export class DatabaseStorage implements IStorage {
       avgRentalDays, avgRentalDaysByIl, avgRentalDaysByIlce, avgRentalDaysByMahalle,
       firstTimers, newCappers,
     };
+  }
+
+  // ── Dönem Karşılaştırma Raporu (CSV-tarzı yıllık/dönemsel karşılaştırma) ────
+  // İki dönemi (ör. 2025 Ocak-Haziran vs 2026 Ocak-Haziran), 3 ofis kapsamında
+  // (Akatlar / Zekeriyaköy / Konsolide) karşılaştıran, ~18 metriklik özet rapor.
+  async getPeriodComparisonReport(
+    periodAStart: Date, periodAEnd: Date,
+    periodBStart: Date, periodBEnd: Date,
+  ): Promise<Record<string, { periodA: any; periodB: any }>> {
+    const TR_MONTHS: Record<string, number> = {
+      "Ocak": 1, "Şubat": 2, "Mart": 3, "Nisan": 4, "Mayıs": 5, "Haziran": 6,
+      "Temmuz": 7, "Ağustos": 8, "Eylül": 9, "Ekim": 10, "Kasım": 11, "Aralık": 12,
+    };
+    const ymd = (d: Date) => d.toISOString().slice(0, 10);
+
+    // ── Ortak: danışmanın belirli bir tarihteki ofisi (transfer geçmişi + fallback) ──
+    const officeHistRows = (await db.execute(sql`
+      SELECT employee_id, office, effective_from FROM employee_office_history ORDER BY employee_id, effective_from
+    `)).rows as any[];
+    const histByEmp = new Map<number, { office: string; from: string }[]>();
+    for (const r of officeHistRows) {
+      if (!histByEmp.has(r.employee_id)) histByEmp.set(r.employee_id, []);
+      histByEmp.get(r.employee_id)!.push({ office: r.office, from: r.effective_from });
+    }
+    const empFallbackRows = await db
+      .select({
+        id: employees.id, office: candidates.office, startDate: employees.startDate, passiveAt: employees.passiveAt,
+        capMonth: employees.capMonth, capValue: employees.capValue, capManualAdjustment: employees.capManualAdjustment,
+        status: employees.status,
+      })
+      .from(employees)
+      .innerJoin(candidates, eq(employees.candidateId, candidates.id));
+    const empInfoById = new Map(empFallbackRows.map(e => [e.id, e]));
+    const officeAsOf = (employeeId: number, asOfDateStr: string): string | null => {
+      const hist = histByEmp.get(employeeId);
+      if (hist && hist.length > 0) {
+        let best: string | null = null;
+        for (const h of hist) { if (h.from <= asOfDateStr) best = h.office; }
+        if (best) return best;
+      }
+      return empInfoById.get(employeeId)?.office ?? null;
+    };
+
+    // ── Ortak: cap durumu — belirli bir "asOfDate" itibarıyla (bugün değil!) ──
+    const capSettingRows = await db.select().from(capSettings);
+    const capSettingByYear = new Map(capSettingRows.map(s => [s.year, parseFloat(s.amount)]));
+
+    const parseCapMonth = (capMonth: string): number | null => {
+      const trimmed = capMonth.trim();
+      let n = TR_MONTHS[trimmed];
+      if (!n) { const parts = trimmed.split("-"); n = parseInt(parts[1] ?? parts[0], 10); }
+      return (!isNaN(n) && n >= 1 && n <= 12) ? n : null;
+    };
+    const cycleStartFor = (anchorDate: Date, capMonthNum: number): Date => {
+      const anchorMonth = anchorDate.getMonth() + 1, anchorYear = anchorDate.getFullYear();
+      const capYear = anchorMonth >= capMonthNum ? anchorYear : anchorYear - 1;
+      return new Date(capYear, capMonthNum - 1, 1);
+    };
+
+    // Bir danışmanın "Capper" sayılması için dönem sonundaki tek bir ana bakmak yetmez:
+    // her danışmanın kendi cap döngüsü (capMonth) yılda bir sıfırlanır, ve 6 aylık bir rapor
+    // penceresi çoğu zaman TAM OLARAK bu sıfırlanmanın ortasına denk gelir. Sıfırlanmadan hemen
+    // önce cap'e ulaşmış biri, sadece dönem sonundaki (sıfırlanmış) döngüye bakılırsa "capper değil"
+    // gibi görünür. Bunun yerine dönemle çakışan HER İKİ döngüyü de (varsa) kontrol edip, ikisinden
+    // BİRİNDE cap'e ulaşılmışsa o danışmanı bu dönem için Capper sayıyoruz.
+    const computeCapperFlags = async (periodStart: Date, periodEnd: Date): Promise<Map<number, boolean>> => {
+      const result = new Map<number, boolean>();
+      const empsWithCap = Array.from(empInfoById.values()).filter(e =>
+        e.capMonth &&
+        e.startDate && new Date(e.startDate) <= periodEnd &&
+        (!e.passiveAt || new Date(e.passiveAt) > periodStart)
+      );
+      if (empsWithCap.length === 0) return result;
+
+      type CycleWindow = { start: Date; capAmount: number };
+      const windowsByEmp = new Map<number, CycleWindow[]>();
+      let earliestStart: Date | null = null;
+      for (const e of empsWithCap) {
+        const capMonthNum = parseCapMonth(e.capMonth ?? "");
+        if (capMonthNum === null) continue;
+        const cycleAtStart = cycleStartFor(periodStart, capMonthNum);
+        const cycleAtEnd = cycleStartFor(periodEnd, capMonthNum);
+        const empCapValue = e.capValue ? parseFloat(e.capValue) : null;
+        const capAmountForCycle = (cycleStart: Date) => empCapValue && empCapValue > 0 ? empCapValue : (capSettingByYear.get(cycleStart.getFullYear()) ?? 0);
+
+        const windows: CycleWindow[] = [];
+        const amtStart = capAmountForCycle(cycleAtStart);
+        if (amtStart > 0) windows.push({ start: cycleAtStart, capAmount: amtStart });
+        if (cycleAtEnd.getTime() !== cycleAtStart.getTime()) {
+          const amtEnd = capAmountForCycle(cycleAtEnd);
+          if (amtEnd > 0) windows.push({ start: cycleAtEnd, capAmount: amtEnd });
+        }
+        if (windows.length > 0) {
+          windowsByEmp.set(e.id, windows);
+          if (!earliestStart || windows[0].start < earliestStart) earliestStart = windows[0].start;
+        }
+      }
+      if (windowsByEmp.size === 0 || !earliestStart) return result;
+
+      const empIds = Array.from(windowsByEmp.keys());
+      const effDate = sql<Date>`COALESCE(${closingAgents.closingDate}, ${closings.closingDate})`;
+      const closingRows = await db
+        .select({ employeeId: closingAgents.employeeId, effDate, bm: closingAgents.marketCenterActual })
+        .from(closingAgents)
+        .innerJoin(closingSides, eq(closingAgents.closingSideId, closingSides.id))
+        .innerJoin(closings, eq(closingSides.closingId, closings.id))
+        .where(and(
+          sql`${effDate} IS NOT NULL`,
+          sql`${effDate} <= ${periodEnd}`,
+          sql`${effDate} >= ${earliestStart}`,
+          inArray(closingAgents.employeeId, empIds),
+        ));
+      const prepayRows = await db
+        .select({ employeeId: officeExpenses.employeeId, date: officeExpenses.date, amount: officeExpenses.amount })
+        .from(officeExpenses)
+        .where(and(
+          eq(officeExpenses.type, "income"),
+          eq(officeExpenses.category, BM_PREPAYMENT_CATEGORY),
+          inArray(officeExpenses.employeeId, empIds),
+          gte(officeExpenses.date, ymd(earliestStart)),
+          lte(officeExpenses.date, ymd(periodEnd)),
+        ));
+
+      const rowsByEmp = new Map<number, { date: Date; bm: number }[]>();
+      for (const r of closingRows) {
+        if (!r.employeeId || !r.effDate) continue;
+        if (!rowsByEmp.has(r.employeeId)) rowsByEmp.set(r.employeeId, []);
+        rowsByEmp.get(r.employeeId)!.push({ date: new Date(r.effDate), bm: parseFloat(r.bm ?? "0") });
+      }
+      const prepaysByEmp = new Map<number, { date: string; amount: number }[]>();
+      for (const r of prepayRows) {
+        if (!r.employeeId) continue;
+        if (!prepaysByEmp.has(r.employeeId)) prepaysByEmp.set(r.employeeId, []);
+        prepaysByEmp.get(r.employeeId)!.push({ date: r.date, amount: parseFloat(r.amount ?? "0") });
+      }
+
+      for (const [empId, windows] of windowsByEmp) {
+        const emp = empInfoById.get(empId);
+        const manualAdj = parseFloat(emp?.capManualAdjustment ?? "0");
+        const rows = rowsByEmp.get(empId) ?? [];
+        const prepays = prepaysByEmp.get(empId) ?? [];
+        let isCapper = false;
+        for (let i = 0; i < windows.length; i++) {
+          const w = windows[i];
+          const nextStart = windows[i + 1]?.start ?? null;
+          const sumBM = rows
+            .filter(r => r.date >= w.start && (!nextStart || r.date < nextStart))
+            .reduce((s, r) => s + r.bm, 0);
+          const wYmd = ymd(w.start), nextYmd = nextStart ? ymd(nextStart) : null;
+          const sumPrepay = prepays
+            .filter(r => r.date >= wYmd && (!nextYmd || r.date < nextYmd))
+            .reduce((s, r) => s + r.amount, 0);
+          const capUsed = sumBM + sumPrepay + manualAdj;
+          if (capUsed >= w.capAmount) { isCapper = true; break; }
+        }
+        result.set(empId, isCapper);
+      }
+      return result;
+    };
+
+    const capStatusA = await computeCapperFlags(periodAStart, periodAEnd);
+    const capStatusB = await computeCapperFlags(periodBStart, periodBEnd);
+
+    // 9 fiyat dilimi (TL) — CSV ile birebir aynı sınırlar
+    const PRICE_BUCKET_THRESHOLDS = [10_000_000, 20_000_000, 30_000_000, 40_000_000, 50_000_000, 75_000_000, 100_000_000, 150_000_000];
+    const PRICE_BUCKET_LABELS = [
+      "10 milyon altı", "10-20 milyon arası", "20-30 milyon arası", "30-40 milyon arası",
+      "40-50 milyon arası", "50-75 milyon arası", "75-100 milyon arası", "100-150 milyon arası", "150 milyon üstü",
+    ];
+    const bucketIndexForPrice = (price: number): number => {
+      for (let i = 0; i < PRICE_BUCKET_THRESHOLDS.length; i++) if (price < PRICE_BUCKET_THRESHOLDS[i]) return i;
+      return PRICE_BUCKET_THRESHOLDS.length;
+    };
+
+    const computeScope = async (
+      start: Date, end: Date, office: string | undefined,
+      capStatusMap: Map<number, boolean>,
+    ) => {
+      const endYmd = ymd(end);
+      const endInclusive = new Date(end); endInclusive.setHours(23, 59, 59, 999);
+      const effectiveStatus = sql<string>`COALESCE(${closingAgents.status}, ${closings.status})`;
+      const effectiveDate = sql<Date>`COALESCE(${closingAgents.closingDate}, ${closings.closingDate})`;
+      const officeSnap = sql<string>`COALESCE(${closingAgents.officeSnapshot}, ${candidates.office})`;
+
+      const rows = await db
+        .select({
+          closingId: closings.id,
+          saleValue: closings.saleValue,
+          openingPrice: closings.openingPrice,
+          commissionRate: closings.commissionRate,
+          dealCategory: closings.dealCategory,
+          durationDays: closings.durationDays,
+          closingDate: effectiveDate,
+          sideType: closingSides.sideType,
+          bhbShare: closingAgents.bhbShare,
+          marketCenterActual: closingAgents.marketCenterActual,
+          employeeId: closingAgents.employeeId,
+          officeSnapshot: officeSnap,
+        })
+        .from(closings)
+        .leftJoin(closingSides, eq(closingSides.closingId, closings.id))
+        .leftJoin(closingAgents, eq(closingAgents.closingSideId, closingSides.id))
+        .leftJoin(employees, eq(employees.id, closingAgents.employeeId))
+        .leftJoin(candidates, eq(candidates.id, employees.candidateId))
+        .where(and(
+          sql`${effectiveStatus} = 'completed'`,
+          sql`${effectiveDate} IS NOT NULL`,
+          sql`${effectiveDate} >= ${start}`,
+          sql`${effectiveDate} <= ${endInclusive}`,
+          ...(office ? [eq(officeSnap, office)] : []),
+        ));
+
+      const islemOrani = (r: { saleValue: string | null; commissionRate?: string | null; dealCategory?: string | null; bhbShare: string | null }) => {
+        const sale = parseFloat(r.saleValue ?? "0");
+        const rate = parseFloat(r.commissionRate ?? "0");
+        const perSide = r.dealCategory === "Kiralık" ? sale / 2 : sale * rate / 100;
+        if (perSide <= 0) return 0;
+        return parseFloat(r.bhbShare ?? "0") / perSide;
+      };
+
+      // ── BHB / Hacim / Adet (toplam + Satılık + Kiralık) ──
+      const cIds = new Set<number>();
+      let totalVolume = 0, satilikVolume = 0, kiralikVolume = 0;
+      let totalBHB = 0, satilikBHB = 0, kiralikBHB = 0, totalBM = 0;
+      let totalCount = 0, satilikCount = 0, kiralikCount = 0;
+      const bySideType = { buyer: 0, seller: 0, referral: 0 } as Record<string, number>;
+      const sideTypesByClosing = new Map<number, Set<string>>();
+      const agentEmpSet = new Set<number>();
+      const agentBHBByEmp = new Map<number, number>();
+
+      for (const r of rows) {
+        const isKiralik = r.dealCategory === "Kiralık";
+        if (!cIds.has(r.closingId)) {
+          cIds.add(r.closingId);
+          const v = parseFloat(r.saleValue ?? "0");
+          totalVolume += v;
+          if (isKiralik) kiralikVolume += v; else satilikVolume += v;
+          // Adet: kapanış başına BİR kez sayılır (fractional işlem oranı ile DEĞİL) —
+          // yoksa hem alıcı hem satıcı tarafını temsil ettiğimiz (içeride kapanan) işlemler
+          // iki kez sayılır ve diğer raporlardaki basit COUNT(*) ile uyuşmaz.
+          totalCount++;
+          if (isKiralik) kiralikCount++; else satilikCount++;
+        }
+        if (r.bhbShare) {
+          const b = parseFloat(r.bhbShare);
+          totalBHB += b;
+          if (isKiralik) kiralikBHB += b; else satilikBHB += b;
+        }
+        if (r.marketCenterActual) totalBM += parseFloat(r.marketCenterActual);
+        const ratio = islemOrani(r);
+
+        if (r.sideType) {
+          const k = r.sideType === "buyer" ? "buyer" : r.sideType === "referral" ? "referral" : "seller";
+          bySideType[k] += ratio;
+          if (!sideTypesByClosing.has(r.closingId)) sideTypesByClosing.set(r.closingId, new Set());
+          sideTypesByClosing.get(r.closingId)!.add(r.sideType);
+        }
+        if (r.employeeId) {
+          agentEmpSet.add(r.employeeId);
+          if (r.bhbShare) agentBHBByEmp.set(r.employeeId, (agentBHBByEmp.get(r.employeeId) ?? 0) + parseFloat(r.bhbShare));
+        }
+      }
+
+      // ── İçeride kapanma oranı: hem buyer hem seller taraf bu kapsamda temsil edildi mi? ──
+      let icerideCount = 0;
+      for (const [, types] of sideTypesByClosing) if (types.has("buyer") && types.has("seller")) icerideCount++;
+      const icerideKapanmaOrani = cIds.size > 0 ? (icerideCount / cIds.size) * 100 : 0;
+
+      // ── Ortalama satış fiyatı + fiyat dilimleri (adet + ortalama süre) — sadece Satılık ──
+      const satilikRows = rows.filter(r => r.dealCategory !== "Kiralık" && r.saleValue && parseFloat(r.saleValue) > 0);
+      const satilikPricesById = new Map<number, number>();
+      for (const r of satilikRows) if (!satilikPricesById.has(r.closingId)) satilikPricesById.set(r.closingId, parseFloat(r.saleValue!));
+      const ortalamaSatisFiyati = satilikPricesById.size > 0
+        ? Array.from(satilikPricesById.values()).reduce((s, v) => s + v, 0) / satilikPricesById.size
+        : 0;
+
+      const priceBuckets = PRICE_BUCKET_LABELS.map(label => ({ label, count: 0, durations: [] as number[] }));
+      for (const [closingId, price] of satilikPricesById) {
+        const idx = bucketIndexForPrice(price);
+        priceBuckets[idx].count++;
+        const durRow = satilikRows.find(r => r.closingId === closingId && r.durationDays && r.durationDays > 0 && r.durationDays <= 3650);
+        if (durRow) priceBuckets[idx].durations.push(durRow.durationDays!);
+      }
+      const priceBucketsOut = priceBuckets.map(b => ({
+        label: b.label, count: b.count,
+        avgDuration: b.durations.length > 0 ? Math.round(b.durations.reduce((s, v) => s + v, 0) / b.durations.length) : null,
+      }));
+
+      // ── Kapanış süresi: genel ortalama + gün bazlı 3 dilim (0-3/3-6/6+ ay ≈ 90/180 gün) ──
+      const durById = new Map<number, number>();
+      for (const r of satilikRows) {
+        if (!durById.has(r.closingId) && r.durationDays && r.durationDays > 0 && r.durationDays <= 3650) durById.set(r.closingId, r.durationDays);
+      }
+      const allDur = Array.from(durById.values());
+      const kapanisSuresi = allDur.length > 0 ? Math.round(allDur.reduce((s, v) => s + v, 0) / allDur.length) : 0;
+      const durationBuckets = [
+        { label: "0-3 ay arası", count: allDur.filter(d => d <= 90).length },
+        { label: "3-6 ay arası", count: allDur.filter(d => d > 90 && d <= 180).length },
+        { label: "6 aydan çok", count: allDur.filter(d => d > 180).length },
+      ];
+
+      // ── İndirim oranı (Satılık, openingPrice varsa) ──
+      const discounts: number[] = [];
+      const seenForDiscount = new Set<number>();
+      for (const r of satilikRows) {
+        if (seenForDiscount.has(r.closingId)) continue;
+        seenForDiscount.add(r.closingId);
+        const opening = parseFloat(r.openingPrice ?? "0");
+        const sale = parseFloat(r.saleValue ?? "0");
+        if (opening > 0) discounts.push((opening - sale) / opening * 100);
+      }
+      const indirimOrani = discounts.length > 0 ? discounts.reduce((s, v) => s + v, 0) / discounts.length : 0;
+
+      // ── Danışman sayısı (dönem sonu itibarıyla, bu ofiste aktif) ──
+      let danismanSayisi = 0;
+      for (const e of empInfoById.values()) {
+        if (!e.startDate || new Date(e.startDate) > end) continue;
+        if (e.passiveAt && new Date(e.passiveAt) <= end) continue;
+        if (office && officeAsOf(e.id, endYmd) !== office) continue;
+        danismanSayisi++;
+      }
+
+      // ── Capper / Milyoner / Kepli-Kepsiz (bu ofisteki danışmanlar arasında) ──
+      let capperSayisi = 0, kepliCount = 0, kepsizCount = 0;
+      for (const [empId, isCapper] of capStatusMap) {
+        if (office && officeAsOf(empId, endYmd) !== office) continue;
+        const emp = empInfoById.get(empId);
+        // Nokta-zamanlı aktiflik: bugünkü status değil, dönem sonu (end) itibarıyla aktif miydi
+        if (!emp || !emp.startDate || new Date(emp.startDate) > end) continue;
+        if (emp.passiveAt && new Date(emp.passiveAt) <= end) continue;
+        if (isCapper) { capperSayisi++; kepliCount++; } else kepsizCount++;
+      }
+      const kepliKepsizToplam = kepliCount + kepsizCount;
+      const kepliKepsizOrani = kepliKepsizToplam > 0
+        ? { kepli: Math.round(kepliCount / kepliKepsizToplam * 100), kepsiz: Math.round(kepsizCount / kepliKepsizToplam * 100) }
+        : { kepli: 0, kepsiz: 0 };
+
+      // ── Ay sayısı (Milyoner yıllıklandırma + danışman başına aylık BHB/BM Payı için) ──
+      const monthCount = Math.max(1, Math.round((end.getTime() - start.getTime()) / (30.44 * 24 * 60 * 60 * 1000)));
+
+      // Milyoner = seçili dönemdeki BHB'nin yıllık eşdeğeri ≥ 1M TL olan danışman
+      let milyonerSayisi = 0;
+      for (const [empId, bhb] of agentBHBByEmp) {
+        if (office && officeAsOf(empId, endYmd) !== office) continue;
+        const annualizedBHB = bhb / monthCount * 12;
+        if (annualizedBHB >= 1_000_000) milyonerSayisi++;
+      }
+      let uretenSayisi = 0;
+      for (const empId of agentEmpSet) {
+        if (office && officeAsOf(empId, endYmd) !== office) continue;
+        uretenSayisi++;
+      }
+
+      const danismanBasinaAylikBHB = danismanSayisi > 0 ? totalBHB / monthCount / danismanSayisi : 0;
+      const danismanBasinaAylikSP = danismanSayisi > 0 ? totalBM / monthCount / danismanSayisi : 0;
+
+      // ── Portföy: aktif portföy (dönem sonu itibarıyla) + alınan sözleşme (dönem içinde) ──
+      const allListings = await db.select({
+        id: listings.id, price: listings.price, employeeId: listings.employeeId,
+        firstSeenAt: listings.firstSeenAt, passiveAt: listings.passiveAt,
+        agreementUploadedAt: listings.agreementUploadedAt,
+      }).from(listings);
+
+      let aktifPortfoyAdedi = 0, aktifPortfoyHacmi = 0;
+      const portfoySahibiSet = new Set<number>();
+      let alinanSozlesmeAdedi = 0, alinanSozlesmeHacmi = 0;
+
+      for (const l of allListings) {
+        if (l.employeeId && office && officeAsOf(l.employeeId, endYmd) !== office) continue;
+        const firstSeen = l.firstSeenAt ? new Date(l.firstSeenAt) : null;
+        const wentPassive = l.passiveAt ? new Date(l.passiveAt) : null;
+        const isActiveAsOfEnd = firstSeen && firstSeen <= end && (!wentPassive || wentPassive > end);
+        if (isActiveAsOfEnd) {
+          aktifPortfoyAdedi++;
+          aktifPortfoyHacmi += parseFloat(l.price ?? "0");
+          if (l.employeeId) portfoySahibiSet.add(l.employeeId);
+        }
+        if (l.agreementUploadedAt) {
+          const uploaded = new Date(l.agreementUploadedAt);
+          if (uploaded >= start && uploaded <= end) {
+            alinanSozlesmeAdedi++;
+            alinanSozlesmeHacmi += parseFloat(l.price ?? "0");
+          }
+        }
+      }
+
+      const saticiAliciToplam = bySideType.buyer + bySideType.seller;
+      const saticiAliciDengesi = saticiAliciToplam > 0
+        ? { satici: Math.round(bySideType.seller / saticiAliciToplam * 100), alici: Math.round(bySideType.buyer / saticiAliciToplam * 100) }
+        : { satici: 0, alici: 0 };
+
+      return {
+        totalBHB, satilikBHB, kiralikBHB,
+        totalVolume, satilikVolume, kiralikVolume,
+        totalCount: Math.round(totalCount), satilikCount: Math.round(satilikCount), kiralikCount: Math.round(kiralikCount),
+        danismanSayisi, capperSayisi, milyonerSayisi, uretenSayisi,
+        danismanBasinaAylikBHB, danismanBasinaAylikSP,
+        kepliKepsizOrani,
+        portfoyuOlanDanismanSayisi: portfoySahibiSet.size,
+        alinanSozlesmeAdedi, alinanSozlesmeHacmi,
+        aktifPortfoyAdedi, aktifPortfoyHacmi,
+        saticiAliciDengesi,
+        ortalamaSatisFiyati,
+        priceBuckets: priceBucketsOut,
+        kapanisSuresi, durationBuckets,
+        indirimOrani,
+        icerideKapanmaOrani,
+      };
+    };
+
+    const scopes: (string | undefined)[] = [undefined, "Akatlar", "Zekeriyaköy"];
+    const result: Record<string, { periodA: any; periodB: any }> = {};
+    for (const office of scopes) {
+      const key = office ?? "Konsolide";
+      result[key] = {
+        periodA: await computeScope(periodAStart, periodAEnd, office, capStatusA),
+        periodB: await computeScope(periodBStart, periodBEnd, office, capStatusB),
+      };
+    }
+    return result;
   }
 
   async getFinancialTargets(year: number, office: string = ""): Promise<FinancialTarget[]> {

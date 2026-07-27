@@ -24,6 +24,8 @@ import Coaching from "@/pages/Coaching";
 import Expenses from "@/pages/Expenses";
 import ExpenseReports from "@/pages/ExpenseReports";
 import DuplicateMerge from "@/pages/DuplicateMerge";
+import Campaigns from "@/pages/Campaigns";
+import CampaignDetail from "@/pages/CampaignDetail";
 import PLReport from "@/pages/PLReport";
 import Listings from "@/pages/Listings";
 import ListingReports from "@/pages/ListingReports";
@@ -83,7 +85,7 @@ function Router() {
       <Route path="/closings" component={() => <ProtectedRoute adminOnly><Closings /></ProtectedRoute>} />
       <Route path="/listings" component={() => <ProtectedRoute><Listings /></ProtectedRoute>} />
       <Route path="/listings/reports" component={() => <ProtectedRoute noAssistant><ListingReports /></ProtectedRoute>} />
-      <Route path="/closing-analytics" component={() => <ProtectedRoute adminOnly><ClosingAnalytics /></ProtectedRoute>} />
+      <Route path="/closing-analytics" component={() => <ProtectedRoute noAssistant><ClosingAnalytics /></ProtectedRoute>} />
       <Route path="/agent-health" component={() => <ProtectedRoute noAssistant><AgentHealth /></ProtectedRoute>} />
       <Route path="/financial-reports" component={() => <ProtectedRoute financialsOnly><FinancialReports /></ProtectedRoute>} />
       <Route path="/cap-report" component={() => <ProtectedRoute adminOnly><CapReport /></ProtectedRoute>} />
@@ -91,6 +93,8 @@ function Router() {
       <Route path="/expenses" component={() => <ProtectedRoute adminOnly><Expenses /></ProtectedRoute>} />
       <Route path="/expense-reports" component={() => <ProtectedRoute adminOnly><ExpenseReports /></ProtectedRoute>} />
       <Route path="/duplicate-merge" component={() => <ProtectedRoute adminOnly><DuplicateMerge /></ProtectedRoute>} />
+      <Route path="/campaigns" component={() => <ProtectedRoute><Campaigns /></ProtectedRoute>} />
+      <Route path="/campaigns/:id" component={() => <ProtectedRoute><CampaignDetail /></ProtectedRoute>} />
       <Route path="/pl-report" component={() => <ProtectedRoute adminOnly><PLReport /></ProtectedRoute>} />
       <Route path="/teams" component={() => <ProtectedRoute adminOnly><Teams /></ProtectedRoute>} />
       <Route path="/fonzip" component={() => <ProtectedRoute adminOnly><FonzipPreview /></ProtectedRoute>} />

@@ -1,13 +1,14 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, Fragment } from "react";
 import { Layout } from "@/components/Layout";
-import { useClosingAnalytics, useClosingLocations, type Currency } from "@/hooks/use-stats";
+import { useClosingAnalytics, useClosingLocations, usePeriodComparison, type Currency, type PeriodComparisonScope } from "@/hooks/use-stats";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
   Line, Legend, LineChart,
 } from "recharts";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { TrendingUp, MapPin, Home, DollarSign, Percent, Clock, Layers, Building2, Maximize2 } from "lucide-react";
+import { TrendingUp, MapPin, Home, DollarSign, Percent, Clock, Layers, Building2, Maximize2, ArrowLeftRight } from "lucide-react";
 
 const OFFICE_OPTIONS = [
   { label: "Her İki Ofis", value: undefined },
@@ -119,6 +120,66 @@ function aggregateByYear(
 const TOOLTIP_STYLE = { borderRadius: 8, border: "1px solid #e5e7eb", fontSize: 12 };
 const AXIS_PROPS = { axisLine: false, tickLine: false, tick: { fontSize: 11 } } as const;
 
+const fmtInt = (v: number) => new Intl.NumberFormat("tr-TR").format(Math.round(v));
+
+// Yıl bazlı dip toplam / ortalama tablosu — grafiklerin altında gösterilir
+function TrendTable({ years, rows, footer, formatValue }: {
+  years: string[];
+  rows: { label: string; values: Record<string, number> }[];
+  footer?: { label: string; values: Record<string, number> };
+  formatValue: (v: number) => string;
+}) {
+  if (years.length === 0 || rows.length === 0) return null;
+  return (
+    <div className="mt-4 overflow-x-auto rounded-lg border border-border">
+      <table className="w-full text-xs">
+        <thead className="bg-muted/40">
+          <tr>
+            <th className="text-left px-3 py-2 font-medium text-muted-foreground">{rows.length === 1 ? "" : "Kategori"}</th>
+            {years.map((y) => <th key={y} className="text-right px-3 py-2 font-medium text-muted-foreground">{y}</th>)}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border">
+          {rows.map((r) => (
+            <tr key={r.label}>
+              <td className="px-3 py-1.5 font-medium whitespace-nowrap">{r.label}</td>
+              {years.map((y) => <td key={y} className="text-right px-3 py-1.5 tabular-nums">{formatValue(r.values[y] ?? 0)}</td>)}
+            </tr>
+          ))}
+        </tbody>
+        {footer && (
+          <tfoot>
+            <tr className="border-t-2 border-border bg-muted/20 font-semibold">
+              <td className="px-3 py-1.5">{footer.label}</td>
+              {years.map((y) => <td key={y} className="text-right px-3 py-1.5 tabular-nums">{formatValue(footer.values[y] ?? 0)}</td>)}
+            </tr>
+          </tfoot>
+        )}
+      </table>
+    </div>
+  );
+}
+
+// aggregateByYear sonucunu {label, values} satırlarına + "Toplam"/"Genel Ortalama" alt satırına çevirir
+function pivotToRows(
+  agg: { data: Record<string, any>[]; years: string[] },
+  mode: "sum" | "avg",
+  footerLabel: string,
+): { rows: { label: string; values: Record<string, number> }[]; footer: { label: string; values: Record<string, number> } } {
+  const rows = agg.data.map((d) => ({
+    label: d.name as string,
+    values: Object.fromEntries(agg.years.map((y) => [y, Number(d[y]) || 0])),
+  }));
+  const footerValues: Record<string, number> = {};
+  for (const y of agg.years) {
+    const vals = rows.map((r) => r.values[y] ?? 0);
+    footerValues[y] = mode === "sum"
+      ? vals.reduce((s, v) => s + v, 0)
+      : (vals.filter((v) => v > 0).length ? vals.filter((v) => v > 0).reduce((s, v) => s + v, 0) / vals.filter((v) => v > 0).length : 0);
+  }
+  return { rows, footer: { label: footerLabel, values: footerValues } };
+}
+
 function Card({ icon: Icon, title, subtitle, onExpand, children }: {
   icon: any; title: string; subtitle?: string; onExpand?: () => void; children: React.ReactNode;
 }) {
@@ -161,6 +222,165 @@ const MONTH_OPTIONS = [
 
 // Wide fixed range — fetch all years' data; month filter is applied on the frontend
 const WIDE_FROM = "2020-01-01";
+
+type Fmt = "money" | "int" | "percent" | "days";
+
+function fmtByType(v: number, fmt: Fmt): string {
+  switch (fmt) {
+    case "money": return fmtMoneyFull(v, "TL");
+    case "int": return fmtInt(v);
+    case "percent": return `${v.toFixed(1)}%`;
+    case "days": return `${Math.round(v)} gün`;
+  }
+}
+
+// null = A değeri 0 olduğu için gelişim % hesaplanamıyor
+function growthPct(a: number, b: number): number | null {
+  if (!a) return b ? null : 0;
+  return ((b - a) / a) * 100;
+}
+
+const PRICE_BUCKET_LABELS = [
+  "10 milyon altı", "10-20 milyon arası", "20-30 milyon arası", "30-40 milyon arası",
+  "40-50 milyon arası", "50-75 milyon arası", "75-100 milyon arası", "100-150 milyon arası", "150 milyon üstü",
+];
+const DURATION_BUCKET_LABELS = ["0-3 ay arası", "3-6 ay arası", "6 aydan çok"];
+
+type MetricRow = { label: string; fmt: Fmt; get: (s: PeriodComparisonScope) => number; indent?: boolean };
+
+const METRIC_ROWS: MetricRow[] = [
+  { label: "Toplam BHB", fmt: "money", get: (s) => s.totalBHB },
+  { label: "Satılık BHB", fmt: "money", get: (s) => s.satilikBHB, indent: true },
+  { label: "Kiralık BHB", fmt: "money", get: (s) => s.kiralikBHB, indent: true },
+  { label: "Toplam Hacim", fmt: "money", get: (s) => s.totalVolume },
+  { label: "Satılık Hacim", fmt: "money", get: (s) => s.satilikVolume, indent: true },
+  { label: "Kiralık Hacim", fmt: "money", get: (s) => s.kiralikVolume, indent: true },
+  { label: "Toplam İşlem Adedi", fmt: "int", get: (s) => s.totalCount },
+  { label: "Satılık Adedi", fmt: "int", get: (s) => s.satilikCount, indent: true },
+  { label: "Kiralık Adedi", fmt: "int", get: (s) => s.kiralikCount, indent: true },
+  { label: "Danışman Sayısı", fmt: "int", get: (s) => s.danismanSayisi },
+  { label: "Üreten Danışman Sayısı", fmt: "int", get: (s) => s.uretenSayisi },
+  { label: "Milyoner Sayısı (Yıllık BHB ≥ 1M)", fmt: "int", get: (s) => s.milyonerSayisi },
+  { label: "Capper Sayısı", fmt: "int", get: (s) => s.capperSayisi },
+  { label: "Kepli Oranı", fmt: "percent", get: (s) => s.kepliKepsizOrani.kepli },
+  { label: "Kepsiz Oranı", fmt: "percent", get: (s) => s.kepliKepsizOrani.kepsiz },
+  { label: "Danışman Başına Aylık BHB", fmt: "money", get: (s) => s.danismanBasinaAylikBHB },
+  { label: "Danışman Başına Aylık Ş.P. (BM Payı)", fmt: "money", get: (s) => s.danismanBasinaAylikSP },
+  { label: "Satıcı Tarafı Oranı", fmt: "percent", get: (s) => s.saticiAliciDengesi.satici },
+  { label: "Alıcı Tarafı Oranı", fmt: "percent", get: (s) => s.saticiAliciDengesi.alici },
+  { label: "İçeride Kapanma Oranı", fmt: "percent", get: (s) => s.icerideKapanmaOrani },
+  { label: "Ortalama Satış Fiyatı", fmt: "money", get: (s) => s.ortalamaSatisFiyati },
+  { label: "İndirim Oranı (Açılış Fiyatına Göre)", fmt: "percent", get: (s) => s.indirimOrani },
+  { label: "Ortalama Kapanış Süresi", fmt: "days", get: (s) => s.kapanisSuresi },
+  ...DURATION_BUCKET_LABELS.map((label, i) => ({
+    label: `Süre Dilimi: ${label}`, fmt: "int" as Fmt,
+    get: (s: PeriodComparisonScope) => s.durationBuckets[i]?.count ?? 0, indent: true,
+  })),
+  { label: "Portföyü Olan Danışman Sayısı", fmt: "int", get: (s) => s.portfoyuOlanDanismanSayisi },
+  { label: "Alınan Sözleşme Adedi", fmt: "int", get: (s) => s.alinanSozlesmeAdedi },
+  { label: "Alınan Sözleşme Hacmi", fmt: "money", get: (s) => s.alinanSozlesmeHacmi },
+  { label: "Aktif Portföy Adedi", fmt: "int", get: (s) => s.aktifPortfoyAdedi },
+  { label: "Aktif Portföy Hacmi", fmt: "money", get: (s) => s.aktifPortfoyHacmi },
+  ...PRICE_BUCKET_LABELS.map((label, i) => ({
+    label: `Fiyat Dilimi: ${label}`, fmt: "int" as Fmt,
+    get: (s: PeriodComparisonScope) => s.priceBuckets[i]?.count ?? 0, indent: true,
+  })),
+];
+
+const SCOPE_KEYS = ["Akatlar", "Zekeriyaköy", "Konsolide"] as const;
+
+function PeriodComparisonSection() {
+  const today = useMemo(() => new Date(), []);
+  const [periodAStart, setPeriodAStart] = useState(formatYMD(new Date(today.getFullYear() - 1, 0, 1)));
+  const [periodAEnd, setPeriodAEnd] = useState(formatYMD(new Date(today.getFullYear() - 1, today.getMonth(), today.getDate())));
+  const [periodBStart, setPeriodBStart] = useState(formatYMD(new Date(today.getFullYear(), 0, 1)));
+  const [periodBEnd, setPeriodBEnd] = useState(formatYMD(today));
+
+  const { data, isLoading } = usePeriodComparison(periodAStart, periodAEnd, periodBStart, periodBEnd);
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-5 shadow-sm space-y-4">
+      <div className="flex items-center gap-2">
+        <ArrowLeftRight className="h-4 w-4 text-primary" />
+        <h2 className="text-base font-semibold">Dönem Karşılaştırma Raporu</h2>
+      </div>
+      <p className="text-xs text-muted-foreground -mt-3">İki dönemi, ofis bazında (Akatlar / Zekeriyaköy / Konsolide) karşılaştırır</p>
+
+      <div className="flex flex-wrap gap-4 items-end">
+        <div className="flex items-end gap-2">
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">Dönem A başlangıç</label>
+            <Input type="date" className="h-8 text-xs w-[150px]" value={periodAStart} onChange={(e) => setPeriodAStart(e.target.value)} />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">Dönem A bitiş</label>
+            <Input type="date" className="h-8 text-xs w-[150px]" value={periodAEnd} onChange={(e) => setPeriodAEnd(e.target.value)} />
+          </div>
+        </div>
+        <span className="text-muted-foreground text-sm pb-2">vs</span>
+        <div className="flex items-end gap-2">
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">Dönem B başlangıç</label>
+            <Input type="date" className="h-8 text-xs w-[150px]" value={periodBStart} onChange={(e) => setPeriodBStart(e.target.value)} />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">Dönem B bitiş</label>
+            <Input type="date" className="h-8 text-xs w-[150px]" value={periodBEnd} onChange={(e) => setPeriodBEnd(e.target.value)} />
+          </div>
+        </div>
+      </div>
+
+      {isLoading && <div className="h-40 bg-muted/40 rounded-lg animate-pulse" />}
+
+      {!isLoading && data && (
+        <div className="overflow-x-auto rounded-lg border border-border">
+          <table className="w-full text-xs">
+            <thead className="bg-muted/40">
+              <tr>
+                <th rowSpan={2} className="text-left px-3 py-2 font-medium text-muted-foreground align-bottom">Metrik</th>
+                {SCOPE_KEYS.map((key) => (
+                  <th key={key} colSpan={3} className="text-center px-3 py-2 font-semibold border-l border-border">{key}</th>
+                ))}
+              </tr>
+              <tr>
+                {SCOPE_KEYS.map((key) => (
+                  <Fragment key={key}>
+                    <th className="text-right px-3 py-1.5 font-medium text-muted-foreground border-l border-border">Dönem A</th>
+                    <th className="text-right px-3 py-1.5 font-medium text-muted-foreground">Dönem B</th>
+                    <th className="text-right px-3 py-1.5 font-medium text-muted-foreground">Gelişim</th>
+                  </Fragment>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {METRIC_ROWS.map((row) => (
+                <tr key={row.label}>
+                  <td className={`px-3 py-1.5 font-medium whitespace-nowrap ${row.indent ? "pl-6 text-muted-foreground font-normal" : ""}`}>{row.label}</td>
+                  {SCOPE_KEYS.map((key) => {
+                    const scope = data[key];
+                    if (!scope) return <td key={key} colSpan={3} className="text-right px-3 py-1.5 border-l border-border">—</td>;
+                    const a = row.get(scope.periodA);
+                    const b = row.get(scope.periodB);
+                    const g = growthPct(a, b);
+                    return (
+                      <Fragment key={key}>
+                        <td className="text-right px-3 py-1.5 tabular-nums border-l border-border">{fmtByType(a, row.fmt)}</td>
+                        <td className="text-right px-3 py-1.5 tabular-nums">{fmtByType(b, row.fmt)}</td>
+                        <td className={`text-right px-3 py-1.5 tabular-nums font-medium ${g === null ? "text-muted-foreground" : g > 0 ? "text-emerald-600" : g < 0 ? "text-red-600" : "text-muted-foreground"}`}>
+                          {g === null ? "—" : `${g > 0 ? "+" : ""}${g.toFixed(1)}%`}
+                        </td>
+                      </Fragment>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function ClosingAnalytics() {
   const [startMonth, setStartMonth] = useState(1);   // Ocak
@@ -213,8 +433,8 @@ export default function ClosingAnalytics() {
         {/* Header + filters */}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-2xl font-display font-bold text-foreground">Kapanış Analitiği</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">Yıllık karşılaştırmalı trend raporları</p>
+            <h1 className="text-2xl font-display font-bold text-foreground">Trend Raporları</h1>
+            <p className="text-sm text-muted-foreground mt-0.5">Yıllık karşılaştırmalı kapanış trendleri</p>
           </div>
           <div className="flex flex-wrap gap-2 items-center">
             <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-1">
@@ -263,6 +483,8 @@ export default function ClosingAnalytics() {
             </div>
           </div>
         </div>
+
+        <PeriodComparisonSection />
 
         {/* Month range + location controls */}
         <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-3 shadow-sm">
@@ -320,7 +542,7 @@ export default function ClosingAnalytics() {
         </div>
 
         {(() => {
-          type ChartDef = { id: string; icon: any; title: string; subtitle: string; hasData: boolean; render: (h: number) => JSX.Element };
+          type ChartDef = { id: string; icon: any; title: string; subtitle: string; hasData: boolean; render: (h: number) => JSX.Element; table: JSX.Element | null };
 
           // Pre-filter data to selected month range before YoY pivots
           const fVol   = filterByMonths(data?.monthlyVolume ?? [], startMonth, endMonth);
@@ -357,6 +579,13 @@ export default function ClosingAnalytics() {
                   </ResponsiveContainer>
                 );
               },
+              table: (() => {
+                const { data: yoy, years } = yoyMonthly(fVol, "count");
+                if (years.length === 0) return null;
+                const totals: Record<string, number> = {};
+                for (const yr of years) totals[yr] = yoy.reduce((s, row) => s + (Number(row[yr]) || 0), 0);
+                return <TrendTable years={years} rows={[{ label: "Toplam Kapanış", values: totals }]} formatValue={fmtInt} />;
+              })(),
             },
 
             // ── 2. Ortalama fiyat: X=ay, lines per year
@@ -386,6 +615,16 @@ export default function ClosingAnalytics() {
                   </ResponsiveContainer>
                 );
               },
+              table: (() => {
+                const { data: yoy, years } = yoyMonthly(fPrice, "avgPrice");
+                if (years.length === 0) return null;
+                const avgs: Record<string, number> = {};
+                for (const yr of years) {
+                  const vals = yoy.map((row) => Number(row[yr]) || 0).filter((v) => v > 0);
+                  avgs[yr] = vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : 0;
+                }
+                return <TrendTable years={years} rows={[{ label: "Ortalama Fiyat", values: avgs }]} formatValue={(v) => fmtMoneyFull(v, currency)} />;
+              })(),
             },
 
             // ── 3. İlçe: X=ilçe, grouped bars per year
@@ -412,6 +651,12 @@ export default function ClosingAnalytics() {
                   </ResponsiveContainer>
                 );
               },
+              table: (() => {
+                const agg = aggregateByYear(fDist, "sum");
+                if (agg.years.length === 0) return null;
+                const { rows, footer } = pivotToRows(agg, "sum", "Toplam");
+                return <TrendTable years={agg.years} rows={rows} footer={footer} formatValue={fmtInt} />;
+              })(),
             },
 
             // ── 4. Mahalle: X=mahalle, grouped bars per year
@@ -438,6 +683,12 @@ export default function ClosingAnalytics() {
                   </ResponsiveContainer>
                 );
               },
+              table: (() => {
+                const agg = aggregateByYear(fNeigh, "sum");
+                if (agg.years.length === 0) return null;
+                const { rows, footer } = pivotToRows(agg, "sum", "Toplam");
+                return <TrendTable years={agg.years} rows={rows} footer={footer} formatValue={fmtInt} />;
+              })(),
             },
 
             // ── 5. Fiyat aralığı: X=fiyat dilimi, grouped bars per year
@@ -464,6 +715,12 @@ export default function ClosingAnalytics() {
                   </ResponsiveContainer>
                 );
               },
+              table: (() => {
+                const agg = aggregateByYear(fRange, "sum");
+                if (agg.years.length === 0) return null;
+                const { rows, footer } = pivotToRows(agg, "sum", "Toplam");
+                return <TrendTable years={agg.years} rows={rows} footer={footer} formatValue={fmtInt} />;
+              })(),
             },
 
             // ── 6. Kategori: X=kategori, grouped bars per year
@@ -490,6 +747,12 @@ export default function ClosingAnalytics() {
                   </ResponsiveContainer>
                 );
               },
+              table: (() => {
+                const agg = aggregateByYear(fCat, "sum");
+                if (agg.years.length === 0) return null;
+                const { rows, footer } = pivotToRows(agg, "sum", "Toplam");
+                return <TrendTable years={agg.years} rows={rows} footer={footer} formatValue={fmtInt} />;
+              })(),
             },
 
             // ── 7. Komisyon: X=kategori, grouped bars per year (avg %)
@@ -519,6 +782,12 @@ export default function ClosingAnalytics() {
                   </ResponsiveContainer>
                 );
               },
+              table: (() => {
+                const agg = aggregateByYear(fComm, "avg");
+                if (agg.years.length === 0) return null;
+                const { rows, footer } = pivotToRows(agg, "avg", "Genel Ortalama");
+                return <TrendTable years={agg.years} rows={rows} footer={footer} formatValue={(v) => `${v.toFixed(2)}%`} />;
+              })(),
             },
 
             // ── 8. Süre: X=kategori, grouped bars per year (avg gün)
@@ -548,6 +817,12 @@ export default function ClosingAnalytics() {
                   </ResponsiveContainer>
                 );
               },
+              table: (() => {
+                const agg = aggregateByYear(fDur, "avg");
+                if (agg.years.length === 0) return null;
+                const { rows, footer } = pivotToRows(agg, "avg", "Genel Ortalama");
+                return <TrendTable years={agg.years} rows={rows} footer={footer} formatValue={(v) => `${Math.round(v)} gün`} />;
+              })(),
             },
           ];
 
@@ -568,6 +843,7 @@ export default function ClosingAnalytics() {
                       onExpand={() => setExpandedChart(def.id)}
                     >
                       {renderCardBody(def, 290)}
+                      {!isLoading && def.hasData && def.table}
                     </Card>
                   ))}
                 </div>
@@ -584,6 +860,7 @@ export default function ClosingAnalytics() {
                   </DialogHeader>
                   <div className="mt-4">
                     {active && renderCardBody(active, 600)}
+                    {active && !isLoading && active.hasData && active.table}
                   </div>
                 </DialogContent>
               </Dialog>

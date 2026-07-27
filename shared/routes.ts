@@ -45,6 +45,7 @@ export const api = {
     employeeTrend:     { method: 'GET' as const, path: '/api/stats/employee-trend' },
     closingAnalytics:  { method: 'GET' as const, path: '/api/stats/closing-analytics' },
     closingLocations:  { method: 'GET' as const, path: '/api/stats/closing-locations' },
+    periodComparison:  { method: 'GET' as const, path: '/api/stats/period-comparison' },
   },
 };
 

@@ -1715,6 +1715,22 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  app.get(api.stats.periodComparison.path, requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
+    try {
+      const periodAStart = new Date(req.query.periodAStart as string);
+      const periodAEnd = new Date(req.query.periodAEnd as string);
+      const periodBStart = new Date(req.query.periodBStart as string);
+      const periodBEnd = new Date(req.query.periodBEnd as string);
+      if ([periodAStart, periodAEnd, periodBStart, periodBEnd].some(d => isNaN(d.getTime()))) {
+        return res.status(400).json({ message: "periodAStart, periodAEnd, periodBStart, periodBEnd required" });
+      }
+      res.json(await storage.getPeriodComparisonReport(periodAStart, periodAEnd, periodBStart, periodBEnd));
+    } catch (err) {
+      console.error("[GET /api/stats/period-comparison]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   app.get(api.stats.closingLocations.path, requireAuth, requireHiringManagerOrAdmin, async (_req, res) => {
     try {
       res.json(await storage.getClosingLocations());
@@ -2846,6 +2862,71 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // ── Office Expenses ────────────────────────────────────────────────────────
+
+  // ── Kampanya Modülü ───────────────────────────────────────────────────────
+  app.get("/api/campaigns", requireAuth, async (_req, res) => {
+    try { res.json(await storage.getCampaigns()); }
+    catch (err: any) { console.error("[GET /api/campaigns]", err); res.status(500).json({ message: err.message }); }
+  });
+
+  app.get("/api/campaigns/:id", requireAuth, async (req, res) => {
+    try {
+      const c = await storage.getCampaign(Number(req.params.id));
+      if (!c) return res.status(404).json({ message: "Kampanya bulunamadı" });
+      res.json(c);
+    } catch (err: any) { console.error("[GET /api/campaigns/:id]", err); res.status(500).json({ message: err.message }); }
+  });
+
+  app.post("/api/campaigns", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const { name, description, status, startDate, endDate } = req.body ?? {};
+      if (!name || !String(name).trim()) return res.status(400).json({ message: "Kampanya adı gerekli" });
+      const userId = (req as any).user?.id ?? null;
+      const created = await storage.createCampaign({ name: name.trim(), description, status, startDate, endDate, createdByUserId: userId });
+      res.status(201).json(created);
+    } catch (err: any) { console.error("[POST /api/campaigns]", err); res.status(500).json({ message: err.message }); }
+  });
+
+  app.patch("/api/campaigns/:id", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      await storage.updateCampaign(Number(req.params.id), req.body ?? {});
+      res.json(await storage.getCampaign(Number(req.params.id)));
+    } catch (err: any) { console.error("[PATCH /api/campaigns/:id]", err); res.status(500).json({ message: err.message }); }
+  });
+
+  app.delete("/api/campaigns/:id", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      await storage.deleteCampaign(Number(req.params.id));
+      res.status(204).send();
+    } catch (err: any) { console.error("[DELETE /api/campaigns/:id]", err); res.status(500).json({ message: err.message }); }
+  });
+
+  app.get("/api/campaigns/:id/expenses", requireAuth, requireAdmin, async (req, res) => {
+    try { res.json(await storage.getCampaignExpenses(Number(req.params.id))); }
+    catch (err: any) { res.status(500).json({ message: err.message }); }
+  });
+
+  app.post("/api/campaigns/:id/expenses", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const { amount, date, notes } = req.body ?? {};
+      if (!amount || !date) return res.status(400).json({ message: "amount ve date gerekli" });
+      const userId = (req as any).user?.id ?? null;
+      const created = await storage.createCampaignExpense({ campaignId: Number(req.params.id), amount: String(amount), date, notes, createdByUserId: userId });
+      res.status(201).json(created);
+    } catch (err: any) { console.error("[POST /api/campaigns/:id/expenses]", err); res.status(500).json({ message: err.message }); }
+  });
+
+  app.delete("/api/campaigns/expenses/:expenseId", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      await storage.deleteCampaignExpense(Number(req.params.expenseId));
+      res.status(204).send();
+    } catch (err: any) { res.status(500).json({ message: err.message }); }
+  });
+
+  app.get("/api/campaigns/:id/leads", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
+    try { res.json(await storage.getCampaignLeads(Number(req.params.id))); }
+    catch (err: any) { res.status(500).json({ message: err.message }); }
+  });
 
   // ── Employee Office History (transferler) ────────────────────────────────
   app.get("/api/employees/:id/office-history", requireAuth, async (req, res) => {

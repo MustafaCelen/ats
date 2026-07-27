@@ -65,6 +65,23 @@ async function run() {
     );
     CREATE INDEX IF NOT EXISTS candidate_merge_log_target_idx ON candidate_merge_log(target_id);
     CREATE INDEX IF NOT EXISTS candidate_merge_log_performed_idx ON candidate_merge_log(performed_at);
+
+    ALTER TABLE candidates ADD COLUMN IF NOT EXISTS campaign_id INTEGER;
+    CREATE INDEX IF NOT EXISTS candidates_campaign_idx ON candidates(campaign_id);
+
+    CREATE TABLE IF NOT EXISTS campaigns (
+      id SERIAL PRIMARY KEY, name TEXT NOT NULL, description TEXT,
+      status TEXT NOT NULL DEFAULT 'active', platform TEXT NOT NULL DEFAULT 'manual',
+      external_id TEXT, start_date TEXT, end_date TEXT,
+      created_by_user_id INTEGER, created_at TIMESTAMP DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS campaign_expenses (
+      id SERIAL PRIMARY KEY, campaign_id INTEGER NOT NULL,
+      amount NUMERIC(15,2) NOT NULL, date TEXT NOT NULL, notes TEXT,
+      created_by_user_id INTEGER, created_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS campaign_expenses_campaign_idx ON campaign_expenses(campaign_id);
   \`;
   await pool.query(sql);
   console.log('[ensure-tables] OK');

@@ -137,6 +137,7 @@ export const candidates = pgTable("candidates", {
   emergencyContactName: text("emergency_contact_name"),
   emergencyContactPhone: text("emergency_contact_phone"),
   office: text("office"),                            // "Akatlar" | "Zekeriyaköy"
+  campaignId: integer("campaign_id"),                // Hangi kampanyadan geldi (opsiyonel)
   createdByUserId: integer("created_by_user_id"),
   createdAt: timestamp("created_at").defaultNow(),
 });
@@ -659,6 +660,43 @@ export const candidateMergeLog = pgTable("candidate_merge_log", {
   performedAtIdx: index("candidate_merge_log_performed_idx").on(t.performedAt),
 }));
 export type CandidateMergeLog = typeof candidateMergeLog.$inferSelect;
+
+// ── Kampanya Modülü ───────────────────────────────────────────────────────
+// Manuel oluşturulan pazarlama/işe alım kampanyaları. İleride Meta Ads API
+// entegrasyonu ile otomatik senkronize edilecek (platform + externalId bu yüzden hazır).
+export const CAMPAIGN_STATUSES = ["active", "paused", "ended"] as const;
+export type CampaignStatus = (typeof CAMPAIGN_STATUSES)[number];
+
+export const campaigns = pgTable("campaigns", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description"),
+  status: text("status").notNull().default("active"), // active | paused | ended
+  platform: text("platform").notNull().default("manual"), // manual | meta | google (gelecekte)
+  externalId: text("external_id"), // Meta kampanya ID'si (ileride otomatik sync için)
+  startDate: text("start_date"),   // YYYY-MM-DD
+  endDate: text("end_date"),       // YYYY-MM-DD, null = devam ediyor
+  createdByUserId: integer("created_by_user_id"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+export const insertCampaignSchema = createInsertSchema(campaigns).omit({ id: true, createdAt: true });
+export type InsertCampaign = z.infer<typeof insertCampaignSchema>;
+export type Campaign = typeof campaigns.$inferSelect;
+
+export const campaignExpenses = pgTable("campaign_expenses", {
+  id: serial("id").primaryKey(),
+  campaignId: integer("campaign_id").notNull(),
+  amount: numeric("amount", { precision: 15, scale: 2 }).notNull(),
+  date: text("date").notNull(), // YYYY-MM-DD
+  notes: text("notes"),
+  createdByUserId: integer("created_by_user_id"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (t) => ({
+  campaignIdx: index("campaign_expenses_campaign_idx").on(t.campaignId),
+}));
+export const insertCampaignExpenseSchema = createInsertSchema(campaignExpenses).omit({ id: true, createdAt: true });
+export type InsertCampaignExpense = z.infer<typeof insertCampaignExpenseSchema>;
+export type CampaignExpense = typeof campaignExpenses.$inferSelect;
 
 // ── Listings (Portal İlanları — KW Platin & Karma) ────────────────────────────
 

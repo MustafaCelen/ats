@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Layout } from "@/components/Layout";
 import { Link } from "wouter";
+import { useQuery } from "@tanstack/react-query";
 import { useCandidates, useCreateCandidate } from "@/hooks/use-candidates";
 import { useJobs, useAllJobs } from "@/hooks/use-jobs";
 import { useApplications, useCreateApplication } from "@/hooks/use-applications";
@@ -345,8 +346,14 @@ function CreateCandidateDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     currentBrand: "", licenseStatus: "unlicensed", licenseNumber: "",
     city: "", district: "", experience: "0",
     referredBy: "", socialMedia: "", resumeText: "",
-    office: "",
+    office: "", campaignId: "",
   });
+
+  const { data: campaigns = [] } = useQuery<{ id: number; name: string; status: string }[]>({
+    queryKey: ["/api/campaigns"],
+    queryFn: () => fetch("/api/campaigns", { credentials: "include" }).then(r => r.ok ? r.json() : []),
+  });
+  const activeCampaigns = campaigns.filter(c => c.status !== "ended");
   const [specialization, setSpecialization] = useState<string[]>([]);
   const [languages, setLanguages] = useState<string[]>(["Türkçe"]);
   const [selectedJobId, setSelectedJobId] = useState<string>("none");
@@ -358,7 +365,7 @@ function CreateCandidateDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const hasJobSelected = selectedJobId !== "none";
 
   const resetForm = () => {
-    setForm({ name: "", email: "", phone: "", category: "", currentBrand: "", licenseStatus: "unlicensed", licenseNumber: "", city: "", district: "", experience: "0", referredBy: "", socialMedia: "", resumeText: "", office: "" });
+    setForm({ name: "", email: "", phone: "", category: "", currentBrand: "", licenseStatus: "unlicensed", licenseNumber: "", city: "", district: "", experience: "0", referredBy: "", socialMedia: "", resumeText: "", office: "", campaignId: "" });
     setSpecialization([]); setLanguages(["Türkçe"]); setSelectedJobId("none");
     setIvDate(""); setIvStart(""); setIvEnd("");
   };
@@ -392,6 +399,7 @@ function CreateCandidateDialog({ open, onOpenChange }: { open: boolean; onOpenCh
       referredBy: form.referredBy || undefined,
       socialMedia: form.socialMedia || undefined,
       resumeText: form.resumeText || undefined,
+      campaignId: form.campaignId ? Number(form.campaignId) : undefined,
       tags: [],
     } as InsertCandidate, {
       onSuccess: (newCandidate) => {
@@ -571,6 +579,17 @@ function CreateCandidateDialog({ open, onOpenChange }: { open: boolean; onOpenCh
           {/* Other */}
           <Section title="Diğer">
             <div className="space-y-3">
+              <Field label="Kampanya (opsiyonel)">
+                <Select value={form.campaignId || "none"} onValueChange={(v) => f("campaignId", v === "none" ? "" : v)}>
+                  <SelectTrigger><SelectValue placeholder="Kampanya seçin (opsiyonel)..." /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">— Yok —</SelectItem>
+                    {activeCampaigns.map((c) => (
+                      <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
               <Field label="Referans (kim tanıttı?)">
                 <Input value={form.referredBy} onChange={(e) => f("referredBy", e.target.value)} placeholder="Ad Soyad veya kaynak" />
               </Field>

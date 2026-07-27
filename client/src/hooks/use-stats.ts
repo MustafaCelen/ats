@@ -87,3 +87,40 @@ export function useClosingLocations() {
     staleTime: 5 * 60 * 1000,
   });
 }
+
+export type PeriodComparisonScope = {
+  totalBHB: number; satilikBHB: number; kiralikBHB: number;
+  totalVolume: number; satilikVolume: number; kiralikVolume: number;
+  totalCount: number; satilikCount: number; kiralikCount: number;
+  danismanSayisi: number; capperSayisi: number; milyonerSayisi: number; uretenSayisi: number;
+  danismanBasinaAylikBHB: number; danismanBasinaAylikSP: number;
+  kepliKepsizOrani: { kepli: number; kepsiz: number };
+  portfoyuOlanDanismanSayisi: number;
+  alinanSozlesmeAdedi: number; alinanSozlesmeHacmi: number;
+  aktifPortfoyAdedi: number; aktifPortfoyHacmi: number;
+  saticiAliciDengesi: { satici: number; alici: number };
+  ortalamaSatisFiyati: number;
+  priceBuckets: { label: string; count: number; avgDuration: number | null }[];
+  kapanisSuresi: number;
+  durationBuckets: { label: string; count: number }[];
+  indirimOrani: number;
+  icerideKapanmaOrani: number;
+};
+export type PeriodComparisonReport = Record<string, { periodA: PeriodComparisonScope; periodB: PeriodComparisonScope }>;
+
+export function usePeriodComparison(periodAStart?: string, periodAEnd?: string, periodBStart?: string, periodBEnd?: string) {
+  return useQuery<PeriodComparisonReport>({
+    queryKey: [api.stats.periodComparison.path, periodAStart, periodAEnd, periodBStart, periodBEnd],
+    enabled: !!(periodAStart && periodAEnd && periodBStart && periodBEnd),
+    queryFn: async () => {
+      const url = new URL(api.stats.periodComparison.path, window.location.origin);
+      url.searchParams.set("periodAStart", periodAStart!);
+      url.searchParams.set("periodAEnd", periodAEnd!);
+      url.searchParams.set("periodBStart", periodBStart!);
+      url.searchParams.set("periodBEnd", periodBEnd!);
+      const res = await fetch(url.toString(), { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to load period comparison report");
+      return res.json();
+    },
+  });
+}
