@@ -3089,17 +3089,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       // Her HM kendi hedefini girer; burada hepsinin toplamı + HM bazında döküm dönülür.
       const targetRows = (await db.execute(sql`
-        SELECT gt.user_id, gt.brut_target, gt.net_target, u.name AS user_name
+        SELECT gt.user_id, gt.brut_target_k0, gt.brut_target_k1, gt.brut_target_k2, gt.net_target, u.name AS user_name
         FROM growth_targets gt
         LEFT JOIN users u ON u.id = gt.user_id
         WHERE gt.year = ${year} AND gt.month = ${month ?? 0}
       `)).rows as any[];
-      const brutTarget = targetRows.reduce((s, r) => s + (r.brut_target ?? 0), 0);
+      const rowBrutTotal = (r: any) => (r.brut_target_k0 ?? 0) + (r.brut_target_k1 ?? 0) + (r.brut_target_k2 ?? 0);
+      const brutTarget = targetRows.reduce((s, r) => s + rowBrutTotal(r), 0);
       const netTarget = targetRows.reduce((s, r) => s + (r.net_target ?? 0), 0);
       const targetsByUser = targetRows.map((r) => ({
         userId: r.user_id,
         userName: r.user_name ?? "(eski genel hedef)",
-        brutTarget: r.brut_target ?? 0,
+        brutTargetK0: r.brut_target_k0 ?? 0,
+        brutTargetK1: r.brut_target_k1 ?? 0,
+        brutTargetK2: r.brut_target_k2 ?? 0,
+        brutTarget: rowBrutTotal(r),
         netTarget: r.net_target ?? 0,
       }));
 
@@ -3125,13 +3129,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const isAdmin = req.user!.role === "admin";
       const requestedUserId = req.query.userId ? parseInt(String(req.query.userId), 10) : null;
       const targetUserId = isAdmin ? requestedUserId : req.user!.id;
-      if (!targetUserId) return res.json({ brutTarget: 0, netTarget: 0 });
+      if (!targetUserId) return res.json({ brutTargetK0: 0, brutTargetK1: 0, brutTargetK2: 0, netTarget: 0 });
 
       const [row] = (await db.execute(sql`
-        SELECT brut_target, net_target FROM growth_targets
+        SELECT brut_target_k0, brut_target_k1, brut_target_k2, net_target FROM growth_targets
         WHERE year = ${year} AND month = ${month} AND user_id = ${targetUserId}
       `)).rows as any[];
-      res.json({ brutTarget: row?.brut_target ?? 0, netTarget: row?.net_target ?? 0 });
+      res.json({
+        brutTargetK0: row?.brut_target_k0 ?? 0,
+        brutTargetK1: row?.brut_target_k1 ?? 0,
+        brutTargetK2: row?.brut_target_k2 ?? 0,
+        netTarget: row?.net_target ?? 0,
+      });
     } catch (err) {
       console.error("[GET /api/growth/my-target]", err);
       res.status(500).json({ message: "Internal server error" });
@@ -3140,7 +3149,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/growth/my-target", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
     try {
-      const { year, month, brutTarget, netTarget, userId } = req.body ?? {};
+      const { year, month, brutTargetK0, brutTargetK1, brutTargetK2, netTarget, userId } = req.body ?? {};
       if (!year || month == null) return res.status(400).json({ message: "year, month gerekli" });
       const isAdmin = req.user!.role === "admin";
 
@@ -3156,13 +3165,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         targetUserId = req.user!.id;
       }
 
-      const b = parseInt(String(brutTarget ?? 0)) || 0;
+      const k0 = parseInt(String(brutTargetK0 ?? 0)) || 0;
+      const k1 = parseInt(String(brutTargetK1 ?? 0)) || 0;
+      const k2 = parseInt(String(brutTargetK2 ?? 0)) || 0;
       const n = parseInt(String(netTarget ?? 0)) || 0;
       const upsert = await db.execute(sql`
-        INSERT INTO growth_targets (year, month, user_id, brut_target, net_target, updated_at)
-        VALUES (${year}, ${month}, ${targetUserId}, ${b}, ${n}, NOW())
+        INSERT INTO growth_targets (year, month, user_id, brut_target_k0, brut_target_k1, brut_target_k2, net_target, updated_at)
+        VALUES (${year}, ${month}, ${targetUserId}, ${k0}, ${k1}, ${k2}, ${n}, NOW())
         ON CONFLICT (year, month, user_id)
-        DO UPDATE SET brut_target = ${b}, net_target = ${n}, updated_at = NOW()
+        DO UPDATE SET brut_target_k0 = ${k0}, brut_target_k1 = ${k1}, brut_target_k2 = ${k2}, net_target = ${n}, updated_at = NOW()
         RETURNING *
       `);
       res.json(upsert.rows[0]);
