@@ -293,8 +293,8 @@ function TargetProgressCard({ label, actual, reelTarget, highTarget, color, form
 }
 
 // ── Brüt / Net Büyüme ────────────────────────────────────────────────────
-function GrowthSection({ viewDate, isAdmin, useCustomRange, fromDate, toDate, ukOnly }: {
-  viewDate: Date; isAdmin: boolean; useCustomRange: boolean; fromDate: string; toDate: string; ukOnly: boolean;
+function GrowthSection({ viewDate, isAdmin, useCustomRange, fromDate, toDate, ukOnly, office }: {
+  viewDate: Date; isAdmin: boolean; useCustomRange: boolean; fromDate: string; toDate: string; ukOnly: boolean; office?: string;
 }) {
   const y = useCustomRange ? parseInt(fromDate.substring(0, 4)) : viewDate.getFullYear();
   const m = useCustomRange ? null : (viewDate.getMonth() + 1);
@@ -304,11 +304,12 @@ function GrowthSection({ viewDate, isAdmin, useCustomRange, fromDate, toDate, uk
     brut: number; left: number; net: number; brutTarget: number; netTarget: number;
     targetsByUser: { userId: number | null; userName: string; brutTarget: number; netTarget: number }[];
   }>({
-    queryKey: ["/api/growth/stats", y, paramMonth, ukOnly],
+    queryKey: ["/api/growth/stats", y, paramMonth, ukOnly, office ?? null],
     queryFn: () => {
       const p = new URLSearchParams({ year: String(y) });
       if (m) p.set("month", String(m));
       if (ukOnly) p.set("ukOnly", "true");
+      if (office) p.set("office", office);
       return fetch(`/api/growth/stats?${p}`, { credentials: "include" }).then(r => r.json());
     },
   });
@@ -985,7 +986,7 @@ export default function FinancialReports() {
         </div>
 
         {/* ── Brüt/Net Büyüme ── */}
-        <GrowthSection viewDate={viewDate} isAdmin={isAdmin} useCustomRange={useCustomRange} fromDate={fromDate} toDate={toDate} ukOnly={ukOnly} />
+        <GrowthSection viewDate={viewDate} isAdmin={isAdmin} useCustomRange={useCustomRange} fromDate={fromDate} toDate={toDate} ukOnly={ukOnly} office={officeFilter} />
 
         {/* ── Target Progress ── */}
         {(periodTargets.hasAny || isAdmin) && (

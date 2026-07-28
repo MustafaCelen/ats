@@ -3074,41 +3074,51 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const year = parseInt(String(req.query.year ?? new Date().getFullYear()));
       const month = req.query.month ? parseInt(String(req.query.month)) : null;
       const ukOnly = req.query.ukOnly === "true";
+      const office = req.query.office ? String(req.query.office) : null;
       const ukFilter = ukOnly
-        ? sql` AND uretkenlik_koclugu = true AND (uk_end_date IS NULL OR uk_end_date = '')`
+        ? sql` AND e.uretkenlik_koclugu = true AND (e.uk_end_date IS NULL OR e.uk_end_date = '')`
         : sql``;
+      // Ofis filtresi: danışmanın (candidate) ofisine göre
+      const officeFilter = office ? sql` AND c.office = ${office}` : sql``;
       // Belirli ay veya tüm yıl
-      let filter = sql`EXTRACT(YEAR FROM start_date) = ${year}`;
-      let leftFilter = sql`EXTRACT(YEAR FROM passive_at) = ${year}`;
+      let filter = sql`EXTRACT(YEAR FROM e.start_date) = ${year}`;
+      let leftFilter = sql`EXTRACT(YEAR FROM e.passive_at) = ${year}`;
       if (month) {
-        filter = sql`EXTRACT(YEAR FROM start_date) = ${year} AND EXTRACT(MONTH FROM start_date) = ${month}`;
-        leftFilter = sql`EXTRACT(YEAR FROM passive_at) = ${year} AND EXTRACT(MONTH FROM passive_at) = ${month}`;
+        filter = sql`EXTRACT(YEAR FROM e.start_date) = ${year} AND EXTRACT(MONTH FROM e.start_date) = ${month}`;
+        leftFilter = sql`EXTRACT(YEAR FROM e.passive_at) = ${year} AND EXTRACT(MONTH FROM e.passive_at) = ${month}`;
       }
-      const [brutRow] = (await db.execute(sql`SELECT COUNT(*)::int AS c FROM employees WHERE ${filter}${ukFilter}`)).rows as any[];
-      const [leftRow] = (await db.execute(sql`SELECT COUNT(*)::int AS c FROM employees WHERE passive_at IS NOT NULL AND ${leftFilter}${ukFilter}`)).rows as any[];
+      const [brutRow] = (await db.execute(sql`
+        SELECT COUNT(*)::int AS c FROM employees e JOIN candidates c ON c.id = e.candidate_id
+        WHERE ${filter}${ukFilter}${officeFilter}`)).rows as any[];
+      const [leftRow] = (await db.execute(sql`
+        SELECT COUNT(*)::int AS c FROM employees e JOIN candidates c ON c.id = e.candidate_id
+        WHERE e.passive_at IS NOT NULL AND ${leftFilter}${ukFilter}${officeFilter}`)).rows as any[];
 
-      // Her HM kendi hedefini (ofis bazında) girer; burada TÜM ofislerin toplamı +
-      // HM bazında (ofisler birleştirilmiş) döküm dönülür.
+      // Her HM kendi hedefini (ofis bazında) girer; office verilirse o ofisin,
+      // verilmezse tüm ofislerin toplamı + HM bazında döküm dönülür.
+      const targetOfficeFilter = office ? sql` AND gt.office = ${office}` : sql``;
       const targetRows = (await db.execute(sql`
         SELECT gt.user_id, u.name AS user_name,
           SUM(gt.brut_target_k0) AS brut_target_k0, SUM(gt.brut_target_k1) AS brut_target_k1,
           SUM(gt.brut_target_k2) AS brut_target_k2, SUM(gt.net_target) AS net_target
         FROM growth_targets gt
         LEFT JOIN users u ON u.id = gt.user_id
-        WHERE gt.year = ${year} AND gt.month = ${month ?? 0}
+        WHERE gt.year = ${year} AND gt.month = ${month ?? 0}${targetOfficeFilter}
         GROUP BY gt.user_id, u.name
       `)).rows as any[];
-      const rowBrutTotal = (r: any) => (r.brut_target_k0 ?? 0) + (r.brut_target_k1 ?? 0) + (r.brut_target_k2 ?? 0);
+      // NOT: SUM() postgres'te string döner; Number() ile toplamak şart
+      // (aksi halde "1"+"0"+"0" = "100" gibi string birleşmesi olur).
+      const rowBrutTotal = (r: any) => Number(r.brut_target_k0 ?? 0) + Number(r.brut_target_k1 ?? 0) + Number(r.brut_target_k2 ?? 0);
       const brutTarget = targetRows.reduce((s, r) => s + rowBrutTotal(r), 0);
-      const netTarget = targetRows.reduce((s, r) => s + (r.net_target ?? 0), 0);
+      const netTarget = targetRows.reduce((s, r) => s + Number(r.net_target ?? 0), 0);
       const targetsByUser = targetRows.map((r) => ({
         userId: r.user_id,
         userName: r.user_name ?? "(eski genel hedef)",
-        brutTargetK0: r.brut_target_k0 ?? 0,
-        brutTargetK1: r.brut_target_k1 ?? 0,
-        brutTargetK2: r.brut_target_k2 ?? 0,
+        brutTargetK0: Number(r.brut_target_k0 ?? 0),
+        brutTargetK1: Number(r.brut_target_k1 ?? 0),
+        brutTargetK2: Number(r.brut_target_k2 ?? 0),
         brutTarget: rowBrutTotal(r),
-        netTarget: r.net_target ?? 0,
+        netTarget: Number(r.net_target ?? 0),
       }));
 
       res.json({
