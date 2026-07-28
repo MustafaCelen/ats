@@ -5112,7 +5112,7 @@ export class DatabaseStorage implements IStorage {
           totalActive:          sql<number>`count(*) filter (where ${listings.status} = 'active')`,
           totalPassive:         sql<number>`count(*) filter (where ${listings.status} = 'passive')`,
           agreementUploaded:    sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.agreementUploadedAt} is not null)`,
-          agreementPending:     sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.agreementUploadedAt} is null)`,
+          agreementPending:     sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.dealCategory} != 'Kiralık' and ${listings.agreementUploadedAt} is null)`,
           noAgreementCount:     sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.noAgreementAt} is not null)`,
           closeReasonSubmitted: sql<number>`count(*) filter (where ${listings.status} = 'passive' and ${listings.closeReasonSubmittedAt} is not null)`,
           closeReasonPending:   sql<number>`count(*) filter (where ${listings.status} = 'passive' and ${listings.closeReasonSubmittedAt} is null)`,
@@ -5585,6 +5585,7 @@ export class DatabaseStorage implements IStorage {
 
     const agreementRows = await db.select().from(listings).where(and(
       eq(listings.status, "active"),
+      ne(listings.dealCategory, "Kiralık"),
       isNull(listings.agreementUploadedAt),
       isNotNull(listings.notifiedNewAt),
       isNotNull(listings.employeeId),
@@ -5867,7 +5868,7 @@ export class DatabaseStorage implements IStorage {
         and(
           isNotNull(listings.employeeId),
           or(
-            and(eq(listings.status, "active"), isNull(listings.agreementUploadedAt), isNull(listings.noAgreementAt)),
+            and(eq(listings.status, "active"), ne(listings.dealCategory, "Kiralık"), isNull(listings.agreementUploadedAt), isNull(listings.noAgreementAt)),
             and(eq(listings.status, "passive"), isNull(listings.closeReasonSubmittedAt)),
           )
         )
@@ -5891,7 +5892,7 @@ export class DatabaseStorage implements IStorage {
         totalActive:       sql<number>`count(*) filter (where ${listings.status} = 'active')`,
         totalPassive:      sql<number>`count(*) filter (where ${listings.status} = 'passive')`,
         agreementUploaded: sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.agreementUploadedAt} is not null)`,
-        agreementPending:  sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.agreementUploadedAt} is null and ${listings.noAgreementAt} is null)`,
+        agreementPending:  sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.dealCategory} != 'Kiralık' and ${listings.agreementUploadedAt} is null and ${listings.noAgreementAt} is null)`,
       })
       .from(listings)
       .where(eq(listings.employeeId, employeeId));
