@@ -88,7 +88,17 @@ function useSaveMyGrowthTarget() {
     },
     onSuccess: (_d, vars) => {
       qc.invalidateQueries({ queryKey: ["/api/growth/my-target", vars.year, vars.month, vars.userId ?? null] });
+      qc.invalidateQueries({ queryKey: ["/api/growth/stats", vars.year, vars.month] });
     },
+  });
+}
+
+// Admin için: tüm HM'lerin o ay girdiği hedeflerin dökümü (tablo satırları için)
+function useGrowthStats(year: number, month: number, enabled: boolean) {
+  return useQuery<{ targetsByUser: { userId: number | null; userName: string; brutTarget: number; netTarget: number }[] }>({
+    queryKey: ["/api/growth/stats", year, month],
+    queryFn: () => fetch(`/api/growth/stats?year=${year}&month=${month}`, { credentials: "include" }).then((r) => r.json()),
+    enabled,
   });
 }
 
@@ -188,8 +198,9 @@ export default function Dashboard() {
   const { data: targetsZekeriyakoy = [] } = useTargets(viewYear, apiMonth, "Zekeriyaköy");
   const saveTarget = useSaveTarget();
 
-  // Büyüme hedefi sadece hiring manager'lar için var olabilir. Admin kendi hedefine
-  // sahip değildir — Dashboard'dan istediği bir HM'nin hedefini seçip girer.
+  // Büyüme hedefi sadece hiring manager'lar için var olabilir. Admin, randevu hedef
+  // tablosuyla birebir aynı yapıda (satır × tıkla-düzenle hücre) tüm HM'leri tek
+  // tabloda görüp düzenler; HM ise sadece kendi satırını.
   const isAdmin = user?.role === "admin";
   const { data: hiringManagers = [] } = useQuery<{ id: number; name: string; role: string }[]>({
     queryKey: ["/api/users"],
@@ -197,10 +208,16 @@ export default function Dashboard() {
     enabled: isAdmin,
     select: (rows) => rows.filter((u) => u.role === "hiring_manager"),
   });
-  const [selectedHmId, setSelectedHmId] = useState<number | null>(null);
-  const growthTargetUserId = isAdmin ? selectedHmId : user?.id ?? null;
+  const { data: growthStats } = useGrowthStats(viewYear, apiMonth, isAdmin);
+  const targetsByUserMap = useMemo(() => {
+    const map = new Map<number, { brutTarget: number; netTarget: number }>();
+    for (const t of growthStats?.targetsByUser ?? []) {
+      if (t.userId != null) map.set(t.userId, { brutTarget: t.brutTarget, netTarget: t.netTarget });
+    }
+    return map;
+  }, [growthStats]);
 
-  const { data: myGrowthTarget } = useMyGrowthTarget(viewYear, apiMonth, growthTargetUserId);
+  const { data: myGrowthTarget } = useMyGrowthTarget(viewYear, apiMonth, isAdmin ? null : user?.id ?? null);
   const saveMyGrowthTarget = useSaveMyGrowthTarget();
 
   const prevMonth = () => setViewDate(new Date(viewYear, viewMonth - 1, 1));
@@ -371,50 +388,96 @@ export default function Dashboard() {
           })}
         </div>
 
-        {/* Büyüme hedefi: HM kendi hedefini, admin seçtiği HM'nin hedefini girer */}
-        <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
-          <div className="flex items-center gap-2 mb-3 flex-wrap">
-            <Target className="h-4 w-4 text-primary" />
-            <h2 className="text-sm font-semibold">
-              {isAdmin ? "Aylık Büyüme Hedefi" : "Bu Ayki Büyüme Hedefiniz"}
-            </h2>
-            <span className="text-xs text-muted-foreground">Financial Reports'taki toplama bu sayılar dahil edilir</span>
-            {isAdmin && (
-              <select
-                value={selectedHmId ?? ""}
-                onChange={(e) => setSelectedHmId(e.target.value ? Number(e.target.value) : null)}
-                className="ml-auto h-8 text-xs border border-input rounded bg-background px-2 min-w-[180px]"
-              >
-                <option value="">Hiring manager seçin…</option>
-                {hiringManagers.map((hm) => <option key={hm.id} value={hm.id}>{hm.name}</option>)}
-              </select>
-            )}
+        {/* Büyüme hedefi — randevu hedef tablosuyla birebir aynı yapı (satır × tıkla-düzenle hücre) */}
+        <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+          <div className="flex items-center gap-2 px-5 py-3 border-b border-border">
+            <Target className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-sm font-semibold text-foreground">Aylık Büyüme Hedefleri</h2>
+            <span className="text-xs text-muted-foreground ml-1">(hedef rakamına tıklayarak düzenleyin)</span>
           </div>
-          {isAdmin && !selectedHmId ? (
-            <p className="text-xs text-muted-foreground italic">Hedef girmek için bir hiring manager seçin.</p>
+
+          {isAdmin ? (
+            hiringManagers.length === 0 ? (
+              <p className="text-sm text-muted-foreground p-6 text-center">Hiring manager bulunamadı</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/30">
+                      <th className="text-left font-medium text-muted-foreground py-2.5 px-4">Hiring Manager</th>
+                      <th className="text-center font-medium text-muted-foreground py-2.5 px-4">Brüt Hedef</th>
+                      <th className="text-center font-medium text-muted-foreground py-2.5 px-4">Net Hedef</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {hiringManagers.map((hm) => {
+                      const t = targetsByUserMap.get(hm.id) ?? { brutTarget: 0, netTarget: 0 };
+                      return (
+                        <tr key={hm.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
+                          <td className="py-3 px-4 font-medium text-sm text-foreground">{hm.name}</td>
+                          <td className="py-3 px-4 text-center">
+                            <TargetCell
+                              value={t.brutTarget}
+                              onSave={(v) => saveMyGrowthTarget.mutate({
+                                year: viewYear, month: apiMonth, brutTarget: v, netTarget: t.netTarget, userId: hm.id,
+                              })}
+                            />
+                          </td>
+                          <td className="py-3 px-4 text-center">
+                            <TargetCell
+                              value={t.netTarget}
+                              onSave={(v) => saveMyGrowthTarget.mutate({
+                                year: viewYear, month: apiMonth, brutTarget: t.brutTarget, netTarget: v, userId: hm.id,
+                              })}
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    <tr className="bg-muted/20 font-semibold">
+                      <td className="py-2.5 px-4">Toplam</td>
+                      <td className="py-2.5 px-4 text-center">
+                        {Array.from(targetsByUserMap.values()).reduce((s, t) => s + t.brutTarget, 0)}
+                      </td>
+                      <td className="py-2.5 px-4 text-center">
+                        {Array.from(targetsByUserMap.values()).reduce((s, t) => s + t.netTarget, 0)}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            )
           ) : (
-            <div className="flex items-center gap-8">
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground">Brüt:</span>
-                <TargetCell
-                  value={myGrowthTarget?.brutTarget ?? 0}
-                  onSave={(v) => saveMyGrowthTarget.mutate({
-                    year: viewYear, month: apiMonth, brutTarget: v, netTarget: myGrowthTarget?.netTarget ?? 0,
-                    userId: growthTargetUserId,
-                  })}
-                />
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground">Net:</span>
-                <TargetCell
-                  value={myGrowthTarget?.netTarget ?? 0}
-                  onSave={(v) => saveMyGrowthTarget.mutate({
-                    year: viewYear, month: apiMonth, brutTarget: myGrowthTarget?.brutTarget ?? 0, netTarget: v,
-                    userId: growthTargetUserId,
-                  })}
-                />
-              </div>
-            </div>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted/30">
+                  <th className="text-left font-medium text-muted-foreground py-2.5 px-4">Siz</th>
+                  <th className="text-center font-medium text-muted-foreground py-2.5 px-4">Brüt Hedef</th>
+                  <th className="text-center font-medium text-muted-foreground py-2.5 px-4">Net Hedef</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td className="py-3 px-4 font-medium text-sm text-foreground">{user?.name}</td>
+                  <td className="py-3 px-4 text-center">
+                    <TargetCell
+                      value={myGrowthTarget?.brutTarget ?? 0}
+                      onSave={(v) => saveMyGrowthTarget.mutate({
+                        year: viewYear, month: apiMonth, brutTarget: v, netTarget: myGrowthTarget?.netTarget ?? 0,
+                      })}
+                    />
+                  </td>
+                  <td className="py-3 px-4 text-center">
+                    <TargetCell
+                      value={myGrowthTarget?.netTarget ?? 0}
+                      onSave={(v) => saveMyGrowthTarget.mutate({
+                        year: viewYear, month: apiMonth, brutTarget: myGrowthTarget?.brutTarget ?? 0, netTarget: v,
+                      })}
+                    />
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           )}
         </div>
 
