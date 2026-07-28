@@ -35,17 +35,18 @@ async function run() {
 
     CREATE TABLE IF NOT EXISTS growth_targets (
       id SERIAL PRIMARY KEY, year INTEGER NOT NULL, month INTEGER NOT NULL,
-      user_id INTEGER,
+      user_id INTEGER, office TEXT NOT NULL DEFAULT '',
       brut_target_k0 INTEGER NOT NULL DEFAULT 0, brut_target_k1 INTEGER NOT NULL DEFAULT 0,
       brut_target_k2 INTEGER NOT NULL DEFAULT 0, net_target INTEGER NOT NULL DEFAULT 0,
       updated_at TIMESTAMP DEFAULT NOW()
     );
     ALTER TABLE growth_targets ADD COLUMN IF NOT EXISTS user_id INTEGER;
+    ALTER TABLE growth_targets ADD COLUMN IF NOT EXISTS office TEXT NOT NULL DEFAULT '';
     ALTER TABLE growth_targets ADD COLUMN IF NOT EXISTS brut_target_k0 INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE growth_targets ADD COLUMN IF NOT EXISTS brut_target_k1 INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE growth_targets ADD COLUMN IF NOT EXISTS brut_target_k2 INTEGER NOT NULL DEFAULT 0;
     DROP INDEX IF EXISTS growth_targets_uq;
-    CREATE UNIQUE INDEX IF NOT EXISTS growth_targets_uq ON growth_targets(year, month, user_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS growth_targets_uq ON growth_targets(year, month, user_id, office);
     CREATE INDEX IF NOT EXISTS growth_targets_ym_idx ON growth_targets(year, month);
 
     CREATE TABLE IF NOT EXISTS fonzip_user_financials (

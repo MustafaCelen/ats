@@ -62,13 +62,16 @@ function useSaveTarget() {
 
 interface GrowthTargetValue { brutTargetK0: number; brutTargetK1: number; brutTargetK2: number; netTarget: number; }
 
-// Aylık büyüme hedefi. HM için kendi hedefi; admin için seçtiği HM'nin hedefi (userId).
-// Brüt hedef, randevu hedefleriyle aynı şekilde K0/K1/K2'ye bölünür; Net tek sayı.
-function useMyGrowthTarget(year: number, month: number, userId?: number | null) {
+// Aylık büyüme hedefi — HM × ofis bazlı (randevu hedefleriyle aynı ofis seçici).
+// office verilmezse ("Tümü" seçiliyken) tüm ofislerin toplamı salt-okunur döner.
+// HM için kendi hedefi; admin için seçtiği HM'nin hedefi (userId).
+// Brüt hedef K0/K1/K2'ye bölünür; Net tek sayı.
+function useMyGrowthTarget(year: number, month: number, office: string | undefined, userId?: number | null) {
   return useQuery<GrowthTargetValue>({
-    queryKey: ["/api/growth/my-target", year, month, userId ?? null],
+    queryKey: ["/api/growth/my-target", year, month, office ?? null, userId ?? null],
     queryFn: async () => {
       const p = new URLSearchParams({ year: String(year), month: String(month) });
+      if (office) p.set("office", office);
       if (userId) p.set("userId", String(userId));
       const res = await fetch(`/api/growth/my-target?${p}`, { credentials: "include" });
       if (!res.ok) throw new Error("Failed");
@@ -80,7 +83,7 @@ function useMyGrowthTarget(year: number, month: number, userId?: number | null) 
 function useSaveMyGrowthTarget() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (data: GrowthTargetValue & { year: number; month: number; userId?: number | null }) => {
+    mutationFn: async (data: GrowthTargetValue & { year: number; month: number; office: string; userId?: number | null }) => {
       const res = await fetch("/api/growth/my-target", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -90,17 +93,23 @@ function useSaveMyGrowthTarget() {
       if (!res.ok) throw new Error(await res.text());
     },
     onSuccess: (_d, vars) => {
-      qc.invalidateQueries({ queryKey: ["/api/growth/my-target", vars.year, vars.month, vars.userId ?? null] });
+      qc.invalidateQueries({ queryKey: ["/api/growth/my-target", vars.year, vars.month] });
+      qc.invalidateQueries({ queryKey: ["/api/growth/targets-by-office", vars.year, vars.month] });
       qc.invalidateQueries({ queryKey: ["/api/growth/stats", vars.year, vars.month] });
     },
   });
 }
 
-// Admin için: tüm HM'lerin o ay girdiği hedeflerin dökümü (tablo satırları için)
-function useGrowthStats(year: number, month: number, enabled: boolean) {
-  return useQuery<{ targetsByUser: (GrowthTargetValue & { userId: number | null; userName: string; brutTarget: number })[] }>({
-    queryKey: ["/api/growth/stats", year, month],
-    queryFn: () => fetch(`/api/growth/stats?year=${year}&month=${month}`, { credentials: "include" }).then((r) => r.json()),
+// Admin için: tüm HM'lerin, seçili ofisteki (veya "Tümü" için tüm ofislerin toplam) hedeflerinin dökümü
+function useGrowthTargetsByOffice(year: number, month: number, office: string | undefined, enabled: boolean) {
+  return useQuery<(GrowthTargetValue & { userId: number })[]>({
+    queryKey: ["/api/growth/targets-by-office", year, month, office ?? null],
+    queryFn: async () => {
+      const p = new URLSearchParams({ year: String(year), month: String(month) });
+      if (office) p.set("office", office);
+      const res = await fetch(`/api/growth/targets-by-office?${p}`, { credentials: "include" });
+      return res.ok ? res.json() : [];
+    },
     enabled,
   });
 }
@@ -211,16 +220,17 @@ export default function Dashboard() {
     enabled: isAdmin,
     select: (rows) => rows.filter((u) => u.role === "hiring_manager"),
   });
-  const { data: growthStats } = useGrowthStats(viewYear, apiMonth, isAdmin);
+  const growthOffice = isAllOffices ? undefined : officeFilter;
+  const { data: growthTargetsRows = [] } = useGrowthTargetsByOffice(viewYear, apiMonth, growthOffice, isAdmin);
   const targetsByUserMap = useMemo(() => {
     const map = new Map<number, GrowthTargetValue>();
-    for (const t of growthStats?.targetsByUser ?? []) {
-      if (t.userId != null) map.set(t.userId, { brutTargetK0: t.brutTargetK0, brutTargetK1: t.brutTargetK1, brutTargetK2: t.brutTargetK2, netTarget: t.netTarget });
+    for (const t of growthTargetsRows) {
+      map.set(t.userId, { brutTargetK0: t.brutTargetK0, brutTargetK1: t.brutTargetK1, brutTargetK2: t.brutTargetK2, netTarget: t.netTarget });
     }
     return map;
-  }, [growthStats]);
+  }, [growthTargetsRows]);
 
-  const { data: myGrowthTarget } = useMyGrowthTarget(viewYear, apiMonth, isAdmin ? null : user?.id ?? null);
+  const { data: myGrowthTarget } = useMyGrowthTarget(viewYear, apiMonth, growthOffice, isAdmin ? null : user?.id ?? null);
   const saveMyGrowthTarget = useSaveMyGrowthTarget();
 
   const prevMonth = () => setViewDate(new Date(viewYear, viewMonth - 1, 1));
@@ -396,7 +406,9 @@ export default function Dashboard() {
           <div className="flex items-center gap-2 px-5 py-3 border-b border-border">
             <Target className="h-4 w-4 text-muted-foreground" />
             <h2 className="text-sm font-semibold text-foreground">Aylık Büyüme Hedefleri</h2>
-            <span className="text-xs text-muted-foreground ml-1">(hedef rakamına tıklayarak düzenleyin)</span>
+            <span className="text-xs text-muted-foreground ml-1">
+              {isAllOffices ? "(Tümü = Akatlar + Zekeriyaköy toplamı — düzenlemek için ofis seçin)" : "(hedef rakamına tıklayarak düzenleyin)"}
+            </span>
           </div>
 
           {(() => {
@@ -412,7 +424,6 @@ export default function Dashboard() {
                   <th key={cat} className={`text-center font-semibold py-2.5 px-4 ${CAT_COLORS[cat].text}`}>{cat}</th>
                 ))}
                 <th className="text-center font-medium text-muted-foreground py-2.5 px-4">Toplam Brüt</th>
-                <th className="text-center font-medium text-muted-foreground py-2.5 px-4">Net Hedef</th>
               </tr>
             );
 
@@ -421,13 +432,14 @@ export default function Dashboard() {
                 <td className="py-3 px-4 font-medium text-sm text-foreground">{name}</td>
                 {K0K1K2.map((cat) => (
                   <td key={cat} className="py-3 px-4 text-center">
-                    <TargetCell value={t[catKey[cat]]} onSave={(v) => onSave({ [catKey[cat]]: v } as Partial<GrowthTargetValue>)} />
+                    <TargetCell
+                      value={t[catKey[cat]]}
+                      onSave={(v) => onSave({ [catKey[cat]]: v } as Partial<GrowthTargetValue>)}
+                      readOnly={isAllOffices}
+                    />
                   </td>
                 ))}
                 <td className="py-3 px-4 text-center font-medium">{brutTotal(t)}</td>
-                <td className="py-3 px-4 text-center">
-                  <TargetCell value={t.netTarget} onSave={(v) => onSave({ netTarget: v })} />
-                </td>
               </tr>
             );
 
@@ -448,7 +460,7 @@ export default function Dashboard() {
                             key={hm.id}
                             name={hm.name}
                             t={t}
-                            onSave={(patch) => saveMyGrowthTarget.mutate({ ...t, ...patch, year: viewYear, month: apiMonth, userId: hm.id })}
+                            onSave={(patch) => saveMyGrowthTarget.mutate({ ...t, ...patch, year: viewYear, month: apiMonth, office: growthOffice ?? "", userId: hm.id })}
                           />
                         );
                       })}
@@ -460,7 +472,6 @@ export default function Dashboard() {
                           </td>
                         ))}
                         <td className="py-2.5 px-4 text-center">{allValues.reduce((s, t) => s + brutTotal(t), 0)}</td>
-                        <td className="py-2.5 px-4 text-center">{allValues.reduce((s, t) => s + t.netTarget, 0)}</td>
                       </tr>
                     </tbody>
                   </table>
@@ -476,7 +487,7 @@ export default function Dashboard() {
                   <Row
                     name={user?.name ?? "Siz"}
                     t={mine}
-                    onSave={(patch) => saveMyGrowthTarget.mutate({ ...mine, ...patch, year: viewYear, month: apiMonth })}
+                    onSave={(patch) => saveMyGrowthTarget.mutate({ ...mine, ...patch, year: viewYear, month: apiMonth, office: growthOffice ?? "" })}
                   />
                 </tbody>
               </table>

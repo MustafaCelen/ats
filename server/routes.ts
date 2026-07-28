@@ -3087,12 +3087,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const [brutRow] = (await db.execute(sql`SELECT COUNT(*)::int AS c FROM employees WHERE ${filter}${ukFilter}`)).rows as any[];
       const [leftRow] = (await db.execute(sql`SELECT COUNT(*)::int AS c FROM employees WHERE passive_at IS NOT NULL AND ${leftFilter}${ukFilter}`)).rows as any[];
 
-      // Her HM kendi hedefini girer; burada hepsinin toplamı + HM bazında döküm dönülür.
+      // Her HM kendi hedefini (ofis bazında) girer; burada TÜM ofislerin toplamı +
+      // HM bazında (ofisler birleştirilmiş) döküm dönülür.
       const targetRows = (await db.execute(sql`
-        SELECT gt.user_id, gt.brut_target_k0, gt.brut_target_k1, gt.brut_target_k2, gt.net_target, u.name AS user_name
+        SELECT gt.user_id, u.name AS user_name,
+          SUM(gt.brut_target_k0) AS brut_target_k0, SUM(gt.brut_target_k1) AS brut_target_k1,
+          SUM(gt.brut_target_k2) AS brut_target_k2, SUM(gt.net_target) AS net_target
         FROM growth_targets gt
         LEFT JOIN users u ON u.id = gt.user_id
         WHERE gt.year = ${year} AND gt.month = ${month ?? 0}
+        GROUP BY gt.user_id, u.name
       `)).rows as any[];
       const rowBrutTotal = (r: any) => (r.brut_target_k0 ?? 0) + (r.brut_target_k1 ?? 0) + (r.brut_target_k2 ?? 0);
       const brutTarget = targetRows.reduce((s, r) => s + rowBrutTotal(r), 0);
@@ -3119,27 +3123,33 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  // Büyüme hedefi: HM kendi hedefini görür/girer; admin ise herhangi bir HM'nin
-  // hedefini (userId query/body param ile) görebilir/girebilir. Sadece hiring_manager
-  // rolündeki kullanıcılar için hedef olabilir — admin'in kendi hedefi yoktur.
+  // Büyüme hedefi: HM kendi hedefini (ofis bazında) görür/girer; admin ise herhangi
+  // bir HM'nin hedefini (userId query/body param ile) görebilir/girebilir. Sadece
+  // hiring_manager rolündeki kullanıcılar için hedef olabilir — admin'in kendi hedefi
+  // yoktur. office verilmezse (ör. Dashboard'da "Tümü" seçiliyken) tüm ofislerin
+  // toplamı salt-okunur olarak dönülür.
   app.get("/api/growth/my-target", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
     try {
       const year = parseInt(String(req.query.year ?? new Date().getFullYear()));
       const month = req.query.month ? parseInt(String(req.query.month)) : 0;
+      const office = req.query.office ? String(req.query.office) : null;
       const isAdmin = req.user!.role === "admin";
       const requestedUserId = req.query.userId ? parseInt(String(req.query.userId), 10) : null;
       const targetUserId = isAdmin ? requestedUserId : req.user!.id;
       if (!targetUserId) return res.json({ brutTargetK0: 0, brutTargetK1: 0, brutTargetK2: 0, netTarget: 0 });
 
+      const officeCond = office ? sql`AND office = ${office}` : sql``;
       const [row] = (await db.execute(sql`
-        SELECT brut_target_k0, brut_target_k1, brut_target_k2, net_target FROM growth_targets
-        WHERE year = ${year} AND month = ${month} AND user_id = ${targetUserId}
+        SELECT SUM(brut_target_k0) AS brut_target_k0, SUM(brut_target_k1) AS brut_target_k1,
+               SUM(brut_target_k2) AS brut_target_k2, SUM(net_target) AS net_target
+        FROM growth_targets
+        WHERE year = ${year} AND month = ${month} AND user_id = ${targetUserId} ${officeCond}
       `)).rows as any[];
       res.json({
-        brutTargetK0: row?.brut_target_k0 ?? 0,
-        brutTargetK1: row?.brut_target_k1 ?? 0,
-        brutTargetK2: row?.brut_target_k2 ?? 0,
-        netTarget: row?.net_target ?? 0,
+        brutTargetK0: Number(row?.brut_target_k0 ?? 0),
+        brutTargetK1: Number(row?.brut_target_k1 ?? 0),
+        brutTargetK2: Number(row?.brut_target_k2 ?? 0),
+        netTarget: Number(row?.net_target ?? 0),
       });
     } catch (err) {
       console.error("[GET /api/growth/my-target]", err);
@@ -3149,8 +3159,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/growth/my-target", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
     try {
-      const { year, month, brutTargetK0, brutTargetK1, brutTargetK2, netTarget, userId } = req.body ?? {};
+      const { year, month, office, brutTargetK0, brutTargetK1, brutTargetK2, netTarget, userId } = req.body ?? {};
       if (!year || month == null) return res.status(400).json({ message: "year, month gerekli" });
+      if (!office) return res.status(400).json({ message: "office gerekli" });
       const isAdmin = req.user!.role === "admin";
 
       let targetUserId: number;
@@ -3170,15 +3181,44 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const k2 = parseInt(String(brutTargetK2 ?? 0)) || 0;
       const n = parseInt(String(netTarget ?? 0)) || 0;
       const upsert = await db.execute(sql`
-        INSERT INTO growth_targets (year, month, user_id, brut_target_k0, brut_target_k1, brut_target_k2, net_target, updated_at)
-        VALUES (${year}, ${month}, ${targetUserId}, ${k0}, ${k1}, ${k2}, ${n}, NOW())
-        ON CONFLICT (year, month, user_id)
+        INSERT INTO growth_targets (year, month, user_id, office, brut_target_k0, brut_target_k1, brut_target_k2, net_target, updated_at)
+        VALUES (${year}, ${month}, ${targetUserId}, ${office}, ${k0}, ${k1}, ${k2}, ${n}, NOW())
+        ON CONFLICT (year, month, user_id, office)
         DO UPDATE SET brut_target_k0 = ${k0}, brut_target_k1 = ${k1}, brut_target_k2 = ${k2}, net_target = ${n}, updated_at = NOW()
         RETURNING *
       `);
       res.json(upsert.rows[0]);
     } catch (err) {
       console.error("[POST /api/growth/my-target]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Admin Dashboard tablosu için: tüm HM'lerin, seçili ofisteki (veya office
+  // verilmezse tüm ofislerin toplam) hedeflerini tek sorguda döner.
+  app.get("/api/growth/targets-by-office", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const year = parseInt(String(req.query.year ?? new Date().getFullYear()));
+      const month = req.query.month ? parseInt(String(req.query.month)) : 0;
+      const office = req.query.office ? String(req.query.office) : null;
+      const officeCond = office ? sql`AND office = ${office}` : sql``;
+      const rows = (await db.execute(sql`
+        SELECT user_id,
+          SUM(brut_target_k0) AS brut_target_k0, SUM(brut_target_k1) AS brut_target_k1,
+          SUM(brut_target_k2) AS brut_target_k2, SUM(net_target) AS net_target
+        FROM growth_targets
+        WHERE year = ${year} AND month = ${month} ${officeCond} AND user_id IS NOT NULL
+        GROUP BY user_id
+      `)).rows as any[];
+      res.json(rows.map((r) => ({
+        userId: r.user_id,
+        brutTargetK0: Number(r.brut_target_k0 ?? 0),
+        brutTargetK1: Number(r.brut_target_k1 ?? 0),
+        brutTargetK2: Number(r.brut_target_k2 ?? 0),
+        netTarget: Number(r.net_target ?? 0),
+      })));
+    } catch (err) {
+      console.error("[GET /api/growth/targets-by-office]", err);
       res.status(500).json({ message: "Internal server error" });
     }
   });

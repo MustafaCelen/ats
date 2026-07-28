@@ -618,22 +618,24 @@ export const expenseTargets = pgTable("expense_targets", {
 }));
 export type ExpenseTarget = typeof expenseTargets.$inferSelect;
 
-// Brüt/Net büyüme hedefleri (aylık) — hiring manager bazlı; her HM kendi hedefini girer.
-// Brüt hedef, randevu hedefleriyle aynı granülaritede K0/K1/K2 kategorisine bölünür
-// (adaylar zaten bu kategoride takip ediliyor); Net hedef tek bir toplam sayı.
+// Brüt/Net büyüme hedefleri (aylık) — hiring manager × ofis bazlı; her HM, randevu
+// hedefleriyle aynı ofis seçiciyle, seçtiği ofis için kendi hedefini girer.
+// Brüt hedef K0/K1/K2 kategorisine bölünür (adaylar zaten bu kategoride takip
+// ediliyor); Net hedef tek bir toplam sayı.
 // userId NULL = HM bazlı yapıya geçmeden önce girilmiş eski genel (şirket geneli) hedef.
 export const growthTargets = pgTable("growth_targets", {
   id: serial("id").primaryKey(),
   year: integer("year").notNull(),
   month: integer("month").notNull(),
   userId: integer("user_id"),
+  office: text("office").notNull().default(""), // "Akatlar" | "Zekeriyaköy"
   brutTargetK0: integer("brut_target_k0").notNull().default(0),
   brutTargetK1: integer("brut_target_k1").notNull().default(0),
   brutTargetK2: integer("brut_target_k2").notNull().default(0),
   netTarget: integer("net_target").notNull().default(0),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (t) => ({
-  uq: uniqueIndex("growth_targets_uq").on(t.year, t.month, t.userId),
+  uq: uniqueIndex("growth_targets_uq").on(t.year, t.month, t.userId, t.office),
   ymIdx: index("growth_targets_ym_idx").on(t.year, t.month),
 }));
 export type GrowthTarget = typeof growthTargets.$inferSelect;
