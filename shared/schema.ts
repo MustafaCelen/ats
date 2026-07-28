@@ -629,6 +629,7 @@ export const growthTargets = pgTable("growth_targets", {
   month: integer("month").notNull(),
   userId: integer("user_id"),
   office: text("office").notNull().default(""), // "Akatlar" | "Zekeriyaköy"
+  brutTarget: integer("brut_target").notNull().default(0), // deprecated: K0/K1/K2'den önceki tek sayı, artık kullanılmıyor
   brutTargetK0: integer("brut_target_k0").notNull().default(0),
   brutTargetK1: integer("brut_target_k1").notNull().default(0),
   brutTargetK2: integer("brut_target_k2").notNull().default(0),
@@ -761,12 +762,14 @@ export const listings = pgTable("listings", {
   agreementFileMime: text("agreement_file_mime"),
   agreementFileData: text("agreement_file_data"),               // base64
   noAgreementAt: timestamp("no_agreement_at"),                  // danışman "sözleşmem yok" dedi
+  agreementReminderSentAt: timestamp("agreement_reminder_sent_at"), // son sözleşme hatırlatması
 
   // Yayından kalkış sebebi (advisor submits via public link)
   closeReasonRequestedAt: timestamp("close_reason_requested_at"),
   closeReason: text("close_reason"),
   closeReasonNote: text("close_reason_note"),
   closeReasonSubmittedAt: timestamp("close_reason_submitted_at"),
+  closeReasonReminderSentAt: timestamp("close_reason_reminder_sent_at"), // son kalkış sebebi hatırlatması
 
   publicToken: text("public_token").notNull().unique(),         // danışman self-servis linki
 

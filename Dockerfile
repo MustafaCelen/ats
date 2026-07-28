@@ -28,6 +28,10 @@ ENV NODE_ENV=production
 ENV PORT=5000
 EXPOSE 5000
 
-# Push schema, ensure custom tables exist (drizzle-kit sometimes drops them),
-# then start the server
-CMD ["sh", "-c", "echo 'No' | npx drizzle-kit push --force; sh script/ensure-tables.sh; node dist/index.cjs"]
+# drizzle-kit push is NOT run automatically here: its interactive prompts don't
+# behave reliably with piped input in a non-TTY context (a piped "No" was once
+# observed resolving to "Yes, delete this column" — see git history). Schema
+# sync relies solely on ensure-tables.sh, which is additive-only (no DROPs) and
+# fully under our control. Any actual column/table removal must be a deliberate,
+# manually-reviewed migration, never part of the automated boot sequence.
+CMD ["sh", "-c", "sh script/ensure-tables.sh; node dist/index.cjs"]
