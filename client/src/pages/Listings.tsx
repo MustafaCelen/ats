@@ -20,6 +20,7 @@ interface Listing {
   id: number;
   listingNumber: string;
   price: string | null;
+  dealCategory: "Satılık" | "Kiralık";
   publishedDate: string | null;
   removedDate: string | null;
   durationDays: number | null;
@@ -49,6 +50,7 @@ interface Listing {
 interface Summary {
   totalActive: number; totalPassive: number; matchedActive: number;
   needsAgreement: number; needsReason: number; soldPassive: number; noAgreement: number;
+  totalActiveSatilik: number; totalActiveKiralik: number;
 }
 
 type MainTab = "listings" | "unmatched" | "notifications";
@@ -406,6 +408,7 @@ export default function Listings() {
   const queryClient = useQueryClient();
   const [mainTab, setMainTab] = useState<MainTab>("listings");
   const [listFilter, setListFilter] = useState<ListFilter>("needsAgreement");
+  const [dealCategoryFilter, setDealCategoryFilter] = useState<"all" | "Satılık" | "Kiralık">("all");
   const [search, setSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -492,6 +495,7 @@ export default function Listings() {
       else if (listFilter === "missingPhone") params.set("missingPhone", "1");
       else if (listFilter === "missingEmail") params.set("missingEmail", "1");
     }
+    if (dealCategoryFilter !== "all") params.set("dealCategory", dealCategoryFilter);
     if (search.trim()) params.set("search", search.trim());
     return params.toString();
   })();
@@ -1049,6 +1053,27 @@ export default function Listings() {
         {mainTab === "listings" && (
           <div className="space-y-4">
 
+            {/* Satılık / Kiralık kategori filtresi */}
+            <div className="flex items-center gap-1.5">
+              {([
+                { key: "all" as const, label: "Tümü" },
+                { key: "Satılık" as const, label: `Satılık${summary ? ` (${summary.totalActiveSatilik})` : ""}` },
+                { key: "Kiralık" as const, label: `Kiralık${summary ? ` (${summary.totalActiveKiralik})` : ""}` },
+              ]).map((c) => (
+                <button
+                  key={c.key}
+                  onClick={() => setDealCategoryFilter(c.key)}
+                  className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
+                    dealCategoryFilter === c.key
+                      ? "bg-foreground text-background"
+                      : "bg-muted text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {c.label}
+                </button>
+              ))}
+            </div>
+
             {/* Filter chips + search */}
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div className="flex items-center gap-1.5 flex-wrap">
@@ -1202,7 +1227,12 @@ export default function Listings() {
                       <tr><td colSpan={10} className="px-3 py-10 text-center text-muted-foreground">Kayıt yok.</td></tr>
                     ) : pageRows.map((l) => (
                       <tr key={l.id} className="border-b border-border last:border-0 hover:bg-muted/30">
-                        <td className="px-3 py-2.5 font-mono text-xs">{l.listingNumber}</td>
+                        <td className="px-3 py-2.5 font-mono text-xs">
+                          {l.listingNumber}
+                          <span className={`ml-1.5 inline-flex text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${l.dealCategory === "Kiralık" ? "bg-blue-100 text-blue-700" : "bg-emerald-100 text-emerald-700"}`}>
+                            {l.dealCategory === "Kiralık" ? "K" : "S"}
+                          </span>
+                        </td>
                         <td className="px-3 py-2.5">
                           {l.employeeId ? (
                             <>

@@ -60,6 +60,60 @@ function useSaveTarget() {
   });
 }
 
+interface GrowthTargetValue { brutTargetK0: number; brutTargetK1: number; brutTargetK2: number; netTarget: number; }
+
+// Aylık büyüme hedefi — HM × ofis bazlı (randevu hedefleriyle aynı ofis seçici).
+// office verilmezse ("Tümü" seçiliyken) tüm ofislerin toplamı salt-okunur döner.
+// HM için kendi hedefi; admin için seçtiği HM'nin hedefi (userId).
+// Brüt hedef K0/K1/K2'ye bölünür; Net tek sayı.
+function useMyGrowthTarget(year: number, month: number, office: string | undefined, userId?: number | null) {
+  return useQuery<GrowthTargetValue>({
+    queryKey: ["/api/growth/my-target", year, month, office ?? null, userId ?? null],
+    queryFn: async () => {
+      const p = new URLSearchParams({ year: String(year), month: String(month) });
+      if (office) p.set("office", office);
+      if (userId) p.set("userId", String(userId));
+      const res = await fetch(`/api/growth/my-target?${p}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+  });
+}
+
+function useSaveMyGrowthTarget() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (data: GrowthTargetValue & { year: number; month: number; office: string; userId?: number | null }) => {
+      const res = await fetch("/api/growth/my-target", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error(await res.text());
+    },
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: ["/api/growth/my-target", vars.year, vars.month] });
+      qc.invalidateQueries({ queryKey: ["/api/growth/targets-by-office", vars.year, vars.month] });
+      qc.invalidateQueries({ queryKey: ["/api/growth/stats", vars.year, vars.month] });
+    },
+  });
+}
+
+// Admin için: tüm HM'lerin, seçili ofisteki (veya "Tümü" için tüm ofislerin toplam) hedeflerinin dökümü
+function useGrowthTargetsByOffice(year: number, month: number, office: string | undefined, enabled: boolean) {
+  return useQuery<(GrowthTargetValue & { userId: number })[]>({
+    queryKey: ["/api/growth/targets-by-office", year, month, office ?? null],
+    queryFn: async () => {
+      const p = new URLSearchParams({ year: String(year), month: String(month) });
+      if (office) p.set("office", office);
+      const res = await fetch(`/api/growth/targets-by-office?${p}`, { credentials: "include" });
+      return res.ok ? res.json() : [];
+    },
+    enabled,
+  });
+}
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CAT_COLORS: Record<string, { badge: string; text: string; bg: string }> = {
   K0: { badge: "bg-blue-100 text-blue-700",    text: "text-blue-600",    bg: "bg-blue-50" },
@@ -155,6 +209,29 @@ export default function Dashboard() {
   const { data: targetsAkatlar = [] } = useTargets(viewYear, apiMonth, "Akatlar");
   const { data: targetsZekeriyakoy = [] } = useTargets(viewYear, apiMonth, "Zekeriyaköy");
   const saveTarget = useSaveTarget();
+
+  // Büyüme hedefi sadece hiring manager'lar için var olabilir. Admin, randevu hedef
+  // tablosuyla birebir aynı yapıda (satır × tıkla-düzenle hücre) tüm HM'leri tek
+  // tabloda görüp düzenler; HM ise sadece kendi satırını.
+  const isAdmin = user?.role === "admin";
+  const { data: hiringManagers = [] } = useQuery<{ id: number; name: string; role: string }[]>({
+    queryKey: ["/api/users"],
+    queryFn: () => fetch("/api/users", { credentials: "include" }).then((r) => r.ok ? r.json() : []),
+    enabled: isAdmin,
+    select: (rows) => rows.filter((u) => u.role === "hiring_manager"),
+  });
+  const growthOffice = isAllOffices ? undefined : officeFilter;
+  const { data: growthTargetsRows = [] } = useGrowthTargetsByOffice(viewYear, apiMonth, growthOffice, isAdmin);
+  const targetsByUserMap = useMemo(() => {
+    const map = new Map<number, GrowthTargetValue>();
+    for (const t of growthTargetsRows) {
+      map.set(t.userId, { brutTargetK0: t.brutTargetK0, brutTargetK1: t.brutTargetK1, brutTargetK2: t.brutTargetK2, netTarget: t.netTarget });
+    }
+    return map;
+  }, [growthTargetsRows]);
+
+  const { data: myGrowthTarget } = useMyGrowthTarget(viewYear, apiMonth, growthOffice, isAdmin ? null : user?.id ?? null);
+  const saveMyGrowthTarget = useSaveMyGrowthTarget();
 
   const prevMonth = () => setViewDate(new Date(viewYear, viewMonth - 1, 1));
   const nextMonth = () => setViewDate(new Date(viewYear, viewMonth + 1, 1));
@@ -322,6 +399,100 @@ export default function Dashboard() {
               </div>
             );
           })}
+        </div>
+
+        {/* Büyüme hedefi — randevu hedef tablosuyla birebir aynı yapı (satır × tıkla-düzenle hücre) */}
+        <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+          <div className="flex items-center gap-2 px-5 py-3 border-b border-border">
+            <Target className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-sm font-semibold text-foreground">Aylık Büyüme Hedefleri</h2>
+            <span className="text-xs text-muted-foreground ml-1">
+              {isAllOffices ? "(Tümü = Akatlar + Zekeriyaköy toplamı — düzenlemek için ofis seçin)" : "(hedef rakamına tıklayarak düzenleyin)"}
+            </span>
+          </div>
+
+          {(() => {
+            const K0K1K2 = CANDIDATE_CATEGORIES as readonly ("K0" | "K1" | "K2")[];
+            const catKey = { K0: "brutTargetK0", K1: "brutTargetK1", K2: "brutTargetK2" } as const;
+            const brutTotal = (t: GrowthTargetValue) => t.brutTargetK0 + t.brutTargetK1 + t.brutTargetK2;
+            const emptyTarget: GrowthTargetValue = { brutTargetK0: 0, brutTargetK1: 0, brutTargetK2: 0, netTarget: 0 };
+
+            const HeaderRow = () => (
+              <tr className="border-b border-border bg-muted/30">
+                <th className="text-left font-medium text-muted-foreground py-2.5 px-4">{isAdmin ? "Hiring Manager" : "Siz"}</th>
+                {K0K1K2.map((cat) => (
+                  <th key={cat} className={`text-center font-semibold py-2.5 px-4 ${CAT_COLORS[cat].text}`}>{cat}</th>
+                ))}
+                <th className="text-center font-medium text-muted-foreground py-2.5 px-4">Toplam Brüt</th>
+              </tr>
+            );
+
+            const Row = ({ name, t, onSave }: { name: string; t: GrowthTargetValue; onSave: (patch: Partial<GrowthTargetValue>) => void }) => (
+              <tr className="border-b border-border/50 hover:bg-muted/20 transition-colors">
+                <td className="py-3 px-4 font-medium text-sm text-foreground">{name}</td>
+                {K0K1K2.map((cat) => (
+                  <td key={cat} className="py-3 px-4 text-center">
+                    <TargetCell
+                      value={t[catKey[cat]]}
+                      onSave={(v) => onSave({ [catKey[cat]]: v } as Partial<GrowthTargetValue>)}
+                      readOnly={isAllOffices}
+                    />
+                  </td>
+                ))}
+                <td className="py-3 px-4 text-center font-medium">{brutTotal(t)}</td>
+              </tr>
+            );
+
+            if (isAdmin) {
+              if (hiringManagers.length === 0) {
+                return <p className="text-sm text-muted-foreground p-6 text-center">Hiring manager bulunamadı</p>;
+              }
+              const allValues = hiringManagers.map((hm) => targetsByUserMap.get(hm.id) ?? emptyTarget);
+              return (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead><HeaderRow /></thead>
+                    <tbody>
+                      {hiringManagers.map((hm) => {
+                        const t = targetsByUserMap.get(hm.id) ?? emptyTarget;
+                        return (
+                          <Row
+                            key={hm.id}
+                            name={hm.name}
+                            t={t}
+                            onSave={(patch) => saveMyGrowthTarget.mutate({ ...t, ...patch, year: viewYear, month: apiMonth, office: growthOffice ?? "", userId: hm.id })}
+                          />
+                        );
+                      })}
+                      <tr className="bg-muted/20 font-semibold">
+                        <td className="py-2.5 px-4">Toplam</td>
+                        {K0K1K2.map((cat) => (
+                          <td key={cat} className="py-2.5 px-4 text-center">
+                            {allValues.reduce((s, t) => s + t[catKey[cat]], 0)}
+                          </td>
+                        ))}
+                        <td className="py-2.5 px-4 text-center">{allValues.reduce((s, t) => s + brutTotal(t), 0)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              );
+            }
+
+            const mine = myGrowthTarget ?? emptyTarget;
+            return (
+              <table className="w-full text-sm">
+                <thead><HeaderRow /></thead>
+                <tbody>
+                  <Row
+                    name={user?.name ?? "Siz"}
+                    t={mine}
+                    onSave={(patch) => saveMyGrowthTarget.mutate({ ...mine, ...patch, year: viewYear, month: apiMonth, office: growthOffice ?? "" })}
+                  />
+                </tbody>
+              </table>
+            );
+          })()}
         </div>
 
         {/* Per-job breakdown + upcoming sidebar */}

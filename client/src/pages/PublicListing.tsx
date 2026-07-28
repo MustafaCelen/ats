@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams } from "wouter";
-import { LISTING_CLOSE_REASONS } from "@shared/schema";
+import { LISTING_CLOSE_REASONS_SATILIK, LISTING_CLOSE_REASONS_KIRALIK } from "@shared/schema";
 import {
   Building2, UploadCloud, CheckCircle2, Loader2, AlertCircle, Trash2,
 } from "lucide-react";
@@ -8,6 +8,7 @@ import {
 interface PublicListing {
   listingNumber: string;
   price: string | null;
+  dealCategory: "Satılık" | "Kiralık";
   status: "active" | "passive";
   office: string | null;
   store: string | null;
@@ -76,15 +77,15 @@ export default function PublicListing() {
   };
   useEffect(load, [token]);
 
-  // Load existing files when data arrives (active listing with agreement)
+  // Load existing files when data arrives (active Satılık listing with agreement)
   useEffect(() => {
-    if (data?.status === "active") {
+    if (data?.status === "active" && data.dealCategory !== "Kiralık") {
       fetch(`/api/public/listings/${token}/files`)
         .then((r) => r.ok ? r.json() : [])
         .then((files) => setUploadedFiles(files))
         .catch(() => {});
     }
-  }, [data?.status, token]);
+  }, [data?.status, data?.dealCategory, token]);
 
   const readFileAsBase64 = (file: File): Promise<{ data: string; mime: string; fileName: string }> =>
     new Promise((resolve, reject) => {
@@ -181,7 +182,23 @@ export default function PublicListing() {
     );
   }
 
-  // Active listing → agreement upload/management
+  // Active Kiralık listing → yetki sözleşmesi istenmiyor, sadece bilgilendirme
+  if (data.status === "active" && data.dealCategory === "Kiralık") {
+    return (
+      <Shell>
+        <ListingHeader />
+        <div className="text-center py-6">
+          <CheckCircle2 className="h-10 w-10 text-emerald-500 mx-auto mb-3" />
+          <h2 className="font-semibold text-lg">İlanınız Sisteme Eklendi</h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            Kiralık portföyler için yetki sözleşmesi talep edilmemektedir. Ekstra bir işlem yapmanıza gerek yok.
+          </p>
+        </div>
+      </Shell>
+    );
+  }
+
+  // Active Satılık listing → agreement upload/management
   if (data.status === "active") {
     const hasFiles = uploadedFiles.length > 0;
     return (
@@ -261,6 +278,7 @@ export default function PublicListing() {
     );
   }
   const isSold = reason === "Satıldı" || reason === "Kiralandı";
+  const closeReasons = data.dealCategory === "Kiralık" ? LISTING_CLOSE_REASONS_KIRALIK : LISTING_CLOSE_REASONS_SATILIK;
   return (
     <Shell>
       <ListingHeader />
@@ -275,7 +293,7 @@ export default function PublicListing() {
         className="w-full mt-1 mb-3 h-10 rounded-lg border border-input bg-background px-3 text-sm"
       >
         <option value="">Seçiniz…</option>
-        {LISTING_CLOSE_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
+        {closeReasons.map((r) => <option key={r} value={r}>{r}</option>)}
       </select>
       <label className="text-xs font-medium text-muted-foreground">Açıklama (opsiyonel)</label>
       <textarea

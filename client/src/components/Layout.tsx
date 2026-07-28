@@ -3,6 +3,7 @@ import {
   LayoutDashboard, Users, Briefcase, BarChart2, ChevronRight, Menu, X,
   Calendar, Shield, LogOut, ClipboardList, UserCheck, KanbanSquare, DollarSign, GraduationCap,
   Receipt, TrendingUp, Building2, Trophy, ShieldAlert, Users2, Puzzle, BarChart3, Copy, Megaphone,
+  MessageCircle,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { useState } from "react";
@@ -81,6 +82,7 @@ const adminNavItems: NavEntry[] = [
   reportsGroupAdmin,
   { icon: Users2,          label: "Takımlar",       href: "/teams"      },
   { icon: Copy,            label: "Danışman Birleştir", href: "/duplicate-merge" },
+  { icon: MessageCircle,   label: "WhatsApp Toplu Mesaj", href: "/whatsapp-bulk" },
   { icon: Puzzle,          label: "Fonzip",         href: "/fonzip"     },
   { icon: Shield,          label: "Kullanıcılar",   href: "/users"      },
 ];

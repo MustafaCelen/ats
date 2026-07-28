@@ -35,10 +35,19 @@ async function run() {
 
     CREATE TABLE IF NOT EXISTS growth_targets (
       id SERIAL PRIMARY KEY, year INTEGER NOT NULL, month INTEGER NOT NULL,
-      brut_target INTEGER NOT NULL DEFAULT 0, net_target INTEGER NOT NULL DEFAULT 0,
+      user_id INTEGER, office TEXT NOT NULL DEFAULT '',
+      brut_target_k0 INTEGER NOT NULL DEFAULT 0, brut_target_k1 INTEGER NOT NULL DEFAULT 0,
+      brut_target_k2 INTEGER NOT NULL DEFAULT 0, net_target INTEGER NOT NULL DEFAULT 0,
       updated_at TIMESTAMP DEFAULT NOW()
     );
-    CREATE UNIQUE INDEX IF NOT EXISTS growth_targets_uq ON growth_targets(year, month);
+    ALTER TABLE growth_targets ADD COLUMN IF NOT EXISTS user_id INTEGER;
+    ALTER TABLE growth_targets ADD COLUMN IF NOT EXISTS office TEXT NOT NULL DEFAULT '';
+    ALTER TABLE growth_targets ADD COLUMN IF NOT EXISTS brut_target_k0 INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE growth_targets ADD COLUMN IF NOT EXISTS brut_target_k1 INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE growth_targets ADD COLUMN IF NOT EXISTS brut_target_k2 INTEGER NOT NULL DEFAULT 0;
+    DROP INDEX IF EXISTS growth_targets_uq;
+    CREATE UNIQUE INDEX IF NOT EXISTS growth_targets_uq ON growth_targets(year, month, user_id, office);
+    CREATE INDEX IF NOT EXISTS growth_targets_ym_idx ON growth_targets(year, month);
 
     CREATE TABLE IF NOT EXISTS fonzip_user_financials (
       fonzip_user_id INTEGER PRIMARY KEY,
@@ -82,6 +91,18 @@ async function run() {
       created_by_user_id INTEGER, created_at TIMESTAMP DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS campaign_expenses_campaign_idx ON campaign_expenses(campaign_id);
+
+    ALTER TABLE listings ADD COLUMN IF NOT EXISTS deal_category TEXT NOT NULL DEFAULT 'Satılık';
+    UPDATE listings SET deal_category = CASE WHEN price IS NOT NULL AND price::numeric < 1000000 THEN 'Kiralık' ELSE 'Satılık' END WHERE deal_category = 'Satılık';
+    CREATE INDEX IF NOT EXISTS listings_deal_category_idx ON listings(deal_category);
+
+    CREATE TABLE IF NOT EXISTS whatsapp_bulk_sends (
+      id SERIAL PRIMARY KEY, employee_id INTEGER, employee_name TEXT, phone TEXT NOT NULL,
+      template_sid TEXT NOT NULL, template_name TEXT NOT NULL, variables TEXT,
+      status TEXT NOT NULL, message_sid TEXT, error TEXT,
+      created_by_user_id INTEGER, created_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS whatsapp_bulk_sends_created_idx ON whatsapp_bulk_sends(created_at);
   \`;
   await pool.query(sql);
   console.log('[ensure-tables] OK');

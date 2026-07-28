@@ -63,6 +63,7 @@ interface OfficeReport {
 
 interface CloseReasonStat {
   closeReason: string;
+  dealCategory: string;
   count: number;
 }
 
@@ -328,8 +329,6 @@ export default function ListingReports() {
 
   const o90PageCount = Math.ceil(sortedO90.length / PAGE_SIZE);
   const o90PageRows = sortedO90.slice(o90Page * PAGE_SIZE, (o90Page + 1) * PAGE_SIZE);
-
-  const totalCloseReasons = closeReasonData.reduce((s, r) => s + r.count, 0);
 
   // ── Sort header components ──
 
@@ -960,34 +959,43 @@ export default function ListingReports() {
               </table>
             </SectionCard>
 
-            {/* Kalkış Sebebi Analizi */}
+            {/* Kalkış Sebebi Analizi — Satılık / Kiralık ayrı */}
             <SectionCard title="Kalkış Sebebi Analizi" icon={TrendingDown}>
               {loadingCloseReason ? (
                 <div className="px-4 py-8 text-center text-muted-foreground">Yükleniyor…</div>
               ) : closeReasonData.length === 0 ? (
                 <div className="px-4 py-8 text-center text-muted-foreground">Henüz kalkış sebebi girilmemiş.</div>
               ) : (
-                <div className="p-4 space-y-3">
-                  {closeReasonData.map((r, i) => {
-                    const pct = totalCloseReasons > 0 ? Math.round((r.count / totalCloseReasons) * 100) : 0;
+                <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {(["Satılık", "Kiralık"] as const).map((cat) => {
+                    const rows = closeReasonData.filter((r) => r.dealCategory === cat);
+                    const total = rows.reduce((s, r) => s + r.count, 0);
                     return (
-                      <div key={i} className="space-y-1">
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="font-medium">{r.closeReason}</span>
-                          <span className="text-muted-foreground">{r.count} <span className="text-xs">({pct}%)</span></span>
-                        </div>
-                        <div className="w-full bg-muted rounded-full h-2">
-                          <div
-                            className="bg-primary h-2 rounded-full transition-all duration-500"
-                            style={{ width: `${pct}%` }}
-                          />
-                        </div>
+                      <div key={cat} className="space-y-3">
+                        <p className="text-xs font-semibold text-muted-foreground uppercase">{cat}</p>
+                        {rows.length === 0 ? (
+                          <p className="text-sm text-muted-foreground">Kayıt yok.</p>
+                        ) : rows.map((r, i) => {
+                          const pct = total > 0 ? Math.round((r.count / total) * 100) : 0;
+                          return (
+                            <div key={i} className="space-y-1">
+                              <div className="flex items-center justify-between text-sm">
+                                <span className="font-medium">{r.closeReason}</span>
+                                <span className="text-muted-foreground">{r.count} <span className="text-xs">({pct}%)</span></span>
+                              </div>
+                              <div className="w-full bg-muted rounded-full h-2">
+                                <div
+                                  className={`h-2 rounded-full transition-all duration-500 ${cat === "Kiralık" ? "bg-blue-500" : "bg-emerald-500"}`}
+                                  style={{ width: `${pct}%` }}
+                                />
+                              </div>
+                            </div>
+                          );
+                        })}
+                        <div className="pt-1 text-xs text-muted-foreground">Toplam: {total} kalkış</div>
                       </div>
                     );
                   })}
-                  <div className="pt-1 text-xs text-muted-foreground">
-                    Toplam: {totalCloseReasons} kalkış
-                  </div>
                 </div>
               )}
             </SectionCard>

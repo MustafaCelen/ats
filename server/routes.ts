@@ -9,7 +9,7 @@ import { api } from "@shared/routes";
 import { z } from "zod";
 import { insertInterviewSchema, insertOfferSchema, type InsertTask, TASK_STATUSES } from "@shared/schema";
 import { getAuthUrl, createOAuth2Client, createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from "./google";
-import { sendWhatsApp, sendWhatsAppTemplate, checkWhatsAppStatus, publicBaseUrl } from "./whatsapp";
+import { sendWhatsApp, sendWhatsAppTemplate, checkWhatsAppStatus, publicBaseUrl, listWhatsAppTemplates } from "./whatsapp";
 import { sendEmail } from "./email";
 import { isFonzipConfigured, fetchFonzipPreview, fetchFonzipUsers, fetchFonzipDebts, fetchFonzipDonations, syncFonzipDebts, syncFonzipUsersFinancials, getFonzipUserFinancialsReport, importFonzipExcel, syncFonzipRecentDebts } from "./fonzip";
 
@@ -146,6 +146,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const q = req.query;
       res.json(await storage.getListings({
         status: q.status ? String(q.status) : undefined,
+        dealCategory: q.dealCategory ? String(q.dealCategory) : undefined,
         needsAgreement: q.needsAgreement === "1",
         needsReason: q.needsReason === "1",
         needsAny: q.needsAny === "1",
@@ -540,6 +541,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.json({
         listingNumber: l.listingNumber,
         price: l.price,
+        dealCategory: l.dealCategory,
         status: l.status,
         office: l.office,
         store: l.store,
@@ -686,6 +688,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         })),
         passive: pending.passive.map((l) => ({
           id: l.id, listingNumber: l.listingNumber, price: l.price,
+          dealCategory: l.dealCategory,
           removedDate: l.removedDate, office: l.office, store: l.store,
           publicToken: l.publicToken,
         })),
@@ -948,6 +951,61 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.json({ status });
     } catch (err) {
       console.error("[POST /api/employees/:id/check-wp-status]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── WhatsApp Toplu Mesaj ───────────────────────────────────────────────────────
+
+  app.get("/api/whatsapp/templates", requireAuth, requireAdmin, async (_req, res) => {
+    try {
+      const templates = await listWhatsAppTemplates();
+      res.json(templates);
+    } catch (err) {
+      console.error("[GET /api/whatsapp/templates]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.post("/api/whatsapp/bulk-send-one", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const { employeeId, templateSid, templateName, variables } = req.body as {
+        employeeId: number; templateSid: string; templateName: string; variables?: Record<string, string>;
+      };
+      if (!employeeId || !templateSid) return res.status(400).json({ message: "employeeId, templateSid gerekli" });
+
+      const emp = await storage.getEmployee(employeeId) as any;
+      const phone = emp?.candidate?.phone;
+      const name = emp?.candidate?.name ?? `Danışman #${employeeId}`;
+      if (!phone) {
+        await storage.logWhatsappBulkSend({
+          employeeId, employeeName: name, phone: "", templateSid, templateName: templateName ?? templateSid,
+          variables: variables ?? {}, status: "failed", error: "Telefon numarası yok",
+          createdByUserId: req.user!.id,
+        });
+        return res.status(400).json({ message: "Danışmanın telefon numarası kayıtlı değil" });
+      }
+
+      const msgId = await sendWhatsAppTemplate(phone, variables ?? {}, templateSid);
+      await storage.logWhatsappBulkSend({
+        employeeId, employeeName: name, phone, templateSid, templateName: templateName ?? templateSid,
+        variables: variables ?? {}, status: msgId ? "sent" : "failed",
+        messageSid: msgId, error: msgId ? null : "Twilio gönderim hatası",
+        createdByUserId: req.user!.id,
+      });
+      if (!msgId) return res.status(502).json({ message: "Gönderim başarısız" });
+      res.json({ ok: true, messageSid: msgId });
+    } catch (err) {
+      console.error("[POST /api/whatsapp/bulk-send-one]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.get("/api/whatsapp/bulk-sends", requireAuth, requireAdmin, async (_req, res) => {
+    try {
+      res.json(await storage.getWhatsappBulkSends());
+    } catch (err) {
+      console.error("[GET /api/whatsapp/bulk-sends]", err);
       res.status(500).json({ message: "Internal server error" });
     }
   });
@@ -3028,13 +3086,36 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
       const [brutRow] = (await db.execute(sql`SELECT COUNT(*)::int AS c FROM employees WHERE ${filter}${ukFilter}`)).rows as any[];
       const [leftRow] = (await db.execute(sql`SELECT COUNT(*)::int AS c FROM employees WHERE passive_at IS NOT NULL AND ${leftFilter}${ukFilter}`)).rows as any[];
-      const [tgt] = (await db.execute(sql`SELECT brut_target, net_target FROM growth_targets WHERE year = ${year} AND month = ${month ?? 0}`)).rows as any[];
+
+      // Her HM kendi hedefini (ofis bazında) girer; burada TÜM ofislerin toplamı +
+      // HM bazında (ofisler birleştirilmiş) döküm dönülür.
+      const targetRows = (await db.execute(sql`
+        SELECT gt.user_id, u.name AS user_name,
+          SUM(gt.brut_target_k0) AS brut_target_k0, SUM(gt.brut_target_k1) AS brut_target_k1,
+          SUM(gt.brut_target_k2) AS brut_target_k2, SUM(gt.net_target) AS net_target
+        FROM growth_targets gt
+        LEFT JOIN users u ON u.id = gt.user_id
+        WHERE gt.year = ${year} AND gt.month = ${month ?? 0}
+        GROUP BY gt.user_id, u.name
+      `)).rows as any[];
+      const rowBrutTotal = (r: any) => (r.brut_target_k0 ?? 0) + (r.brut_target_k1 ?? 0) + (r.brut_target_k2 ?? 0);
+      const brutTarget = targetRows.reduce((s, r) => s + rowBrutTotal(r), 0);
+      const netTarget = targetRows.reduce((s, r) => s + (r.net_target ?? 0), 0);
+      const targetsByUser = targetRows.map((r) => ({
+        userId: r.user_id,
+        userName: r.user_name ?? "(eski genel hedef)",
+        brutTargetK0: r.brut_target_k0 ?? 0,
+        brutTargetK1: r.brut_target_k1 ?? 0,
+        brutTargetK2: r.brut_target_k2 ?? 0,
+        brutTarget: rowBrutTotal(r),
+        netTarget: r.net_target ?? 0,
+      }));
+
       res.json({
         brut: brutRow?.c ?? 0,
         left: leftRow?.c ?? 0,
         net: (brutRow?.c ?? 0) - (leftRow?.c ?? 0),
-        brutTarget: tgt?.brut_target ?? 0,
-        netTarget: tgt?.net_target ?? 0,
+        brutTarget, netTarget, targetsByUser,
       });
     } catch (err) {
       console.error("[GET /api/growth/stats]", err);
@@ -3042,22 +3123,102 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.post("/api/growth/targets", requireAuth, requireAdmin, async (req, res) => {
+  // Büyüme hedefi: HM kendi hedefini (ofis bazında) görür/girer; admin ise herhangi
+  // bir HM'nin hedefini (userId query/body param ile) görebilir/girebilir. Sadece
+  // hiring_manager rolündeki kullanıcılar için hedef olabilir — admin'in kendi hedefi
+  // yoktur. office verilmezse (ör. Dashboard'da "Tümü" seçiliyken) tüm ofislerin
+  // toplamı salt-okunur olarak dönülür.
+  app.get("/api/growth/my-target", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
     try {
-      const { year, month, brutTarget, netTarget } = req.body ?? {};
+      const year = parseInt(String(req.query.year ?? new Date().getFullYear()));
+      const month = req.query.month ? parseInt(String(req.query.month)) : 0;
+      const office = req.query.office ? String(req.query.office) : null;
+      const isAdmin = req.user!.role === "admin";
+      const requestedUserId = req.query.userId ? parseInt(String(req.query.userId), 10) : null;
+      const targetUserId = isAdmin ? requestedUserId : req.user!.id;
+      if (!targetUserId) return res.json({ brutTargetK0: 0, brutTargetK1: 0, brutTargetK2: 0, netTarget: 0 });
+
+      const officeCond = office ? sql`AND office = ${office}` : sql``;
+      const [row] = (await db.execute(sql`
+        SELECT SUM(brut_target_k0) AS brut_target_k0, SUM(brut_target_k1) AS brut_target_k1,
+               SUM(brut_target_k2) AS brut_target_k2, SUM(net_target) AS net_target
+        FROM growth_targets
+        WHERE year = ${year} AND month = ${month} AND user_id = ${targetUserId} ${officeCond}
+      `)).rows as any[];
+      res.json({
+        brutTargetK0: Number(row?.brut_target_k0 ?? 0),
+        brutTargetK1: Number(row?.brut_target_k1 ?? 0),
+        brutTargetK2: Number(row?.brut_target_k2 ?? 0),
+        netTarget: Number(row?.net_target ?? 0),
+      });
+    } catch (err) {
+      console.error("[GET /api/growth/my-target]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.post("/api/growth/my-target", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
+    try {
+      const { year, month, office, brutTargetK0, brutTargetK1, brutTargetK2, netTarget, userId } = req.body ?? {};
       if (!year || month == null) return res.status(400).json({ message: "year, month gerekli" });
-      const b = parseInt(String(brutTarget ?? 0)) || 0;
+      if (!office) return res.status(400).json({ message: "office gerekli" });
+      const isAdmin = req.user!.role === "admin";
+
+      let targetUserId: number;
+      if (isAdmin) {
+        if (!userId) return res.status(400).json({ message: "Hangi hiring manager için gireceğinizi seçin" });
+        targetUserId = Number(userId);
+        const [targetUser] = (await db.execute(sql`SELECT role FROM users WHERE id = ${targetUserId}`)).rows as any[];
+        if (!targetUser || targetUser.role !== "hiring_manager") {
+          return res.status(400).json({ message: "Büyüme hedefi sadece hiring manager'lar için girilebilir" });
+        }
+      } else {
+        targetUserId = req.user!.id;
+      }
+
+      const k0 = parseInt(String(brutTargetK0 ?? 0)) || 0;
+      const k1 = parseInt(String(brutTargetK1 ?? 0)) || 0;
+      const k2 = parseInt(String(brutTargetK2 ?? 0)) || 0;
       const n = parseInt(String(netTarget ?? 0)) || 0;
       const upsert = await db.execute(sql`
-        INSERT INTO growth_targets (year, month, brut_target, net_target, updated_at)
-        VALUES (${year}, ${month}, ${b}, ${n}, NOW())
-        ON CONFLICT (year, month)
-        DO UPDATE SET brut_target = ${b}, net_target = ${n}, updated_at = NOW()
+        INSERT INTO growth_targets (year, month, user_id, office, brut_target_k0, brut_target_k1, brut_target_k2, net_target, updated_at)
+        VALUES (${year}, ${month}, ${targetUserId}, ${office}, ${k0}, ${k1}, ${k2}, ${n}, NOW())
+        ON CONFLICT (year, month, user_id, office)
+        DO UPDATE SET brut_target_k0 = ${k0}, brut_target_k1 = ${k1}, brut_target_k2 = ${k2}, net_target = ${n}, updated_at = NOW()
         RETURNING *
       `);
       res.json(upsert.rows[0]);
     } catch (err) {
-      console.error("[POST /api/growth/targets]", err);
+      console.error("[POST /api/growth/my-target]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Admin Dashboard tablosu için: tüm HM'lerin, seçili ofisteki (veya office
+  // verilmezse tüm ofislerin toplam) hedeflerini tek sorguda döner.
+  app.get("/api/growth/targets-by-office", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const year = parseInt(String(req.query.year ?? new Date().getFullYear()));
+      const month = req.query.month ? parseInt(String(req.query.month)) : 0;
+      const office = req.query.office ? String(req.query.office) : null;
+      const officeCond = office ? sql`AND office = ${office}` : sql``;
+      const rows = (await db.execute(sql`
+        SELECT user_id,
+          SUM(brut_target_k0) AS brut_target_k0, SUM(brut_target_k1) AS brut_target_k1,
+          SUM(brut_target_k2) AS brut_target_k2, SUM(net_target) AS net_target
+        FROM growth_targets
+        WHERE year = ${year} AND month = ${month} ${officeCond} AND user_id IS NOT NULL
+        GROUP BY user_id
+      `)).rows as any[];
+      res.json(rows.map((r) => ({
+        userId: r.user_id,
+        brutTargetK0: Number(r.brut_target_k0 ?? 0),
+        brutTargetK1: Number(r.brut_target_k1 ?? 0),
+        brutTargetK2: Number(r.brut_target_k2 ?? 0),
+        netTarget: Number(r.net_target ?? 0),
+      })));
+    } catch (err) {
+      console.error("[GET /api/growth/targets-by-office]", err);
       res.status(500).json({ message: "Internal server error" });
     }
   });

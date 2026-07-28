@@ -4,8 +4,8 @@ import {
   users, jobAssignments, applicationDocuments, tasks, employees,
   capSettings, closings, closingSides, closingAgents, interviewTargets,
   officeExpenses, listings, financialTargets, listingAgreementFiles,
-  teams, teamMembers, fonzipSyncedDebts,
-  APPLICATION_STAGES, BM_PREPAYMENT_CATEGORY,
+  teams, teamMembers, fonzipSyncedDebts, whatsappBulkSends,
+  APPLICATION_STAGES, BM_PREPAYMENT_CATEGORY, LISTING_RENTAL_PRICE_THRESHOLD,
   type Job, type InsertJob,
   type Candidate, type InsertCandidate,
   type Application, type InsertApplication,
@@ -25,8 +25,9 @@ import {
   type ListingAgreementFile,
   type Team, type TeamWithMembers,
   type FonzipSyncedDebt,
+  type WhatsappBulkSend,
 } from "@shared/schema";
-import { eq, desc, asc, count, sql, gte, lte, lt, and, or, isNull, isNotNull, inArray, notInArray } from "drizzle-orm";
+import { eq, ne, desc, asc, count, sql, gte, lte, lt, and, or, isNull, isNotNull, inArray, notInArray } from "drizzle-orm";
 import { differenceInDays } from "date-fns";
 import { randomBytes } from "crypto";
 
@@ -3848,11 +3849,6 @@ export class DatabaseStorage implements IStorage {
           const v = parseFloat(r.saleValue ?? "0");
           totalVolume += v;
           if (isKiralik) kiralikVolume += v; else satilikVolume += v;
-          // Adet: kapanış başına BİR kez sayılır (fractional işlem oranı ile DEĞİL) —
-          // yoksa hem alıcı hem satıcı tarafını temsil ettiğimiz (içeride kapanan) işlemler
-          // iki kez sayılır ve diğer raporlardaki basit COUNT(*) ile uyuşmaz.
-          totalCount++;
-          if (isKiralik) kiralikCount++; else satilikCount++;
         }
         if (r.bhbShare) {
           const b = parseFloat(r.bhbShare);
@@ -3860,7 +3856,12 @@ export class DatabaseStorage implements IStorage {
           if (isKiralik) kiralikBHB += b; else satilikBHB += b;
         }
         if (r.marketCenterActual) totalBM += parseFloat(r.marketCenterActual);
+        // Adet: BHB payı bazlı kesirli işlem oranı (islemOrani) — her satır 1 "işlem" değil,
+        // ajanın o işlemdeki pay oranı kadar sayılır (ör. 0.38). Bu, uygulamadaki yerleşik
+        // "işlem adedi" tanımı (getClosingStats / Financial Reports ile aynı yöntem).
         const ratio = islemOrani(r);
+        totalCount += ratio;
+        if (isKiralik) kiralikCount += ratio; else satilikCount += ratio;
 
         if (r.sideType) {
           const k = r.sideType === "buyer" ? "buyer" : r.sideType === "referral" ? "referral" : "seller";
@@ -4676,6 +4677,7 @@ export class DatabaseStorage implements IStorage {
   async getListings(filters?: {
     status?: string;
     employeeId?: number;
+    dealCategory?: string;
     needsAgreement?: boolean;
     needsReason?: boolean;
     needsAny?: boolean;
@@ -4690,16 +4692,18 @@ export class DatabaseStorage implements IStorage {
     const conds = [];
     if (filters?.status) conds.push(eq(listings.status, filters.status));
     if (filters?.employeeId !== undefined) conds.push(eq(listings.employeeId, filters.employeeId));
+    if (filters?.dealCategory) conds.push(eq(listings.dealCategory, filters.dealCategory));
     if (filters?.onlyMatched) conds.push(isNotNull(listings.employeeId));
     if (filters?.onlyUnmatched) conds.push(and(isNull(listings.employeeId), eq(listings.status, "active")));
     if (filters?.missingPhone) conds.push(and(isNotNull(listings.employeeId), isNull(candidates.phone)));
     if (filters?.missingEmail) conds.push(and(isNotNull(listings.employeeId), isNull(candidates.email)));
-    if (filters?.needsAgreement) conds.push(and(eq(listings.status, "active"), isNull(listings.agreementUploadedAt), isNull(listings.noAgreementAt)));
+    // Kiralık portföyler için yetki sözleşmesi hiç istenmiyor — "sözleşme bekleyen/var" filtrelerine hiç girmezler.
+    if (filters?.needsAgreement) conds.push(and(eq(listings.status, "active"), ne(listings.dealCategory, "Kiralık"), isNull(listings.agreementUploadedAt), isNull(listings.noAgreementAt)));
     if (filters?.needsReason) conds.push(and(eq(listings.status, "passive"), isNull(listings.closeReasonSubmittedAt)));
     if (filters?.needsAny) conds.push(and(
       isNotNull(listings.employeeId),
       or(
-        and(eq(listings.status, "active"), isNull(listings.agreementUploadedAt), isNull(listings.noAgreementAt)),
+        and(eq(listings.status, "active"), ne(listings.dealCategory, "Kiralık"), isNull(listings.agreementUploadedAt), isNull(listings.noAgreementAt)),
         and(eq(listings.status, "passive"), isNull(listings.closeReasonSubmittedAt)),
       ),
     ));
@@ -4730,15 +4734,19 @@ export class DatabaseStorage implements IStorage {
   async getListingsSummary(): Promise<{
     totalActive: number; totalPassive: number;
     matchedActive: number; needsAgreement: number; needsReason: number; soldPassive: number; noAgreement: number;
+    totalActiveSatilik: number; totalActiveKiralik: number;
   }> {
+    // Kiralık portföyler için yetki sözleşmesi hiç istenmiyor — needsAgreement'a hiç girmezler.
     const [row] = await db.select({
       totalActive:    sql<number>`count(*) filter (where ${listings.status} = 'active')`,
       totalPassive:   sql<number>`count(*) filter (where ${listings.status} = 'passive')`,
       matchedActive:  sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.employeeId} is not null)`,
-      needsAgreement: sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.employeeId} is not null and ${listings.agreementUploadedAt} is null and ${listings.noAgreementAt} is null)`,
+      needsAgreement: sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.dealCategory} != 'Kiralık' and ${listings.employeeId} is not null and ${listings.agreementUploadedAt} is null and ${listings.noAgreementAt} is null)`,
       needsReason:    sql<number>`count(*) filter (where ${listings.status} = 'passive' and ${listings.employeeId} is not null and ${listings.closeReasonSubmittedAt} is null)`,
       soldPassive:    sql<number>`count(*) filter (where ${listings.closeReason} in ('Satıldı','Kiralandı'))`,
       noAgreement:    sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.noAgreementAt} is not null)`,
+      totalActiveSatilik: sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.dealCategory} = 'Satılık')`,
+      totalActiveKiralik: sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.dealCategory} = 'Kiralık')`,
     }).from(listings);
     return {
       totalActive: Number(row?.totalActive ?? 0),
@@ -4748,6 +4756,8 @@ export class DatabaseStorage implements IStorage {
       needsReason: Number(row?.needsReason ?? 0),
       soldPassive: Number(row?.soldPassive ?? 0),
       noAgreement: Number(row?.noAgreement ?? 0),
+      totalActiveSatilik: Number(row?.totalActiveSatilik ?? 0),
+      totalActiveKiralik: Number(row?.totalActiveKiralik ?? 0),
     };
   }
 
@@ -4893,11 +4903,23 @@ export class DatabaseStorage implements IStorage {
 
   async markListingNotified(id: number, kind: "new" | "passive", msgId?: string | null): Promise<void> {
     const now = new Date();
-    await db.update(listings).set(
-      kind === "new"
-        ? { notifiedNewAt: now, agreementRequestedAt: now, updatedAt: now, ...(msgId ? { notifyMsgIdNew: msgId } : {}) }
-        : { notifiedPassiveAt: now, closeReasonRequestedAt: now, updatedAt: now, ...(msgId ? { notifyMsgIdPassive: msgId } : {}) }
-    ).where(eq(listings.id, id));
+    if (kind === "new") {
+      // Kiralık portföyler için yetki sözleşmesi talep edilmiyor artık — bildirim yine gider,
+      // sadece agreementRequestedAt set edilmeyip "needsAgreement" akışına hiç girmiyor.
+      const [row] = await db.select({ dealCategory: listings.dealCategory }).from(listings).where(eq(listings.id, id));
+      const isRental = row?.dealCategory === "Kiralık";
+      await db.update(listings).set({
+        notifiedNewAt: now,
+        ...(isRental ? {} : { agreementRequestedAt: now }),
+        updatedAt: now,
+        ...(msgId ? { notifyMsgIdNew: msgId } : {}),
+      }).where(eq(listings.id, id));
+    } else {
+      await db.update(listings).set({
+        notifiedPassiveAt: now, closeReasonRequestedAt: now, updatedAt: now,
+        ...(msgId ? { notifyMsgIdPassive: msgId } : {}),
+      }).where(eq(listings.id, id));
+    }
   }
 
   async clearListings(): Promise<void> {
@@ -4922,6 +4944,12 @@ export class DatabaseStorage implements IStorage {
       store?: string | null;
     }>,
   ): Promise<{ created: number; updated: number; newActive: Listing[]; newlyPassive: Listing[] }> {
+    // Kaynak portal export'unda Satılık/Kiralık ayrımı yok — fiyata göre otomatik sınıflandırıyoruz.
+    const classifyDealCategory = (price: string | null | undefined): "Satılık" | "Kiralık" => {
+      const p = parseFloat(price ?? "");
+      if (!isNaN(p) && p > 0 && p < LISTING_RENTAL_PRICE_THRESHOLD) return "Kiralık";
+      return "Satılık";
+    };
     const empIndex = await this.buildEmployeeIndex();
     const numbers = Array.from(new Set(rows.map((r) => String(r.listingNumber).trim()).filter(Boolean)));
     let created = 0, updated = 0;
@@ -4950,6 +4978,7 @@ export class DatabaseStorage implements IStorage {
           const [row] = await db.insert(listings).values({
             listingNumber: num,
             price: r.price ?? null,
+            dealCategory: classifyDealCategory(r.price),
             publishedDate: r.publishedDate ?? null,
             advisorName: advisor || null,
             employeeId: empId,
@@ -4968,8 +4997,10 @@ export class DatabaseStorage implements IStorage {
               VALUES (${prev.id}, ${prev.price}, ${r.price}, now())
             `);
           }
+          const newPrice = r.price ?? prev.price;
           await db.update(listings).set({
-            price: r.price ?? prev.price,
+            price: newPrice,
+            dealCategory: classifyDealCategory(newPrice),
             publishedDate: r.publishedDate ?? prev.publishedDate,
             advisorName: advisor || prev.advisorName,
             employeeId: empId ?? prev.employeeId,
@@ -4988,6 +5019,7 @@ export class DatabaseStorage implements IStorage {
           await db.insert(listings).values({
             listingNumber: num,
             price: r.price ?? null,
+            dealCategory: classifyDealCategory(r.price),
             publishedDate: r.publishedDate ?? null,
             removedDate: r.removedDate ?? null,
             durationDays: r.durationDays ?? null,
@@ -5003,8 +5035,10 @@ export class DatabaseStorage implements IStorage {
           if (prev.status === "active") {
             // Listing is currently active — it was re-listed after a prior removal.
             // Active always wins: only sync metadata, never flip status to passive.
+            const newPrice = r.price ?? prev.price;
             await db.update(listings).set({
-              price: r.price ?? prev.price,
+              price: newPrice,
+              dealCategory: classifyDealCategory(newPrice),
               advisorName: advisor || prev.advisorName,
               employeeId: empId ?? prev.employeeId,
               office: r.office ?? prev.office,
@@ -5013,8 +5047,10 @@ export class DatabaseStorage implements IStorage {
             }).where(eq(listings.id, prev.id));
             updated++;
           } else {
+            const newPrice = r.price ?? prev.price;
             await db.update(listings).set({
-              price: r.price ?? prev.price,
+              price: newPrice,
+              dealCategory: classifyDealCategory(newPrice),
               removedDate: r.removedDate ?? prev.removedDate,
               durationDays: r.durationDays ?? prev.durationDays,
               advisorName: advisor || prev.advisorName,
@@ -5077,7 +5113,7 @@ export class DatabaseStorage implements IStorage {
           totalActive:          sql<number>`count(*) filter (where ${listings.status} = 'active')`,
           totalPassive:         sql<number>`count(*) filter (where ${listings.status} = 'passive')`,
           agreementUploaded:    sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.agreementUploadedAt} is not null)`,
-          agreementPending:     sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.agreementUploadedAt} is null)`,
+          agreementPending:     sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.dealCategory} != 'Kiralık' and ${listings.agreementUploadedAt} is null)`,
           noAgreementCount:     sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.noAgreementAt} is not null)`,
           closeReasonSubmitted: sql<number>`count(*) filter (where ${listings.status} = 'passive' and ${listings.closeReasonSubmittedAt} is not null)`,
           closeReasonPending:   sql<number>`count(*) filter (where ${listings.status} = 'passive' and ${listings.closeReasonSubmittedAt} is null)`,
@@ -5339,10 +5375,11 @@ export class DatabaseStorage implements IStorage {
 
   // ── Feature 3: Kalkış sebebi analizi ────────────────────────────────────────
 
-  async getListingCloseReasonStats(): Promise<{ closeReason: string; count: number }[]> {
+  async getListingCloseReasonStats(): Promise<{ closeReason: string; dealCategory: string; count: number }[]> {
     const rows = await db
       .select({
         closeReason: listings.closeReason,
+        dealCategory: listings.dealCategory,
         count: sql<number>`count(*)`,
       })
       .from(listings)
@@ -5351,12 +5388,12 @@ export class DatabaseStorage implements IStorage {
         isNotNull(listings.closeReasonSubmittedAt),
         isNotNull(listings.closeReason),
       ))
-      .groupBy(listings.closeReason)
+      .groupBy(listings.closeReason, listings.dealCategory)
       .orderBy(sql`count(*) desc`);
 
     return rows
       .filter((r) => r.closeReason !== null)
-      .map((r) => ({ closeReason: r.closeReason!, count: Number(r.count ?? 0) }));
+      .map((r) => ({ closeReason: r.closeReason!, dealCategory: r.dealCategory, count: Number(r.count ?? 0) }));
   }
 
   // ── Feature 4: Aylık trend ───────────────────────────────────────────────────
@@ -5549,6 +5586,7 @@ export class DatabaseStorage implements IStorage {
 
     const agreementRows = await db.select().from(listings).where(and(
       eq(listings.status, "active"),
+      ne(listings.dealCategory, "Kiralık"),
       isNull(listings.agreementUploadedAt),
       isNotNull(listings.notifiedNewAt),
       isNotNull(listings.employeeId),
@@ -5789,8 +5827,9 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getAdvisorPendingListings(employeeId: number): Promise<{ active: Listing[]; passive: Listing[] }> {
+    // Kiralık portföyler için yetki sözleşmesi istenmediğinden bu listeye hiç girmezler.
     const active = await db.select().from(listings).where(
-      and(eq(listings.employeeId, employeeId), eq(listings.status, "active"), isNull(listings.agreementUploadedAt))
+      and(eq(listings.employeeId, employeeId), eq(listings.status, "active"), ne(listings.dealCategory, "Kiralık"), isNull(listings.agreementUploadedAt))
     ).orderBy(desc(listings.updatedAt));
     const passive = await db.select().from(listings).where(
       and(eq(listings.employeeId, employeeId), eq(listings.status, "passive"), isNull(listings.closeReasonSubmittedAt))
@@ -5830,7 +5869,7 @@ export class DatabaseStorage implements IStorage {
         and(
           isNotNull(listings.employeeId),
           or(
-            and(eq(listings.status, "active"), isNull(listings.agreementUploadedAt), isNull(listings.noAgreementAt)),
+            and(eq(listings.status, "active"), ne(listings.dealCategory, "Kiralık"), isNull(listings.agreementUploadedAt), isNull(listings.noAgreementAt)),
             and(eq(listings.status, "passive"), isNull(listings.closeReasonSubmittedAt)),
           )
         )
@@ -5854,7 +5893,7 @@ export class DatabaseStorage implements IStorage {
         totalActive:       sql<number>`count(*) filter (where ${listings.status} = 'active')`,
         totalPassive:      sql<number>`count(*) filter (where ${listings.status} = 'passive')`,
         agreementUploaded: sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.agreementUploadedAt} is not null)`,
-        agreementPending:  sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.agreementUploadedAt} is null and ${listings.noAgreementAt} is null)`,
+        agreementPending:  sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.dealCategory} != 'Kiralık' and ${listings.agreementUploadedAt} is null and ${listings.noAgreementAt} is null)`,
       })
       .from(listings)
       .where(eq(listings.employeeId, employeeId));
@@ -5877,6 +5916,32 @@ export class DatabaseStorage implements IStorage {
     await db.update(employees).set({
       advisorLastEmailNotifiedAt: new Date(),
     } as any).where(eq(employees.id, employeeId));
+  }
+
+  // ── WhatsApp Toplu Mesaj ──────────────────────────────────────────────────────
+
+  async logWhatsappBulkSend(data: {
+    employeeId: number | null; employeeName: string | null; phone: string;
+    templateSid: string; templateName: string; variables: Record<string, string>;
+    status: "sent" | "failed"; messageSid?: string | null; error?: string | null;
+    createdByUserId?: number | null;
+  }): Promise<void> {
+    await db.insert(whatsappBulkSends).values({
+      employeeId: data.employeeId,
+      employeeName: data.employeeName,
+      phone: data.phone,
+      templateSid: data.templateSid,
+      templateName: data.templateName,
+      variables: JSON.stringify(data.variables ?? {}),
+      status: data.status,
+      messageSid: data.messageSid ?? null,
+      error: data.error ?? null,
+      createdByUserId: data.createdByUserId ?? null,
+    });
+  }
+
+  async getWhatsappBulkSends(limit: number = 200): Promise<WhatsappBulkSend[]> {
+    return db.select().from(whatsappBulkSends).orderBy(desc(whatsappBulkSends.createdAt)).limit(limit);
   }
 
   // ── Teams ───────────────────────────────────────────────────────────────────

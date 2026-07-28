@@ -35,6 +35,7 @@ import PublicListing from "@/pages/PublicListing";
 import AdvisorSelfService from "@/pages/AdvisorSelfService";
 import Teams from "@/pages/Teams";
 import FonzipPreview from "@/pages/FonzipPreview";
+import WhatsappBulk from "@/pages/WhatsappBulk";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 function ProtectedRoute({
@@ -98,6 +99,7 @@ function Router() {
       <Route path="/pl-report" component={() => <ProtectedRoute adminOnly><PLReport /></ProtectedRoute>} />
       <Route path="/teams" component={() => <ProtectedRoute adminOnly><Teams /></ProtectedRoute>} />
       <Route path="/fonzip" component={() => <ProtectedRoute adminOnly><FonzipPreview /></ProtectedRoute>} />
+      <Route path="/whatsapp-bulk" component={() => <ProtectedRoute adminOnly><WhatsappBulk /></ProtectedRoute>} />
       <Route component={NotFound} />
     </Switch>
   );

@@ -618,16 +618,26 @@ export const expenseTargets = pgTable("expense_targets", {
 }));
 export type ExpenseTarget = typeof expenseTargets.$inferSelect;
 
-// Brüt/Net büyüme hedefleri (aylık)
+// Brüt/Net büyüme hedefleri (aylık) — hiring manager × ofis bazlı; her HM, randevu
+// hedefleriyle aynı ofis seçiciyle, seçtiği ofis için kendi hedefini girer.
+// Brüt hedef K0/K1/K2 kategorisine bölünür (adaylar zaten bu kategoride takip
+// ediliyor); Net hedef tek bir toplam sayı.
+// userId NULL = HM bazlı yapıya geçmeden önce girilmiş eski genel (şirket geneli) hedef.
 export const growthTargets = pgTable("growth_targets", {
   id: serial("id").primaryKey(),
   year: integer("year").notNull(),
   month: integer("month").notNull(),
-  brutTarget: integer("brut_target").notNull().default(0),
+  userId: integer("user_id"),
+  office: text("office").notNull().default(""), // "Akatlar" | "Zekeriyaköy"
+  brutTarget: integer("brut_target").notNull().default(0), // deprecated: K0/K1/K2'den önceki tek sayı, artık kullanılmıyor
+  brutTargetK0: integer("brut_target_k0").notNull().default(0),
+  brutTargetK1: integer("brut_target_k1").notNull().default(0),
+  brutTargetK2: integer("brut_target_k2").notNull().default(0),
   netTarget: integer("net_target").notNull().default(0),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (t) => ({
-  uq: uniqueIndex("growth_targets_uq").on(t.year, t.month),
+  uq: uniqueIndex("growth_targets_uq").on(t.year, t.month, t.userId, t.office),
+  ymIdx: index("growth_targets_ym_idx").on(t.year, t.month),
 }));
 export type GrowthTarget = typeof growthTargets.$inferSelect;
 
@@ -703,22 +713,39 @@ export type CampaignExpense = typeof campaignExpenses.$inferSelect;
 export const LISTING_STATUSES = ["active", "passive"] as const;
 export type ListingStatus = (typeof LISTING_STATUSES)[number];
 
-// Reasons a listing left publication (advisor self-reports via public link)
-export const LISTING_CLOSE_REASONS = [
+export const LISTING_DEAL_CATEGORIES = ["Satılık", "Kiralık"] as const;
+export type ListingDealCategory = (typeof LISTING_DEAL_CATEGORIES)[number];
+// Fiyata göre otomatik Satılık/Kiralık ayrımı — kaynak portal export'unda bu bilgi yok.
+// Bu tutarın ALTINDAKİ fiyatlar Kiralık, EŞİT/ÜSTÜ Satılık sayılır.
+export const LISTING_RENTAL_PRICE_THRESHOLD = 1_000_000;
+
+// Reasons a listing left publication (advisor self-reports via public link) — kategoriye göre ayrı liste
+export const LISTING_CLOSE_REASONS_SATILIK = [
   "Satıldı",
-  "Kiralandı",
-  "Sözleşme Süresi Doldu",
   "Mal Sahibi İptal Etti",
   "Fiyat Anlaşmazlığı",
   "Başka Ofisten Satıldı",
   "Diğer",
 ] as const;
-export type ListingCloseReason = (typeof LISTING_CLOSE_REASONS)[number];
+export const LISTING_CLOSE_REASONS_KIRALIK = [
+  "Kiralandı",
+  "Sözleşme Süresi Doldu",
+  "Mal Sahibi İptal Etti",
+  "Fiyat Anlaşmazlığı",
+  "Başka Ofisten Kiralandı",
+  "Diğer",
+] as const;
+// Geriye dönük uyumluluk: eski (kategori ayrımından önceki) veriler/kodlar için birleşik liste
+export const LISTING_CLOSE_REASONS = [
+  ...new Set([...LISTING_CLOSE_REASONS_SATILIK, ...LISTING_CLOSE_REASONS_KIRALIK]),
+] as string[];
+export type ListingCloseReason = (typeof LISTING_CLOSE_REASONS_SATILIK)[number] | (typeof LISTING_CLOSE_REASONS_KIRALIK)[number];
 
 export const listings = pgTable("listings", {
   id: serial("id").primaryKey(),
   listingNumber: text("listing_number").notNull().unique(),     // İlan Numarası
   price: numeric("price", { precision: 15, scale: 2 }),         // Fiyat
+  dealCategory: text("deal_category").notNull().default("Satılık"), // Satılık | Kiralık (fiyattan otomatik)
   publishedDate: text("published_date"),                        // Yayınlanma (raw)
   removedDate: text("removed_date"),                            // Yayından Kaldırılma (raw)
   durationDays: integer("duration_days"),                       // Süre (gün)
@@ -735,12 +762,14 @@ export const listings = pgTable("listings", {
   agreementFileMime: text("agreement_file_mime"),
   agreementFileData: text("agreement_file_data"),               // base64
   noAgreementAt: timestamp("no_agreement_at"),                  // danışman "sözleşmem yok" dedi
+  agreementReminderSentAt: timestamp("agreement_reminder_sent_at"), // son sözleşme hatırlatması
 
   // Yayından kalkış sebebi (advisor submits via public link)
   closeReasonRequestedAt: timestamp("close_reason_requested_at"),
   closeReason: text("close_reason"),
   closeReasonNote: text("close_reason_note"),
   closeReasonSubmittedAt: timestamp("close_reason_submitted_at"),
+  closeReasonReminderSentAt: timestamp("close_reason_reminder_sent_at"), // son kalkış sebebi hatırlatması
 
   publicToken: text("public_token").notNull().unique(),         // danışman self-servis linki
 
@@ -875,3 +904,22 @@ export const fonzipConfig = pgTable("_fonzip_config", {
   value: text("value").notNull(),
   expiresAt: timestamp("expires_at", { withTimezone: true }),
 });
+
+// ── WhatsApp Toplu Mesaj (danışmanlara bilgilendirme amaçlı Twilio template gönderimi) ──
+export const whatsappBulkSends = pgTable("whatsapp_bulk_sends", {
+  id: serial("id").primaryKey(),
+  employeeId: integer("employee_id"),
+  employeeName: text("employee_name"),
+  phone: text("phone").notNull(),
+  templateSid: text("template_sid").notNull(),
+  templateName: text("template_name").notNull(),
+  variables: text("variables"), // JSON: {"1": "...", "2": "..."}
+  status: text("status").notNull(), // sent | failed
+  messageSid: text("message_sid"),
+  error: text("error"),
+  createdByUserId: integer("created_by_user_id"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (t) => ({
+  createdAtIdx: index("whatsapp_bulk_sends_created_idx").on(t.createdAt),
+}));
+export type WhatsappBulkSend = typeof whatsappBulkSends.$inferSelect;
