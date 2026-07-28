@@ -1,19 +1,19 @@
-#!/bin/sh
-# Drizzle-kit push bazen özel indeksleri/tabloları silebiliyor.
-# Bu script startup'ta çalışıp eksik olanları garanti oluşturur.
+import { pool } from "./db";
 
-if [ -z "$DATABASE_URL" ]; then
-  echo "[ensure-tables] DATABASE_URL yok, atlanıyor"
-  exit 0
-fi
-
-# psql wrapper (docker container'da olmayabilir; node-postgres via node kullanıyoruz)
-node -e "
-const { Pool } = require('pg');
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-
-async function run() {
-  const sql = \`
+/**
+ * Additive schema self-heal, run on every server boot (dev + production, Docker + Replit).
+ *
+ * drizzle-kit push is intentionally NOT run automatically (its interactive prompts have
+ * mis-resolved to destructive DROPs before). Instead we keep this single, additive-only
+ * block: CREATE TABLE IF NOT EXISTS / ADD COLUMN IF NOT EXISTS / CREATE INDEX. The only
+ * DROP is on an index (never data), and the one UPDATE only backfills deal_category from
+ * price. No DROP TABLE, DROP COLUMN or DELETE — so it cannot lose data.
+ *
+ * This is the single source of truth for the "extra" tables that live outside the main
+ * drizzle boot SQL. Any real column/table removal must be a deliberate, reviewed migration.
+ */
+export async function ensureSchema(): Promise<void> {
+  const sql = `
     CREATE TABLE IF NOT EXISTS employee_office_history (
       id SERIAL PRIMARY KEY,
       employee_id INTEGER NOT NULL,
@@ -103,11 +103,12 @@ async function run() {
       created_by_user_id INTEGER, created_at TIMESTAMP DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS whatsapp_bulk_sends_created_idx ON whatsapp_bulk_sends(created_at);
-  \`;
-  await pool.query(sql);
-  console.log('[ensure-tables] OK');
-  await pool.end();
+  `;
+  try {
+    await pool.query(sql);
+    console.log("[ensure-schema] OK");
+  } catch (e: any) {
+    // Non-fatal: never block server startup on a schema self-heal hiccup.
+    console.error("[ensure-schema]", e?.message ?? e);
+  }
 }
-
-run().catch(e => { console.error('[ensure-tables]', e.message); process.exit(0); });
-"

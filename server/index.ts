@@ -8,6 +8,7 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { isFonzipConfigured, syncFonzipRecentDebts, syncFonzipUsersFinancials } from "./fonzip";
+import { ensureSchema } from "./ensure-schema";
 
 const PgStore = connectPgSimple(session);
 
@@ -249,6 +250,11 @@ app.use((req, res, next) => {
       END IF;
     END $$;
   `);
+
+  // Additive schema self-heal for the "extra" tables (growth_targets, campaigns,
+  // expense_targets, etc.). Runs on every boot — dev + production, Docker + Replit —
+  // so the schema stays in sync without ensure-tables.sh (which Replit never runs).
+  await ensureSchema();
 
   await registerRoutes(httpServer, app);
 

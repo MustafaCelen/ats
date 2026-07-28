@@ -24,22 +24,16 @@ WORKDIR /app
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/package*.json ./
-# drizzle-kit needs the config and schema to push migrations
+# drizzle-kit config/schema kept for manual `npm run db:push` if ever needed
 COPY --from=builder /app/drizzle.config.ts ./
 COPY --from=builder /app/shared ./shared
-COPY --from=builder /app/script ./script
-# Normalize shell-script line endings (Windows checkouts can introduce CRLF,
-# which breaks sh/dash parsing). Belt-and-suspenders alongside .gitattributes.
-RUN sed -i 's/\r$//' script/*.sh
 
 ENV NODE_ENV=production
 ENV PORT=5000
 EXPOSE 5000
 
-# drizzle-kit push is NOT run automatically here: its interactive prompts don't
-# behave reliably with piped input in a non-TTY context (a piped "No" was once
-# observed resolving to "Yes, delete this column" — see git history). Schema
-# sync relies solely on ensure-tables.sh, which is additive-only (no DROPs) and
-# fully under our control. Any actual column/table removal must be a deliberate,
-# manually-reviewed migration, never part of the automated boot sequence.
-CMD ["sh", "-c", "sh script/ensure-tables.sh; node dist/index.cjs"]
+# drizzle-kit push is NOT run automatically: its interactive prompts have
+# mis-resolved to destructive DROPs before. Schema sync is handled additively
+# inside the server on boot (server/ensure-schema.ts) — same code path on Docker
+# and Replit. Any real column/table removal must be a deliberate, reviewed migration.
+CMD ["node", "dist/index.cjs"]
