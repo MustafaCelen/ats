@@ -3848,11 +3848,6 @@ export class DatabaseStorage implements IStorage {
           const v = parseFloat(r.saleValue ?? "0");
           totalVolume += v;
           if (isKiralik) kiralikVolume += v; else satilikVolume += v;
-          // Adet: kapanış başına BİR kez sayılır (fractional işlem oranı ile DEĞİL) —
-          // yoksa hem alıcı hem satıcı tarafını temsil ettiğimiz (içeride kapanan) işlemler
-          // iki kez sayılır ve diğer raporlardaki basit COUNT(*) ile uyuşmaz.
-          totalCount++;
-          if (isKiralik) kiralikCount++; else satilikCount++;
         }
         if (r.bhbShare) {
           const b = parseFloat(r.bhbShare);
@@ -3860,7 +3855,12 @@ export class DatabaseStorage implements IStorage {
           if (isKiralik) kiralikBHB += b; else satilikBHB += b;
         }
         if (r.marketCenterActual) totalBM += parseFloat(r.marketCenterActual);
+        // Adet: BHB payı bazlı kesirli işlem oranı (islemOrani) — her satır 1 "işlem" değil,
+        // ajanın o işlemdeki pay oranı kadar sayılır (ör. 0.38). Bu, uygulamadaki yerleşik
+        // "işlem adedi" tanımı (getClosingStats / Financial Reports ile aynı yöntem).
         const ratio = islemOrani(r);
+        totalCount += ratio;
+        if (isKiralik) kiralikCount += ratio; else satilikCount += ratio;
 
         if (r.sideType) {
           const k = r.sideType === "buyer" ? "buyer" : r.sideType === "referral" ? "referral" : "seller";
