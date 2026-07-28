@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "wouter";
-import { LISTING_CLOSE_REASONS } from "@shared/schema";
+import { LISTING_CLOSE_REASONS_SATILIK, LISTING_CLOSE_REASONS_KIRALIK } from "@shared/schema";
 import {
   Building2, UploadCloud, CheckCircle2, Loader2, AlertCircle, ChevronDown, ChevronUp, XCircle, Trash2, ArrowDownToLine,
   Trophy, Wallet, Clock3, FileText, ListChecks,
@@ -10,6 +10,7 @@ interface PendingListing {
   id: number;
   listingNumber: string;
   price: string | null;
+  dealCategory?: string;
   publishedDate?: string | null;
   removedDate?: string | null;
   office: string | null;
@@ -381,6 +382,7 @@ function PassiveCard({ listing, token }: { listing: PendingListing; token: strin
   };
 
   const isSold = reason === "Satıldı" || reason === "Kiralandı";
+  const closeReasons = listing.dealCategory === "Kiralık" ? LISTING_CLOSE_REASONS_KIRALIK : LISTING_CLOSE_REASONS_SATILIK;
 
   return (
     <Card>
@@ -416,7 +418,7 @@ function PassiveCard({ listing, token }: { listing: PendingListing; token: strin
             className="w-full mt-1 mb-3 h-10 rounded-lg border border-input bg-background px-3 text-sm"
           >
             <option value="">Seçiniz…</option>
-            {LISTING_CLOSE_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
+            {closeReasons.map((r) => <option key={r} value={r}>{r}</option>)}
           </select>
           <label className="text-xs font-medium text-muted-foreground">Açıklama (opsiyonel)</label>
           <textarea

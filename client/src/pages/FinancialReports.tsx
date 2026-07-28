@@ -296,17 +296,13 @@ function TargetProgressCard({ label, actual, reelTarget, highTarget, color, form
 function GrowthSection({ viewDate, isAdmin, useCustomRange, fromDate, toDate, ukOnly }: {
   viewDate: Date; isAdmin: boolean; useCustomRange: boolean; fromDate: string; toDate: string; ukOnly: boolean;
 }) {
-  const qc = useQueryClient();
-  const [editorOpen, setEditorOpen] = useState(false);
-  const [brutInput, setBrutInput] = useState("");
-  const [netInput, setNetInput] = useState("");
-
   const y = useCustomRange ? parseInt(fromDate.substring(0, 4)) : viewDate.getFullYear();
   const m = useCustomRange ? null : (viewDate.getMonth() + 1);
   const paramMonth = m ?? 0;
 
   const { data: growth } = useQuery<{
     brut: number; left: number; net: number; brutTarget: number; netTarget: number;
+    targetsByUser: { userId: number | null; userName: string; brutTarget: number; netTarget: number }[];
   }>({
     queryKey: ["/api/growth/stats", y, paramMonth, ukOnly],
     queryFn: () => {
@@ -321,22 +317,7 @@ function GrowthSection({ viewDate, isAdmin, useCustomRange, fromDate, toDate, uk
   const net = growth?.net ?? 0;
   const brutT = growth?.brutTarget ?? 0;
   const netT = growth?.netTarget ?? 0;
-
-  const openEditor = () => {
-    setBrutInput(String(brutT || ""));
-    setNetInput(String(netT || ""));
-    setEditorOpen(true);
-  };
-
-  const saveTargets = async () => {
-    await fetch("/api/growth/targets", {
-      method: "POST", credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ year: y, month: paramMonth, brutTarget: parseInt(brutInput) || 0, netTarget: parseInt(netInput) || 0 }),
-    });
-    qc.invalidateQueries({ queryKey: ["/api/growth/stats"] });
-    setEditorOpen(false);
-  };
+  const targetsByUser = growth?.targetsByUser ?? [];
 
   const GrowthCard = ({ label, actual, target, sub, color }: {
     label: string; actual: number; target: number; sub?: string; color: string;
@@ -374,11 +355,7 @@ function GrowthSection({ viewDate, isAdmin, useCustomRange, fromDate, toDate, uk
         <span className="text-xs text-muted-foreground ml-1">
           {useCustomRange ? `${fromDate} – ${toDate}` : format(viewDate, "MMMM yyyy", { locale: tr })}
         </span>
-        {isAdmin && !useCustomRange && (
-          <Button size="sm" variant="ghost" className="ml-auto h-7 text-xs gap-1" onClick={openEditor}>
-            <Save className="h-3.5 w-3.5" /> Hedef Düzenle
-          </Button>
-        )}
+        <span className="text-xs text-muted-foreground ml-auto italic">Her HM kendi hedefini Dashboard'dan girer</span>
       </div>
       <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-4">
         <GrowthCard label="Brüt Büyüme" actual={brut} target={brutT} sub="Danışmana dönüşmüş adaylar" color="#10b981" />
@@ -390,24 +367,15 @@ function GrowthSection({ viewDate, isAdmin, useCustomRange, fromDate, toDate, uk
         </div>
       </div>
 
-      {editorOpen && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setEditorOpen(false)}>
-          <div className="bg-card rounded-xl shadow-xl p-6 w-full max-w-sm" onClick={e => e.stopPropagation()}>
-            <h3 className="text-base font-semibold mb-4">Büyüme Hedefleri — {String(paramMonth).padStart(2, "0")}/{y}</h3>
-            <div className="space-y-3">
-              <div>
-                <label className="text-xs font-medium">Brüt Büyüme Hedefi</label>
-                <Input type="number" value={brutInput} onChange={e => setBrutInput(e.target.value)} className="mt-1" />
-              </div>
-              <div>
-                <label className="text-xs font-medium">Net Büyüme Hedefi</label>
-                <Input type="number" value={netInput} onChange={e => setNetInput(e.target.value)} className="mt-1" />
-              </div>
-            </div>
-            <div className="flex gap-2 mt-6">
-              <Button variant="outline" onClick={() => setEditorOpen(false)} className="flex-1">İptal</Button>
-              <Button onClick={saveTargets} className="flex-1">Kaydet</Button>
-            </div>
+      {isAdmin && targetsByUser.length > 0 && (
+        <div className="px-5 pb-4">
+          <p className="text-xs font-medium text-muted-foreground mb-2">HM bazında hedefler</p>
+          <div className="flex flex-wrap gap-2">
+            {targetsByUser.map((t) => (
+              <span key={t.userId ?? "legacy"} className="text-xs bg-muted/40 rounded-full px-3 py-1">
+                {t.userName}: <span className="font-medium">Brüt {t.brutTarget} / Net {t.netTarget}</span>
+              </span>
+            ))}
           </div>
         </div>
       )}

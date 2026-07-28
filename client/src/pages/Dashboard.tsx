@@ -60,6 +60,36 @@ function useSaveTarget() {
   });
 }
 
+// Giriş yapan HM/admin'in kendi aylık brüt/net büyüme hedefi
+function useMyGrowthTarget(year: number, month: number) {
+  return useQuery<{ brutTarget: number; netTarget: number }>({
+    queryKey: ["/api/growth/my-target", year, month],
+    queryFn: async () => {
+      const res = await fetch(`/api/growth/my-target?year=${year}&month=${month}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+  });
+}
+
+function useSaveMyGrowthTarget() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (data: { year: number; month: number; brutTarget: number; netTarget: number }) => {
+      const res = await fetch("/api/growth/my-target", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error(await res.text());
+    },
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: ["/api/growth/my-target", vars.year, vars.month] });
+    },
+  });
+}
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CAT_COLORS: Record<string, { badge: string; text: string; bg: string }> = {
   K0: { badge: "bg-blue-100 text-blue-700",    text: "text-blue-600",    bg: "bg-blue-50" },
@@ -155,6 +185,9 @@ export default function Dashboard() {
   const { data: targetsAkatlar = [] } = useTargets(viewYear, apiMonth, "Akatlar");
   const { data: targetsZekeriyakoy = [] } = useTargets(viewYear, apiMonth, "Zekeriyaköy");
   const saveTarget = useSaveTarget();
+
+  const { data: myGrowthTarget } = useMyGrowthTarget(viewYear, apiMonth);
+  const saveMyGrowthTarget = useSaveMyGrowthTarget();
 
   const prevMonth = () => setViewDate(new Date(viewYear, viewMonth - 1, 1));
   const nextMonth = () => setViewDate(new Date(viewYear, viewMonth + 1, 1));
@@ -322,6 +355,35 @@ export default function Dashboard() {
               </div>
             );
           })}
+        </div>
+
+        {/* Kendi aylık brüt/net büyüme hedefiniz */}
+        <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+          <div className="flex items-center gap-2 mb-3">
+            <Target className="h-4 w-4 text-primary" />
+            <h2 className="text-sm font-semibold">Bu Ayki Büyüme Hedefiniz</h2>
+            <span className="text-xs text-muted-foreground">Financial Reports'taki toplama bu sayılar dahil edilir</span>
+          </div>
+          <div className="flex items-center gap-8">
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">Brüt:</span>
+              <TargetCell
+                value={myGrowthTarget?.brutTarget ?? 0}
+                onSave={(v) => saveMyGrowthTarget.mutate({
+                  year: viewYear, month: apiMonth, brutTarget: v, netTarget: myGrowthTarget?.netTarget ?? 0,
+                })}
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">Net:</span>
+              <TargetCell
+                value={myGrowthTarget?.netTarget ?? 0}
+                onSave={(v) => saveMyGrowthTarget.mutate({
+                  year: viewYear, month: apiMonth, brutTarget: myGrowthTarget?.brutTarget ?? 0, netTarget: v,
+                })}
+              />
+            </div>
+          </div>
         </div>
 
         {/* Per-job breakdown + upcoming sidebar */}

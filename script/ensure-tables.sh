@@ -35,10 +35,14 @@ async function run() {
 
     CREATE TABLE IF NOT EXISTS growth_targets (
       id SERIAL PRIMARY KEY, year INTEGER NOT NULL, month INTEGER NOT NULL,
+      user_id INTEGER,
       brut_target INTEGER NOT NULL DEFAULT 0, net_target INTEGER NOT NULL DEFAULT 0,
       updated_at TIMESTAMP DEFAULT NOW()
     );
-    CREATE UNIQUE INDEX IF NOT EXISTS growth_targets_uq ON growth_targets(year, month);
+    ALTER TABLE growth_targets ADD COLUMN IF NOT EXISTS user_id INTEGER;
+    DROP INDEX IF EXISTS growth_targets_uq;
+    CREATE UNIQUE INDEX IF NOT EXISTS growth_targets_uq ON growth_targets(year, month, user_id);
+    CREATE INDEX IF NOT EXISTS growth_targets_ym_idx ON growth_targets(year, month);
 
     CREATE TABLE IF NOT EXISTS fonzip_user_financials (
       fonzip_user_id INTEGER PRIMARY KEY,
@@ -82,6 +86,10 @@ async function run() {
       created_by_user_id INTEGER, created_at TIMESTAMP DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS campaign_expenses_campaign_idx ON campaign_expenses(campaign_id);
+
+    ALTER TABLE listings ADD COLUMN IF NOT EXISTS deal_category TEXT NOT NULL DEFAULT 'Satılık';
+    UPDATE listings SET deal_category = CASE WHEN price IS NOT NULL AND price::numeric < 1000000 THEN 'Kiralık' ELSE 'Satılık' END WHERE deal_category = 'Satılık';
+    CREATE INDEX IF NOT EXISTS listings_deal_category_idx ON listings(deal_category);
   \`;
   await pool.query(sql);
   console.log('[ensure-tables] OK');

@@ -618,16 +618,19 @@ export const expenseTargets = pgTable("expense_targets", {
 }));
 export type ExpenseTarget = typeof expenseTargets.$inferSelect;
 
-// Brüt/Net büyüme hedefleri (aylık)
+// Brüt/Net büyüme hedefleri (aylık) — hiring manager bazlı; her HM kendi hedefini girer.
+// userId NULL = HM bazlı yapıya geçmeden önce girilmiş eski genel (şirket geneli) hedef.
 export const growthTargets = pgTable("growth_targets", {
   id: serial("id").primaryKey(),
   year: integer("year").notNull(),
   month: integer("month").notNull(),
+  userId: integer("user_id"),
   brutTarget: integer("brut_target").notNull().default(0),
   netTarget: integer("net_target").notNull().default(0),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (t) => ({
-  uq: uniqueIndex("growth_targets_uq").on(t.year, t.month),
+  uq: uniqueIndex("growth_targets_uq").on(t.year, t.month, t.userId),
+  ymIdx: index("growth_targets_ym_idx").on(t.year, t.month),
 }));
 export type GrowthTarget = typeof growthTargets.$inferSelect;
 
@@ -703,22 +706,39 @@ export type CampaignExpense = typeof campaignExpenses.$inferSelect;
 export const LISTING_STATUSES = ["active", "passive"] as const;
 export type ListingStatus = (typeof LISTING_STATUSES)[number];
 
-// Reasons a listing left publication (advisor self-reports via public link)
-export const LISTING_CLOSE_REASONS = [
+export const LISTING_DEAL_CATEGORIES = ["Satılık", "Kiralık"] as const;
+export type ListingDealCategory = (typeof LISTING_DEAL_CATEGORIES)[number];
+// Fiyata göre otomatik Satılık/Kiralık ayrımı — kaynak portal export'unda bu bilgi yok.
+// Bu tutarın ALTINDAKİ fiyatlar Kiralık, EŞİT/ÜSTÜ Satılık sayılır.
+export const LISTING_RENTAL_PRICE_THRESHOLD = 1_000_000;
+
+// Reasons a listing left publication (advisor self-reports via public link) — kategoriye göre ayrı liste
+export const LISTING_CLOSE_REASONS_SATILIK = [
   "Satıldı",
-  "Kiralandı",
-  "Sözleşme Süresi Doldu",
   "Mal Sahibi İptal Etti",
   "Fiyat Anlaşmazlığı",
   "Başka Ofisten Satıldı",
   "Diğer",
 ] as const;
-export type ListingCloseReason = (typeof LISTING_CLOSE_REASONS)[number];
+export const LISTING_CLOSE_REASONS_KIRALIK = [
+  "Kiralandı",
+  "Sözleşme Süresi Doldu",
+  "Mal Sahibi İptal Etti",
+  "Fiyat Anlaşmazlığı",
+  "Başka Ofisten Kiralandı",
+  "Diğer",
+] as const;
+// Geriye dönük uyumluluk: eski (kategori ayrımından önceki) veriler/kodlar için birleşik liste
+export const LISTING_CLOSE_REASONS = [
+  ...new Set([...LISTING_CLOSE_REASONS_SATILIK, ...LISTING_CLOSE_REASONS_KIRALIK]),
+] as string[];
+export type ListingCloseReason = (typeof LISTING_CLOSE_REASONS_SATILIK)[number] | (typeof LISTING_CLOSE_REASONS_KIRALIK)[number];
 
 export const listings = pgTable("listings", {
   id: serial("id").primaryKey(),
   listingNumber: text("listing_number").notNull().unique(),     // İlan Numarası
   price: numeric("price", { precision: 15, scale: 2 }),         // Fiyat
+  dealCategory: text("deal_category").notNull().default("Satılık"), // Satılık | Kiralık (fiyattan otomatik)
   publishedDate: text("published_date"),                        // Yayınlanma (raw)
   removedDate: text("removed_date"),                            // Yayından Kaldırılma (raw)
   durationDays: integer("duration_days"),                       // Süre (gün)

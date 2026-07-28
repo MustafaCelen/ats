@@ -146,6 +146,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const q = req.query;
       res.json(await storage.getListings({
         status: q.status ? String(q.status) : undefined,
+        dealCategory: q.dealCategory ? String(q.dealCategory) : undefined,
         needsAgreement: q.needsAgreement === "1",
         needsReason: q.needsReason === "1",
         needsAny: q.needsAny === "1",
@@ -540,6 +541,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.json({
         listingNumber: l.listingNumber,
         price: l.price,
+        dealCategory: l.dealCategory,
         status: l.status,
         office: l.office,
         store: l.store,
@@ -686,6 +688,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         })),
         passive: pending.passive.map((l) => ({
           id: l.id, listingNumber: l.listingNumber, price: l.price,
+          dealCategory: l.dealCategory,
           removedDate: l.removedDate, office: l.office, store: l.store,
           publicToken: l.publicToken,
         })),
@@ -3028,13 +3031,28 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
       const [brutRow] = (await db.execute(sql`SELECT COUNT(*)::int AS c FROM employees WHERE ${filter}${ukFilter}`)).rows as any[];
       const [leftRow] = (await db.execute(sql`SELECT COUNT(*)::int AS c FROM employees WHERE passive_at IS NOT NULL AND ${leftFilter}${ukFilter}`)).rows as any[];
-      const [tgt] = (await db.execute(sql`SELECT brut_target, net_target FROM growth_targets WHERE year = ${year} AND month = ${month ?? 0}`)).rows as any[];
+
+      // Her HM kendi hedefini girer; burada hepsinin toplamı + HM bazında döküm dönülür.
+      const targetRows = (await db.execute(sql`
+        SELECT gt.user_id, gt.brut_target, gt.net_target, u.name AS user_name
+        FROM growth_targets gt
+        LEFT JOIN users u ON u.id = gt.user_id
+        WHERE gt.year = ${year} AND gt.month = ${month ?? 0}
+      `)).rows as any[];
+      const brutTarget = targetRows.reduce((s, r) => s + (r.brut_target ?? 0), 0);
+      const netTarget = targetRows.reduce((s, r) => s + (r.net_target ?? 0), 0);
+      const targetsByUser = targetRows.map((r) => ({
+        userId: r.user_id,
+        userName: r.user_name ?? "(eski genel hedef)",
+        brutTarget: r.brut_target ?? 0,
+        netTarget: r.net_target ?? 0,
+      }));
+
       res.json({
         brut: brutRow?.c ?? 0,
         left: leftRow?.c ?? 0,
         net: (brutRow?.c ?? 0) - (leftRow?.c ?? 0),
-        brutTarget: tgt?.brut_target ?? 0,
-        netTarget: tgt?.net_target ?? 0,
+        brutTarget, netTarget, targetsByUser,
       });
     } catch (err) {
       console.error("[GET /api/growth/stats]", err);
@@ -3042,22 +3060,38 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.post("/api/growth/targets", requireAuth, requireAdmin, async (req, res) => {
+  // Giriş yapan HM/admin'in kendi büyüme hedefi (Dashboard'dan girilir)
+  app.get("/api/growth/my-target", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
+    try {
+      const year = parseInt(String(req.query.year ?? new Date().getFullYear()));
+      const month = req.query.month ? parseInt(String(req.query.month)) : 0;
+      const [row] = (await db.execute(sql`
+        SELECT brut_target, net_target FROM growth_targets
+        WHERE year = ${year} AND month = ${month} AND user_id = ${req.user!.id}
+      `)).rows as any[];
+      res.json({ brutTarget: row?.brut_target ?? 0, netTarget: row?.net_target ?? 0 });
+    } catch (err) {
+      console.error("[GET /api/growth/my-target]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.post("/api/growth/my-target", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
     try {
       const { year, month, brutTarget, netTarget } = req.body ?? {};
       if (!year || month == null) return res.status(400).json({ message: "year, month gerekli" });
       const b = parseInt(String(brutTarget ?? 0)) || 0;
       const n = parseInt(String(netTarget ?? 0)) || 0;
       const upsert = await db.execute(sql`
-        INSERT INTO growth_targets (year, month, brut_target, net_target, updated_at)
-        VALUES (${year}, ${month}, ${b}, ${n}, NOW())
-        ON CONFLICT (year, month)
+        INSERT INTO growth_targets (year, month, user_id, brut_target, net_target, updated_at)
+        VALUES (${year}, ${month}, ${req.user!.id}, ${b}, ${n}, NOW())
+        ON CONFLICT (year, month, user_id)
         DO UPDATE SET brut_target = ${b}, net_target = ${n}, updated_at = NOW()
         RETURNING *
       `);
       res.json(upsert.rows[0]);
     } catch (err) {
-      console.error("[POST /api/growth/targets]", err);
+      console.error("[POST /api/growth/my-target]", err);
       res.status(500).json({ message: "Internal server error" });
     }
   });
