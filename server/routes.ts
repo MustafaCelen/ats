@@ -3115,14 +3115,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  // Giriş yapan HM/admin'in kendi büyüme hedefi (Dashboard'dan girilir)
+  // Büyüme hedefi: HM kendi hedefini görür/girer; admin ise herhangi bir HM'nin
+  // hedefini (userId query/body param ile) görebilir/girebilir. Sadece hiring_manager
+  // rolündeki kullanıcılar için hedef olabilir — admin'in kendi hedefi yoktur.
   app.get("/api/growth/my-target", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
     try {
       const year = parseInt(String(req.query.year ?? new Date().getFullYear()));
       const month = req.query.month ? parseInt(String(req.query.month)) : 0;
+      const isAdmin = req.user!.role === "admin";
+      const requestedUserId = req.query.userId ? parseInt(String(req.query.userId), 10) : null;
+      const targetUserId = isAdmin ? requestedUserId : req.user!.id;
+      if (!targetUserId) return res.json({ brutTarget: 0, netTarget: 0 });
+
       const [row] = (await db.execute(sql`
         SELECT brut_target, net_target FROM growth_targets
-        WHERE year = ${year} AND month = ${month} AND user_id = ${req.user!.id}
+        WHERE year = ${year} AND month = ${month} AND user_id = ${targetUserId}
       `)).rows as any[];
       res.json({ brutTarget: row?.brut_target ?? 0, netTarget: row?.net_target ?? 0 });
     } catch (err) {
@@ -3133,13 +3140,27 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/growth/my-target", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
     try {
-      const { year, month, brutTarget, netTarget } = req.body ?? {};
+      const { year, month, brutTarget, netTarget, userId } = req.body ?? {};
       if (!year || month == null) return res.status(400).json({ message: "year, month gerekli" });
+      const isAdmin = req.user!.role === "admin";
+
+      let targetUserId: number;
+      if (isAdmin) {
+        if (!userId) return res.status(400).json({ message: "Hangi hiring manager için gireceğinizi seçin" });
+        targetUserId = Number(userId);
+        const [targetUser] = (await db.execute(sql`SELECT role FROM users WHERE id = ${targetUserId}`)).rows as any[];
+        if (!targetUser || targetUser.role !== "hiring_manager") {
+          return res.status(400).json({ message: "Büyüme hedefi sadece hiring manager'lar için girilebilir" });
+        }
+      } else {
+        targetUserId = req.user!.id;
+      }
+
       const b = parseInt(String(brutTarget ?? 0)) || 0;
       const n = parseInt(String(netTarget ?? 0)) || 0;
       const upsert = await db.execute(sql`
         INSERT INTO growth_targets (year, month, user_id, brut_target, net_target, updated_at)
-        VALUES (${year}, ${month}, ${req.user!.id}, ${b}, ${n}, NOW())
+        VALUES (${year}, ${month}, ${targetUserId}, ${b}, ${n}, NOW())
         ON CONFLICT (year, month, user_id)
         DO UPDATE SET brut_target = ${b}, net_target = ${n}, updated_at = NOW()
         RETURNING *

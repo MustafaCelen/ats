@@ -60,12 +60,14 @@ function useSaveTarget() {
   });
 }
 
-// Giriş yapan HM/admin'in kendi aylık brüt/net büyüme hedefi
-function useMyGrowthTarget(year: number, month: number) {
+// Aylık brüt/net büyüme hedefi. HM için kendi hedefi; admin için seçtiği HM'nin hedefi (userId).
+function useMyGrowthTarget(year: number, month: number, userId?: number | null) {
   return useQuery<{ brutTarget: number; netTarget: number }>({
-    queryKey: ["/api/growth/my-target", year, month],
+    queryKey: ["/api/growth/my-target", year, month, userId ?? null],
     queryFn: async () => {
-      const res = await fetch(`/api/growth/my-target?year=${year}&month=${month}`, { credentials: "include" });
+      const p = new URLSearchParams({ year: String(year), month: String(month) });
+      if (userId) p.set("userId", String(userId));
+      const res = await fetch(`/api/growth/my-target?${p}`, { credentials: "include" });
       if (!res.ok) throw new Error("Failed");
       return res.json();
     },
@@ -75,7 +77,7 @@ function useMyGrowthTarget(year: number, month: number) {
 function useSaveMyGrowthTarget() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (data: { year: number; month: number; brutTarget: number; netTarget: number }) => {
+    mutationFn: async (data: { year: number; month: number; brutTarget: number; netTarget: number; userId?: number | null }) => {
       const res = await fetch("/api/growth/my-target", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -85,7 +87,7 @@ function useSaveMyGrowthTarget() {
       if (!res.ok) throw new Error(await res.text());
     },
     onSuccess: (_d, vars) => {
-      qc.invalidateQueries({ queryKey: ["/api/growth/my-target", vars.year, vars.month] });
+      qc.invalidateQueries({ queryKey: ["/api/growth/my-target", vars.year, vars.month, vars.userId ?? null] });
     },
   });
 }
@@ -186,7 +188,19 @@ export default function Dashboard() {
   const { data: targetsZekeriyakoy = [] } = useTargets(viewYear, apiMonth, "Zekeriyaköy");
   const saveTarget = useSaveTarget();
 
-  const { data: myGrowthTarget } = useMyGrowthTarget(viewYear, apiMonth);
+  // Büyüme hedefi sadece hiring manager'lar için var olabilir. Admin kendi hedefine
+  // sahip değildir — Dashboard'dan istediği bir HM'nin hedefini seçip girer.
+  const isAdmin = user?.role === "admin";
+  const { data: hiringManagers = [] } = useQuery<{ id: number; name: string; role: string }[]>({
+    queryKey: ["/api/users"],
+    queryFn: () => fetch("/api/users", { credentials: "include" }).then((r) => r.ok ? r.json() : []),
+    enabled: isAdmin,
+    select: (rows) => rows.filter((u) => u.role === "hiring_manager"),
+  });
+  const [selectedHmId, setSelectedHmId] = useState<number | null>(null);
+  const growthTargetUserId = isAdmin ? selectedHmId : user?.id ?? null;
+
+  const { data: myGrowthTarget } = useMyGrowthTarget(viewYear, apiMonth, growthTargetUserId);
   const saveMyGrowthTarget = useSaveMyGrowthTarget();
 
   const prevMonth = () => setViewDate(new Date(viewYear, viewMonth - 1, 1));
@@ -357,33 +371,51 @@ export default function Dashboard() {
           })}
         </div>
 
-        {/* Kendi aylık brüt/net büyüme hedefiniz */}
+        {/* Büyüme hedefi: HM kendi hedefini, admin seçtiği HM'nin hedefini girer */}
         <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
-          <div className="flex items-center gap-2 mb-3">
+          <div className="flex items-center gap-2 mb-3 flex-wrap">
             <Target className="h-4 w-4 text-primary" />
-            <h2 className="text-sm font-semibold">Bu Ayki Büyüme Hedefiniz</h2>
+            <h2 className="text-sm font-semibold">
+              {isAdmin ? "Aylık Büyüme Hedefi" : "Bu Ayki Büyüme Hedefiniz"}
+            </h2>
             <span className="text-xs text-muted-foreground">Financial Reports'taki toplama bu sayılar dahil edilir</span>
+            {isAdmin && (
+              <select
+                value={selectedHmId ?? ""}
+                onChange={(e) => setSelectedHmId(e.target.value ? Number(e.target.value) : null)}
+                className="ml-auto h-8 text-xs border border-input rounded bg-background px-2 min-w-[180px]"
+              >
+                <option value="">Hiring manager seçin…</option>
+                {hiringManagers.map((hm) => <option key={hm.id} value={hm.id}>{hm.name}</option>)}
+              </select>
+            )}
           </div>
-          <div className="flex items-center gap-8">
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">Brüt:</span>
-              <TargetCell
-                value={myGrowthTarget?.brutTarget ?? 0}
-                onSave={(v) => saveMyGrowthTarget.mutate({
-                  year: viewYear, month: apiMonth, brutTarget: v, netTarget: myGrowthTarget?.netTarget ?? 0,
-                })}
-              />
+          {isAdmin && !selectedHmId ? (
+            <p className="text-xs text-muted-foreground italic">Hedef girmek için bir hiring manager seçin.</p>
+          ) : (
+            <div className="flex items-center gap-8">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">Brüt:</span>
+                <TargetCell
+                  value={myGrowthTarget?.brutTarget ?? 0}
+                  onSave={(v) => saveMyGrowthTarget.mutate({
+                    year: viewYear, month: apiMonth, brutTarget: v, netTarget: myGrowthTarget?.netTarget ?? 0,
+                    userId: growthTargetUserId,
+                  })}
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">Net:</span>
+                <TargetCell
+                  value={myGrowthTarget?.netTarget ?? 0}
+                  onSave={(v) => saveMyGrowthTarget.mutate({
+                    year: viewYear, month: apiMonth, brutTarget: myGrowthTarget?.brutTarget ?? 0, netTarget: v,
+                    userId: growthTargetUserId,
+                  })}
+                />
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">Net:</span>
-              <TargetCell
-                value={myGrowthTarget?.netTarget ?? 0}
-                onSave={(v) => saveMyGrowthTarget.mutate({
-                  year: viewYear, month: apiMonth, brutTarget: myGrowthTarget?.brutTarget ?? 0, netTarget: v,
-                })}
-              />
-            </div>
-          </div>
+          )}
         </div>
 
         {/* Per-job breakdown + upcoming sidebar */}
