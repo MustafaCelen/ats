@@ -102,6 +102,54 @@ export async function sendWhatsApp(phone: string, message: string): Promise<stri
   }
 }
 
+export interface WhatsAppTemplate {
+  sid: string;
+  friendlyName: string;
+  language: string;
+  body: string;
+  variables: string[]; // ör. ["1","2"]
+}
+
+/**
+ * Twilio Content API'den onaylı mesaj şablonlarını çeker (toplu mesaj modülü için).
+ */
+export async function listWhatsAppTemplates(): Promise<WhatsAppTemplate[]> {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  if (!accountSid || !authToken) {
+    console.warn("[WhatsApp] Missing Twilio config for template list");
+    return [];
+  }
+
+  const templates: WhatsAppTemplate[] = [];
+  let pageUrl: string | null = "https://content.twilio.com/v1/Content?PageSize=100";
+  const auth = twilioAuth(accountSid, authToken);
+
+  try {
+    while (pageUrl) {
+      const res: Response = await fetch(pageUrl, { headers: { Authorization: auth } });
+      if (!res.ok) break;
+      const data: any = await res.json().catch(() => null);
+      if (!data) break;
+      for (const c of data.contents ?? []) {
+        const typeKey = Object.keys(c.types ?? {})[0];
+        const body = typeKey ? (c.types[typeKey]?.body ?? "") : "";
+        templates.push({
+          sid: c.sid,
+          friendlyName: c.friendly_name ?? c.sid,
+          language: c.language ?? "",
+          body,
+          variables: Object.keys(c.variables ?? {}),
+        });
+      }
+      pageUrl = data.meta?.next_page_url ?? null;
+    }
+  } catch (err) {
+    console.warn("[WhatsApp] Template list error:", err);
+  }
+  return templates;
+}
+
 /**
  * Check delivery status of a previously sent message via Twilio.
  * Returns one of: "pending" | "sent" | "delivered" | "read" | "failed" | null

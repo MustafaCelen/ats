@@ -4,7 +4,7 @@ import {
   users, jobAssignments, applicationDocuments, tasks, employees,
   capSettings, closings, closingSides, closingAgents, interviewTargets,
   officeExpenses, listings, financialTargets, listingAgreementFiles,
-  teams, teamMembers, fonzipSyncedDebts,
+  teams, teamMembers, fonzipSyncedDebts, whatsappBulkSends,
   APPLICATION_STAGES, BM_PREPAYMENT_CATEGORY, LISTING_RENTAL_PRICE_THRESHOLD,
   type Job, type InsertJob,
   type Candidate, type InsertCandidate,
@@ -25,6 +25,7 @@ import {
   type ListingAgreementFile,
   type Team, type TeamWithMembers,
   type FonzipSyncedDebt,
+  type WhatsappBulkSend,
 } from "@shared/schema";
 import { eq, ne, desc, asc, count, sql, gte, lte, lt, and, or, isNull, isNotNull, inArray, notInArray } from "drizzle-orm";
 import { differenceInDays } from "date-fns";
@@ -5915,6 +5916,32 @@ export class DatabaseStorage implements IStorage {
     await db.update(employees).set({
       advisorLastEmailNotifiedAt: new Date(),
     } as any).where(eq(employees.id, employeeId));
+  }
+
+  // ── WhatsApp Toplu Mesaj ──────────────────────────────────────────────────────
+
+  async logWhatsappBulkSend(data: {
+    employeeId: number | null; employeeName: string | null; phone: string;
+    templateSid: string; templateName: string; variables: Record<string, string>;
+    status: "sent" | "failed"; messageSid?: string | null; error?: string | null;
+    createdByUserId?: number | null;
+  }): Promise<void> {
+    await db.insert(whatsappBulkSends).values({
+      employeeId: data.employeeId,
+      employeeName: data.employeeName,
+      phone: data.phone,
+      templateSid: data.templateSid,
+      templateName: data.templateName,
+      variables: JSON.stringify(data.variables ?? {}),
+      status: data.status,
+      messageSid: data.messageSid ?? null,
+      error: data.error ?? null,
+      createdByUserId: data.createdByUserId ?? null,
+    });
+  }
+
+  async getWhatsappBulkSends(limit: number = 200): Promise<WhatsappBulkSend[]> {
+    return db.select().from(whatsappBulkSends).orderBy(desc(whatsappBulkSends.createdAt)).limit(limit);
   }
 
   // ── Teams ───────────────────────────────────────────────────────────────────

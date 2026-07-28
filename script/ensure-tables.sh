@@ -90,6 +90,14 @@ async function run() {
     ALTER TABLE listings ADD COLUMN IF NOT EXISTS deal_category TEXT NOT NULL DEFAULT 'Satılık';
     UPDATE listings SET deal_category = CASE WHEN price IS NOT NULL AND price::numeric < 1000000 THEN 'Kiralık' ELSE 'Satılık' END WHERE deal_category = 'Satılık';
     CREATE INDEX IF NOT EXISTS listings_deal_category_idx ON listings(deal_category);
+
+    CREATE TABLE IF NOT EXISTS whatsapp_bulk_sends (
+      id SERIAL PRIMARY KEY, employee_id INTEGER, employee_name TEXT, phone TEXT NOT NULL,
+      template_sid TEXT NOT NULL, template_name TEXT NOT NULL, variables TEXT,
+      status TEXT NOT NULL, message_sid TEXT, error TEXT,
+      created_by_user_id INTEGER, created_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS whatsapp_bulk_sends_created_idx ON whatsapp_bulk_sends(created_at);
   \`;
   await pool.query(sql);
   console.log('[ensure-tables] OK');

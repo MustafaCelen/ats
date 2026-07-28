@@ -895,3 +895,22 @@ export const fonzipConfig = pgTable("_fonzip_config", {
   value: text("value").notNull(),
   expiresAt: timestamp("expires_at", { withTimezone: true }),
 });
+
+// ── WhatsApp Toplu Mesaj (danışmanlara bilgilendirme amaçlı Twilio template gönderimi) ──
+export const whatsappBulkSends = pgTable("whatsapp_bulk_sends", {
+  id: serial("id").primaryKey(),
+  employeeId: integer("employee_id"),
+  employeeName: text("employee_name"),
+  phone: text("phone").notNull(),
+  templateSid: text("template_sid").notNull(),
+  templateName: text("template_name").notNull(),
+  variables: text("variables"), // JSON: {"1": "...", "2": "..."}
+  status: text("status").notNull(), // sent | failed
+  messageSid: text("message_sid"),
+  error: text("error"),
+  createdByUserId: integer("created_by_user_id"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (t) => ({
+  createdAtIdx: index("whatsapp_bulk_sends_created_idx").on(t.createdAt),
+}));
+export type WhatsappBulkSend = typeof whatsappBulkSends.$inferSelect;

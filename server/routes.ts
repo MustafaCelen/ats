@@ -9,7 +9,7 @@ import { api } from "@shared/routes";
 import { z } from "zod";
 import { insertInterviewSchema, insertOfferSchema, type InsertTask, TASK_STATUSES } from "@shared/schema";
 import { getAuthUrl, createOAuth2Client, createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from "./google";
-import { sendWhatsApp, sendWhatsAppTemplate, checkWhatsAppStatus, publicBaseUrl } from "./whatsapp";
+import { sendWhatsApp, sendWhatsAppTemplate, checkWhatsAppStatus, publicBaseUrl, listWhatsAppTemplates } from "./whatsapp";
 import { sendEmail } from "./email";
 import { isFonzipConfigured, fetchFonzipPreview, fetchFonzipUsers, fetchFonzipDebts, fetchFonzipDonations, syncFonzipDebts, syncFonzipUsersFinancials, getFonzipUserFinancialsReport, importFonzipExcel, syncFonzipRecentDebts } from "./fonzip";
 
@@ -951,6 +951,61 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.json({ status });
     } catch (err) {
       console.error("[POST /api/employees/:id/check-wp-status]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── WhatsApp Toplu Mesaj ───────────────────────────────────────────────────────
+
+  app.get("/api/whatsapp/templates", requireAuth, requireAdmin, async (_req, res) => {
+    try {
+      const templates = await listWhatsAppTemplates();
+      res.json(templates);
+    } catch (err) {
+      console.error("[GET /api/whatsapp/templates]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.post("/api/whatsapp/bulk-send-one", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const { employeeId, templateSid, templateName, variables } = req.body as {
+        employeeId: number; templateSid: string; templateName: string; variables?: Record<string, string>;
+      };
+      if (!employeeId || !templateSid) return res.status(400).json({ message: "employeeId, templateSid gerekli" });
+
+      const emp = await storage.getEmployee(employeeId) as any;
+      const phone = emp?.candidate?.phone;
+      const name = emp?.candidate?.name ?? `Danışman #${employeeId}`;
+      if (!phone) {
+        await storage.logWhatsappBulkSend({
+          employeeId, employeeName: name, phone: "", templateSid, templateName: templateName ?? templateSid,
+          variables: variables ?? {}, status: "failed", error: "Telefon numarası yok",
+          createdByUserId: req.user!.id,
+        });
+        return res.status(400).json({ message: "Danışmanın telefon numarası kayıtlı değil" });
+      }
+
+      const msgId = await sendWhatsAppTemplate(phone, variables ?? {}, templateSid);
+      await storage.logWhatsappBulkSend({
+        employeeId, employeeName: name, phone, templateSid, templateName: templateName ?? templateSid,
+        variables: variables ?? {}, status: msgId ? "sent" : "failed",
+        messageSid: msgId, error: msgId ? null : "Twilio gönderim hatası",
+        createdByUserId: req.user!.id,
+      });
+      if (!msgId) return res.status(502).json({ message: "Gönderim başarısız" });
+      res.json({ ok: true, messageSid: msgId });
+    } catch (err) {
+      console.error("[POST /api/whatsapp/bulk-send-one]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.get("/api/whatsapp/bulk-sends", requireAuth, requireAdmin, async (_req, res) => {
+    try {
+      res.json(await storage.getWhatsappBulkSends());
+    } catch (err) {
+      console.error("[GET /api/whatsapp/bulk-sends]", err);
       res.status(500).json({ message: "Internal server error" });
     }
   });
