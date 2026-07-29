@@ -33,6 +33,22 @@ function formatYMD(d: Date) {
   return `${y}-${m}-${day}`;
 }
 
+// [startYmd, endYmd] aralığına denk gelen tüm (yıl, ay) çiftlerini döner —
+// randevu hedeflerini "Özel Aralık" çok aylı seçimlerde doğru toplayabilmek için.
+function monthsInRange(startYmd: string, endYmd: string): { year: number; month: number }[] {
+  const start = new Date(startYmd + "T00:00:00");
+  const end = new Date(endYmd + "T00:00:00");
+  const months: { year: number; month: number }[] = [];
+  let y = start.getFullYear(), m = start.getMonth();
+  const endY = end.getFullYear(), endM = end.getMonth();
+  while (y < endY || (y === endY && m <= endM)) {
+    months.push({ year: y, month: m + 1 });
+    m++;
+    if (m > 11) { m = 0; y++; }
+  }
+  return months;
+}
+
 const COLORS = ["#3b82f6","#10b981","#f59e0b","#8b5cf6","#ef4444","#06b6d4","#f97316","#84cc16","#ec4899","#14b8a6"];
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -521,15 +537,29 @@ export default function FinancialReports() {
     queryFn: () => fetch("/api/interviews?all=true", { credentials: "include" }).then(r => r.ok ? r.json() : []),
     staleTime: 5 * 60 * 1000,
   });
-  // Interview targets are stored per office; fetch both and combine per the active office filter.
+  // Interview targets are stored per office PER MONTH; "Özel Aralık" can span several
+  // months, so we fetch every (yıl, ay) in [computedStart, computedEnd] and sum them —
+  // otherwise a multi-month gerçekleşen total was being compared against a single ay'ın
+  // hedefi (vy/vm), making the numbers look wildly off.
+  const targetMonths = useMemo(() => monthsInRange(computedStart, computedEnd), [computedStart, computedEnd]);
   const { data: apptTargetsAk = [] } = useQuery<any[]>({
-    queryKey: ["/api/interview-targets", vy, vm + 1, "Akatlar"],
-    queryFn: () => fetch(`/api/interview-targets?year=${vy}&month=${vm + 1}&office=Akatlar`, { credentials: "include" }).then(r => r.ok ? r.json() : []),
+    queryKey: ["/api/interview-targets", targetMonths, "Akatlar"],
+    queryFn: async () => {
+      const rows = await Promise.all(targetMonths.map(({ year, month }) =>
+        fetch(`/api/interview-targets?year=${year}&month=${month}&office=Akatlar`, { credentials: "include" }).then(r => r.ok ? r.json() : [])
+      ));
+      return rows.flat();
+    },
     staleTime: 5 * 60 * 1000,
   });
   const { data: apptTargetsZk = [] } = useQuery<any[]>({
-    queryKey: ["/api/interview-targets", vy, vm + 1, "Zekeriyaköy"],
-    queryFn: () => fetch(`/api/interview-targets?year=${vy}&month=${vm + 1}&office=${encodeURIComponent("Zekeriyaköy")}`, { credentials: "include" }).then(r => r.ok ? r.json() : []),
+    queryKey: ["/api/interview-targets", targetMonths, "Zekeriyaköy"],
+    queryFn: async () => {
+      const rows = await Promise.all(targetMonths.map(({ year, month }) =>
+        fetch(`/api/interview-targets?year=${year}&month=${month}&office=${encodeURIComponent("Zekeriyaköy")}`, { credentials: "include" }).then(r => r.ok ? r.json() : [])
+      ));
+      return rows.flat();
+    },
     staleTime: 5 * 60 * 1000,
   });
   const apptTargets = useMemo(
