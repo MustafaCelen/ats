@@ -317,7 +317,6 @@ function GrowthSection({ viewDate, isAdmin, useCustomRange, fromDate, toDate, uk
   const brut = growth?.brut ?? 0;
   const net = growth?.net ?? 0;
   const brutT = growth?.brutTarget ?? 0;
-  const netT = growth?.netTarget ?? 0;
   const targetsByUser = growth?.targetsByUser ?? [];
 
   const GrowthCard = ({ label, actual, target, sub, color }: {
@@ -360,7 +359,11 @@ function GrowthSection({ viewDate, isAdmin, useCustomRange, fromDate, toDate, uk
       </div>
       <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-4">
         <GrowthCard label="Brüt Büyüme" actual={brut} target={brutT} sub="Danışmana dönüşmüş adaylar" color="#10b981" />
-        <GrowthCard label="Net Büyüme" actual={net} target={netT} sub={`Brüt (${brut}) − Çıkan (${growth?.left ?? 0})`} color="#3b82f6" />
+        <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-2">
+          <span className="text-sm font-medium text-muted-foreground">Net Büyüme</span>
+          <div className="text-3xl font-bold" style={{ color: "#3b82f6" }}>{net}</div>
+          <p className="text-xs text-muted-foreground">{`Brüt (${brut}) − Çıkan (${growth?.left ?? 0})`}</p>
+        </div>
         <div className="rounded-xl border border-border bg-muted/20 p-4 shadow-sm space-y-2">
           <span className="text-sm font-medium text-muted-foreground">Çıkış Yapan</span>
           <div className="text-3xl font-bold text-red-600">{growth?.left ?? 0}</div>
@@ -370,11 +373,11 @@ function GrowthSection({ viewDate, isAdmin, useCustomRange, fromDate, toDate, uk
 
       {isAdmin && targetsByUser.length > 0 && (
         <div className="px-5 pb-4">
-          <p className="text-xs font-medium text-muted-foreground mb-2">HM bazında hedefler</p>
+          <p className="text-xs font-medium text-muted-foreground mb-2">HM bazında hedefler (Brüt)</p>
           <div className="flex flex-wrap gap-2">
             {targetsByUser.map((t) => (
               <span key={t.userId ?? "legacy"} className="text-xs bg-muted/40 rounded-full px-3 py-1">
-                {t.userName}: <span className="font-medium">Brüt {t.brutTarget} / Net {t.netTarget}</span>
+                {t.userName}: <span className="font-medium">{t.brutTarget}</span>
               </span>
             ))}
           </div>
