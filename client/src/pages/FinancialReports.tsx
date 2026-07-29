@@ -284,7 +284,7 @@ function TargetProgressCard({ label, actual, reelTarget, highTarget, color, form
           {/* Gerçekleşen büyük gösterim */}
           <div className="text-3xl font-bold text-foreground leading-tight">{fmt(actual)}</div>
           <div className="text-xs text-muted-foreground">Hedef: {fmt(maxT)}</div>
-          <div className="relative h-2.5 rounded-full bg-muted overflow-hidden">
+          <div className="relative h-2 rounded-full bg-muted overflow-hidden">
             {reelMark !== null && (
               <div className="absolute top-0 bottom-0 w-px bg-white/80 z-10" style={{ left: `${reelMark}%` }} />
             )}
@@ -368,6 +368,9 @@ function GrowthSection({ viewDate, isAdmin, useCustomRange, fromDate, toDate, uk
       <div className="px-5 py-3 border-b border-border flex items-center gap-2">
         <TrendingUp className="h-4 w-4 text-primary" />
         <h2 className="text-base font-semibold">Danışman Büyüme Hedefleri</h2>
+        {office && (
+          <span className="text-xs font-medium bg-primary/10 text-primary px-2 py-0.5 rounded-full">{office}</span>
+        )}
         <span className="text-xs text-muted-foreground ml-1">
           {useCustomRange ? `${fromDate} – ${toDate}` : format(viewDate, "MMMM yyyy", { locale: tr })}
         </span>
@@ -994,23 +997,24 @@ export default function FinancialReports() {
               };
               const s = styles[cat];
               return (
-                <div key={cat} className="rounded-xl border border-border bg-background p-4">
-                  <div className="flex items-center justify-between mb-2">
+                <div key={cat} className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-2">
+                  <div className="flex items-center justify-between">
                     <span className={`rounded-md px-2 py-0.5 text-xs font-bold ${s.badge}`}>{cat}</span>
                     {done && <span className="text-[10px] text-emerald-600 font-medium">✓ Hedef tamam</span>}
                   </div>
-                  <p className={`text-2xl font-bold ${s.text}`}>{actual}</p>
+                  <div className={`text-3xl font-bold ${s.text}`}>{actual}</div>
                   {target > 0 ? (
                     <>
-                      <div className="mt-2 h-1.5 rounded-full bg-muted overflow-hidden">
+                      <div className="text-xs text-muted-foreground">Hedef: {target}</div>
+                      <div className="h-2 rounded-full bg-muted overflow-hidden">
                         <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(100, pct ?? 0)}%`, backgroundColor: s.bar }} />
                       </div>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        {target} hedefin <span className="font-medium">{pct}%</span>'i
+                      <p className="text-xs text-muted-foreground">
+                        %{pct}{done && <span className="text-emerald-600 font-semibold"> · ✓ hedefe ulaşıldı</span>}
                       </p>
                     </>
                   ) : (
-                    <p className="text-xs text-muted-foreground mt-1">Hedef tanımlı değil</p>
+                    <div className="text-xs text-muted-foreground/50 italic">Hedef belirlenmedi</div>
                   )}
                 </div>
               );
