@@ -459,6 +459,234 @@ function ChartCard({ title, children, extra }: {
   );
 }
 
+// ── Dönem Karşılaştırma (HEDEF / Realizasyon / ABB% / YBB / YBB%) ─────────────
+// KW'nin kullandığı iç rapor formatının birebir karşılığı: RANDEVU (Toplam/Yeni/K1/K2)
+// + BRÜT (Toplam/Yeni/K1/K2) + NET + BHB + Company TL + Oran% (Company TL ÷ BHB).
+// Her metrik için hem seçili DÖNEM hem de YIL BAŞINDAN BUGÜNE (YBB) kümülatif değer.
+
+function interviewActualsInRange(interviews: any[], startYmd: string, endYmd: string, office?: string) {
+  const from = new Date(startYmd + "T00:00:00");
+  const to = new Date(endYmd + "T23:59:59");
+  const counts: Record<string, number> = { K0: 0, K1: 0, K2: 0 };
+  for (const iv of interviews) {
+    if (!iv.startTime) continue;
+    const d = new Date(iv.startTime);
+    if (d < from || d > to) continue;
+    if (office && iv.candidate?.office !== office) continue;
+    const cat: string = iv.candidate?.category ?? "K0";
+    if (cat in counts) counts[cat]++;
+  }
+  return counts;
+}
+
+function useInterviewTargetsSum(months: { year: number; month: number }[], office: string) {
+  return useQuery<Record<string, number>>({
+    queryKey: ["/api/interview-targets-sum", months, office],
+    queryFn: async () => {
+      const perMonth = await Promise.all(months.map(({ year, month }) =>
+        fetch(`/api/interview-targets?year=${year}&month=${month}&office=${encodeURIComponent(office)}`, { credentials: "include" })
+          .then(r => r.ok ? r.json() : [])
+      ));
+      const totals: Record<string, number> = { K0: 0, K1: 0, K2: 0 };
+      for (const rows of perMonth) for (const t of rows) if (t.category in totals) totals[t.category] += t.target ?? 0;
+      return totals;
+    },
+    enabled: months.length > 0,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+function useGrowthRangeStats(months: { year: number; month: number }[], office: string | undefined) {
+  return useQuery({
+    queryKey: ["/api/growth/stats-range", months, office ?? null],
+    queryFn: async () => {
+      const perMonth = await Promise.all(months.map(({ year, month }) => {
+        const p = new URLSearchParams({ year: String(year), month: String(month) });
+        if (office) p.set("office", office);
+        return fetch(`/api/growth/stats?${p}`, { credentials: "include" }).then(r => r.json());
+      }));
+      const sum = {
+        brut: 0, left: 0, net: 0, brutTarget: 0, netTarget: 0,
+        brutByCategory: { K0: 0, K1: 0, K2: 0 } as Record<string, number>,
+        brutTargetByCategory: { K0: 0, K1: 0, K2: 0 } as Record<string, number>,
+      };
+      for (const r of perMonth) {
+        sum.brut += r.brut ?? 0; sum.left += r.left ?? 0; sum.net += r.net ?? 0;
+        sum.brutTarget += r.brutTarget ?? 0; sum.netTarget += r.netTarget ?? 0;
+        for (const k of ["K0", "K1", "K2"] as const) {
+          sum.brutByCategory[k] += r.brutByCategory?.[k] ?? 0;
+          sum.brutTargetByCategory[k] += r.brutTargetByCategory?.[k] ?? 0;
+        }
+      }
+      return sum;
+    },
+    enabled: months.length > 0,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+function sumFinancialTargetsInRange(targetsForYear: any[], year: number, startYmd: string, endYmd: string) {
+  const tMap = new Map(targetsForYear.map((t: any) => [t.month, t]));
+  const s = new Date(startYmd + "T00:00:00"), e = new Date(endYmd + "T00:00:00");
+  let bhb = 0, bm = 0;
+  const cur = new Date(s.getFullYear(), s.getMonth(), 1);
+  const endD = new Date(e.getFullYear(), e.getMonth(), 1);
+  while (cur <= endD) {
+    if (cur.getFullYear() === year) {
+      const t = tMap.get(cur.getMonth() + 1) as any;
+      if (t) { bhb += parseFloat(t.bhbTarget ?? "0"); bm += parseFloat(t.bmTarget ?? "0"); }
+    }
+    cur.setMonth(cur.getMonth() + 1);
+  }
+  return { bhb, bm };
+}
+
+interface PeriodRow {
+  randevuToplam: number; randevuK0: number; randevuK1: number; randevuK2: number;
+  brutToplam: number; brutK0: number; brutK1: number; brutK2: number;
+  net: number; bhb: number; companyTl: number;
+}
+
+function PeriodComparisonTable({ computedStart, computedEnd, office, useCustomRange, fromDate, toDate, viewDate }: {
+  computedStart: string; computedEnd: string; office?: string;
+  useCustomRange: boolean; fromDate: string; toDate: string; viewDate: Date;
+}) {
+  const year = new Date(computedEnd + "T00:00:00").getFullYear();
+  const ytdStart = formatYMD(new Date(year, 0, 1));
+  const periodMonths = useMemo(() => monthsInRange(computedStart, computedEnd), [computedStart, computedEnd]);
+  const ytdMonths = useMemo(() => monthsInRange(ytdStart, computedEnd), [ytdStart, computedEnd]);
+
+  const { data: allInterviews = [] } = useQuery<any[]>({
+    queryKey: ["/api/interviews?all=true"],
+    queryFn: () => fetch("/api/interviews?all=true", { credentials: "include" }).then(r => r.ok ? r.json() : []),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const periodApptActual = useMemo(() => interviewActualsInRange(allInterviews, computedStart, computedEnd, office), [allInterviews, computedStart, computedEnd, office]);
+  const ytdApptActual = useMemo(() => interviewActualsInRange(allInterviews, ytdStart, computedEnd, office), [allInterviews, ytdStart, computedEnd, office]);
+
+  const { data: apptTgtPeriodAk = { K0: 0, K1: 0, K2: 0 } } = useInterviewTargetsSum(periodMonths, "Akatlar");
+  const { data: apptTgtPeriodZk = { K0: 0, K1: 0, K2: 0 } } = useInterviewTargetsSum(periodMonths, "Zekeriyaköy");
+  const { data: apptTgtYtdAk = { K0: 0, K1: 0, K2: 0 } } = useInterviewTargetsSum(ytdMonths, "Akatlar");
+  const { data: apptTgtYtdZk = { K0: 0, K1: 0, K2: 0 } } = useInterviewTargetsSum(ytdMonths, "Zekeriyaköy");
+  const combineOffices = (ak: Record<string, number>, zk: Record<string, number>) =>
+    !office ? { K0: ak.K0 + zk.K0, K1: ak.K1 + zk.K1, K2: ak.K2 + zk.K2 } : office === "Akatlar" ? ak : zk;
+  const periodApptTarget = combineOffices(apptTgtPeriodAk, apptTgtPeriodZk);
+  const ytdApptTarget = combineOffices(apptTgtYtdAk, apptTgtYtdZk);
+
+  const { data: growthPeriod } = useGrowthRangeStats(periodMonths, office);
+  const { data: growthYtd } = useGrowthRangeStats(ytdMonths, office);
+
+  const { data: closingPeriod } = useClosingStats(computedStart, computedEnd, office);
+  const { data: closingYtd } = useClosingStats(ytdStart, computedEnd, office);
+
+  const { data: finTargetsAk = [] } = useFinancialTargets(year, "Akatlar");
+  const { data: finTargetsZk = [] } = useFinancialTargets(year, "Zekeriyaköy");
+  const finTargetsForYear = !office ? mergeTargetRows(finTargetsAk, finTargetsZk) : office === "Akatlar" ? finTargetsAk : finTargetsZk;
+  const periodFinTarget = useMemo(() => sumFinancialTargetsInRange(finTargetsForYear, year, computedStart, computedEnd), [finTargetsForYear, year, computedStart, computedEnd]);
+  const ytdFinTarget = useMemo(() => sumFinancialTargetsInRange(finTargetsForYear, year, ytdStart, computedEnd), [finTargetsForYear, year, ytdStart, computedEnd]);
+
+  const hedefRow: PeriodRow = {
+    randevuToplam: periodApptTarget.K0 + periodApptTarget.K1 + periodApptTarget.K2,
+    randevuK0: periodApptTarget.K0, randevuK1: periodApptTarget.K1, randevuK2: periodApptTarget.K2,
+    brutToplam: growthPeriod?.brutTarget ?? 0,
+    brutK0: growthPeriod?.brutTargetByCategory.K0 ?? 0, brutK1: growthPeriod?.brutTargetByCategory.K1 ?? 0, brutK2: growthPeriod?.brutTargetByCategory.K2 ?? 0,
+    net: growthPeriod?.netTarget ?? 0, bhb: periodFinTarget.bhb, companyTl: periodFinTarget.bm,
+  };
+  const realizasyonRow: PeriodRow = {
+    randevuToplam: periodApptActual.K0 + periodApptActual.K1 + periodApptActual.K2,
+    randevuK0: periodApptActual.K0, randevuK1: periodApptActual.K1, randevuK2: periodApptActual.K2,
+    brutToplam: growthPeriod?.brut ?? 0,
+    brutK0: growthPeriod?.brutByCategory.K0 ?? 0, brutK1: growthPeriod?.brutByCategory.K1 ?? 0, brutK2: growthPeriod?.brutByCategory.K2 ?? 0,
+    net: growthPeriod?.net ?? 0, bhb: closingPeriod?.completedBHB ?? 0, companyTl: closingPeriod?.completedBM ?? 0,
+  };
+  const ybbRow: PeriodRow = {
+    randevuToplam: ytdApptActual.K0 + ytdApptActual.K1 + ytdApptActual.K2,
+    randevuK0: ytdApptActual.K0, randevuK1: ytdApptActual.K1, randevuK2: ytdApptActual.K2,
+    brutToplam: growthYtd?.brut ?? 0,
+    brutK0: growthYtd?.brutByCategory.K0 ?? 0, brutK1: growthYtd?.brutByCategory.K1 ?? 0, brutK2: growthYtd?.brutByCategory.K2 ?? 0,
+    net: growthYtd?.net ?? 0, bhb: closingYtd?.completedBHB ?? 0, companyTl: closingYtd?.completedBM ?? 0,
+  };
+  const ybbHedefRow: PeriodRow = {
+    randevuToplam: ytdApptTarget.K0 + ytdApptTarget.K1 + ytdApptTarget.K2,
+    randevuK0: ytdApptTarget.K0, randevuK1: ytdApptTarget.K1, randevuK2: ytdApptTarget.K2,
+    brutToplam: growthYtd?.brutTarget ?? 0,
+    brutK0: growthYtd?.brutTargetByCategory.K0 ?? 0, brutK1: growthYtd?.brutTargetByCategory.K1 ?? 0, brutK2: growthYtd?.brutTargetByCategory.K2 ?? 0,
+    net: growthYtd?.netTarget ?? 0, bhb: ytdFinTarget.bhb, companyTl: ytdFinTarget.bm,
+  };
+
+  const COLS: { key: keyof PeriodRow; fmt: "int" | "money" }[] = [
+    { key: "randevuToplam", fmt: "int" }, { key: "randevuK0", fmt: "int" }, { key: "randevuK1", fmt: "int" }, { key: "randevuK2", fmt: "int" },
+    { key: "brutToplam", fmt: "int" }, { key: "brutK0", fmt: "int" }, { key: "brutK1", fmt: "int" }, { key: "brutK2", fmt: "int" },
+    { key: "net", fmt: "int" }, { key: "bhb", fmt: "money" }, { key: "companyTl", fmt: "money" },
+  ];
+  const fmtCell = (v: number, fmt: "int" | "money") => fmt === "money" ? fmtTRY(v) : String(Math.round(v));
+  const ratio = (a: number, b: number): number | null => b > 0 ? (a / b) * 100 : null;
+
+  const DataRow = ({ label, row, oran, italic }: { label: string; row: PeriodRow; oran: number | null; italic?: boolean }) => (
+    <tr className={`border-b border-border/50 ${italic ? "italic text-muted-foreground" : ""}`}>
+      <td className="py-2 px-3 font-medium whitespace-nowrap">{label}</td>
+      {COLS.map(c => <td key={c.key} className="py-2 px-3 text-right tabular-nums">{fmtCell(row[c.key], c.fmt)}</td>)}
+      <td className="py-2 px-3 text-right tabular-nums font-medium">{oran !== null ? `%${oran.toFixed(2)}` : "—"}</td>
+    </tr>
+  );
+  const RatioRow = ({ label, actual, target }: { label: string; actual: PeriodRow; target: PeriodRow }) => (
+    <tr className="border-b border-border/50">
+      <td className="py-2 px-3 font-medium whitespace-nowrap">{label}</td>
+      {COLS.map(c => {
+        const r = ratio(actual[c.key], target[c.key]);
+        return <td key={c.key} className="py-2 px-3 text-right tabular-nums">{r !== null ? `%${Math.round(r)}` : "—"}</td>;
+      })}
+      <td className="py-2 px-3" />
+    </tr>
+  );
+
+  const periodLabel = useCustomRange ? `${fromDate} – ${toDate}` : format(viewDate, "MMMM yyyy", { locale: tr });
+
+  return (
+    <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+      <div className="px-5 py-3 border-b border-border flex items-center gap-2">
+        <TrendingUp className="h-4 w-4 text-primary" />
+        <h2 className="text-base font-semibold">Dönem Karşılaştırma</h2>
+        {office && <span className="text-xs font-medium bg-primary/10 text-primary px-2 py-0.5 rounded-full">{office}</span>}
+        <span className="text-xs text-muted-foreground ml-1">{periodLabel}</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead className="bg-muted/30">
+            <tr className="border-b border-border">
+              <th rowSpan={2} className="text-left px-3 py-2 font-medium text-muted-foreground align-bottom">Dönem</th>
+              <th colSpan={4} className="text-center px-3 py-1.5 font-semibold border-l border-border">RANDEVU</th>
+              <th colSpan={4} className="text-center px-3 py-1.5 font-semibold border-l border-border">BRÜT</th>
+              <th rowSpan={2} className="text-right px-3 py-2 font-medium text-muted-foreground align-bottom border-l border-border">NET</th>
+              <th rowSpan={2} className="text-right px-3 py-2 font-medium text-muted-foreground align-bottom">BHB</th>
+              <th rowSpan={2} className="text-right px-3 py-2 font-medium text-muted-foreground align-bottom">Company TL</th>
+              <th rowSpan={2} className="text-right px-3 py-2 font-medium text-muted-foreground align-bottom">Oran%</th>
+            </tr>
+            <tr className="text-muted-foreground">
+              <th className="text-right px-3 py-1.5 font-medium border-l border-border">Toplam</th>
+              <th className="text-right px-3 py-1.5 font-medium">Yeni</th>
+              <th className="text-right px-3 py-1.5 font-medium">K1</th>
+              <th className="text-right px-3 py-1.5 font-medium">K2</th>
+              <th className="text-right px-3 py-1.5 font-medium border-l border-border">Toplam</th>
+              <th className="text-right px-3 py-1.5 font-medium">Yeni</th>
+              <th className="text-right px-3 py-1.5 font-medium">K1</th>
+              <th className="text-right px-3 py-1.5 font-medium">K2</th>
+            </tr>
+          </thead>
+          <tbody>
+            <DataRow label="HEDEF" row={hedefRow} oran={null} />
+            <DataRow label="Realizasyon" row={realizasyonRow} oran={ratio(realizasyonRow.companyTl, realizasyonRow.bhb)} italic />
+            <RatioRow label="ABB%" actual={realizasyonRow} target={hedefRow} />
+            <DataRow label="YBB" row={ybbRow} oran={ratio(ybbRow.companyTl, ybbRow.bhb)} italic />
+            <RatioRow label="YBB%" actual={ybbRow} target={ybbHedefRow} />
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function FinancialReports() {
   const [viewDate, setViewDate] = useState(() => new Date());
@@ -966,6 +1194,12 @@ export default function FinancialReports() {
             </div>
           </div>
         </div>
+
+        {/* ── Dönem Karşılaştırma (HEDEF/Realizasyon/ABB%/YBB/YBB%) ── */}
+        <PeriodComparisonTable
+          computedStart={computedStart} computedEnd={computedEnd} office={officeFilter}
+          useCustomRange={useCustomRange} fromDate={fromDate} toDate={toDate} viewDate={viewDate}
+        />
 
         {/* ── Randevu Hedef Takibi ── */}
         <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">

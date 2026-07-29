@@ -3093,6 +3093,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const [leftRow] = (await db.execute(sql`
         SELECT COUNT(*)::int AS c FROM employees e JOIN candidates c ON c.id = e.candidate_id
         WHERE e.passive_at IS NOT NULL AND ${leftFilter}${ukFilter}${officeFilter}`)).rows as any[];
+      // Brüt gerçekleşen — K0/K1/K2 kırılımı (candidates.category), "Dönem Karşılaştırma" tablosu için
+      const brutCatRows = (await db.execute(sql`
+        SELECT c.category, COUNT(*)::int AS c FROM employees e JOIN candidates c ON c.id = e.candidate_id
+        WHERE ${filter}${ukFilter}${officeFilter}
+        GROUP BY c.category`)).rows as any[];
+      const brutByCategory = { K0: 0, K1: 0, K2: 0 } as Record<string, number>;
+      for (const r of brutCatRows) if (r.category in brutByCategory) brutByCategory[r.category] = Number(r.c ?? 0);
 
       // Her HM kendi hedefini (ofis bazında) girer; office verilirse o ofisin,
       // verilmezse tüm ofislerin toplamı + HM bazında döküm dönülür.
@@ -3111,6 +3118,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const rowBrutTotal = (r: any) => Number(r.brut_target_k0 ?? 0) + Number(r.brut_target_k1 ?? 0) + Number(r.brut_target_k2 ?? 0);
       const brutTarget = targetRows.reduce((s, r) => s + rowBrutTotal(r), 0);
       const netTarget = targetRows.reduce((s, r) => s + Number(r.net_target ?? 0), 0);
+      const brutTargetByCategory = {
+        K0: targetRows.reduce((s, r) => s + Number(r.brut_target_k0 ?? 0), 0),
+        K1: targetRows.reduce((s, r) => s + Number(r.brut_target_k1 ?? 0), 0),
+        K2: targetRows.reduce((s, r) => s + Number(r.brut_target_k2 ?? 0), 0),
+      };
       const targetsByUser = targetRows.map((r) => ({
         userId: r.user_id,
         userName: r.user_name ?? "(eski genel hedef)",
@@ -3125,6 +3137,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         brut: brutRow?.c ?? 0,
         left: leftRow?.c ?? 0,
         net: (brutRow?.c ?? 0) - (leftRow?.c ?? 0),
+        brutByCategory, brutTargetByCategory,
         brutTarget, netTarget, targetsByUser,
       });
     } catch (err) {
