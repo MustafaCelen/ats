@@ -376,7 +376,7 @@ function GrowthSection({ viewDate, isAdmin, useCustomRange, fromDate, toDate, uk
         </span>
         <span className="text-xs text-muted-foreground ml-auto italic">Her HM kendi hedefini Dashboard'dan girer</span>
       </div>
-      <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className={`p-4 grid grid-cols-1 ${isAdmin && targetsByUser.length > 0 ? "md:grid-cols-4" : "md:grid-cols-3"} gap-4`}>
         <GrowthCard label="Brüt Büyüme" actual={brut} target={brutT} sub="Danışmana dönüşmüş adaylar" color="#10b981" />
         <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-2">
           <span className="text-sm font-medium text-muted-foreground">Net Büyüme</span>
@@ -388,20 +388,20 @@ function GrowthSection({ viewDate, isAdmin, useCustomRange, fromDate, toDate, uk
           <div className="text-3xl font-bold text-red-600">{growth?.left ?? 0}</div>
           <p className="text-xs text-muted-foreground">Bu dönemde pasife çekilen danışman sayısı</p>
         </div>
-      </div>
-
-      {isAdmin && targetsByUser.length > 0 && (
-        <div className="px-5 pb-4">
-          <p className="text-xs font-medium text-muted-foreground mb-2">HM bazında hedefler (Brüt)</p>
-          <div className="flex flex-wrap gap-2">
-            {targetsByUser.map((t) => (
-              <span key={t.userId ?? "legacy"} className="text-xs bg-muted/40 rounded-full px-3 py-1">
-                {t.userName}: <span className="font-medium">{t.brutTarget}</span>
-              </span>
-            ))}
+        {isAdmin && targetsByUser.length > 0 && (
+          <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-2">
+            <span className="text-sm font-medium text-muted-foreground">HM Bazında (Brüt)</span>
+            <div className="space-y-1.5 max-h-[88px] overflow-y-auto pr-1">
+              {targetsByUser.map((t) => (
+                <div key={t.userId ?? "legacy"} className="flex items-center justify-between gap-2 text-xs">
+                  <span className="text-muted-foreground truncate">{t.userName}</span>
+                  <span className="font-semibold text-foreground shrink-0">{t.brutTarget}</span>
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
