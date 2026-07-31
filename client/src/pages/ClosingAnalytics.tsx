@@ -281,10 +281,16 @@ const METRIC_ROWS: MetricRow[] = [
   { label: "Alınan Sözleşme Hacmi", fmt: "money", get: (s) => s.alinanSozlesmeHacmi },
   { label: "Aktif Portföy Adedi", fmt: "int", get: (s) => s.aktifPortfoyAdedi },
   { label: "Aktif Portföy Hacmi", fmt: "money", get: (s) => s.aktifPortfoyHacmi },
-  ...PRICE_BUCKET_LABELS.map((label, i) => ({
-    label: `Fiyat Dilimi: ${label}`, fmt: "int" as Fmt,
-    get: (s: PeriodComparisonScope) => s.priceBuckets[i]?.count ?? 0, indent: true,
-  })),
+  ...PRICE_BUCKET_LABELS.flatMap((label, i) => ([
+    {
+      label: `Fiyat Dilimi: ${label} (Adet)`, fmt: "int" as Fmt,
+      get: (s: PeriodComparisonScope) => s.priceBuckets[i]?.count ?? 0, indent: true,
+    },
+    {
+      label: `Fiyat Dilimi: ${label} (Hacim)`, fmt: "money" as Fmt,
+      get: (s: PeriodComparisonScope) => s.priceBuckets[i]?.volume ?? 0, indent: true,
+    },
+  ])),
 ];
 
 const SCOPE_KEYS = ["Akatlar", "Zekeriyaköy", "Konsolide"] as const;

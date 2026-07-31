@@ -100,7 +100,7 @@ export type PeriodComparisonScope = {
   aktifPortfoyAdedi: number; aktifPortfoyHacmi: number;
   saticiAliciDengesi: { satici: number; alici: number };
   ortalamaSatisFiyati: number;
-  priceBuckets: { label: string; count: number; avgDuration: number | null }[];
+  priceBuckets: { label: string; count: number; volume: number; avgDuration: number | null }[];
   kapanisSuresi: number;
   durationBuckets: { label: string; count: number }[];
   indirimOrani: number;

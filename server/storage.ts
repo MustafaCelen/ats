@@ -3888,15 +3888,16 @@ export class DatabaseStorage implements IStorage {
         ? Array.from(satilikPricesById.values()).reduce((s, v) => s + v, 0) / satilikPricesById.size
         : 0;
 
-      const priceBuckets = PRICE_BUCKET_LABELS.map(label => ({ label, count: 0, durations: [] as number[] }));
+      const priceBuckets = PRICE_BUCKET_LABELS.map(label => ({ label, count: 0, volume: 0, durations: [] as number[] }));
       for (const [closingId, price] of satilikPricesById) {
         const idx = bucketIndexForPrice(price);
         priceBuckets[idx].count++;
+        priceBuckets[idx].volume += price;
         const durRow = satilikRows.find(r => r.closingId === closingId && r.durationDays && r.durationDays > 0 && r.durationDays <= 3650);
         if (durRow) priceBuckets[idx].durations.push(durRow.durationDays!);
       }
       const priceBucketsOut = priceBuckets.map(b => ({
-        label: b.label, count: b.count,
+        label: b.label, count: b.count, volume: b.volume,
         avgDuration: b.durations.length > 0 ? Math.round(b.durations.reduce((s, v) => s + v, 0) / b.durations.length) : null,
       }));
 
