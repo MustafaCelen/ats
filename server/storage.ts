@@ -3969,14 +3969,40 @@ export class DatabaseStorage implements IStorage {
       const danismanBasinaAylikBHB = danismanSayisi > 0 ? totalBHB / monthCount / danismanSayisi : 0;
       const danismanBasinaAylikSP = danismanSayisi > 0 ? totalBM / monthCount / danismanSayisi : 0;
 
-      // ── Portföy: aktif portföy (dönem sonu itibarıyla) + alınan sözleşme (dönem içinde) ──
+      // ── Aktif Portföy: LİSTİNGS değil, tamamlanmış İŞLEMLER (closings) esas alınır —
+      // dönem sonuna kadar (başlangıçla sınırlı değil, birikimli) tamamlanmış ve gerçek
+      // kapanış tarihi girilmiş tüm işlemlerin hacmi/adedi. "Toplam Hacim"den farkı:
+      // o metrik [start,end] penceresiyle sınırlı, bu ise "bugüne (dönem sonuna) kadarki
+      // toplam" — o yüzden ayrı ve anlamlı bir metrik.
+      const aktifPortfoyRows = await db
+        .select({ closingId: closings.id, saleValue: closings.saleValue, officeSnapshot: officeSnap })
+        .from(closings)
+        .leftJoin(closingSides, eq(closingSides.closingId, closings.id))
+        .leftJoin(closingAgents, eq(closingAgents.closingSideId, closingSides.id))
+        .leftJoin(employees, eq(employees.id, closingAgents.employeeId))
+        .leftJoin(candidates, eq(candidates.id, employees.candidateId))
+        .where(and(
+          sql`${effectiveStatus} = 'completed'`,
+          sql`${effectiveDate} IS NOT NULL`,
+          sql`${effectiveDate} <= ${endInclusive}`,
+          ...(office ? [eq(officeSnap, office)] : []),
+        ));
+      const aktifPortfoySeen = new Set<number>();
+      let aktifPortfoyAdedi = 0, aktifPortfoyHacmi = 0;
+      for (const r of aktifPortfoyRows) {
+        if (aktifPortfoySeen.has(r.closingId)) continue;
+        aktifPortfoySeen.add(r.closingId);
+        aktifPortfoyAdedi++;
+        aktifPortfoyHacmi += parseFloat(r.saleValue ?? "0");
+      }
+
+      // ── Portföy: danışman başına aktif ilan (listings) + alınan sözleşme (dönem içinde) ──
       const allListings = await db.select({
         id: listings.id, price: listings.price, employeeId: listings.employeeId,
         status: listings.status, firstSeenAt: listings.firstSeenAt, passiveAt: listings.passiveAt,
         agreementUploadedAt: listings.agreementUploadedAt,
       }).from(listings);
 
-      let aktifPortfoyAdedi = 0, aktifPortfoyHacmi = 0;
       const portfoySahibiSet = new Set<number>();
       let alinanSozlesmeAdedi = 0, alinanSozlesmeHacmi = 0;
 
@@ -3991,8 +4017,6 @@ export class DatabaseStorage implements IStorage {
         const isActiveAsOfEnd = !!firstSeen && firstSeen <= end
           && (l.status === "active" || (!!wentPassive && wentPassive > end));
         if (isActiveAsOfEnd) {
-          aktifPortfoyAdedi++;
-          aktifPortfoyHacmi += parseFloat(l.price ?? "0");
           if (l.employeeId) portfoySahibiSet.add(l.employeeId);
         }
         if (l.agreementUploadedAt) {
