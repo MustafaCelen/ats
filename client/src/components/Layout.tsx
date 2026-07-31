@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Users, Briefcase, BarChart2, ChevronRight, Menu, X,
   Calendar, Shield, LogOut, ClipboardList, UserCheck, KanbanSquare, DollarSign, GraduationCap,
   Receipt, TrendingUp, Building2, Trophy, ShieldAlert, Users2, Puzzle, BarChart3, Copy, Megaphone,
-  MessageCircle,
+  MessageCircle, MapPin,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { useState } from "react";
@@ -44,6 +44,7 @@ const reportsGroupAdmin: NavGroup = {
   label: "Raporlar",
   children: [
     { icon: DollarSign,    label: "Finansal Raporlar",      href: "/financial-reports" },
+    { icon: MapPin,        label: "Danışman Karnesi",       href: "/advisor-scorecard" },
     { icon: TrendingUp,    label: "Kâr / Zarar",            href: "/pl-report"         },
     { icon: Trophy,        label: "Cap Analizi",            href: "/cap-report"        },
     { icon: BarChart2,     label: "Üretim Bandı Raporları", href: "/reports"           },

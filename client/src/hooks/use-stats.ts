@@ -124,3 +124,53 @@ export function usePeriodComparison(periodAStart?: string, periodAEnd?: string, 
     },
   });
 }
+
+export type ScorecardMahalleRow = {
+  mahalle: string; bhb: number; oran: number; hacim: number;
+  hacimPayi: number;
+  // Sadece ofis tablosunda dolu gelir (şirket geneli tablosunda undefined).
+  oranPayi?: number;
+  bireyselHacimPayi?: number;
+  bireyselOranPayi?: number;
+};
+export type ScorecardAdvisorRow = {
+  employeeId: number;
+  name: string;
+  rows: ScorecardMahalleRow[];
+  total: { bhb: number; oran: number; hacim: number };
+  hacimPayi: number;
+};
+export type ScorecardOfficeAdvisorRow = ScorecardAdvisorRow & {
+  oranPayi: number;
+  bireyselHacimPayi: number;
+  bireyselOranPayi: number;
+  portfoyAdedi: number;
+  portfoyHacmi: number;
+};
+export type AdvisorScorecardReport = {
+  company: { rows: ScorecardAdvisorRow[]; total: { bhb: number; oran: number; hacim: number } };
+  office: {
+    rows: ScorecardOfficeAdvisorRow[];
+    total: { bhb: number; oran: number; hacim: number };
+    portfolioTotal: { adet: number; hacim: number };
+  };
+  availableMahalleler: string[];
+};
+
+export function useAdvisorScorecard(startDate?: string, endDate?: string, office?: string, mahalle?: string[]) {
+  const mahalleKey = mahalle && mahalle.length > 0 ? [...mahalle].sort().join("|") : "";
+  return useQuery<AdvisorScorecardReport>({
+    queryKey: [api.stats.advisorScorecard.path, startDate, endDate, office, mahalleKey],
+    enabled: !!(startDate && endDate),
+    queryFn: async () => {
+      const url = new URL(api.stats.advisorScorecard.path, window.location.origin);
+      url.searchParams.set("startDate", startDate!);
+      url.searchParams.set("endDate", endDate!);
+      if (office) url.searchParams.set("office", office);
+      for (const m of mahalle ?? []) url.searchParams.append("mahalle", m);
+      const res = await fetch(url.toString(), { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to load advisor scorecard report");
+      return res.json();
+    },
+  });
+}

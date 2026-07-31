@@ -46,6 +46,7 @@ export const api = {
     closingAnalytics:  { method: 'GET' as const, path: '/api/stats/closing-analytics' },
     closingLocations:  { method: 'GET' as const, path: '/api/stats/closing-locations' },
     periodComparison:  { method: 'GET' as const, path: '/api/stats/period-comparison' },
+    advisorScorecard:  { method: 'GET' as const, path: '/api/stats/advisor-scorecard' },
   },
 };
 

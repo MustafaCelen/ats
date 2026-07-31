@@ -1798,6 +1798,23 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  app.get(api.stats.advisorScorecard.path, requireAuth, requireFinancialsAccess, async (req, res) => {
+    try {
+      const startDate = new Date(req.query.startDate as string);
+      const endDate = new Date(req.query.endDate as string);
+      const office = req.query.office ? (req.query.office as string) : undefined;
+      const mahalleRaw = req.query.mahalle;
+      const mahalle = mahalleRaw ? (Array.isArray(mahalleRaw) ? mahalleRaw as string[] : [mahalleRaw as string]) : undefined;
+      if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+        return res.status(400).json({ message: "startDate, endDate required" });
+      }
+      res.json(await storage.getAdvisorNeighborhoodScorecard(startDate, endDate, office, mahalle));
+    } catch (err) {
+      console.error("[GET /api/stats/advisor-scorecard]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   app.get("/api/reports/churn", requireAuth, requireHiringManagerOrAdmin, async (_req: any, res: any) => {
     try {
       res.json(await storage.getChurnReport());

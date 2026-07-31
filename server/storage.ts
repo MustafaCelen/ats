@@ -4064,6 +4064,208 @@ export class DatabaseStorage implements IStorage {
     return result;
   }
 
+  // Mahalle bazlı danışman karnesi: seçilen ofis için (office boşsa = Tüm Ofisler,
+  // ofis filtresi uygulanmaz), her danışmanın hem şirket geneli (tüm ofisler) hem de
+  // sadece o ofise ait işlemlerini Semt/Mahalle kırılımında gösterir. İşlem Hacmi =
+  // saleValue × işlem oranı (islemOrani) — her satır bazında, closing başına
+  // dedup'lanmadan toplanır (böylece iki taraflı/içeride kapanan işlemler Adet ile
+  // birebir tutarlı biçimde iki kez katkı verir).
+  async getAdvisorNeighborhoodScorecard(startDate: Date, endDate: Date, office?: string, mahalleFilter?: string[]): Promise<{
+    company: { rows: any[]; total: { bhb: number; oran: number; hacim: number } };
+    office: { rows: any[]; total: { bhb: number; oran: number; hacim: number }; portfolioTotal: { adet: number; hacim: number } };
+    availableMahalleler: string[];
+  }> {
+    const endInclusive = new Date(endDate); endInclusive.setHours(23, 59, 59, 999);
+    const effectiveStatus = sql<string>`COALESCE(${closingAgents.status}, ${closings.status})`;
+    const effectiveDate = sql<Date>`COALESCE(${closingAgents.closingDate}, ${closings.closingDate})`;
+    const officeSnap = sql<string>`COALESCE(${closingAgents.officeSnapshot}, ${candidates.office})`;
+
+    const rows = await db
+      .select({
+        employeeId: closingAgents.employeeId,
+        employeeName: candidates.name,
+        mahalle: closings.mahalle,
+        saleValue: closings.saleValue,
+        commissionRate: closings.commissionRate,
+        dealCategory: closings.dealCategory,
+        bhbShare: closingAgents.bhbShare,
+        officeSnapshot: officeSnap,
+      })
+      .from(closings)
+      .leftJoin(closingSides, eq(closingSides.closingId, closings.id))
+      .leftJoin(closingAgents, eq(closingAgents.closingSideId, closingSides.id))
+      .leftJoin(employees, eq(employees.id, closingAgents.employeeId))
+      .leftJoin(candidates, eq(candidates.id, employees.candidateId))
+      .where(and(
+        sql`${effectiveStatus} = 'completed'`,
+        sql`${effectiveDate} IS NOT NULL`,
+        sql`${effectiveDate} >= ${startDate}`,
+        sql`${effectiveDate} <= ${endInclusive}`,
+        sql`${closingAgents.employeeId} IS NOT NULL`,
+      ));
+
+    const islemOrani = (r: { saleValue: string | null; commissionRate?: string | null; dealCategory?: string | null; bhbShare: string | null }) => {
+      const sale = parseFloat(r.saleValue ?? "0");
+      const rate = parseFloat(r.commissionRate ?? "0");
+      const perSide = r.dealCategory === "Kiralık" ? sale / 2 : sale * rate / 100;
+      if (perSide <= 0) return 0;
+      return parseFloat(r.bhbShare ?? "0") / perSide;
+    };
+    // İşlem Hacmi = işlem bedeli × işlem oranı. Kiralık işlemlerde saleValue aylık kira
+    // bedelini tutar (bkz. perSide = sale/2 yukarıda) — hacmi satışlarla karşılaştırılabilir
+    // kılmak için yıllık kira bedeline (×12) çevriliyor.
+    const hacimValue = (r: { saleValue: string | null; dealCategory?: string | null }) => {
+      const sale = parseFloat(r.saleValue ?? "0");
+      return r.dealCategory === "Kiralık" ? sale * 12 : sale;
+    };
+
+    // Mahalle filtresi seçeneklerini (dropdown), FİLTRELENMEMİŞ ofis verisinden — hacme göre
+    // sıralı — çıkarıyoruz; böylece bir mahalle seçildiğinde liste kaybolmuyor.
+    const mahalleHacimMap = new Map<string, number>();
+    for (const r of rows) {
+      if (office && r.officeSnapshot !== office) continue;
+      const m = r.mahalle?.trim() || "Belirtilmemiş";
+      mahalleHacimMap.set(m, (mahalleHacimMap.get(m) ?? 0) + hacimValue(r) * islemOrani(r));
+    }
+    const availableMahalleler = Array.from(mahalleHacimMap.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([m]) => m);
+
+    const filteredRows = mahalleFilter && mahalleFilter.length > 0
+      ? rows.filter(r => mahalleFilter.includes(r.mahalle?.trim() || "Belirtilmemiş"))
+      : rows;
+
+    type Agg = { bhb: number; oran: number; hacim: number };
+    const blank = (): Agg => ({ bhb: 0, oran: 0, hacim: 0 });
+    const add = (a: Agg, bhb: number, oran: number, hacim: number) => { a.bhb += bhb; a.oran += oran; a.hacim += hacim; };
+
+    // Danışmanın GERÇEK toplamı — mahalle filtresinden VE ofis filtresinden bağımsız,
+    // dönem boyunca yaptığı tüm işlemler (tüm ofisler, tüm mahalleler). "Bireysel Payı"
+    // hep BUNA göre hesaplanır: "seçili mahalle(ler)deki üretimim, TÜM üretimimin
+    // yüzde kaçı" — mahalle filtresi daraldıkça payın da küçülmesi beklenir.
+    const companyByEmpAll = new Map<number, Agg>();
+    for (const r of rows) {
+      const empId = r.employeeId!;
+      if (!companyByEmpAll.has(empId)) companyByEmpAll.set(empId, blank());
+      add(companyByEmpAll.get(empId)!, parseFloat(r.bhbShare ?? "0"), islemOrani(r), hacimValue(r) * islemOrani(r));
+    }
+
+    const namesByEmp = new Map<number, string>();
+    const companyByEmpMahalle = new Map<string, Agg>();
+    const companyByEmp = new Map<number, Agg>();
+    const companyByMahalle = new Map<string, Agg>();
+    const companyTotal = blank();
+    const officeByEmpMahalle = new Map<string, Agg>();
+    const officeByEmp = new Map<number, Agg>();
+    const officeByMahalle = new Map<string, Agg>();
+    const officeTotal = blank();
+
+    for (const r of filteredRows) {
+      const empId = r.employeeId!;
+      namesByEmp.set(empId, r.employeeName ?? `#${empId}`);
+      const mahalle = r.mahalle?.trim() || "Belirtilmemiş";
+      const bhb = parseFloat(r.bhbShare ?? "0");
+      const oran = islemOrani(r);
+      const hacim = hacimValue(r) * oran;
+      const key = `${empId}::${mahalle}`;
+
+      if (!companyByEmpMahalle.has(key)) companyByEmpMahalle.set(key, blank());
+      add(companyByEmpMahalle.get(key)!, bhb, oran, hacim);
+      if (!companyByEmp.has(empId)) companyByEmp.set(empId, blank());
+      add(companyByEmp.get(empId)!, bhb, oran, hacim);
+      if (!companyByMahalle.has(mahalle)) companyByMahalle.set(mahalle, blank());
+      add(companyByMahalle.get(mahalle)!, bhb, oran, hacim);
+      add(companyTotal, bhb, oran, hacim);
+
+      if (!office || r.officeSnapshot === office) {
+        if (!officeByEmpMahalle.has(key)) officeByEmpMahalle.set(key, blank());
+        add(officeByEmpMahalle.get(key)!, bhb, oran, hacim);
+        if (!officeByEmp.has(empId)) officeByEmp.set(empId, blank());
+        add(officeByEmp.get(empId)!, bhb, oran, hacim);
+        if (!officeByMahalle.has(mahalle)) officeByMahalle.set(mahalle, blank());
+        add(officeByMahalle.get(mahalle)!, bhb, oran, hacim);
+        add(officeTotal, bhb, oran, hacim);
+      }
+    }
+
+    // Portföy adedi/hacmi: seçilen ofisteki (danışmanın kendi şubesi — listings.office
+    // portal/mağaza adı olduğu için kullanılamaz) aktif ilanlar, danışman bazında
+    const activeListingRows = await db
+      .select({ employeeId: listings.employeeId, price: listings.price })
+      .from(listings)
+      .innerJoin(employees, eq(employees.id, listings.employeeId))
+      .innerJoin(candidates, eq(candidates.id, employees.candidateId))
+      .where(and(eq(listings.status, "active"), ...(office ? [eq(candidates.office, office)] : [])));
+    const portfolioByEmp = new Map<number, { adet: number; hacim: number }>();
+    const portfolioTotal = { adet: 0, hacim: 0 };
+    for (const l of activeListingRows) {
+      const price = parseFloat(l.price ?? "0");
+      portfolioTotal.adet += 1;
+      portfolioTotal.hacim += price;
+      if (!l.employeeId) continue;
+      if (!portfolioByEmp.has(l.employeeId)) portfolioByEmp.set(l.employeeId, { adet: 0, hacim: 0 });
+      const p = portfolioByEmp.get(l.employeeId)!;
+      p.adet += 1;
+      p.hacim += price;
+    }
+
+    const buildRows = (byEmp: Map<number, Agg>, byEmpMahalle: Map<string, Agg>) => {
+      return Array.from(byEmp.keys()).map(empId => {
+        const mahalleRows = Array.from(byEmpMahalle.entries())
+          .filter(([k]) => k.startsWith(`${empId}::`))
+          .map(([k, v]) => ({ mahalle: k.slice(k.indexOf("::") + 2), ...v }))
+          .sort((a, b) => b.hacim - a.hacim);
+        return { employeeId: empId, name: namesByEmp.get(empId) ?? `#${empId}`, rows: mahalleRows, total: byEmp.get(empId)! };
+      });
+    };
+
+    const companyRows = buildRows(companyByEmp, companyByEmpMahalle)
+      .sort((a, b) => a.name.localeCompare(b.name, "tr"))
+      .map(r => ({
+        ...r,
+        rows: r.rows.map(mr => {
+          const mahalleTotal = companyByMahalle.get(mr.mahalle) ?? blank();
+          return { ...mr, hacimPayi: mahalleTotal.hacim > 0 ? mr.hacim / mahalleTotal.hacim : 0 };
+        }),
+        hacimPayi: companyTotal.hacim > 0 ? r.total.hacim / companyTotal.hacim : 0,
+      }));
+
+    const officeRows = buildRows(officeByEmp, officeByEmpMahalle)
+      .sort((a, b) => b.total.hacim - a.total.hacim)
+      .map(r => {
+        // Bireysel Payı'nın paydası HER ZAMAN danışmanın gerçek toplamı (tüm mahalleler,
+        // tüm ofisler) — mahalle satırlarında da aynı payda kullanılır, böylece alt
+        // satırların toplamı üst satırdaki toplam bireysel payıyla tutarlı olur.
+        const companyEmpTotal = companyByEmpAll.get(r.employeeId) ?? blank();
+        const portfolio = portfolioByEmp.get(r.employeeId) ?? { adet: 0, hacim: 0 };
+        return {
+          ...r,
+          rows: r.rows.map(mr => {
+            const officeMahalleTotal = officeByMahalle.get(mr.mahalle) ?? blank();
+            return {
+              ...mr,
+              hacimPayi: officeMahalleTotal.hacim > 0 ? mr.hacim / officeMahalleTotal.hacim : 0,
+              oranPayi: officeMahalleTotal.oran > 0 ? mr.oran / officeMahalleTotal.oran : 0,
+              bireyselHacimPayi: companyEmpTotal.hacim > 0 ? mr.hacim / companyEmpTotal.hacim : 0,
+              bireyselOranPayi: companyEmpTotal.oran > 0 ? mr.oran / companyEmpTotal.oran : 0,
+            };
+          }),
+          hacimPayi: officeTotal.hacim > 0 ? r.total.hacim / officeTotal.hacim : 0,
+          oranPayi: officeTotal.oran > 0 ? r.total.oran / officeTotal.oran : 0,
+          bireyselHacimPayi: companyEmpTotal.hacim > 0 ? r.total.hacim / companyEmpTotal.hacim : 0,
+          bireyselOranPayi: companyEmpTotal.oran > 0 ? r.total.oran / companyEmpTotal.oran : 0,
+          portfoyAdedi: portfolio.adet,
+          portfoyHacmi: portfolio.hacim,
+        };
+      });
+
+    return {
+      company: { rows: companyRows, total: companyTotal },
+      office: { rows: officeRows, total: officeTotal, portfolioTotal },
+      availableMahalleler,
+    };
+  }
+
   async getFinancialTargets(year: number, office: string = ""): Promise<FinancialTarget[]> {
     return db.select().from(financialTargets)
       .where(and(eq(financialTargets.year, year), eq(financialTargets.office, office)))
