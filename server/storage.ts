@@ -3971,7 +3971,7 @@ export class DatabaseStorage implements IStorage {
       // ── Portföy: aktif portföy (dönem sonu itibarıyla) + alınan sözleşme (dönem içinde) ──
       const allListings = await db.select({
         id: listings.id, price: listings.price, employeeId: listings.employeeId,
-        firstSeenAt: listings.firstSeenAt, passiveAt: listings.passiveAt,
+        status: listings.status, firstSeenAt: listings.firstSeenAt, passiveAt: listings.passiveAt,
         agreementUploadedAt: listings.agreementUploadedAt,
       }).from(listings);
 
@@ -3983,7 +3983,12 @@ export class DatabaseStorage implements IStorage {
         if (l.employeeId && office && officeAsOf(l.employeeId, endYmd) !== office) continue;
         const firstSeen = l.firstSeenAt ? new Date(l.firstSeenAt) : null;
         const wentPassive = l.passiveAt ? new Date(l.passiveAt) : null;
-        const isActiveAsOfEnd = firstSeen && firstSeen <= end && (!wentPassive || wentPassive > end);
+        // "Aktif" için sadece passiveAt'e güvenilmiyor: birçok pasif ilanda bu alan hiç
+        // set edilmemiş (ör. daha önce hiç "aktif" olarak görmediğimiz, doğrudan "pasif"
+        // sayfasından gelen ilanlar). Bu yüzden güncel status da kontrol ediliyor —
+        // status='passive' ve passiveAt bilinmiyorsa (veya end'den önceyse) aktif SAYILMAZ.
+        const isActiveAsOfEnd = !!firstSeen && firstSeen <= end
+          && (l.status === "active" || (!!wentPassive && wentPassive > end));
         if (isActiveAsOfEnd) {
           aktifPortfoyAdedi++;
           aktifPortfoyHacmi += parseFloat(l.price ?? "0");
@@ -5015,7 +5020,10 @@ export class DatabaseStorage implements IStorage {
       } else {
         // passive sheet
         if (!prev) {
-          // Historical passive listing we never saw active → record silently
+          // Historical passive listing we never saw active → record silently.
+          // passiveAt is unknown (we never saw it active), so we stamp it with "now" —
+          // better than leaving it NULL forever, which would make it look "still active"
+          // to any point-in-time report that checks passiveAt.
           await db.insert(listings).values({
             listingNumber: num,
             price: r.price ?? null,
@@ -5028,6 +5036,7 @@ export class DatabaseStorage implements IStorage {
             office: r.office ?? null,
             store: r.store ?? null,
             status: "passive",
+            passiveAt: new Date(),
             publicToken: randomBytes(16).toString("hex"),
           });
           created++;
@@ -5058,6 +5067,8 @@ export class DatabaseStorage implements IStorage {
               office: r.office ?? prev.office,
               store: r.store ?? prev.store,
               status: "passive",
+              // Backfill passiveAt if it was never set (data-quality gap from earlier imports).
+              ...(prev.passiveAt ? {} : { passiveAt: new Date() }),
               updatedAt: new Date(),
             }).where(eq(listings.id, prev.id));
             updated++;
