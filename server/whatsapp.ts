@@ -27,6 +27,49 @@ function twilioAuth(accountSid: string, authToken: string) {
   return "Basic " + Buffer.from(`${accountSid}:${authToken}`).toString("base64");
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * POST a message to Twilio with automatic retry on rate-limit errors.
+ * Twilio 63018 = "Rate limit exceeded for Channel" — a transient error; Twilio's own
+ * guidance is to retry after a delay. We back off exponentially (2s → 4s → 8s → 16s)
+ * for a few attempts before giving up. Returns the MessageSid, or null on failure.
+ */
+async function postTwilioMessage(
+  accountSid: string,
+  authToken: string,
+  body: URLSearchParams,
+): Promise<string | null> {
+  const MAX_ATTEMPTS = 5;
+  let backoff = 2000;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      const res = await fetch(TWILIO_API(accountSid), {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded", Authorization: twilioAuth(accountSid, authToken) },
+        body: body.toString(),
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok) return data?.sid ?? null;
+
+      // 63018 = channel rate limit; 429 = too many requests → transient, back off and retry
+      const rateLimited = data?.code === 63018 || res.status === 429;
+      if (rateLimited && attempt < MAX_ATTEMPTS) {
+        console.warn(`[WhatsApp] Rate limited (63018), attempt ${attempt}/${MAX_ATTEMPTS}, waiting ${backoff}ms…`);
+        await sleep(backoff);
+        backoff = Math.min(backoff * 2, 30000);
+        continue;
+      }
+      console.warn(`[WhatsApp] Twilio error (${res.status}):`, data);
+      return null;
+    } catch (err) {
+      console.warn("[WhatsApp] Network error:", err);
+      return null;
+    }
+  }
+  return null;
+}
+
 /**
  * Send a WhatsApp message via Twilio using a pre-approved Content Template.
  * vars: { "1": "Danışman Adı", "2": "3", "3": "1", "4": "https://..." }
@@ -49,27 +92,13 @@ export async function sendWhatsAppTemplate(
   const e164 = toE164(phone);
   if (!e164) { console.warn(`[WhatsApp] Invalid phone: ${phone}`); return null; }
 
-  try {
-    const body = new URLSearchParams({
-      From: `whatsapp:${from}`,
-      To:   `whatsapp:${e164}`,
-      ContentSid: sid,
-      ContentVariables: JSON.stringify(vars),
-    });
-
-    const res = await fetch(TWILIO_API(accountSid), {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded", Authorization: twilioAuth(accountSid, authToken) },
-      body: body.toString(),
-    });
-
-    const data = await res.json().catch(() => null);
-    if (!res.ok) { console.warn(`[WhatsApp] Twilio template error (${res.status}):`, data); return null; }
-    return data?.sid ?? null;
-  } catch (err) {
-    console.warn("[WhatsApp] Network error:", err);
-    return null;
-  }
+  const body = new URLSearchParams({
+    From: `whatsapp:${from}`,
+    To:   `whatsapp:${e164}`,
+    ContentSid: sid,
+    ContentVariables: JSON.stringify(vars),
+  });
+  return postTwilioMessage(accountSid, authToken, body);
 }
 
 /**
@@ -85,21 +114,8 @@ export async function sendWhatsApp(phone: string, message: string): Promise<stri
   const e164 = toE164(phone);
   if (!e164) { console.warn(`[WhatsApp] Invalid phone number: ${phone}`); return null; }
 
-  try {
-    const body = new URLSearchParams({ From: `whatsapp:${from}`, To: `whatsapp:${e164}`, Body: message });
-    const res = await fetch(TWILIO_API(accountSid), {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded", Authorization: twilioAuth(accountSid, authToken) },
-      body: body.toString(),
-    });
-
-    const data = await res.json().catch(() => null);
-    if (!res.ok) { console.warn(`[WhatsApp] Twilio error (${res.status}):`, data); return null; }
-    return data?.sid ?? null;
-  } catch (err) {
-    console.warn("[WhatsApp] Network error:", err);
-    return null;
-  }
+  const body = new URLSearchParams({ From: `whatsapp:${from}`, To: `whatsapp:${e164}`, Body: message });
+  return postTwilioMessage(accountSid, authToken, body);
 }
 
 export interface WhatsAppTemplate {

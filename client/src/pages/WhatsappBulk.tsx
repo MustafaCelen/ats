@@ -141,7 +141,9 @@ export default function WhatsappBulk() {
         failed++;
       }
       setProgress((s) => (s ? { ...s, sent, failed } : s));
-      if (i < ids.length - 1 && !stopRef.current) await new Promise((r) => setTimeout(r, 1000));
+      // Twilio WhatsApp kanal hız limitine (63018) takılmamak için mesajlar arası bekleme.
+      // Sunucu tarafı da 63018'de otomatik retry+backoff yapıyor (server/whatsapp.ts).
+      if (i < ids.length - 1 && !stopRef.current) await new Promise((r) => setTimeout(r, 1500));
     }
 
     const wasStopped = stopRef.current;
