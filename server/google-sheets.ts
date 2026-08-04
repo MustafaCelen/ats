@@ -72,6 +72,25 @@ const trDate = (d: Date | string | null | undefined): string => {
   return `${day}.${month}.${date.getFullYear()}`;
 };
 
+const TR_MONTHS = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"];
+// İlgili Ay'ı şablon formatına ("1-Ocak") çevirir. Kayıtlı ilgiliAy ("YYYY-MM" veya
+// "MM/YYYY") varsa ondan, yoksa kapanış tarihinden ayı türetir.
+const trIlgiliAy = (ilgiliAy: string | null | undefined, fallbackDate: Date | string | null | undefined): string => {
+  let monthNum: number | null = null;
+  if (ilgiliAy) {
+    const ym = ilgiliAy.match(/^(\d{4})-(\d{1,2})$/);          // YYYY-MM
+    const my = ilgiliAy.match(/^(\d{1,2})\/(\d{4})$/);          // MM/YYYY
+    if (ym) monthNum = parseInt(ym[2], 10);
+    else if (my) monthNum = parseInt(my[1], 10);
+  }
+  if (monthNum == null && fallbackDate) {
+    const d = new Date(fallbackDate);
+    if (!isNaN(d.getTime())) monthNum = d.getMonth() + 1;
+  }
+  if (monthNum == null || monthNum < 1 || monthNum > 12) return "";
+  return `${monthNum}-${TR_MONTHS[monthNum - 1]}`;
+};
+
 // İşlem Oranı / İşlem Hacmi — Mahalle Bazlı Danışman Karnesi'ndeki ile aynı formül:
 // perSide = Kiralık ? saleValue/2 : saleValue × commissionRate/100; oran = bhbShare/perSide;
 // hacim = (Kiralık ? saleValue×12 : saleValue) × oran (Kiralık'ta saleValue aylık kira bedeli).
@@ -101,7 +120,7 @@ export function buildClosingSheetRows(closing: ClosingWithDetails): string[][] {
         String(closing.id),
         agent.employeeName ?? agent.candidateName ?? "",
         agent.kwuid ?? "",
-        agent.ilgiliAy ?? closing.ilgiliAy ?? "",
+        trIlgiliAy(agent.ilgiliAy ?? closing.ilgiliAy, agent.closingDate ?? closing.closingDate),
         DEAL_CATEGORY_LABEL[closing.dealCategory] ?? closing.dealCategory,
         closing.dealType,
         SIDE_LABEL[side.sideType] ?? side.sideType,
