@@ -13,7 +13,10 @@ export function createOAuth2Client() {
 export function getAuthUrl(state?: string, includeCalendar = false) {
   const scopes = ["openid", "email", "profile"];
   if (includeCalendar) {
+    // "link" akışı — takvim izniyle birlikte Sheets izni de isteniyor (closings →
+    // Google Sheets senkronu, servis hesabı yerine bu bağlanan kullanıcının token'ını kullanır).
     scopes.push("https://www.googleapis.com/auth/calendar.events");
+    scopes.push("https://www.googleapis.com/auth/spreadsheets");
   }
   const params = new URLSearchParams({
     client_id: CLIENT_ID,

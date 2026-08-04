@@ -30,6 +30,7 @@ import {
 import { eq, ne, desc, asc, count, sql, gte, lte, lt, and, or, isNull, isNotNull, inArray, notInArray } from "drizzle-orm";
 import { differenceInDays } from "date-fns";
 import { randomBytes } from "crypto";
+import { appendClosingToSheet } from "./google-sheets";
 
 export type ApplicationWithRelations = Application & { candidate?: Candidate; job?: Job };
 export type InterviewWithRelations = Interview & { candidate?: Candidate; job?: Job; application?: Application };
@@ -3008,6 +3009,13 @@ export class DatabaseStorage implements IStorage {
       }
     } catch (e) {
       console.error("[createClosing snapshot+UK sync]", e);
+    }
+    // Google Sheets'e satır ekleme — GOOGLE_SHEETS_* env'i yoksa sessizce atlanır.
+    try {
+      const withDetails = await this.buildClosingWithDetails(result);
+      await appendClosingToSheet(withDetails);
+    } catch (e) {
+      console.error("[createClosing google-sheets sync]", e);
     }
     return result;
   }

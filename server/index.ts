@@ -9,6 +9,7 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import { isFonzipConfigured, syncFonzipRecentDebts, syncFonzipUsersFinancials } from "./fonzip";
 import { ensureSchema } from "./ensure-schema";
+import { ensureClosingSheetHeader } from "./google-sheets";
 
 const PgStore = connectPgSimple(session);
 
@@ -255,6 +256,9 @@ app.use((req, res, next) => {
   // expense_targets, etc.). Runs on every boot — dev + production, Docker + Replit —
   // so the schema stays in sync without ensure-tables.sh (which Replit never runs).
   await ensureSchema();
+
+  // Closings → Google Sheets satır senkronu: GOOGLE_SHEETS_* env'i yoksa no-op.
+  ensureClosingSheetHeader().catch((err) => console.warn("[google-sheets] header init failed:", err.message));
 
   await registerRoutes(httpServer, app);
 
