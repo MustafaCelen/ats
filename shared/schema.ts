@@ -509,6 +509,7 @@ export interface ClosingAgentWithEmployee extends ClosingAgent {
   employeeName?: string;
   candidateName?: string;
   kwuid?: string;
+  office?: string | null;  // çözülmüş ofis: officeSnapshot ?? candidate.office
 }
 
 export interface ClosingSideWithAgents extends ClosingSide {

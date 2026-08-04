@@ -2137,6 +2137,7 @@ export class DatabaseStorage implements IStorage {
             employeeName: r.candidate?.name ?? undefined,
             candidateName: r.candidate?.name ?? undefined,
             kwuid: r.emp?.kwuid ?? undefined,
+            office: r.agent.officeSnapshot ?? r.candidate?.office ?? null,
           })),
         };
       })

@@ -10,8 +10,12 @@ import type { ClosingWithDetails, ClosingAgentWithEmployee, ClosingSideWithAgent
 // access/refresh token'ını kullanarak Sheets'e yazarız. Token süresi dolarsa
 // getOAuth2ClientForUser otomatik yeniler (aynı Calendar'da kullanılan mekanizma).
 const SPREADSHEET_ID = process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
-const SHEET_TAB = process.env.GOOGLE_SHEETS_TAB_NAME || "Closings";
 const SYNC_USER_EMAIL = process.env.GOOGLE_SHEETS_SYNC_USER_EMAIL;
+// Ofisi çözülemeyen (officeSnapshot + candidate.office ikisi de boş) satırların yazılacağı
+// varsayılan sekme — sistemde ana ofis Akatlar olduğu için oraya düşürüyoruz.
+const DEFAULT_OFFICE_TAB = process.env.GOOGLE_SHEETS_DEFAULT_TAB || "Akatlar";
+// Boot'ta başlığı önden yazılacak/oluşturulacak sekmeler.
+const KNOWN_OFFICE_TABS = ["Akatlar", "Zekeriyaköy"];
 
 let warnedMissingConfig = false;
 let warnedNotConnected = false;
@@ -106,45 +110,82 @@ function islemHacmi(closing: ClosingWithDetails, oran: number): number {
   return (closing.dealCategory === "Kiralık" ? sale * 12 : sale) * oran;
 }
 
-export function buildClosingSheetRows(closing: ClosingWithDetails): string[][] {
+function buildAgentRow(closing: ClosingWithDetails, side: ClosingSideWithAgents, agent: ClosingAgentWithEmployee): string[] {
   const saleValue = parseFloat(closing.saleValue ?? "0");
   const openingPrice = closing.openingPrice != null ? parseFloat(closing.openingPrice) : null;
   const indirimOrani = openingPrice && openingPrice > 0 ? ((saleValue - openingPrice) / openingPrice) * 100 : null;
-
-  const rows: string[][] = [];
-  for (const side of closing.sides as ClosingSideWithAgents[]) {
-    for (const agent of side.agents) {
-      const oran = islemOrani(closing, agent);
-      const hacim = islemHacmi(closing, oran);
-      rows.push([
-        String(closing.id),
-        agent.employeeName ?? agent.candidateName ?? "",
-        agent.kwuid ?? "",
-        trIlgiliAy(agent.ilgiliAy ?? closing.ilgiliAy, agent.closingDate ?? closing.closingDate),
-        DEAL_CATEGORY_LABEL[closing.dealCategory] ?? closing.dealCategory,
-        closing.dealType,
-        SIDE_LABEL[side.sideType] ?? side.sideType,
-        trDate(agent.closingDate ?? closing.closingDate),
-        trNum(closing.saleValue),
-        trNum(agent.bhbShare), trNum(agent.mainBranchShare), trNum(agent.kwtrKdv), trNum(agent.marketCenterActual), trNum(agent.bmKdv), trNum(agent.ukShare), trNum(agent.employeeNet),
-        trNum(agent.kasa), trNum(agent.nakit), trNum(agent.banka),
-        trPercent(parseFloat(closing.commissionRate ?? "0")), trNum(hacim), trNum(oran),
-        closing.il ?? "", closing.ilce ?? "", closing.mahalle ?? "", closing.propertyAddress, closing.propertyDetails ?? "",
-        trNum(closing.openingPrice), trNum(closing.saleValue), indirimOrani != null ? trPercent(indirimOrani) : "",
-        closing.durationDays != null ? String(closing.durationDays) : "",
-        closing.customerSource ?? "", closing.referralInfo ?? "",
-      ]);
-    }
-  }
-  return rows;
+  const oran = islemOrani(closing, agent);
+  const hacim = islemHacmi(closing, oran);
+  return [
+    String(closing.id),
+    agent.employeeName ?? agent.candidateName ?? "",
+    agent.kwuid ?? "",
+    trIlgiliAy(agent.ilgiliAy ?? closing.ilgiliAy, agent.closingDate ?? closing.closingDate),
+    DEAL_CATEGORY_LABEL[closing.dealCategory] ?? closing.dealCategory,
+    closing.dealType,
+    SIDE_LABEL[side.sideType] ?? side.sideType,
+    trDate(agent.closingDate ?? closing.closingDate),
+    trNum(closing.saleValue),
+    trNum(agent.bhbShare), trNum(agent.mainBranchShare), trNum(agent.kwtrKdv), trNum(agent.marketCenterActual), trNum(agent.bmKdv), trNum(agent.ukShare), trNum(agent.employeeNet),
+    trNum(agent.kasa), trNum(agent.nakit), trNum(agent.banka),
+    trPercent(parseFloat(closing.commissionRate ?? "0")), trNum(hacim), trNum(oran),
+    closing.il ?? "", closing.ilce ?? "", closing.mahalle ?? "", closing.propertyAddress, closing.propertyDetails ?? "",
+    trNum(closing.openingPrice), trNum(closing.saleValue), indirimOrani != null ? trPercent(indirimOrani) : "",
+    closing.durationDays != null ? String(closing.durationDays) : "",
+    closing.customerSource ?? "", closing.referralInfo ?? "",
+  ];
 }
 
-export async function appendClosingToSheet(closing: ClosingWithDetails): Promise<void> {
-  const sheets = await getSheetsClient();
-  if (!sheets) return;
-  const rows = buildClosingSheetRows(closing);
-  if (rows.length === 0) return;
+// Satırları danışmanın ofisine göre (sekme adı = ofis) gruplar. Ofisi çözülemeyen
+// satırlar DEFAULT_OFFICE_TAB'a düşer.
+export function buildClosingSheetRowsByOffice(closing: ClosingWithDetails): Map<string, string[][]> {
+  const byTab = new Map<string, string[][]>();
+  for (const side of closing.sides as ClosingSideWithAgents[]) {
+    for (const agent of side.agents) {
+      const tab = (agent.office?.trim() || DEFAULT_OFFICE_TAB);
+      if (!byTab.has(tab)) byTab.set(tab, []);
+      byTab.get(tab)!.push(buildAgentRow(closing, side, agent));
+    }
+  }
+  return byTab;
+}
 
+// Bir sekmenin var olduğundan (yoksa oluşturur) ve başlık satırının yazıldığından emin olur.
+// Aynı boot/istek içinde tekrar tekrar kontrol etmemek için hangi sekmelerin hazır olduğunu
+// hafızada tutar.
+const readyTabs = new Set<string>();
+async function ensureTab(sheets: any, tab: string): Promise<boolean> {
+  if (readyTabs.has(tab)) return true;
+  try {
+    const meta = await sheets.spreadsheets.get({ spreadsheetId: SPREADSHEET_ID!, fields: "sheets.properties.title" });
+    const titles: string[] = (meta.data.sheets ?? []).map((s: any) => s.properties?.title).filter(Boolean);
+    if (!titles.includes(tab)) {
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId: SPREADSHEET_ID!,
+        requestBody: { requests: [{ addSheet: { properties: { title: tab } } }] },
+      });
+      console.log(`[google-sheets] '${tab}' sekmesi oluşturuldu`);
+    }
+    // Başlık satırı boşsa yaz.
+    const head = await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID!, range: `${tab}!A1:A1` });
+    if (!head.data.values || head.data.values.length === 0) {
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: SPREADSHEET_ID!,
+        range: `${tab}!A1`,
+        valueInputOption: "RAW",
+        requestBody: { values: [CLOSING_SHEET_HEADERS] },
+      });
+      console.log(`[google-sheets] '${tab}' başlık satırı yazıldı`);
+    }
+    readyTabs.add(tab);
+    return true;
+  } catch (e: any) {
+    console.error(`[google-sheets] '${tab}' sekmesi hazırlanamadı:`, e?.message ?? e);
+    return false;
+  }
+}
+
+async function appendRows(sheets: any, tab: string, rows: string[][], closingId: number): Promise<void> {
   // Toplu CSV import'ta closing'ler 10'arlı paralel gruplar halinde işleniyor — Sheets API
   // rate limit'e (429) takılabiliyor. 3 denemeye kadar artan bekleme ile tekrar dener.
   const MAX_ATTEMPTS = 3;
@@ -152,7 +193,7 @@ export async function appendClosingToSheet(closing: ClosingWithDetails): Promise
     try {
       await sheets.spreadsheets.values.append({
         spreadsheetId: SPREADSHEET_ID!,
-        range: `${SHEET_TAB}!A1`,
+        range: `${tab}!A1`,
         valueInputOption: "USER_ENTERED",
         insertDataOption: "INSERT_ROWS",
         requestBody: { values: rows },
@@ -165,28 +206,29 @@ export async function appendClosingToSheet(closing: ClosingWithDetails): Promise
         await new Promise((r) => setTimeout(r, attempt * 1000));
         continue;
       }
-      console.error(`[google-sheets] append failed (closing ${closing.id}, attempt ${attempt}):`, e?.message ?? e);
+      console.error(`[google-sheets] append failed (closing ${closingId}, tab ${tab}, attempt ${attempt}):`, e?.message ?? e);
       return;
     }
   }
 }
 
-// Sunucu boot'unda bir kez çağrılır — sheet boşsa başlık satırını yazar.
+export async function appendClosingToSheet(closing: ClosingWithDetails): Promise<void> {
+  const sheets = await getSheetsClient();
+  if (!sheets) return;
+  const byTab = buildClosingSheetRowsByOffice(closing);
+  for (const [tab, rows] of Array.from(byTab.entries())) {
+    if (rows.length === 0) continue;
+    const ok = await ensureTab(sheets, tab);
+    if (!ok) continue;
+    await appendRows(sheets, tab, rows, closing.id);
+  }
+}
+
+// Sunucu boot'unda bir kez çağrılır — bilinen ofis sekmelerini (boşsa) başlıkla hazırlar.
 export async function ensureClosingSheetHeader(): Promise<void> {
   const sheets = await getSheetsClient();
   if (!sheets) return;
-  try {
-    const res = await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID!, range: `${SHEET_TAB}!A1:A1` });
-    if (!res.data.values || res.data.values.length === 0) {
-      await sheets.spreadsheets.values.update({
-        spreadsheetId: SPREADSHEET_ID!,
-        range: `${SHEET_TAB}!A1`,
-        valueInputOption: "RAW",
-        requestBody: { values: [CLOSING_SHEET_HEADERS] },
-      });
-      console.log("[google-sheets] header row written");
-    }
-  } catch (e: any) {
-    console.error("[google-sheets] header check failed:", e?.message ?? e);
+  for (const tab of KNOWN_OFFICE_TABS) {
+    await ensureTab(sheets, tab);
   }
 }
