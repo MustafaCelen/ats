@@ -1,7 +1,7 @@
 import { google } from "googleapis";
 import { storage } from "./storage";
 import { getOAuth2ClientForUser } from "./google";
-import type { ClosingWithDetails } from "@shared/schema";
+import type { ClosingWithDetails, ClosingAgentWithEmployee, ClosingSideWithAgents } from "@shared/schema";
 
 // Servis hesabı KEY'i değil — organizasyon policy'si servis hesabı key oluşturmayı
 // engellediği için, uygulamanın zaten Takvim için kullandığı per-user Google OAuth
@@ -36,45 +36,84 @@ async function getSheetsClient() {
   return google.sheets({ version: "v4", auth });
 }
 
-// CSV import şablonuyla aynı kolonlar — bu sheet'ten export edilip tekrar import
-// edilebilsin diye. Her (taraf × danışman) kombinasyonu ayrı bir satır.
+// Kullanıcının kendi master closings şablonuyla BİREBİR aynı kolonlar (+ başa Closing ID).
+// Her (taraf × danışman) kombinasyonu ayrı bir satır. Sayılar tr-TR formatında (nokta
+// binlik, virgül ondalık) yazılıyor — sheet'in kendi locale'i buna göre sayı olarak
+// parse ediyor (USER_ENTERED).
 export const CLOSING_SHEET_HEADERS = [
-  "Closing ID", "Taraf", "KWUID", "Danışman",
-  "İşlem Tarihi", "İlgili Ay", "Durum",
-  "İşlem", "İşlem Tipi", "İşlem Değeri", "BHB Oranı", "Açılış Rakamı", "Süre/Gün",
-  "İl", "İlçe", "Semt/Mahalle", "Adres", "Mülkle İlgili Detay Bilgiler",
-  "Alıcı Adı", "Satıcı Adı", "Müşteri nereden buldu?", "Yönlendirme Bilgisi", "Notlar",
-  "Sözleşme Başlangıç Tarihi", "Sözleşme Bitiş Tarihi",
-  "Pay (%)", "BHB", "KWTR", "KWTR (+KDV)", "BM (PlatinKarma)", "PlatinKarma (KDV)", "ÜK Tutarı", "Danışman Net",
+  "Closing ID",
+  "Danışman", "KWUID", "İlgili Ay", "İşlem", "İşlem Tipi", "Taraf",
+  "İşlem Tarihi", "İşlem Değeri",
+  "BHB", "KWTR", "KWTR (+KDV)", "PlatinKarma", "PlatinKarma (KDV)", "ÜK", "Danışman",
   "Kasa", "Nakit", "Banka",
+  "BHB Oranı", "İşlem Hacmi", "İşlem Oranı (Taraf Sayısı)",
+  "İl", "İlçe", "Semt/Mahalle", "Adres", "Mülkle İlgili Detay Bilgiler",
+  "Açılış Rakamı", "Kapanış Rakamı", "İndirim Oranı", "Süre/Gün",
+  "Müşteri nereden buldu?", "Yönlendirme Bilgisi",
 ];
 
 const SIDE_LABEL: Record<string, string> = { buyer: "Alıcı", seller: "Satıcı", referral: "Yönlendirme" };
-const ymd = (d: Date | string | null | undefined) => d ? new Date(d).toISOString().slice(0, 10) : "";
+// Kaynak şablonda Kiralık işlemler "Kiralama" olarak yazılıyor (import tarafı da bunu
+// Kiralık'a geri çeviriyor) — Satış ve Yönlendirme olduğu gibi kalıyor.
+const DEAL_CATEGORY_LABEL: Record<string, string> = { "Kiralık": "Kiralama" };
+
+const trNum = (v: string | number | null | undefined, decimals = 2): string => {
+  const n = typeof v === "number" ? v : parseFloat(v ?? "0");
+  if (isNaN(n)) return "";
+  return n.toLocaleString("tr-TR", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+};
+const trPercent = (n: number, decimals = 2): string => `${trNum(n, decimals)}%`;
+const trDate = (d: Date | string | null | undefined): string => {
+  if (!d) return "";
+  const date = new Date(d);
+  if (isNaN(date.getTime())) return "";
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${day}.${month}.${date.getFullYear()}`;
+};
+
+// İşlem Oranı / İşlem Hacmi — Mahalle Bazlı Danışman Karnesi'ndeki ile aynı formül:
+// perSide = Kiralık ? saleValue/2 : saleValue × commissionRate/100; oran = bhbShare/perSide;
+// hacim = (Kiralık ? saleValue×12 : saleValue) × oran (Kiralık'ta saleValue aylık kira bedeli).
+function islemOrani(closing: ClosingWithDetails, agent: ClosingAgentWithEmployee): number {
+  const sale = parseFloat(closing.saleValue ?? "0");
+  const rate = parseFloat(closing.commissionRate ?? "0");
+  const perSide = closing.dealCategory === "Kiralık" ? sale / 2 : sale * rate / 100;
+  if (perSide <= 0) return 0;
+  return parseFloat(agent.bhbShare ?? "0") / perSide;
+}
+function islemHacmi(closing: ClosingWithDetails, oran: number): number {
+  const sale = parseFloat(closing.saleValue ?? "0");
+  return (closing.dealCategory === "Kiralık" ? sale * 12 : sale) * oran;
+}
 
 export function buildClosingSheetRows(closing: ClosingWithDetails): string[][] {
+  const saleValue = parseFloat(closing.saleValue ?? "0");
+  const openingPrice = closing.openingPrice != null ? parseFloat(closing.openingPrice) : null;
+  const indirimOrani = openingPrice && openingPrice > 0 ? ((saleValue - openingPrice) / openingPrice) * 100 : null;
+
   const rows: string[][] = [];
-  for (const side of closing.sides) {
+  for (const side of closing.sides as ClosingSideWithAgents[]) {
     for (const agent of side.agents) {
+      const oran = islemOrani(closing, agent);
+      const hacim = islemHacmi(closing, oran);
       rows.push([
         String(closing.id),
-        SIDE_LABEL[side.sideType] ?? side.sideType,
-        agent.kwuid ?? "",
         agent.employeeName ?? agent.candidateName ?? "",
-        ymd(agent.closingDate ?? closing.closingDate),
+        agent.kwuid ?? "",
         agent.ilgiliAy ?? closing.ilgiliAy ?? "",
-        agent.status ?? closing.status,
-        closing.dealCategory,
+        DEAL_CATEGORY_LABEL[closing.dealCategory] ?? closing.dealCategory,
         closing.dealType,
-        closing.saleValue,
-        closing.commissionRate ?? "",
-        closing.openingPrice ?? "",
-        closing.durationDays != null ? String(closing.durationDays) : "",
+        SIDE_LABEL[side.sideType] ?? side.sideType,
+        trDate(agent.closingDate ?? closing.closingDate),
+        trNum(closing.saleValue),
+        trNum(agent.bhbShare), trNum(agent.mainBranchShare), trNum(agent.kwtrKdv), trNum(agent.marketCenterActual), trNum(agent.bmKdv), trNum(agent.ukShare), trNum(agent.employeeNet),
+        trNum(agent.kasa), trNum(agent.nakit), trNum(agent.banka),
+        trPercent(parseFloat(closing.commissionRate ?? "0")), trNum(hacim), trNum(oran),
         closing.il ?? "", closing.ilce ?? "", closing.mahalle ?? "", closing.propertyAddress, closing.propertyDetails ?? "",
-        closing.buyerName ?? "", closing.sellerName ?? "", closing.customerSource ?? "", closing.referralInfo ?? "", closing.notes ?? "",
-        ymd(closing.contractStartDate), ymd(closing.contractEndDate),
-        agent.splitPercentage, agent.bhbShare, agent.mainBranchShare, agent.kwtrKdv, agent.marketCenterActual, agent.bmKdv, agent.ukShare, agent.employeeNet,
-        agent.kasa ?? "", agent.nakit ?? "", agent.banka ?? "",
+        trNum(closing.openingPrice), trNum(closing.saleValue), indirimOrani != null ? trPercent(indirimOrani) : "",
+        closing.durationDays != null ? String(closing.durationDays) : "",
+        closing.customerSource ?? "", closing.referralInfo ?? "",
       ]);
     }
   }
@@ -86,16 +125,30 @@ export async function appendClosingToSheet(closing: ClosingWithDetails): Promise
   if (!sheets) return;
   const rows = buildClosingSheetRows(closing);
   if (rows.length === 0) return;
-  try {
-    await sheets.spreadsheets.values.append({
-      spreadsheetId: SPREADSHEET_ID!,
-      range: `${SHEET_TAB}!A1`,
-      valueInputOption: "USER_ENTERED",
-      insertDataOption: "INSERT_ROWS",
-      requestBody: { values: rows },
-    });
-  } catch (e: any) {
-    console.error("[google-sheets] append failed:", e?.message ?? e);
+
+  // Toplu CSV import'ta closing'ler 10'arlı paralel gruplar halinde işleniyor — Sheets API
+  // rate limit'e (429) takılabiliyor. 3 denemeye kadar artan bekleme ile tekrar dener.
+  const MAX_ATTEMPTS = 3;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      await sheets.spreadsheets.values.append({
+        spreadsheetId: SPREADSHEET_ID!,
+        range: `${SHEET_TAB}!A1`,
+        valueInputOption: "USER_ENTERED",
+        insertDataOption: "INSERT_ROWS",
+        requestBody: { values: rows },
+      });
+      return;
+    } catch (e: any) {
+      const status = e?.code ?? e?.response?.status;
+      const retryable = status === 429 || (typeof status === "number" && status >= 500);
+      if (retryable && attempt < MAX_ATTEMPTS) {
+        await new Promise((r) => setTimeout(r, attempt * 1000));
+        continue;
+      }
+      console.error(`[google-sheets] append failed (closing ${closing.id}, attempt ${attempt}):`, e?.message ?? e);
+      return;
+    }
   }
 }
 
