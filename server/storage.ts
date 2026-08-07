@@ -4969,6 +4969,7 @@ export class DatabaseStorage implements IStorage {
       employeeName: r.empName ?? undefined,
       employeePhone: r.empPhone ?? undefined,
       agreementFileData: undefined as any, // never ship base64 blobs in list payloads
+      firebaseRaw: undefined as any,       // ham JSON'u liste payload'ında taşıma (büyük)
     }));
   }
 
@@ -5341,10 +5342,10 @@ export class DatabaseStorage implements IStorage {
   // yeni kayıt açılmaz). Portal'dan gelen price/dealCategory/status alanlarına DOKUNMAZ.
   async enrichListingsFromFirebase(
     ilanlar: Record<string, Record<string, any>>,
-  ): Promise<{ total: number; matched: number; updated: number; unmatched: string[] }> {
+  ): Promise<{ total: number; updated: number; created: number }> {
     const entries = Object.entries(ilanlar ?? {});
     const total = entries.length;
-    if (total === 0) return { total: 0, matched: 0, updated: 0, unmatched: [] };
+    if (total === 0) return { total: 0, updated: 0, created: 0 };
 
     const NA = (v: any): string | null => {
       if (v == null) return null;
@@ -5359,6 +5360,14 @@ export class DatabaseStorage implements IStorage {
       const n = parseFloat(s.replace(/\./g, m => m).replace(",", "."));
       return isNaN(n) ? null : String(n);
     };
+    // "73.500.000 TL" → "73500000" ; "12.500,50 TL" → "12500.50"
+    const parsePrice = (v: any): string | null => {
+      const s = NA(v);
+      if (s == null) return null;
+      const cleaned = s.replace(/[^\d.,]/g, "").replace(/\./g, "").replace(",", ".");
+      const n = parseFloat(cleaned);
+      return isNaN(n) ? null : String(n);
+    };
     // Lokasyon: "İstanbul / Sarıyer / Kireçburnu Mh." → { il, ilce, mahalle }
     const parseLokasyon = (v: any): { il: string | null; ilce: string | null; mahalle: string | null } => {
       const s = NA(v);
@@ -5366,25 +5375,15 @@ export class DatabaseStorage implements IStorage {
       const parts = s.split("/").map(p => p.trim()).filter(Boolean);
       return { il: parts[0] ?? null, ilce: parts[1] ?? null, mahalle: parts[2] ?? null };
     };
-
-    // İlan numaralarını topla, mevcut ilanları tek sorguda çek
-    const numbers = entries.map(([k, v]) => String(v["İlan No"] ?? k).trim()).filter(Boolean);
-    const existingRows = numbers.length > 0
-      ? await db.select({ id: listings.id, listingNumber: listings.listingNumber }).from(listings).where(inArray(listings.listingNumber, numbers))
-      : [];
-    const idByNumber = new Map(existingRows.map(r => [r.listingNumber, r.id]));
-
-    let matched = 0, updated = 0;
-    const unmatched: string[] = [];
-    const now = new Date();
-
-    for (const [key, v] of entries) {
-      const listingNumber = String(v["İlan No"] ?? key).trim();
-      const id = idByNumber.get(listingNumber);
-      if (!id) { unmatched.push(listingNumber); continue; }
-      matched++;
+    const classifyDealCategory = (price: string | null): "Satılık" | "Kiralık" => {
+      const p = parseFloat(price ?? "");
+      if (!isNaN(p) && p > 0 && p < LISTING_RENTAL_PRICE_THRESHOLD) return "Kiralık";
+      return "Satılık";
+    };
+    // Firebase objesinden zenginleştirme alan seti (hem update hem insert için).
+    const enrichFields = (v: Record<string, any>, now: Date) => {
       const loc = parseLokasyon(v["Lokasyon"]);
-      await db.update(listings).set({
+      return {
         il: loc.il, ilce: loc.ilce, mahalle: loc.mahalle,
         emlakTipi: NA(v["Emlak Tipi"]),
         odaSayisi: NA(v["Oda Sayısı"]),
@@ -5401,12 +5400,52 @@ export class DatabaseStorage implements IStorage {
         siteAdi: NA(v["Site Adı"]),
         firebaseRaw: JSON.stringify(v),
         firebaseSyncedAt: now,
-        updatedAt: now,
-      }).where(eq(listings.id, id));
-      updated++;
+      };
+    };
+
+    const empIndex = await this.buildEmployeeIndex();
+
+    // İlan numaralarını topla, mevcut ilanları tek sorguda çek
+    const numbers = entries.map(([k, v]) => String(v["İlan No"] ?? k).trim()).filter(Boolean);
+    const existingRows = numbers.length > 0
+      ? await db.select({ id: listings.id, listingNumber: listings.listingNumber }).from(listings).where(inArray(listings.listingNumber, numbers))
+      : [];
+    const idByNumber = new Map(existingRows.map(r => [r.listingNumber, r.id]));
+
+    let updated = 0, created = 0;
+    const now = new Date();
+
+    for (const [key, v] of entries) {
+      const listingNumber = String(v["İlan No"] ?? key).trim();
+      if (!listingNumber) continue;
+      const id = idByNumber.get(listingNumber);
+
+      if (id) {
+        // Mevcut ilan — sadece zenginleştir, portal alanlarına dokunma.
+        await db.update(listings).set({ ...enrichFields(v, now), updatedAt: now }).where(eq(listings.id, id));
+        updated++;
+      } else {
+        // Eşleşmeyen — danışman adına göre çözüp yeni ilan olarak ekle (importListings mantığı).
+        const advisor = NA(v["Danışman"]);
+        const empId = advisor ? this.resolveEmployeeId(empIndex, advisor) : null;
+        const price = parsePrice(v["Fiyat"]);
+        await db.insert(listings).values({
+          listingNumber,
+          price,
+          dealCategory: classifyDealCategory(price),
+          advisorName: advisor,
+          employeeId: empId,
+          office: NA(v["Ofis"]),
+          store: NA(v["Mağaza"]),
+          status: "active",
+          publicToken: randomBytes(16).toString("hex"),
+          ...enrichFields(v, now),
+        });
+        created++;
+      }
     }
 
-    return { total, matched, updated, unmatched };
+    return { total, updated, created };
   }
 
   // ── Feature 1: Danışman bazlı rapor ─────────────────────────────────────────
@@ -5434,7 +5473,7 @@ export class DatabaseStorage implements IStorage {
           totalActive:          sql<number>`count(*) filter (where ${listings.status} = 'active')`,
           totalPassive:         sql<number>`count(*) filter (where ${listings.status} = 'passive')`,
           agreementUploaded:    sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.agreementUploadedAt} is not null)`,
-          agreementPending:     sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.dealCategory} != 'Kiralık' and ${listings.agreementUploadedAt} is null)`,
+          agreementPending:     sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.dealCategory} != 'Kiralık' and ${listings.agreementUploadedAt} is null and ${listings.noAgreementAt} is null)`,
           noAgreementCount:     sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.noAgreementAt} is not null)`,
           closeReasonSubmitted: sql<number>`count(*) filter (where ${listings.status} = 'passive' and ${listings.closeReasonSubmittedAt} is not null)`,
           closeReasonPending:   sql<number>`count(*) filter (where ${listings.status} = 'passive' and ${listings.closeReasonSubmittedAt} is null)`,

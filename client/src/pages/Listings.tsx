@@ -45,6 +45,24 @@ interface Listing {
   notifyMsgIdPassive: string | null;
   noAgreementAt: string | null;
   passiveAt: string | null;
+  // Firebase zenginleştirme (opsiyonel — sadece Firebase Detay yüklenmişse dolu)
+  il?: string | null;
+  ilce?: string | null;
+  mahalle?: string | null;
+  emlakTipi?: string | null;
+  odaSayisi?: string | null;
+  banyoSayisi?: string | null;
+  binaYasi?: string | null;
+  m2Brut?: string | null;
+  m2Net?: string | null;
+  enlem?: string | null;
+  boylam?: string | null;
+  baslik?: string | null;
+  aciklama?: string | null;
+  ilanLink?: string | null;
+  ilanTarihi?: string | null;
+  siteAdi?: string | null;
+  firebaseSyncedAt?: string | null;
 }
 
 interface Summary {
@@ -430,6 +448,7 @@ export default function Listings() {
   const [viewer, setViewer] = useState<Listing | null>(null);
   const [viewerFiles, setViewerFiles] = useState<{ id: number; name: string; mime: string }[]>([]);
   const [viewerFilesLoading, setViewerFilesLoading] = useState(false);
+  const [detailListing, setDetailListing] = useState<Listing | null>(null);
   const [previewFile, setPreviewFile] = useState<{ id: number; name: string; mime: string } | null>(null);
   const [deletingFileId, setDeletingFileId] = useState<number | null>(null);
   const [clearingAgreementId, setClearingAgreementId] = useState<number | null>(null);
@@ -772,7 +791,7 @@ export default function Listings() {
       refresh();
       toast({
         title: "Firebase verisi işlendi",
-        description: `${data.total} ilan okundu, ${data.updated} mevcut ilan zenginleştirildi, ${data.unmatched?.length ?? 0} eşleşmedi (sistemde yok).`,
+        description: `${data.total} ilan okundu · ${data.updated} mevcut ilan zenginleştirildi · ${data.created} yeni ilan eklendi (danışman adına göre eşlendi).`,
       });
     } catch {
       toast({ title: "Hata", description: "Dosya işlenemedi.", variant: "destructive" });
@@ -1266,11 +1285,28 @@ export default function Listings() {
                       <tr><td colSpan={10} className="px-3 py-10 text-center text-muted-foreground">Kayıt yok.</td></tr>
                     ) : pageRows.map((l) => (
                       <tr key={l.id} className="border-b border-border last:border-0 hover:bg-muted/30">
-                        <td className="px-3 py-2.5 font-mono text-xs">
-                          {l.listingNumber}
-                          <span className={`ml-1.5 inline-flex text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${l.dealCategory === "Kiralık" ? "bg-blue-100 text-blue-700" : "bg-emerald-100 text-emerald-700"}`}>
-                            {l.dealCategory === "Kiralık" ? "K" : "S"}
-                          </span>
+                        <td className="px-3 py-2.5 font-mono text-xs align-top">
+                          <div className="flex items-center gap-1.5">
+                            {l.listingNumber}
+                            <span className={`inline-flex text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${l.dealCategory === "Kiralık" ? "bg-blue-100 text-blue-700" : "bg-emerald-100 text-emerald-700"}`}>
+                              {l.dealCategory === "Kiralık" ? "K" : "S"}
+                            </span>
+                          </div>
+                          {l.firebaseSyncedAt && (
+                            <div className="mt-1 font-sans space-y-0.5">
+                              {(l.ilce || l.mahalle) && (
+                                <div className="text-[11px] text-muted-foreground truncate max-w-[180px]">
+                                  📍 {[l.ilce, l.mahalle].filter(Boolean).join(" · ")}
+                                </div>
+                              )}
+                              <div className="text-[11px] text-muted-foreground truncate max-w-[180px]">
+                                {[l.emlakTipi, l.odaSayisi, l.m2Net ? `${Math.round(Number(l.m2Net))} m²` : null].filter(Boolean).join(" · ")}
+                              </div>
+                              <button onClick={() => setDetailListing(l)} className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 hover:bg-indigo-100">
+                                <Database className="h-2.5 w-2.5" /> Detay
+                              </button>
+                            </div>
+                          )}
                         </td>
                         <td className="px-3 py-2.5">
                           {l.employeeId ? (
@@ -1741,6 +1777,63 @@ export default function Listings() {
                     </div>
                   )}
                 </>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Firebase detay görünümü */}
+      <Dialog open={!!detailListing} onOpenChange={(o) => !o && setDetailListing(null)}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Database className="h-4 w-4 text-indigo-600" />
+              İlan Detayı — {detailListing?.listingNumber}
+            </DialogTitle>
+          </DialogHeader>
+          {detailListing && (
+            <div className="space-y-4 text-sm">
+              {detailListing.baslik && <div className="font-semibold text-base">{detailListing.baslik}</div>}
+              <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+                {([
+                  ["Emlak Tipi", detailListing.emlakTipi],
+                  ["Konum", [detailListing.il, detailListing.ilce, detailListing.mahalle].filter(Boolean).join(" / ")],
+                  ["Site Adı", detailListing.siteAdi],
+                  ["Oda Sayısı", detailListing.odaSayisi],
+                  ["Banyo Sayısı", detailListing.banyoSayisi],
+                  ["Bina Yaşı", detailListing.binaYasi],
+                  ["m² (Brüt)", detailListing.m2Brut ? Math.round(Number(detailListing.m2Brut)).toString() : null],
+                  ["m² (Net)", detailListing.m2Net ? Math.round(Number(detailListing.m2Net)).toString() : null],
+                  ["İlan Tarihi", detailListing.ilanTarihi],
+                  ["Fiyat", detailListing.price ? `${Number(detailListing.price).toLocaleString("tr-TR")} TL` : null],
+                ] as [string, string | null | undefined][]).filter(([, v]) => v).map(([label, v]) => (
+                  <div key={label}>
+                    <div className="text-[11px] text-muted-foreground">{label}</div>
+                    <div className="font-medium">{v}</div>
+                  </div>
+                ))}
+              </div>
+              {detailListing.aciklama && (
+                <div>
+                  <div className="text-[11px] text-muted-foreground mb-1">Açıklama</div>
+                  <div className="text-xs whitespace-pre-line max-h-48 overflow-y-auto rounded-md border border-border bg-muted/20 p-2.5">{detailListing.aciklama}</div>
+                </div>
+              )}
+              <div className="flex flex-wrap gap-2 pt-1">
+                {detailListing.ilanLink && (
+                  <a href={detailListing.ilanLink} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-xs h-8 px-3 rounded-md border border-input bg-background hover:bg-muted font-medium">
+                    <ExternalLink className="h-3.5 w-3.5" /> İlan Sayfası
+                  </a>
+                )}
+                {detailListing.enlem && detailListing.boylam && (
+                  <a href={`https://www.google.com/maps?q=${detailListing.enlem},${detailListing.boylam}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-xs h-8 px-3 rounded-md border border-input bg-background hover:bg-muted font-medium">
+                    <ExternalLink className="h-3.5 w-3.5" /> Haritada Gör
+                  </a>
+                )}
+              </div>
+              {detailListing.firebaseSyncedAt && (
+                <p className="text-[11px] text-muted-foreground">Firebase'den son güncelleme: {new Date(detailListing.firebaseSyncedAt).toLocaleString("tr-TR")}</p>
               )}
             </div>
           )}
