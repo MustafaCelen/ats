@@ -5335,6 +5335,80 @@ export class DatabaseStorage implements IStorage {
     return { created, updated, newActive, newlyPassive };
   }
 
+  // Firebase Realtime Database export'undan (JSON) mevcut ilanları zenginleştirir.
+  // Eşleşme: Firebase düğüm anahtarı / "İlan No" == listings.listing_number.
+  // Sadece MEVCUT ilanları günceller (Firebase'de olup sistemde olmayanlar "unmatched" sayılır,
+  // yeni kayıt açılmaz). Portal'dan gelen price/dealCategory/status alanlarına DOKUNMAZ.
+  async enrichListingsFromFirebase(
+    ilanlar: Record<string, Record<string, any>>,
+  ): Promise<{ total: number; matched: number; updated: number; unmatched: string[] }> {
+    const entries = Object.entries(ilanlar ?? {});
+    const total = entries.length;
+    if (total === 0) return { total: 0, matched: 0, updated: 0, unmatched: [] };
+
+    const NA = (v: any): string | null => {
+      if (v == null) return null;
+      const s = String(v).trim();
+      if (!s || s === "Belirtilmemiş") return null;
+      return s;
+    };
+    // "600.0" → 600.00 ; "Belirtilmemiş"/boş → null
+    const num = (v: any): string | null => {
+      const s = NA(v);
+      if (s == null) return null;
+      const n = parseFloat(s.replace(/\./g, m => m).replace(",", "."));
+      return isNaN(n) ? null : String(n);
+    };
+    // Lokasyon: "İstanbul / Sarıyer / Kireçburnu Mh." → { il, ilce, mahalle }
+    const parseLokasyon = (v: any): { il: string | null; ilce: string | null; mahalle: string | null } => {
+      const s = NA(v);
+      if (!s) return { il: null, ilce: null, mahalle: null };
+      const parts = s.split("/").map(p => p.trim()).filter(Boolean);
+      return { il: parts[0] ?? null, ilce: parts[1] ?? null, mahalle: parts[2] ?? null };
+    };
+
+    // İlan numaralarını topla, mevcut ilanları tek sorguda çek
+    const numbers = entries.map(([k, v]) => String(v["İlan No"] ?? k).trim()).filter(Boolean);
+    const existingRows = numbers.length > 0
+      ? await db.select({ id: listings.id, listingNumber: listings.listingNumber }).from(listings).where(inArray(listings.listingNumber, numbers))
+      : [];
+    const idByNumber = new Map(existingRows.map(r => [r.listingNumber, r.id]));
+
+    let matched = 0, updated = 0;
+    const unmatched: string[] = [];
+    const now = new Date();
+
+    for (const [key, v] of entries) {
+      const listingNumber = String(v["İlan No"] ?? key).trim();
+      const id = idByNumber.get(listingNumber);
+      if (!id) { unmatched.push(listingNumber); continue; }
+      matched++;
+      const loc = parseLokasyon(v["Lokasyon"]);
+      await db.update(listings).set({
+        il: loc.il, ilce: loc.ilce, mahalle: loc.mahalle,
+        emlakTipi: NA(v["Emlak Tipi"]),
+        odaSayisi: NA(v["Oda Sayısı"]),
+        banyoSayisi: NA(v["Banyo Sayısı"]),
+        binaYasi: NA(v["Bina Yaşı"]),
+        m2Brut: num(v["m² (Brüt)"]),
+        m2Net: num(v["m² (Net)"]),
+        enlem: num(v["Enlem"]),
+        boylam: num(v["Boylam"]),
+        baslik: NA(v["İlan Başlığı"]),
+        aciklama: NA(v["Açıklama"]),
+        ilanLink: NA(v["Link"]),
+        ilanTarihi: NA(v["İlan Tarihi"]),
+        siteAdi: NA(v["Site Adı"]),
+        firebaseRaw: JSON.stringify(v),
+        firebaseSyncedAt: now,
+        updatedAt: now,
+      }).where(eq(listings.id, id));
+      updated++;
+    }
+
+    return { total, matched, updated, unmatched };
+  }
+
   // ── Feature 1: Danışman bazlı rapor ─────────────────────────────────────────
 
   async getListingReportByAdvisor(): Promise<{

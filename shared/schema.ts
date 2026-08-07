@@ -783,6 +783,27 @@ export const listings = pgTable("listings", {
   firstSeenAt: timestamp("first_seen_at").defaultNow(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
+
+  // ── Firebase Realtime Database'den zenginleştirme (ilan no ile eşleşir) ──
+  // Curated (filtre/rapor için) alanlar ayrı kolon; kalan tüm Firebase alanları firebaseRaw'da.
+  il: text("il"),                                                 // Lokasyon → İl
+  ilce: text("ilce"),                                             // Lokasyon → İlçe
+  mahalle: text("mahalle"),                                       // Lokasyon → Mahalle
+  emlakTipi: text("emlak_tipi"),                                  // Emlak Tipi (Satılık Villa vb.)
+  odaSayisi: text("oda_sayisi"),                                  // Oda Sayısı (5+2)
+  banyoSayisi: text("banyo_sayisi"),                              // Banyo Sayısı (6 Üzeri olabilir)
+  binaYasi: text("bina_yasi"),                                    // Bina Yaşı (21-25 arası)
+  m2Brut: numeric("m2_brut", { precision: 12, scale: 2 }),        // m² (Brüt)
+  m2Net: numeric("m2_net", { precision: 12, scale: 2 }),          // m² (Net)
+  enlem: numeric("enlem", { precision: 12, scale: 8 }),           // Enlem (latitude)
+  boylam: numeric("boylam", { precision: 12, scale: 8 }),         // Boylam (longitude)
+  baslik: text("baslik"),                                         // İlan Başlığı
+  aciklama: text("aciklama"),                                     // Açıklama
+  ilanLink: text("ilan_link"),                                    // Link (sahibinden vb.)
+  ilanTarihi: text("ilan_tarihi"),                               // İlan Tarihi (ham: "03 Temmuz 2026")
+  siteAdi: text("site_adi"),                                      // Site Adı
+  firebaseRaw: text("firebase_raw"),                             // Tüm Firebase objesi (JSON string)
+  firebaseSyncedAt: timestamp("firebase_synced_at"),             // Son Firebase zenginleştirme zamanı
 }, (t) => ({
   statusIdx: index("listings_status_idx").on(t.status),
   employeeIdx: index("listings_employee_idx").on(t.employeeId),

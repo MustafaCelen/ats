@@ -211,6 +211,23 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // Firebase Realtime Database JSON export'undan mevcut ilanları zenginleştir.
+  // Beklenen body: ya {"ilanlar": {"923...": {...}}} ya da doğrudan {"923...": {...}}.
+  app.post("/api/listings/enrich-firebase", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const body = req.body ?? {};
+      const ilanlar = (body.ilanlar && typeof body.ilanlar === "object") ? body.ilanlar : body;
+      if (!ilanlar || typeof ilanlar !== "object" || Array.isArray(ilanlar)) {
+        return res.status(400).json({ message: "Geçersiz JSON: 'ilanlar' objesi veya ilan-no→ilan objesi bekleniyor" });
+      }
+      const result = await storage.enrichListingsFromFirebase(ilanlar);
+      res.json(result);
+    } catch (err) {
+      console.error("[POST /api/listings/enrich-firebase]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   // Check Green API delivery status for a sent notification
   app.get("/api/listings/:id/notify-status", requireAuth, async (req, res) => {
     try {

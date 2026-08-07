@@ -103,6 +103,28 @@ export async function ensureSchema(): Promise<void> {
       created_by_user_id INTEGER, created_at TIMESTAMP DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS whatsapp_bulk_sends_created_idx ON whatsapp_bulk_sends(created_at);
+
+    -- Firebase Realtime Database ilan zenginleştirme kolonları
+    ALTER TABLE listings ADD COLUMN IF NOT EXISTS il TEXT;
+    ALTER TABLE listings ADD COLUMN IF NOT EXISTS ilce TEXT;
+    ALTER TABLE listings ADD COLUMN IF NOT EXISTS mahalle TEXT;
+    ALTER TABLE listings ADD COLUMN IF NOT EXISTS emlak_tipi TEXT;
+    ALTER TABLE listings ADD COLUMN IF NOT EXISTS oda_sayisi TEXT;
+    ALTER TABLE listings ADD COLUMN IF NOT EXISTS banyo_sayisi TEXT;
+    ALTER TABLE listings ADD COLUMN IF NOT EXISTS bina_yasi TEXT;
+    ALTER TABLE listings ADD COLUMN IF NOT EXISTS m2_brut NUMERIC(12,2);
+    ALTER TABLE listings ADD COLUMN IF NOT EXISTS m2_net NUMERIC(12,2);
+    ALTER TABLE listings ADD COLUMN IF NOT EXISTS enlem NUMERIC(12,8);
+    ALTER TABLE listings ADD COLUMN IF NOT EXISTS boylam NUMERIC(12,8);
+    ALTER TABLE listings ADD COLUMN IF NOT EXISTS baslik TEXT;
+    ALTER TABLE listings ADD COLUMN IF NOT EXISTS aciklama TEXT;
+    ALTER TABLE listings ADD COLUMN IF NOT EXISTS ilan_link TEXT;
+    ALTER TABLE listings ADD COLUMN IF NOT EXISTS ilan_tarihi TEXT;
+    ALTER TABLE listings ADD COLUMN IF NOT EXISTS site_adi TEXT;
+    ALTER TABLE listings ADD COLUMN IF NOT EXISTS firebase_raw TEXT;
+    ALTER TABLE listings ADD COLUMN IF NOT EXISTS firebase_synced_at TIMESTAMP;
+    CREATE INDEX IF NOT EXISTS listings_ilce_idx ON listings(ilce);
+    CREATE INDEX IF NOT EXISTS listings_mahalle_idx ON listings(mahalle);
   `;
   try {
     await pool.query(sql);

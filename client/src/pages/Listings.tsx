@@ -11,7 +11,7 @@ import { apiRequest } from "@/lib/queryClient";
 import {
   Building2, Upload, Search, FileCheck2, FileWarning, HelpCircle,
   CheckCircle2, Clock, Send, ExternalLink, ChevronLeft, ChevronRight, Download, Plus,
-  RefreshCw, MessageSquare, Link2, Bell, BellOff, Mail, Trash2, ArrowUp, ArrowDown, ArrowUpDown, X,
+  RefreshCw, MessageSquare, Link2, Bell, BellOff, Mail, Trash2, ArrowUp, ArrowDown, ArrowUpDown, X, Database,
 } from "lucide-react";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -748,6 +748,39 @@ export default function Listings() {
     }
   };
 
+  const handleFirebaseEnrich = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    setImporting(true);
+    try {
+      let json: any;
+      try {
+        json = JSON.parse(await file.text());
+      } catch {
+        toast({ title: "Hata", description: "Dosya geçerli bir JSON değil.", variant: "destructive" });
+        return;
+      }
+      const res = await fetch("/api/listings/enrich-firebase", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(json),
+      });
+      const data = await res.json();
+      if (!res.ok) { toast({ title: "Hata", description: data.message, variant: "destructive" }); return; }
+      refresh();
+      toast({
+        title: "Firebase verisi işlendi",
+        description: `${data.total} ilan okundu, ${data.updated} mevcut ilan zenginleştirildi, ${data.unmatched?.length ?? 0} eşleşmedi (sistemde yok).`,
+      });
+    } catch {
+      toast({ title: "Hata", description: "Dosya işlenemedi.", variant: "destructive" });
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const checkWpStatus = async (empId: number, phone: string | null, msgId: string | null) => {
     if (!phone || !msgId || wpCheckingIds.has(empId)) return;
     setWpCheckingIds((prev) => new Set(prev).add(empId));
@@ -1007,6 +1040,12 @@ export default function Listings() {
               <input type="file" accept=".csv" className="hidden" disabled={importing} onChange={handleImport("passive")} />
               <span className="inline-flex items-center gap-1.5 text-xs h-8 px-3 rounded-md border border-input bg-background hover:bg-muted transition-colors font-medium">
                 <Upload className="h-3.5 w-3.5" /> Pasif İlanlar
+              </span>
+            </label>
+            <label className="cursor-pointer" title="Firebase Realtime Database JSON export'u ile mevcut ilanları detay verisiyle zenginleştir">
+              <input type="file" accept=".json,application/json" className="hidden" disabled={importing} onChange={handleFirebaseEnrich} />
+              <span className="inline-flex items-center gap-1.5 text-xs h-8 px-3 rounded-md border border-input bg-background hover:bg-muted transition-colors font-medium">
+                <Database className="h-3.5 w-3.5" /> Firebase Detay
               </span>
             </label>
           </div>
