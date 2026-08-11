@@ -85,6 +85,53 @@ const fmtNumberCell = (s: string): string => {
   }).format(n);
 };
 
+// ── Türkçe formatlı para girişi ───────────────────────────────────────────────
+// Canlı binlik "." ayracı + "," ondalık ayracı. Saklanan değer (value/onChange)
+// her zaman canonical JS formatı ("73500000.5"). Ekranda "73.500.000,5" görünür,
+// virgülle küsürat girilebilir.
+const moneyFormatTR = (canonical: string): string => {
+  if (canonical == null || canonical === "") return "";
+  const neg = canonical.startsWith("-");
+  const s = canonical.replace("-", "");
+  const dot = s.indexOf(".");
+  let intPart = dot >= 0 ? s.slice(0, dot) : s;
+  const decPart = dot >= 0 ? s.slice(dot + 1) : null;
+  intPart = intPart.replace(/^0+(?=\d)/, "");
+  if (intPart === "") intPart = "0";
+  const intFmt = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  const sign = neg ? "-" : "";
+  if (decPart === null) return sign + intFmt;          // ondalık yok
+  if (decPart === "") return sign + intFmt + ",";      // kullanıcı virgülü yeni yazdı
+  if (/^0+$/.test(decPart)) return sign + intFmt;      // ".00" gibi → tam sayı göster
+  return sign + intFmt + "," + decPart;
+};
+const moneyParseTR = (display: string): string => {
+  const neg = display.trim().startsWith("-");
+  let s = display.replace(/\./g, "").replace(/,/g, ".").replace(/[^0-9.]/g, "");
+  const i = s.indexOf(".");
+  if (i >= 0) s = s.slice(0, i + 1) + s.slice(i + 1).replace(/\./g, "").slice(0, 2);
+  return (neg ? "-" : "") + s;
+};
+function MoneyInput({ value, onChange, className, placeholder, onBlur }: {
+  value: string;
+  onChange: (canonical: string) => void;
+  className?: string;
+  placeholder?: string;
+  onBlur?: () => void;
+}) {
+  return (
+    <Input
+      type="text"
+      inputMode="decimal"
+      placeholder={placeholder}
+      className={className}
+      value={moneyFormatTR(value)}
+      onChange={(e) => onChange(moneyParseTR(e.target.value))}
+      onBlur={onBlur}
+    />
+  );
+}
+
 // Read-only display cells. List editing is disabled — use the edit dialog (Pencil) instead.
 function InlineCell({ value, type, className = "" }: {
   value: string; onSave?: (v: string) => void; type?: string; className?: string;
@@ -491,7 +538,7 @@ function SideSection({
     paymentCollected: defaultStatus === "completed",
   });
 
-  const bhbMode = side.bhbMode ?? "rate";
+  const bhbMode = side.bhbMode ?? "manual";
   const rateBHB = saleValue * (commissionRatePct / 100);
   const agentsManualBhbTotal = bhbMode === "manual"
     ? side.agents.reduce((s, a) => s + parseFloat(a.agentManualBhb || "0"), 0)
@@ -670,20 +717,13 @@ function SideSection({
                   {bhbMode === "manual" ? (
                     <>
                       <div className="w-28">
-                        <Input
-                          type="text"
-                          inputMode="decimal"
+                        <MoneyInput
                           placeholder="BHB (₺)"
-                          value={agent.agentManualBhbFocused
-                            ? agent.agentManualBhb
-                            : (agentManualBhbNum > 0 ? fmtNumberCell(agent.agentManualBhb) : agent.agentManualBhb)}
-                          onFocus={() => updateAgent(agent.id, { agentManualBhbFocused: true })}
+                          value={agent.agentManualBhb}
                           onBlur={() => {
-                            updateAgent(agent.id, { agentManualBhbFocused: false });
                             if (agentManualBhbNum > 0 && emp && !agent.isManuallyEdited) recalc();
                           }}
-                          onChange={(e) => {
-                            const raw = e.target.value.replace(/\./g, "").replace(",", ".");
+                          onChange={(raw) => {
                             const agentBhbNum = parseFloat(raw) || 0;
                             const newSplit = rateBHB > 0 ? ((agentBhbNum / rateBHB) * 100).toFixed(4) : "0";
                             updateAgent(agent.id, {
@@ -1199,7 +1239,6 @@ function NewClosingDialog({
   const [dealCategory, setDealCategory] = useState<DealCategory>("Satış");
   const [dealType, setDealType] = useState<string>("Konut");
   const [saleValue, setSaleValue] = useState("");
-  const [saleValueFocused, setSaleValueFocused] = useState(false);
   const [commissionRate, setCommissionRate] = useState("2");
   const [openingPrice, setOpeningPrice] = useState("");
   const [durationDays, setDurationDays] = useState("");
@@ -1564,15 +1603,11 @@ function NewClosingDialog({
               </div>
               <div>
                 <Label className="text-xs">{saleValueLabel}</Label>
-                <Input
-                  type="text"
-                  inputMode="decimal"
+                <MoneyInput
+                  value={saleValue}
+                  onChange={setSaleValue}
                   className="mt-1 h-8 text-sm"
                   placeholder="0"
-                  value={saleValueFocused ? saleValue : fmtNumberCell(saleValue)}
-                  onFocus={() => setSaleValueFocused(true)}
-                  onBlur={() => setSaleValueFocused(false)}
-                  onChange={(e) => setSaleValue(e.target.value.replace(/\./g, "").replace(",", "."))}
                 />
               </div>
               <div className="flex items-end">
@@ -1703,7 +1738,7 @@ function NewClosingDialog({
               </div>
               <div>
                 <Label className="text-xs">Açılış Rakamı (₺)</Label>
-                <Input type="number" min="0" className="mt-1 h-8 text-sm" placeholder="Liste fiyatı..." value={openingPrice} onChange={(e) => setOpeningPrice(e.target.value)} />
+                <MoneyInput className="mt-1 h-8 text-sm" placeholder="Liste fiyatı..." value={openingPrice} onChange={setOpeningPrice} />
               </div>
               <div>
                 <Label className="text-xs">Süre/Gün</Label>
