@@ -2603,7 +2603,7 @@ export class DatabaseStorage implements IStorage {
         (SELECT COUNT(*) FROM candidates cd
            JOIN employees e ON e.candidate_id = cd.id
            WHERE cd.campaign_id = c.id)::int as converted_count,
-        (SELECT COALESCE(SUM(amount), 0) FROM campaign_expenses WHERE campaign_id = c.id)::numeric as total_expense
+        ((SELECT COALESCE(SUM(amount), 0) FROM campaign_expenses WHERE campaign_id = c.id)::numeric + COALESCE(c.spend, 0))::numeric as total_expense
       FROM campaigns c
       ORDER BY c.created_at DESC
     `);
@@ -2617,7 +2617,7 @@ export class DatabaseStorage implements IStorage {
         (SELECT COUNT(*) FROM candidates cd
            JOIN employees e ON e.candidate_id = cd.id
            WHERE cd.campaign_id = c.id)::int as converted_count,
-        (SELECT COALESCE(SUM(amount), 0) FROM campaign_expenses WHERE campaign_id = c.id)::numeric as total_expense
+        ((SELECT COALESCE(SUM(amount), 0) FROM campaign_expenses WHERE campaign_id = c.id)::numeric + COALESCE(c.spend, 0))::numeric as total_expense
       FROM campaigns c WHERE c.id = ${id}
     `);
     return result.rows[0] ?? null;
@@ -2683,6 +2683,74 @@ export class DatabaseStorage implements IStorage {
       ORDER BY cd.created_at DESC
     `);
     return result.rows;
+  }
+
+  // ── Meta entegrasyonu ──
+  // Meta kampanyasını platform+external_id ile bul → varsa güncelle (isim/durum/tarih/spend),
+  // yoksa oluştur. Manuel kampanyalara dokunmaz.
+  async upsertMetaCampaign(data: {
+    externalId: string; name: string; status: string;
+    startDate: string | null; endDate: string | null; spend: number;
+  }): Promise<{ id: number; created: boolean }> {
+    const existing = await db.execute(sql`
+      SELECT id FROM campaigns WHERE platform = 'meta' AND external_id = ${data.externalId} LIMIT 1
+    `);
+    if (existing.rows.length > 0) {
+      const id = (existing.rows[0] as any).id;
+      await db.execute(sql`
+        UPDATE campaigns SET name = ${data.name}, status = ${data.status},
+          start_date = ${data.startDate}, end_date = ${data.endDate},
+          spend = ${String(data.spend)}::numeric, meta_synced_at = now()
+        WHERE id = ${id}
+      `);
+      return { id, created: false };
+    }
+    const inserted = await db.execute(sql`
+      INSERT INTO campaigns (name, status, platform, external_id, start_date, end_date, spend, meta_synced_at)
+      VALUES (${data.name}, ${data.status}, 'meta', ${data.externalId}, ${data.startDate}, ${data.endDate}, ${String(data.spend)}::numeric, now())
+      RETURNING id
+    `);
+    return { id: (inserted.rows[0] as any).id, created: true };
+  }
+
+  // Meta lead'i aday olarak kaydeder — leadgen_id ile idempotent (webhook retry'lerine karşı).
+  // Aynı lead ikinci kez gelirse yeni aday açmaz. campaignExternalId ile kampanyaya bağlar.
+  async ingestMetaLead(data: {
+    leadgenId: string;
+    campaignExternalId: string | null;
+    formId: string | null;
+    adId: string | null;
+    name: string;
+    email: string | null;
+    phone: string | null;
+    rawFields: Record<string, string>;
+  }): Promise<{ candidateId: number; duplicate: boolean }> {
+    // Zaten işlenmiş mi?
+    const seen = await db.execute(sql`SELECT candidate_id FROM meta_leads WHERE leadgen_id = ${data.leadgenId} LIMIT 1`);
+    if (seen.rows.length > 0 && (seen.rows[0] as any).candidate_id) {
+      return { candidateId: (seen.rows[0] as any).candidate_id, duplicate: true };
+    }
+
+    // Kampanyayı external_id ile bul (yoksa null — sync sonrası eşleşir)
+    let campaignId: number | null = null;
+    if (data.campaignExternalId) {
+      const camp = await db.execute(sql`SELECT id FROM campaigns WHERE platform = 'meta' AND external_id = ${data.campaignExternalId} LIMIT 1`);
+      campaignId = camp.rows.length > 0 ? (camp.rows[0] as any).id : null;
+    }
+
+    const [candidate] = await db.insert(candidates).values({
+      name: data.name,
+      email: data.email,
+      phone: data.phone,
+      campaignId: campaignId ?? undefined,
+    } as any).returning();
+
+    await db.execute(sql`
+      INSERT INTO meta_leads (leadgen_id, campaign_external_id, form_id, ad_id, candidate_id, campaign_id, raw_fields)
+      VALUES (${data.leadgenId}, ${data.campaignExternalId}, ${data.formId}, ${data.adId}, ${candidate.id}, ${campaignId}, ${JSON.stringify(data.rawFields)})
+      ON CONFLICT (leadgen_id) DO UPDATE SET candidate_id = EXCLUDED.candidate_id, campaign_id = EXCLUDED.campaign_id
+    `);
+    return { candidateId: candidate.id, duplicate: false };
   }
 
   // Bir danışmanın belirli tarihteki ofisini döner (transfer geçmişine göre)

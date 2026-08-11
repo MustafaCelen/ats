@@ -12,6 +12,7 @@ import { getAuthUrl, createOAuth2Client, createCalendarEvent, updateCalendarEven
 import { sendWhatsApp, sendWhatsAppTemplate, checkWhatsAppStatus, publicBaseUrl, listWhatsAppTemplates } from "./whatsapp";
 import { sendEmail } from "./email";
 import { isFonzipConfigured, fetchFonzipPreview, fetchFonzipUsers, fetchFonzipDebts, fetchFonzipDonations, syncFonzipDebts, syncFonzipUsersFinancials, getFonzipUserFinancialsReport, importFonzipExcel, syncFonzipRecentDebts } from "./fonzip";
+import { isMetaConfigured, isMetaWebhookConfigured, metaConfig, syncMetaCampaigns, fetchMetaLead, mapLeadToCandidate, verifyWebhookSignature } from "./meta";
 
 // Scoping helper:
 //   admin      → undefined (all jobs)
@@ -3018,6 +3019,84 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.get("/api/campaigns/:id/leads", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
     try { res.json(await storage.getCampaignLeads(Number(req.params.id))); }
     catch (err: any) { res.status(500).json({ message: err.message }); }
+  });
+
+  // ── Meta (Facebook) entegrasyonu ─────────────────────────────────────────
+  // Durum (admin) — hangi parçalar yapılandırılmış?
+  app.get("/api/meta/status", requireAuth, requireAdmin, (_req, res) => {
+    res.json({
+      configured: isMetaConfigured(),
+      webhookConfigured: isMetaWebhookConfigured(),
+      adAccountId: metaConfig.adAccountId ? `act_${metaConfig.adAccountId}` : null,
+      pageId: metaConfig.pageId || null,
+    });
+  });
+
+  // Kampanya + harcama senkronu (admin, manuel tetikleme — ileride cron'a da bağlanabilir)
+  app.post("/api/meta/sync-campaigns", requireAuth, requireAdmin, async (_req, res) => {
+    try {
+      const result = await syncMetaCampaigns();
+      res.json(result);
+    } catch (err: any) {
+      console.error("[POST /api/meta/sync-campaigns]", err);
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Webhook doğrulaması (Meta App kurulumunda çağrılır — PUBLIC, auth yok)
+  app.get("/api/meta/webhook", (req, res) => {
+    const mode = req.query["hub.mode"];
+    const token = req.query["hub.verify_token"];
+    const challenge = req.query["hub.challenge"];
+    if (mode === "subscribe" && token === metaConfig.verifyToken && metaConfig.verifyToken) {
+      return res.status(200).send(String(challenge ?? ""));
+    }
+    return res.sendStatus(403);
+  });
+
+  // Webhook lead alımı (Meta çağırır — PUBLIC, imza ile doğrulanır)
+  app.post("/api/meta/webhook", async (req, res) => {
+    try {
+      const sig = req.header("x-hub-signature-256");
+      const raw = (req as any).rawBody ?? Buffer.from(JSON.stringify(req.body ?? {}));
+      if (!verifyWebhookSignature(raw, sig)) {
+        console.warn("[meta webhook] imza doğrulanamadı");
+        return res.sendStatus(403);
+      }
+      // Meta'ya hemen 200 dön — işlemeyi arka planda yap (retry fırtınasını önler)
+      res.sendStatus(200);
+
+      const body = req.body ?? {};
+      if (body.object !== "page") return;
+      for (const entry of body.entry ?? []) {
+        for (const change of entry.changes ?? []) {
+          if (change.field !== "leadgen") continue;
+          const leadgenId = change.value?.leadgen_id;
+          if (!leadgenId) continue;
+          try {
+            const lead = await fetchMetaLead(String(leadgenId));
+            if (!lead) continue;
+            const mapped = mapLeadToCandidate(lead.fields);
+            const result = await storage.ingestMetaLead({
+              leadgenId: lead.id,
+              campaignExternalId: lead.campaignId,
+              formId: lead.formId,
+              adId: lead.adId,
+              name: mapped.name,
+              email: mapped.email,
+              phone: mapped.phone,
+              rawFields: lead.fields,
+            });
+            console.log(`[meta webhook] lead ${lead.id} → aday #${result.candidateId}${result.duplicate ? " (mükerrer, atlandı)" : ""}`);
+          } catch (e: any) {
+            console.error(`[meta webhook] lead ${leadgenId} işlenemedi:`, e?.message ?? e);
+          }
+        }
+      }
+    } catch (err: any) {
+      console.error("[POST /api/meta/webhook]", err);
+      if (!res.headersSent) res.sendStatus(500);
+    }
   });
 
   // ── Employee Office History (transferler) ────────────────────────────────

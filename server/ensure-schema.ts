@@ -125,6 +125,21 @@ export async function ensureSchema(): Promise<void> {
     ALTER TABLE listings ADD COLUMN IF NOT EXISTS firebase_synced_at TIMESTAMP;
     CREATE INDEX IF NOT EXISTS listings_ilce_idx ON listings(ilce);
     CREATE INDEX IF NOT EXISTS listings_mahalle_idx ON listings(mahalle);
+
+    -- Meta (Facebook) entegrasyonu
+    ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS spend NUMERIC(15,2) NOT NULL DEFAULT 0;
+    ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS meta_synced_at TIMESTAMP;
+    CREATE UNIQUE INDEX IF NOT EXISTS campaigns_platform_external_idx ON campaigns(platform, external_id) WHERE external_id IS NOT NULL;
+
+    -- Meta Lead Ads: gelen her lead için dedup + audit (webhook retry'lerine karşı)
+    CREATE TABLE IF NOT EXISTS meta_leads (
+      leadgen_id TEXT PRIMARY KEY,
+      campaign_external_id TEXT, form_id TEXT, ad_id TEXT,
+      candidate_id INTEGER, campaign_id INTEGER,
+      raw_fields TEXT, error TEXT,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS meta_leads_candidate_idx ON meta_leads(candidate_id);
   `;
   try {
     await pool.query(sql);

@@ -13,7 +13,7 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
-import { Megaphone, Plus, Users, TrendingUp, Wallet, Calendar } from "lucide-react";
+import { Megaphone, Plus, Users, TrendingUp, Wallet, Calendar, RefreshCw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -51,6 +51,29 @@ export default function Campaigns() {
     queryFn: () => fetch("/api/campaigns", { credentials: "include" }).then(r => r.json()),
   });
 
+  const { data: metaStatus } = useQuery<{ configured: boolean; webhookConfigured: boolean }>({
+    queryKey: ["/api/meta/status"],
+    queryFn: () => fetch("/api/meta/status", { credentials: "include" }).then(r => r.ok ? r.json() : { configured: false, webhookConfigured: false }),
+    enabled: isAdmin,
+  });
+
+  const metaSync = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/meta/sync-campaigns", { method: "POST", credentials: "include" });
+      if (!res.ok) throw new Error((await res.json()).message ?? "Hata");
+      return res.json() as Promise<{ synced: number; errors: string[] }>;
+    },
+    onSuccess: (d) => {
+      qc.invalidateQueries({ queryKey: ["/api/campaigns"] });
+      toast({
+        title: "Meta senkronu tamamlandı",
+        description: `${d.synced} kampanya senkronlandı.` + (d.errors.length ? ` ${d.errors.length} hata.` : ""),
+        variant: d.errors.length && d.synced === 0 ? "destructive" : undefined,
+      });
+    },
+    onError: (e: any) => toast({ title: "Meta senkronu başarısız", description: e?.message, variant: "destructive" }),
+  });
+
   const totalLeads = campaigns.reduce((s, c) => s + c.lead_count, 0);
   const totalConverted = campaigns.reduce((s, c) => s + c.converted_count, 0);
   const totalSpend = campaigns.reduce((s, c) => s + parseFloat(c.total_expense), 0);
@@ -70,9 +93,16 @@ export default function Campaigns() {
             </p>
           </div>
           {isAdmin && (
-            <Button onClick={() => setCreateOpen(true)} className="gap-1.5">
-              <Plus className="h-4 w-4" /> Yeni Kampanya
-            </Button>
+            <div className="flex items-center gap-2">
+              {metaStatus?.configured && (
+                <Button variant="outline" onClick={() => metaSync.mutate()} disabled={metaSync.isPending} className="gap-1.5" title="Meta kampanyalarını ve harcamalarını senkronla">
+                  <RefreshCw className={`h-4 w-4 ${metaSync.isPending ? "animate-spin" : ""}`} /> Meta Senkronla
+                </Button>
+              )}
+              <Button onClick={() => setCreateOpen(true)} className="gap-1.5">
+                <Plus className="h-4 w-4" /> Yeni Kampanya
+              </Button>
+            </div>
           )}
         </div>
 
@@ -130,7 +160,10 @@ export default function Campaigns() {
                   <Card className="cursor-pointer hover:shadow-md transition-shadow h-full">
                     <CardContent className="pt-4 pb-4 space-y-3">
                       <div className="flex items-start justify-between gap-2">
-                        <h3 className="font-semibold text-base leading-tight">{c.name}</h3>
+                        <h3 className="font-semibold text-base leading-tight flex items-center gap-1.5">
+                          {c.platform === "meta" && <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-semibold shrink-0">META</span>}
+                          {c.name}
+                        </h3>
                         <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium shrink-0 ${meta.cls}`}>
                           {meta.label}
                         </span>

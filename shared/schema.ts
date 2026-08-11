@@ -684,9 +684,11 @@ export const campaigns = pgTable("campaigns", {
   description: text("description"),
   status: text("status").notNull().default("active"), // active | paused | ended
   platform: text("platform").notNull().default("manual"), // manual | meta | google (gelecekte)
-  externalId: text("external_id"), // Meta kampanya ID'si (ileride otomatik sync için)
+  externalId: text("external_id"), // Meta kampanya ID'si (otomatik sync için)
   startDate: text("start_date"),   // YYYY-MM-DD
   endDate: text("end_date"),       // YYYY-MM-DD, null = devam ediyor
+  spend: numeric("spend", { precision: 15, scale: 2 }).notNull().default("0"), // Meta insights lifetime harcama
+  metaSyncedAt: timestamp("meta_synced_at"), // son Meta senkronu
   createdByUserId: integer("created_by_user_id"),
   createdAt: timestamp("created_at").defaultNow(),
 });
