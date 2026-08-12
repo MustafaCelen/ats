@@ -689,6 +689,19 @@ export const campaigns = pgTable("campaigns", {
   endDate: text("end_date"),       // YYYY-MM-DD, null = devam ediyor
   spend: numeric("spend", { precision: 15, scale: 2 }).notNull().default("0"), // Meta insights lifetime harcama
   metaSyncedAt: timestamp("meta_synced_at"), // son Meta senkronu
+
+  // ── Meta kampanya detayları/bütçe (platform='meta' senkronunda dolar) ──
+  objective: text("objective"),                                        // OUTCOME_LEADS vb.
+  dailyBudget: numeric("daily_budget", { precision: 15, scale: 2 }),    // hesap para biriminde (kuruş/cent'ten çevrilmiş)
+  lifetimeBudget: numeric("lifetime_budget", { precision: 15, scale: 2 }),
+  currency: text("currency"),                                          // TRY, USD vb. (ad account'tan)
+  impressions: integer("impressions"),
+  clicks: integer("clicks"),
+  reach: integer("reach"),
+  cpc: numeric("cpc", { precision: 10, scale: 4 }),                     // tıklama başı maliyet
+  cpm: numeric("cpm", { precision: 10, scale: 4 }),                     // 1000 gösterim başı maliyet
+  metaRaw: text("meta_raw"),                                           // ham campaign+insights JSON (yeni alan gerektiğinde şema değişmeden)
+
   createdByUserId: integer("created_by_user_id"),
   createdAt: timestamp("created_at").defaultNow(),
 });

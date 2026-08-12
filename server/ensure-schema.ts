@@ -129,6 +129,16 @@ export async function ensureSchema(): Promise<void> {
     -- Meta (Facebook) entegrasyonu
     ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS spend NUMERIC(15,2) NOT NULL DEFAULT 0;
     ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS meta_synced_at TIMESTAMP;
+    ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS objective TEXT;
+    ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS daily_budget NUMERIC(15,2);
+    ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS lifetime_budget NUMERIC(15,2);
+    ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS currency TEXT;
+    ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS impressions INTEGER;
+    ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS clicks INTEGER;
+    ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS reach INTEGER;
+    ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS cpc NUMERIC(10,4);
+    ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS cpm NUMERIC(10,4);
+    ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS meta_raw TEXT;
     CREATE UNIQUE INDEX IF NOT EXISTS campaigns_platform_external_idx ON campaigns(platform, external_id) WHERE external_id IS NOT NULL;
 
     -- Meta Lead Ads: gelen her lead için dedup + audit (webhook retry'lerine karşı)

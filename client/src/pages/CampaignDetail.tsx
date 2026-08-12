@@ -13,6 +13,7 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   Megaphone, ArrowLeft, Users, TrendingUp, Wallet, Calendar, Plus, Trash2, Pencil, Target,
+  Eye, MousePointerClick, Radar, PiggyBank, Gauge,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
@@ -28,7 +29,31 @@ interface CampaignDetailData {
   lead_count: number;
   converted_count: number;
   total_expense: string;
+  // Meta detayları (platform === 'meta' iken dolu)
+  objective: string | null;
+  daily_budget: string | null;
+  lifetime_budget: string | null;
+  currency: string | null;
+  impressions: number | null;
+  clicks: number | null;
+  reach: number | null;
+  cpc: string | null;
+  cpm: string | null;
+  meta_synced_at: string | null;
 }
+
+const OBJECTIVE_LABELS: Record<string, string> = {
+  OUTCOME_LEADS: "Potansiyel Müşteri (Lead)",
+  OUTCOME_TRAFFIC: "Trafik",
+  OUTCOME_ENGAGEMENT: "Etkileşim",
+  OUTCOME_AWARENESS: "Bilinirlik",
+  OUTCOME_SALES: "Satış",
+  OUTCOME_APP_PROMOTION: "Uygulama Tanıtımı",
+  LEAD_GENERATION: "Potansiyel Müşteri (Lead)",
+  LINK_CLICKS: "Bağlantı Tıklamaları",
+  CONVERSIONS: "Dönüşümler",
+};
+const fmtInt = (n: number) => new Intl.NumberFormat("tr-TR").format(n);
 
 interface ExpenseRow {
   id: number;
@@ -166,6 +191,73 @@ export default function CampaignDetail() {
           <Card>
             <CardContent className="pt-4 pb-4">
               <p className="text-sm text-muted-foreground whitespace-pre-wrap">{campaign.description}</p>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Meta kampanya detayları + bütçe (sadece platform='meta') */}
+        {campaign.platform === "meta" && (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-semibold">META</span>
+                Kampanya Detayları &amp; Bütçe
+              </CardTitle>
+              {campaign.meta_synced_at && (
+                <p className="text-[11px] text-muted-foreground">Son senkron: {new Date(campaign.meta_synced_at).toLocaleString("tr-TR")}</p>
+              )}
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                {campaign.objective && (
+                  <div>
+                    <p className="text-[11px] text-muted-foreground flex items-center gap-1"><Target className="h-3 w-3" />Hedef</p>
+                    <p className="text-sm font-semibold mt-0.5">{OBJECTIVE_LABELS[campaign.objective] ?? campaign.objective}</p>
+                  </div>
+                )}
+                {campaign.daily_budget && (
+                  <div>
+                    <p className="text-[11px] text-muted-foreground flex items-center gap-1"><PiggyBank className="h-3 w-3" />Günlük Bütçe</p>
+                    <p className="text-sm font-semibold mt-0.5">{fmtTRY(parseFloat(campaign.daily_budget))}</p>
+                  </div>
+                )}
+                {campaign.lifetime_budget && (
+                  <div>
+                    <p className="text-[11px] text-muted-foreground flex items-center gap-1"><PiggyBank className="h-3 w-3" />Toplam Bütçe</p>
+                    <p className="text-sm font-semibold mt-0.5">{fmtTRY(parseFloat(campaign.lifetime_budget))}</p>
+                  </div>
+                )}
+                {campaign.impressions != null && (
+                  <div>
+                    <p className="text-[11px] text-muted-foreground flex items-center gap-1"><Eye className="h-3 w-3" />Gösterim</p>
+                    <p className="text-sm font-semibold mt-0.5">{fmtInt(campaign.impressions)}</p>
+                  </div>
+                )}
+                {campaign.reach != null && (
+                  <div>
+                    <p className="text-[11px] text-muted-foreground flex items-center gap-1"><Radar className="h-3 w-3" />Erişim</p>
+                    <p className="text-sm font-semibold mt-0.5">{fmtInt(campaign.reach)}</p>
+                  </div>
+                )}
+                {campaign.clicks != null && (
+                  <div>
+                    <p className="text-[11px] text-muted-foreground flex items-center gap-1"><MousePointerClick className="h-3 w-3" />Tıklama</p>
+                    <p className="text-sm font-semibold mt-0.5">{fmtInt(campaign.clicks)}</p>
+                  </div>
+                )}
+                {campaign.cpc != null && (
+                  <div>
+                    <p className="text-[11px] text-muted-foreground flex items-center gap-1"><Gauge className="h-3 w-3" />CPC (Tıklama Başı)</p>
+                    <p className="text-sm font-semibold mt-0.5">{fmtTRY(parseFloat(campaign.cpc))}</p>
+                  </div>
+                )}
+                {campaign.cpm != null && (
+                  <div>
+                    <p className="text-[11px] text-muted-foreground flex items-center gap-1"><Gauge className="h-3 w-3" />CPM (1000 Gösterim)</p>
+                    <p className="text-sm font-semibold mt-0.5">{fmtTRY(parseFloat(campaign.cpm))}</p>
+                  </div>
+                )}
+              </div>
             </CardContent>
           </Card>
         )}

@@ -62,12 +62,21 @@ export async function syncMetaCampaigns(): Promise<{ synced: number; errors: str
   const errors: string[] = [];
   let synced = 0;
 
-  // 1) Kampanyalar
+  // 0) Hesap para birimi — daily_budget/lifetime_budget Meta'da hesabın en küçük para
+  // birimi cinsinden gelir (TRY için kuruş) — normal tutara çevirmek için /100 gerekiyor.
+  // spend/cpc/cpm insights'ta zaten normal birimde geliyor, onlara dokunmuyoruz.
+  let currency = "TRY";
+  try {
+    const acc = await graphGet(`act_${metaConfig.adAccountId}`, { fields: "currency" });
+    currency = acc.currency ?? "TRY";
+  } catch { /* alınamazsa varsayılan TRY ile devam */ }
+
+  // 1) Kampanyalar (bütçe + hedef dahil)
   let after: string | undefined;
   const campaigns: any[] = [];
   do {
     const page = await graphGet(`act_${metaConfig.adAccountId}/campaigns`, {
-      fields: "id,name,status,start_time,stop_time",
+      fields: "id,name,status,objective,daily_budget,lifetime_budget,start_time,stop_time",
       limit: 100,
       ...(after ? { after } : {}),
     });
@@ -75,23 +84,36 @@ export async function syncMetaCampaigns(): Promise<{ synced: number; errors: str
     after = page.paging?.cursors?.after && page.paging?.next ? page.paging.cursors.after : undefined;
   } while (after);
 
-  // 2) Her kampanya için insights (spend) — lifetime
+  // 2) Her kampanya için insights (spend, gösterim, tıklama, CPC/CPM, reach) — lifetime
   for (const c of campaigns) {
     try {
-      let spend = 0;
+      let insights: any = {};
       try {
-        const ins = await graphGet(`${c.id}/insights`, { fields: "spend", date_preset: "maximum" });
-        spend = parseFloat(ins.data?.[0]?.spend ?? "0") || 0;
-      } catch { /* insights yoksa (hiç yayınlanmamış kampanya) spend=0 */ }
+        const ins = await graphGet(`${c.id}/insights`, {
+          fields: "spend,impressions,clicks,cpc,cpm,reach",
+          date_preset: "maximum",
+        });
+        insights = ins.data?.[0] ?? {};
+      } catch { /* insights yoksa (hiç yayınlanmamış kampanya) boş kalır */ }
 
       const statusMap: Record<string, string> = { ACTIVE: "active", PAUSED: "paused", ARCHIVED: "ended", DELETED: "ended" };
       await storage.upsertMetaCampaign({
         externalId: String(c.id),
         name: c.name ?? `Meta #${c.id}`,
         status: statusMap[c.status] ?? "active",
+        objective: c.objective ?? null,
         startDate: c.start_time ? String(c.start_time).slice(0, 10) : null,
         endDate: c.stop_time ? String(c.stop_time).slice(0, 10) : null,
-        spend,
+        currency,
+        dailyBudget: c.daily_budget != null ? parseFloat(c.daily_budget) / 100 : null,
+        lifetimeBudget: c.lifetime_budget != null ? parseFloat(c.lifetime_budget) / 100 : null,
+        spend: parseFloat(insights.spend ?? "0") || 0,
+        impressions: insights.impressions != null ? parseInt(insights.impressions, 10) : null,
+        clicks: insights.clicks != null ? parseInt(insights.clicks, 10) : null,
+        reach: insights.reach != null ? parseInt(insights.reach, 10) : null,
+        cpc: insights.cpc != null ? parseFloat(insights.cpc) : null,
+        cpm: insights.cpm != null ? parseFloat(insights.cpm) : null,
+        metaRaw: JSON.stringify({ campaign: c, insights }),
       });
       synced++;
     } catch (e: any) {

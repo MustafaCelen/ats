@@ -2691,7 +2691,12 @@ export class DatabaseStorage implements IStorage {
   async upsertMetaCampaign(data: {
     externalId: string; name: string; status: string;
     startDate: string | null; endDate: string | null; spend: number;
+    objective?: string | null; currency?: string | null;
+    dailyBudget?: number | null; lifetimeBudget?: number | null;
+    impressions?: number | null; clicks?: number | null; reach?: number | null;
+    cpc?: number | null; cpm?: number | null; metaRaw?: string | null;
   }): Promise<{ id: number; created: boolean }> {
+    const num = (v: number | null | undefined) => v == null ? null : String(v);
     const existing = await db.execute(sql`
       SELECT id FROM campaigns WHERE platform = 'meta' AND external_id = ${data.externalId} LIMIT 1
     `);
@@ -2700,14 +2705,25 @@ export class DatabaseStorage implements IStorage {
       await db.execute(sql`
         UPDATE campaigns SET name = ${data.name}, status = ${data.status},
           start_date = ${data.startDate}, end_date = ${data.endDate},
-          spend = ${String(data.spend)}::numeric, meta_synced_at = now()
+          spend = ${String(data.spend)}::numeric, meta_synced_at = now(),
+          objective = ${data.objective ?? null}, currency = ${data.currency ?? null},
+          daily_budget = ${num(data.dailyBudget)}::numeric, lifetime_budget = ${num(data.lifetimeBudget)}::numeric,
+          impressions = ${data.impressions ?? null}, clicks = ${data.clicks ?? null}, reach = ${data.reach ?? null},
+          cpc = ${num(data.cpc)}::numeric, cpm = ${num(data.cpm)}::numeric, meta_raw = ${data.metaRaw ?? null}
         WHERE id = ${id}
       `);
       return { id, created: false };
     }
     const inserted = await db.execute(sql`
-      INSERT INTO campaigns (name, status, platform, external_id, start_date, end_date, spend, meta_synced_at)
-      VALUES (${data.name}, ${data.status}, 'meta', ${data.externalId}, ${data.startDate}, ${data.endDate}, ${String(data.spend)}::numeric, now())
+      INSERT INTO campaigns (
+        name, status, platform, external_id, start_date, end_date, spend, meta_synced_at,
+        objective, currency, daily_budget, lifetime_budget, impressions, clicks, reach, cpc, cpm, meta_raw
+      )
+      VALUES (
+        ${data.name}, ${data.status}, 'meta', ${data.externalId}, ${data.startDate}, ${data.endDate}, ${String(data.spend)}::numeric, now(),
+        ${data.objective ?? null}, ${data.currency ?? null}, ${num(data.dailyBudget)}::numeric, ${num(data.lifetimeBudget)}::numeric,
+        ${data.impressions ?? null}, ${data.clicks ?? null}, ${data.reach ?? null}, ${num(data.cpc)}::numeric, ${num(data.cpm)}::numeric, ${data.metaRaw ?? null}
+      )
       RETURNING id
     `);
     return { id: (inserted.rows[0] as any).id, created: true };
