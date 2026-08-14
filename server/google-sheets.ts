@@ -185,9 +185,8 @@ async function ensureTab(sheets: any, tab: string): Promise<boolean> {
   }
 }
 
-async function appendRows(sheets: any, tab: string, rows: string[][], closingId: number): Promise<void> {
-  // Toplu CSV import'ta closing'ler 10'arlı paralel gruplar halinde işleniyor — Sheets API
-  // rate limit'e (429) takılabiliyor. 3 denemeye kadar artan bekleme ile tekrar dener.
+async function appendRows(sheets: any, tab: string, rows: string[][], label: string | number): Promise<void> {
+  // Rate limit'e (429) takılırsa 3 denemeye kadar artan bekleme ile tekrar dener.
   const MAX_ATTEMPTS = 3;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
@@ -206,22 +205,38 @@ async function appendRows(sheets: any, tab: string, rows: string[][], closingId:
         await new Promise((r) => setTimeout(r, attempt * 1000));
         continue;
       }
-      console.error(`[google-sheets] append failed (closing ${closingId}, tab ${tab}, attempt ${attempt}):`, e?.message ?? e);
+      console.error(`[google-sheets] append failed (${label}, tab ${tab}, attempt ${attempt}):`, e?.message ?? e);
       return;
     }
   }
 }
 
-export async function appendClosingToSheet(closing: ClosingWithDetails): Promise<void> {
+// Birden fazla closing'in satırlarını sekme başına TEK bir append çağrısında toplu yazar.
+// CSV toplu import'ta her satır için ayrı ayrı çağrılınca (10'arlı paralel gruplar) Sheets
+// API rate limit'ine (429) takılıp importu ciddi yavaşlatıyordu — artık import bitince
+// tüm satırlar sekme başına tek seferde yazılıyor.
+async function appendClosingsToSheet(closingsList: ClosingWithDetails[]): Promise<void> {
+  if (closingsList.length === 0) return;
   const sheets = await getSheetsClient();
   if (!sheets) return;
-  const byTab = buildClosingSheetRowsByOffice(closing);
+  const byTab = new Map<string, string[][]>();
+  for (const closing of closingsList) {
+    const rowsByTab = buildClosingSheetRowsByOffice(closing);
+    for (const [tab, rows] of Array.from(rowsByTab.entries())) {
+      if (!byTab.has(tab)) byTab.set(tab, []);
+      byTab.get(tab)!.push(...rows);
+    }
+  }
   for (const [tab, rows] of Array.from(byTab.entries())) {
     if (rows.length === 0) continue;
     const ok = await ensureTab(sheets, tab);
     if (!ok) continue;
-    await appendRows(sheets, tab, rows, closing.id);
+    await appendRows(sheets, tab, rows, `bulk×${closingsList.length}`);
   }
+}
+
+export async function appendClosingToSheet(closing: ClosingWithDetails): Promise<void> {
+  return appendClosingsToSheet([closing]);
 }
 
 // Sunucu boot'unda bir kez çağrılır — bilinen ofis sekmelerini (boşsa) başlıkla hazırlar.

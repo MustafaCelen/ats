@@ -2642,6 +2642,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
           await storage.createClosing({
             disableCap: true,
+            skipSheetSync: true, // toplu import Sheets'e hiç yazmaz — sadece manuel/tekli girişler senkronlanır
             propertyAddress: adres,
             il: first["İl"] || null,
             ilce: first["İlçe"] || null,

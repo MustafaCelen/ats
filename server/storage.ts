@@ -2890,6 +2890,7 @@ export class DatabaseStorage implements IStorage {
     notes?: string | null;
     createdByUserId?: number | null;
     disableCap?: boolean; // true during CSV import — skips cap restriction in fallback calculation
+    skipSheetSync?: boolean; // true during CSV import — Sheets satırı burada yazılmaz, import sonunda toplu yazılır
     sides: Array<{
       sideType: string;
       agents: Array<{
@@ -3096,11 +3097,13 @@ export class DatabaseStorage implements IStorage {
       console.error("[createClosing snapshot+UK sync]", e);
     }
     // Google Sheets'e satır ekleme — GOOGLE_SHEETS_* env'i yoksa sessizce atlanır.
-    try {
-      const withDetails = await this.buildClosingWithDetails(result);
-      await appendClosingToSheet(withDetails);
-    } catch (e) {
-      console.error("[createClosing google-sheets sync]", e);
+    // Arka planda (fire-and-forget) çalışır: closing oluşturma isteği Sheets API
+    // round-trip'ini beklemez. Toplu import (skipSheetSync=true) burada hiç yazmaz —
+    // sadece manuel/tekli kapanış girişleri (form) Sheets'e senkronlanır.
+    if (!data.skipSheetSync) {
+      this.buildClosingWithDetails(result)
+        .then((withDetails) => appendClosingToSheet(withDetails))
+        .catch((e) => console.error("[createClosing google-sheets sync]", e));
     }
     return result;
   }
