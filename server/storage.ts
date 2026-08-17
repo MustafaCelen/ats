@@ -3580,13 +3580,13 @@ export class DatabaseStorage implements IStorage {
       ))
       .groupBy(closingAgents.employeeId);
 
-    const firstTimers: Array<{ employeeId: number; name: string; kwuid: string; firstDate: string; bhb: number; bm: number }> = [];
+    const firstTimersAll: Array<{ employeeId: number; name: string; kwuid: string; firstDate: string; bhb: number; bm: number }> = [];
     for (const r of firstDateRows) {
       if (!r.employeeId || !r.firstDate) continue;
       const fd = new Date(r.firstDate);
       if (fd >= startDate && fd <= end) {
         const emp = empMap.get(r.employeeId);
-        if (emp) firstTimers.push({
+        if (emp) firstTimersAll.push({
           employeeId: r.employeeId,
           name: emp.name, kwuid: emp.kwuid,
           firstDate: fd.toISOString().split("T")[0],
@@ -3594,21 +3594,25 @@ export class DatabaseStorage implements IStorage {
         });
       }
     }
-    firstTimers.sort((a, b) => a.firstDate.localeCompare(b.firstDate));
+    firstTimersAll.sort((a, b) => a.firstDate.localeCompare(b.firstDate));
 
-    // Fetch BHB for each first-timer's first closing
-    if (firstTimers.length > 0) {
-      const empIds = firstTimers.map(ft => ft.employeeId);
+    // Fetch BHB (+ ilk kapanışın office_snapshot'ı, ofis filtresi için) for each first-timer's first closing
+    const firstTimerOffice = new Map<number, string | null>();
+    if (firstTimersAll.length > 0) {
+      const empIds = firstTimersAll.map(ft => ft.employeeId);
       const bhbRows = await db
         .select({
           employeeId: closingAgents.employeeId,
           effDate: effectiveDate,
           bhbShare: closingAgents.bhbShare,
           bm: closingAgents.marketCenterActual,
+          officeSnapshot: officeSnap,
         })
         .from(closingAgents)
         .innerJoin(closingSides, eq(closingAgents.closingSideId, closingSides.id))
         .innerJoin(closings, eq(closingSides.closingId, closings.id))
+        .leftJoin(employees, eq(employees.id, closingAgents.employeeId))
+        .leftJoin(candidates, eq(candidates.id, employees.candidateId))
         .where(and(
           sql`${effectiveStatus} = 'completed'`,
           sql`${effectiveDate} IS NOT NULL`,
@@ -3617,13 +3621,21 @@ export class DatabaseStorage implements IStorage {
       for (const r of bhbRows) {
         if (!r.employeeId || !r.effDate) continue;
         const dateStr = new Date(r.effDate).toISOString().split("T")[0];
-        const ft = firstTimers.find(f => f.employeeId === r.employeeId);
+        const ft = firstTimersAll.find(f => f.employeeId === r.employeeId);
         if (ft && dateStr === ft.firstDate) {
           ft.bhb += parseFloat(String(r.bhbShare) || "0");
           ft.bm  += parseFloat(String(r.bm) || "0");
+          if (!firstTimerOffice.has(r.employeeId)) firstTimerOffice.set(r.employeeId, r.officeSnapshot ?? null);
         }
       }
     }
+    // Ofis/takım filtresi: sadece o kişinin İLK kapanışının gerçekleştiği ofis/takım eşleşiyorsa göster
+    // (kapanış geçmişi bir bütün olarak "ilk kez" tanımını belirler, ama gösterim seçili ofise göre süzülür).
+    const firstTimers = employeeIds && employeeIds.length > 0
+      ? firstTimersAll.filter(ft => employeeIds.includes(ft.employeeId))
+      : office
+        ? firstTimersAll.filter(ft => firstTimerOffice.get(ft.employeeId) === office)
+        : firstTimersAll;
 
     // ── New cappers in this period ──
     // Walk per-employee closings chronologically since their cap period start; find the
@@ -3677,23 +3689,30 @@ export class DatabaseStorage implements IStorage {
           employeeId: closingAgents.employeeId,
           effDate: effectiveDate,
           bm: closingAgents.marketCenterActual,
+          officeSnapshot: officeSnap,
         })
         .from(closingAgents)
         .innerJoin(closingSides, eq(closingAgents.closingSideId, closingSides.id))
         .innerJoin(closings, eq(closingSides.closingId, closings.id))
+        .leftJoin(employees, eq(employees.id, closingAgents.employeeId))
+        .leftJoin(candidates, eq(candidates.id, employees.candidateId))
         .where(and(
           sql`${effectiveDate} IS NOT NULL`,
           sql`${effectiveDate} >= ${minPeriodStart}`,
           inArray(closingAgents.employeeId, Array.from(empCapInfo.keys())),
         ));
 
-      const byEmp = new Map<number, Array<{ date: Date; bm: number }>>();
+      const byEmp = new Map<number, Array<{ date: Date; bm: number; officeSnapshot: string | null }>>();
       for (const r of capPeriodRows) {
         if (!r.employeeId || !r.effDate) continue;
         if (!byEmp.has(r.employeeId)) byEmp.set(r.employeeId, []);
-        byEmp.get(r.employeeId)!.push({ date: new Date(r.effDate), bm: parseFloat(r.bm ?? "0") });
+        byEmp.get(r.employeeId)!.push({ date: new Date(r.effDate), bm: parseFloat(r.bm ?? "0"), officeSnapshot: r.officeSnapshot ?? null });
       }
 
+      // Cap'e ne zaman ulaşıldığı HER ZAMAN kişinin TÜM (ofis filtresinden bağımsız) BM
+      // katkılarının kümülatifiyle hesaplanır — aksi halde ofis filtresi cap'e ulaşma
+      // tarihini kaydırırdı. Gösterim ise cap'i AŞAN o spesifik kapanışın office_snapshot'ına
+      // göre süzülür (bir danışman transfer olduysa, cap'e hangi ofisteyken ulaştıysa oraya sayılır).
       for (const [empId, rows] of byEmp) {
         const info = empCapInfo.get(empId);
         if (!info) continue;
@@ -3702,11 +3721,14 @@ export class DatabaseStorage implements IStorage {
           .sort((a, b) => a.date.getTime() - b.date.getTime());
         let running = 0;
         let capDate: Date | null = null;
+        let capOffice: string | null = null;
         for (const r of inPeriod) {
           running += r.bm;
-          if (running >= info.capAmount) { capDate = r.date; break; }
+          if (running >= info.capAmount) { capDate = r.date; capOffice = r.officeSnapshot; break; }
         }
         if (capDate && capDate >= startDate && capDate <= end) {
+          if (employeeIds && employeeIds.length > 0 && !employeeIds.includes(empId)) continue;
+          if (!(employeeIds && employeeIds.length > 0) && office && capOffice !== office) continue;
           const emp = empMap.get(empId);
           if (emp) newCappers.push({
             employeeId: empId,
