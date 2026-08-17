@@ -23,6 +23,9 @@ import {
   CANDIDATE_CATEGORIES, TURKEY_CITIES, REAL_ESTATE_BRANDS, type InsertCandidate,
 } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
+import { PhoneInput } from "@/components/PhoneInput";
+import { composePhone, isValidPhoneForCountry } from "@/lib/phone";
+import { DEFAULT_COUNTRY, COUNTRY_CODES } from "@/lib/countryCodes";
 
 // ─── Category display meta ────────────────────────────────────────────────────
 
@@ -356,6 +359,7 @@ function CreateCandidateDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const activeCampaigns = campaigns.filter(c => c.status !== "ended");
   const [specialization, setSpecialization] = useState<string[]>([]);
   const [languages, setLanguages] = useState<string[]>(["Türkçe"]);
+  const [phoneCountry, setPhoneCountry] = useState<string>(DEFAULT_COUNTRY.iso2);
   const [selectedJobId, setSelectedJobId] = useState<string>("none");
   const [ivDate, setIvDate] = useState("");
   const [ivStart, setIvStart] = useState("");
@@ -367,6 +371,7 @@ function CreateCandidateDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const resetForm = () => {
     setForm({ name: "", email: "", phone: "", category: "", currentBrand: "", licenseStatus: "unlicensed", licenseNumber: "", city: "", district: "", experience: "0", referredBy: "", socialMedia: "", resumeText: "", office: "", campaignId: "" });
     setSpecialization([]); setLanguages(["Türkçe"]); setSelectedJobId("none");
+    setPhoneCountry(DEFAULT_COUNTRY.iso2);
     setIvDate(""); setIvStart(""); setIvEnd("");
   };
 
@@ -374,8 +379,13 @@ function CreateCandidateDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     if (!form.name.trim()) { toast({ title: "Ad zorunludur", variant: "destructive" }); return; }
     if (!form.category) { toast({ title: "Kategori (K0/K1/K2) zorunludur", variant: "destructive" }); return; }
     if (!form.phone.trim()) { toast({ title: "Telefon zorunludur", variant: "destructive" }); return; }
-    if (!/^05\d{9}$/.test(form.phone)) {
-      toast({ title: "Geçersiz telefon formatı", description: "05xxxxxxxxx formatında giriniz (11 haneli)", variant: "destructive" }); return;
+    const phoneCountryDial = COUNTRY_CODES.find((c) => c.iso2 === phoneCountry)?.dial ?? DEFAULT_COUNTRY.dial;
+    if (!isValidPhoneForCountry(phoneCountryDial, form.phone)) {
+      toast({
+        title: "Geçersiz telefon formatı",
+        description: phoneCountryDial === "90" ? "05xxxxxxxxx formatında giriniz (11 haneli)" : "Geçerli bir telefon numarası giriniz",
+        variant: "destructive",
+      }); return;
     }
     if (!form.office) { toast({ title: "KW Ofis seçimi zorunludur", variant: "destructive" }); return; }
     if (hasJobSelected && ivDate && (!ivStart || !ivEnd)) {
@@ -385,7 +395,7 @@ function CreateCandidateDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     mutate({
       name: form.name.trim(),
       email: form.email.trim() || undefined,
-      phone: form.phone || undefined,
+      phone: composePhone(phoneCountryDial, form.phone) || undefined,
       category: form.category,
       currentBrand: form.currentBrand || undefined,
       licenseStatus: form.licenseStatus,
@@ -538,7 +548,13 @@ function CreateCandidateDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                 <Input value={form.name} onChange={(e) => f("name", e.target.value)} placeholder="Ahmet Yılmaz" data-testid="input-candidate-name" />
               </Field>
               <Field label="Telefon *">
-                <Input value={form.phone} onChange={(e) => f("phone", e.target.value)} placeholder="05xxxxxxxxx" data-testid="input-candidate-phone" />
+                <PhoneInput
+                  countryIso2={phoneCountry}
+                  national={form.phone}
+                  onCountryChange={setPhoneCountry}
+                  onNationalChange={(v) => f("phone", v)}
+                  testId="input-candidate-phone"
+                />
               </Field>
               <Field label="E-posta">
                 <Input type="email" value={form.email} onChange={(e) => f("email", e.target.value)} placeholder="ahmet@example.com" data-testid="input-candidate-email" />

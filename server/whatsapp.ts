@@ -1,4 +1,10 @@
 function toE164(phone: string): string | null {
+  // Yurt dışı numaralar zaten "+{ülke kodu}..." (E.164) olarak saklanıyor — olduğu gibi kullan.
+  if (phone.trim().startsWith("+")) {
+    const digits = phone.replace(/\D/g, "");
+    return digits.length >= 8 ? "+" + digits : null;
+  }
+  // TR: mevcut yerel format ("05xxxxxxxxx" veya çıplak 10 hane).
   const digits = phone.replace(/\D/g, "");
   if (digits.startsWith("90") && digits.length === 12) return "+" + digits;
   if (digits.startsWith("0") && digits.length === 11) return "+90" + digits.slice(1);

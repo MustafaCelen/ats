@@ -1363,14 +1363,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json(candidate);
   });
 
+  // Türkiye: yerel format "05xxxxxxxxx" (11 hane). Yurt dışı: E.164 ("+" + ülke kodu + ulusal
+  // numara, toplam 8-15 hane) — client tarafındaki ülke kodu seçiciyle bu formatta gönderilir.
   const PHONE_RE = /^05\d{9}$/;
+  const INTL_PHONE_RE = /^\+[1-9]\d{7,14}$/;
+  const isValidPhone = (phone: string) => PHONE_RE.test(phone) || INTL_PHONE_RE.test(phone);
+  const PHONE_ERROR_MSG = "Telefon numarası 05xxxxxxxxx (TR) veya + ile başlayan uluslararası formatta olmalıdır";
 
   app.post(api.candidates.create.path, requireAuth, async (req, res) => {
     try {
       const input = api.candidates.create.input.parse(req.body);
       if (input.phone) {
-        if (!PHONE_RE.test(input.phone))
-          return res.status(400).json({ message: "Telefon numarası 05xxxxxxxxx formatında olmalıdır (11 haneli)" });
+        if (!isValidPhone(input.phone))
+          return res.status(400).json({ message: PHONE_ERROR_MSG });
         const dup = await storage.getCandidateByPhone(input.phone);
         if (dup) return res.status(409).json({ message: `Bu telefon numarası zaten kayıtlı: ${dup.name}` });
       }
@@ -1386,8 +1391,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const input = api.candidates.update.input.parse(req.body);
       if (input.phone) {
-        if (!PHONE_RE.test(input.phone))
-          return res.status(400).json({ message: "Telefon numarası 05xxxxxxxxx formatında olmalıdır (11 haneli)" });
+        if (!isValidPhone(input.phone))
+          return res.status(400).json({ message: PHONE_ERROR_MSG });
         const dup = await storage.getCandidateByPhone(input.phone);
         if (dup && dup.id !== Number(req.params.id))
           return res.status(409).json({ message: `Bu telefon numarası zaten kayıtlı: ${dup.name}` });

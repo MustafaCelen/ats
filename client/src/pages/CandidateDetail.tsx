@@ -35,6 +35,9 @@ import {
 } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
+import { PhoneInput } from "@/components/PhoneInput";
+import { composePhone, isValidPhoneForCountry, parseStoredPhone } from "@/lib/phone";
+import { COUNTRY_CODES, DEFAULT_COUNTRY } from "@/lib/countryCodes";
 import { useLocation } from "wouter";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -1338,10 +1341,14 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
   const { mutate: update, isPending } = useUpdateCandidate();
   const { toast } = useToast();
 
+  const initialPhone = parseStoredPhone(candidate.phone);
+  const [phoneCountry, setPhoneCountry] = useState<string>(
+    COUNTRY_CODES.find((c) => c.dial === initialPhone.dial)?.iso2 ?? DEFAULT_COUNTRY.iso2
+  );
   const [form, setForm] = useState({
     name: candidate.name ?? "",
     email: candidate.email ?? "",
-    phone: candidate.phone ?? "",
+    phone: initialPhone.national,
     category: candidate.category ?? "K0",
     currentBrand: candidate.currentBrand ?? "",
     licenseStatus: candidate.licenseStatus ?? "unlicensed",
@@ -1366,8 +1373,13 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
     if (!form.name.trim()) {
       toast({ title: "Ad zorunludur", variant: "destructive" }); return;
     }
-    if (form.phone && !/^05\d{9}$/.test(form.phone)) {
-      toast({ title: "Geçersiz telefon", description: "05xxxxxxxxx formatında giriniz (11 haneli)", variant: "destructive" }); return;
+    const phoneCountryDial = COUNTRY_CODES.find((c) => c.iso2 === phoneCountry)?.dial ?? DEFAULT_COUNTRY.dial;
+    if (form.phone && !isValidPhoneForCountry(phoneCountryDial, form.phone)) {
+      toast({
+        title: "Geçersiz telefon",
+        description: phoneCountryDial === "90" ? "05xxxxxxxxx formatında giriniz (11 haneli)" : "Geçerli bir telefon numarası giriniz",
+        variant: "destructive",
+      }); return;
     }
     if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
       toast({ title: "Geçersiz e-posta adresi", variant: "destructive" }); return;
@@ -1380,6 +1392,7 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
       id: candidate.id,
       data: {
         ...form,
+        phone: composePhone(phoneCountryDial, form.phone) || undefined,
         experience: parseInt(form.experience) || 0,
         specialization,
         languages,
@@ -1394,7 +1407,6 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
         referredBy: form.referredBy || undefined,
         socialMedia: form.socialMedia || undefined,
         resumeText: form.resumeText || undefined,
-        phone: form.phone || undefined,
         expectedStartMonth: form.expectedStartMonth || undefined,
       } as Partial<InsertCandidate>,
     }, {
@@ -1418,7 +1430,15 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
             <div className="grid grid-cols-2 gap-3">
               <Field label="Ad Soyad *"><Input value={form.name} onChange={(e) => f("name", e.target.value)} data-testid="input-edit-name" /></Field>
               <Field label="E-posta"><Input type="email" value={form.email} onChange={(e) => f("email", e.target.value)} data-testid="input-edit-email" /></Field>
-              <Field label="Telefon"><Input value={form.phone} onChange={(e) => f("phone", e.target.value)} placeholder="05xxxxxxxxx" data-testid="input-edit-phone" /></Field>
+              <Field label="Telefon">
+                <PhoneInput
+                  countryIso2={phoneCountry}
+                  national={form.phone}
+                  onCountryChange={setPhoneCountry}
+                  onNationalChange={(v) => f("phone", v)}
+                  testId="input-edit-phone"
+                />
+              </Field>
               <Field label="Sosyal Medya / LinkedIn"><Input value={form.socialMedia} onChange={(e) => f("socialMedia", e.target.value)} placeholder="https://linkedin.com/in/..." /></Field>
             </div>
           </EditGroup>
