@@ -2787,6 +2787,33 @@ export class DatabaseStorage implements IStorage {
     return (fallback.rows[0] as any)?.office ?? null;
   }
 
+  // Bir danışmanın office-history'si değiştiğinde (yeni transfer eklendi/silindi),
+  // TÜM geçmiş kapanışlarındaki office_snapshot'ı güncel history'ye göre yeniden hesaplar.
+  // Aksi halde transfer kaydından ÖNCEKİ kapanışlar, ilk transfer eklenene kadar
+  // office_snapshot'ı hiç set edilmediği (createClosing sadece o an geçerli history'ye göre
+  // bir kez yazdığı) için candidates.office fallback'i üzerinden "şu anki" ofise düşük kalır.
+  async resyncOfficeSnapshotsForEmployee(employeeId: number): Promise<number> {
+    const agents = await db.execute(sql`
+      SELECT ca.id, COALESCE(ca.closing_date, c.closing_date) AS eff_date
+      FROM closing_agents ca
+      JOIN closing_sides cs ON cs.id = ca.closing_side_id
+      JOIN closings c ON c.id = cs.closing_id
+      WHERE ca.employee_id = ${employeeId}
+    `);
+    let changed = 0;
+    for (const a of agents.rows as any[]) {
+      if (!a.eff_date) continue;
+      const office = await this.getEmployeeOfficeAt(employeeId, new Date(a.eff_date));
+      if (!office) continue;
+      const res = await db.execute(sql`
+        UPDATE closing_agents SET office_snapshot = ${office}
+        WHERE id = ${a.id} AND office_snapshot IS DISTINCT FROM ${office}
+      `);
+      changed += res.rowCount ?? 0;
+    }
+    return changed;
+  }
+
   // ÜK share → office_expenses "ÜK Geliri" senkronu (idempotent)
   async syncClosingAgentUkIncome(agentId: number): Promise<void> {
     const rows = await db.execute(sql`
@@ -3283,25 +3310,19 @@ export class DatabaseStorage implements IStorage {
     const end = new Date(endDate);
     end.setHours(23, 59, 59, 999);
 
-    // ── Pre-compute employee IDs for filtering (team filter takes precedence over office) ──
-    let filterEmpIds: number[] | null = null;
-    if (employeeIds && employeeIds.length > 0) {
-      filterEmpIds = employeeIds;
-    } else if (office) {
-      const rows = await db
-        .select({ id: employees.id })
-        .from(employees)
-        .innerJoin(candidates, eq(employees.candidateId, candidates.id))
-        .where(eq(candidates.office, office));
-      filterEmpIds = rows.map(r => r.id);
-    }
-    const hasOfficeFilter = filterEmpIds !== null;
-    const hasOfficeData   = hasOfficeFilter && filterEmpIds!.length > 0;
-
-    const completedAgentCond = hasOfficeFilter
-      ? (hasOfficeData ? inArray(closingAgents.employeeId, filterEmpIds!) : sql`1=0`)
-      : undefined;
-    const expectedAgentCond = completedAgentCond;
+    // ── Filtre koşulu: takım (employeeIds) verilmişse doğrudan o employeeId'ler; ofis
+    // verilmişse SATIR BAZLI office_snapshot (candidates.office'e fallback) — bir danışmanın
+    // TÜM geçmişini "şu anki" ofisine değil, her işlemi KENDİ ZAMANINDAKİ ofisine göre sayar.
+    // (Eskiden ofis filtresi "şu an bu ofiste olan danışmanlar" listesiyle uygulanıyordu —
+    // bu, transfer olan danışmanların transfer ÖNCESİ işlemlerini de yeni ofise yazıyordu.)
+    const officeSnap = sql<string>`COALESCE(${closingAgents.officeSnapshot}, ${candidates.office})`;
+    const agentCond = employeeIds && employeeIds.length > 0
+      ? inArray(closingAgents.employeeId, employeeIds)
+      : office
+        ? sql`${officeSnap} = ${office}`
+        : undefined;
+    const completedAgentCond = agentCond;
+    const expectedAgentCond = agentCond;
 
     // Per-agent date/status take precedence; closing-level used as fallback.
     const effectiveStatus = sql<string>`COALESCE(${closingAgents.status}, ${closings.status})`;
@@ -3329,6 +3350,8 @@ export class DatabaseStorage implements IStorage {
       .from(closings)
       .leftJoin(closingSides, eq(closingSides.closingId, closings.id))
       .leftJoin(closingAgents, eq(closingAgents.closingSideId, closingSides.id))
+      .leftJoin(employees, eq(employees.id, closingAgents.employeeId))
+      .leftJoin(candidates, eq(candidates.id, employees.candidateId))
       .where(and(
         sql`${effectiveStatus} = 'completed'`,
         sql`${effectiveDate} IS NOT NULL`,
@@ -3344,6 +3367,8 @@ export class DatabaseStorage implements IStorage {
       .from(closings)
       .leftJoin(closingSides, eq(closingSides.closingId, closings.id))
       .leftJoin(closingAgents, eq(closingAgents.closingSideId, closingSides.id))
+      .leftJoin(employees, eq(employees.id, closingAgents.employeeId))
+      .leftJoin(candidates, eq(candidates.id, employees.candidateId))
       .where(and(
         sql`${effectiveStatus} = 'expected'`,
         ...(expectedAgentCond ? [expectedAgentCond] : []),

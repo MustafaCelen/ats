@@ -3143,13 +3143,35 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (!/^\d{4}-\d{2}-\d{2}$/.test(effectiveFrom)) {
         return res.status(400).json({ message: "effectiveFrom YYYY-MM-DD formatında olmalı" });
       }
+
+      // Bu danışmanın İLK transferiyse: transferden önceki dönemi işaretsiz bırakmamak için
+      // mevcut (transfer öncesi) candidates.office değerini çok eski bir tarihe (2000-01-01)
+      // "taban" kaydı olarak ekliyoruz. Aksi halde bu tarihten önceki kapanışlar history'de
+      // hiç eşleşmeyip candidates.office fallback'i üzerinden yanlışlıkla YENİ ofise düşer.
+      const existingCount = await db.execute(sql`
+        SELECT COUNT(*)::int AS c FROM employee_office_history WHERE employee_id = ${empId}
+      `);
+      if (((existingCount.rows[0] as any)?.c ?? 0) === 0) {
+        const priorOffice = await db.execute(sql`
+          SELECT c.office FROM employees e JOIN candidates c ON c.id = e.candidate_id WHERE e.id = ${empId}
+        `);
+        const priorOfficeValue = (priorOffice.rows[0] as any)?.office;
+        if (priorOfficeValue && priorOfficeValue !== office) {
+          await db.execute(sql`
+            INSERT INTO employee_office_history (employee_id, office, effective_from, notes)
+            VALUES (${empId}, ${priorOfficeValue}, '2000-01-01', ${"Otomatik: transfer öncesi başlangıç ofisi"})
+          `);
+        }
+      }
+
       const created = await db.execute(sql`
         INSERT INTO employee_office_history (employee_id, office, effective_from, notes)
         VALUES (${empId}, ${office}, ${effectiveFrom}, ${notes ?? null})
         RETURNING *
       `);
       await syncCandidateOfficeFromHistory(empId);
-      res.json(created.rows[0]);
+      const resyncedCount = await storage.resyncOfficeSnapshotsForEmployee(empId);
+      res.json({ ...created.rows[0], resyncedCount });
     } catch (err: any) {
       console.error("[POST /api/employees/:id/office-history]", err);
       res.status(500).json({ message: err.message });
@@ -3163,7 +3185,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const row = await db.execute(sql`SELECT employee_id FROM employee_office_history WHERE id = ${hid}`);
       const empId = (row.rows[0] as any)?.employee_id;
       await db.execute(sql`DELETE FROM employee_office_history WHERE id = ${hid}`);
-      if (empId) await syncCandidateOfficeFromHistory(empId);
+      if (empId) {
+        await syncCandidateOfficeFromHistory(empId);
+        await storage.resyncOfficeSnapshotsForEmployee(empId);
+      }
       res.status(204).send();
     } catch (err: any) {
       console.error("[DELETE /api/employees/office-history/:historyId]", err);
