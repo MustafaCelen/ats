@@ -150,6 +150,56 @@ export async function ensureSchema(): Promise<void> {
       created_at TIMESTAMP DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS meta_leads_candidate_idx ON meta_leads(candidate_id);
+
+    -- Genel değişiklik günlüğü (audit log) — kullanıcı bilgisi olmadan, sadece
+    -- "hangi alan ne zaman neyden neye değişti / silindi". DB trigger ile dolduruluyor,
+    -- böylece uygulama kodundaki ham SQL UPDATE'ler (Drizzle dışından yapılanlar dahil) de
+    -- kaçmadan yakalanır.
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id SERIAL PRIMARY KEY,
+      table_name TEXT NOT NULL,
+      record_id INTEGER NOT NULL,
+      field_name TEXT NOT NULL,
+      old_value TEXT,
+      new_value TEXT,
+      action TEXT NOT NULL DEFAULT 'update',
+      changed_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS audit_log_record_idx ON audit_log(table_name, record_id);
+    CREATE INDEX IF NOT EXISTS audit_log_changed_at_idx ON audit_log(changed_at);
+
+    CREATE OR REPLACE FUNCTION employees_audit_trigger() RETURNS TRIGGER AS $func$
+    BEGIN
+      IF TG_OP = 'UPDATE' THEN
+        IF NEW.contract_type IS DISTINCT FROM OLD.contract_type THEN
+          INSERT INTO audit_log (table_name, record_id, field_name, old_value, new_value, action)
+          VALUES ('employees', NEW.id, 'contract_type', OLD.contract_type, NEW.contract_type, 'update');
+        END IF;
+        IF NEW.status IS DISTINCT FROM OLD.status THEN
+          INSERT INTO audit_log (table_name, record_id, field_name, old_value, new_value, action)
+          VALUES ('employees', NEW.id, 'status', OLD.status, NEW.status, 'update');
+        END IF;
+        IF NEW.cap_month IS DISTINCT FROM OLD.cap_month THEN
+          INSERT INTO audit_log (table_name, record_id, field_name, old_value, new_value, action)
+          VALUES ('employees', NEW.id, 'cap_month', OLD.cap_month, NEW.cap_month, 'update');
+        END IF;
+        RETURN NEW;
+      ELSIF TG_OP = 'DELETE' THEN
+        INSERT INTO audit_log (table_name, record_id, field_name, old_value, new_value, action)
+        VALUES
+          ('employees', OLD.id, 'contract_type', OLD.contract_type, NULL, 'delete'),
+          ('employees', OLD.id, 'status', OLD.status, NULL, 'delete'),
+          ('employees', OLD.id, 'cap_month', OLD.cap_month, NULL, 'delete');
+        RETURN OLD;
+      END IF;
+      RETURN NULL;
+    END;
+    $func$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS employees_audit ON employees;
+    CREATE TRIGGER employees_audit
+      AFTER UPDATE OR DELETE ON employees
+      FOR EACH ROW EXECUTE FUNCTION employees_audit_trigger();
   `;
   try {
     await pool.query(sql);

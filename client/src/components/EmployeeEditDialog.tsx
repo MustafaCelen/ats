@@ -336,6 +336,9 @@ export function EmployeeEditDialog({ emp, open, onOpenChange }: Props) {
               <div className="col-span-2">
                 <OfficeTransferSection employeeId={emp.id} candidateId={emp.candidateId} onCurrentOfficeChange={setOffice} />
               </div>
+              <div className="col-span-2">
+                <AuditLogSection employeeId={emp.id} />
+              </div>
               <Field label="Şehir">
                 <Select value={city} onValueChange={setCity}>
                   <SelectTrigger><SelectValue placeholder="Şehir seçin..." /></SelectTrigger>
@@ -712,6 +715,71 @@ function OfficeTransferSection({ employeeId, candidateId, onCurrentOfficeChange 
               >
                 Sil
               </button>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Değişiklik Geçmişi (Audit Log) ────────────────────────────────────────
+interface AuditLogRow {
+  id: number;
+  field_name: string;
+  old_value: string | null;
+  new_value: string | null;
+  action: "update" | "delete";
+  changed_at: string;
+}
+
+const AUDIT_FIELD_LABELS: Record<string, string> = {
+  contract_type: "Sözleşme Türü",
+  status: "Durum",
+  cap_month: "Cap Ayı",
+};
+const AUDIT_VALUE_LABELS: Record<string, string> = {
+  active: "Aktif",
+  inactive: "Pasif",
+};
+const auditValueLabel = (v: string | null) => (v == null ? "—" : AUDIT_VALUE_LABELS[v] ?? v);
+
+function AuditLogSection({ employeeId }: { employeeId: number }) {
+  const { data: log = [] } = useQuery<AuditLogRow[]>({
+    queryKey: [`/api/employees/${employeeId}/audit-log`],
+    queryFn: async () => {
+      const r = await fetch(`/api/employees/${employeeId}/audit-log`, { credentials: "include" });
+      if (!r.ok) return [];
+      const data = await r.json();
+      return Array.isArray(data) ? data : [];
+    },
+    enabled: !!employeeId,
+  });
+  const safeLog = Array.isArray(log) ? log : [];
+
+  return (
+    <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
+      <p className="text-xs font-semibold flex items-center gap-2">
+        Değişiklik Geçmişi
+        <span className="text-[10px] text-muted-foreground font-normal">
+          — sözleşme türü / durum / cap ayı
+        </span>
+      </p>
+      <div className="space-y-1">
+        {safeLog.length === 0 ? (
+          <p className="text-xs text-muted-foreground italic">Henüz kayıtlı değişiklik yok</p>
+        ) : (
+          safeLog.map((h) => (
+            <div key={h.id} className="flex items-center gap-2 text-xs bg-background rounded px-2 py-1.5 border border-border">
+              <span className="font-mono text-muted-foreground">
+                {new Date(h.changed_at).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+              </span>
+              <span className="font-semibold">{AUDIT_FIELD_LABELS[h.field_name] ?? h.field_name}</span>
+              {h.action === "delete" ? (
+                <span className="text-red-600">silindi (son değer: {auditValueLabel(h.old_value)})</span>
+              ) : (
+                <span>{auditValueLabel(h.old_value)} → {auditValueLabel(h.new_value)}</span>
+              )}
             </div>
           ))
         )}
