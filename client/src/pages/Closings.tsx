@@ -1926,7 +1926,9 @@ export default function Closings() {
       });
     }
     if (officeFilter !== "all") {
-      rows = rows.filter(r => employeeOfficeMap[(r.agent as any).employeeId] === officeFilter);
+      // Danışmanın ŞU ANKİ ofisi değil, işlemin gerçekleştiği andaki ofisi (office_snapshot) —
+      // aksi halde transfer olan danışmanların transfer ÖNCESİ işlemleri de yeni ofise yazılır.
+      rows = rows.filter(r => ((r.agent as any).officeSnapshot ?? employeeOfficeMap[(r.agent as any).employeeId]) === officeFilter);
     }
     if (advisorFilter) {
       const q = advisorFilter.toLowerCase();
@@ -1991,7 +1993,7 @@ export default function Closings() {
     kasa: string; nakit: string; banka: string;
     buyerName: string; sellerName: string; notes: string;
     sideType: string;
-    employeeId: number; employeeName: string;
+    employeeId: number; employeeName: string; officeSnapshot: string | null;
     splitPercentage: string; bhbShare: string; mainBranchShare: string;
     kwtrKdv: string; marketCenterActual: string; marketCenterDue: string;
     bmKdv: string; ukShare: string; employeeNet: string;
@@ -2043,6 +2045,7 @@ export default function Closings() {
             sideType: side.sideType,
             employeeId: agent.employeeId,
             employeeName: agent.candidateName ?? agent.employeeName ?? `#${agent.employeeId}`,
+            officeSnapshot: (agent as any).officeSnapshot ?? null,
             splitPercentage: agent.splitPercentage ?? "100",
             bhbShare: agent.bhbShare ?? "0",
             mainBranchShare: agent.mainBranchShare ?? "0",
@@ -2077,7 +2080,7 @@ export default function Closings() {
       const matchMonth = monthFilter === "all" || d.slice(5, 7) === monthFilter;
       return matchYear && matchMonth;
     });
-    if (officeFilter !== "all") rows = rows.filter(r => employeeOfficeMap[r.employeeId] === officeFilter);
+    if (officeFilter !== "all") rows = rows.filter(r => (r.officeSnapshot ?? employeeOfficeMap[r.employeeId]) === officeFilter);
     if (advisorFilter) {
       const q = advisorFilter.toLowerCase();
       rows = rows.filter(r => r.employeeName.toLowerCase().includes(q));
