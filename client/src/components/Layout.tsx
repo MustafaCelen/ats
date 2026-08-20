@@ -44,7 +44,8 @@ const reportsGroupAdmin: NavGroup = {
   label: "Raporlar",
   children: [
     { icon: DollarSign,    label: "Finansal Raporlar",      href: "/financial-reports" },
-    { icon: MapPin,        label: "Danışman Karnesi",       href: "/advisor-scorecard" },
+    { icon: UserCheck,     label: "Danışman Karnesi",       href: "/advisor-personal-scorecard" },
+    { icon: MapPin,        label: "Mahalle Bazlı Karne",    href: "/advisor-scorecard" },
     { icon: TrendingUp,    label: "Kâr / Zarar",            href: "/pl-report"         },
     { icon: Trophy,        label: "Cap Analizi",            href: "/cap-report"        },
     { icon: BarChart2,     label: "Üretim Bandı Raporları", href: "/reports"           },

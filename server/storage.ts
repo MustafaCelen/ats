@@ -4409,6 +4409,171 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
+  // ── Tekil Danışman Karnesi (Cap + yıllık/çeyreklik BHB-işlem + portföy) ──
+  // Eski "DANIŞMAN KARNESİ" Excel şablonunun canlı hâli. 3 yıllık pencere her zaman
+  // dinamik: bu yıl + önceki 2 yıl. Yıllık BHB hedefi şablonda vardı ama sistemde
+  // danışman bazlı hiçbir yerde tutulmadığı için bilinçli olarak dışarıda bırakıldı.
+  async getAdvisorPersonalScorecard(employeeId: number): Promise<{
+    employeeId: number; employeeName: string; kwuid: string;
+    cap: { capAmount: number | null; capUsed: number; capRemaining: number | null; periodStart: string; capYear: number };
+    years: number[];
+    bhbByYear: Record<number, { total: number; q1: number; q2: number; q3: number; q4: number }>;
+    islemByYear: {
+      toplam: Record<number, { total: number; q1: number; q2: number; q3: number; q4: number }>;
+      satilik: Record<number, { total: number; q1: number; q2: number; q3: number; q4: number }>;
+      kiralik: Record<number, { total: number; q1: number; q2: number; q3: number; q4: number }>;
+    };
+    satilikStatsByYear: Record<number, { avgCommissionRate: number; totalVolume: number }>;
+    portfolio: { lastPortfolioDate: string | null; activeCount: number; activeVolume: number };
+  }> {
+    const [emp] = await db
+      .select({ id: employees.id, kwuid: employees.kwuid, name: candidates.name })
+      .from(employees)
+      .leftJoin(candidates, eq(candidates.id, employees.candidateId))
+      .where(eq(employees.id, employeeId));
+
+    const capStatus = await this.getEmployeeCapStatus(employeeId);
+
+    const currentYear = new Date().getFullYear();
+    const years = [currentYear - 2, currentYear - 1, currentYear];
+    const rangeStart = new Date(years[0], 0, 1);
+    const rangeEnd = new Date(years[2], 11, 31, 23, 59, 59, 999);
+
+    const effectiveStatus = sql<string>`COALESCE(${closingAgents.status}, ${closings.status})`;
+    const effectiveDate = sql<Date>`COALESCE(${closingAgents.closingDate}, ${closings.closingDate})`;
+
+    const rows = await db
+      .select({
+        closingId: closings.id,
+        saleValue: closings.saleValue,
+        commissionRate: closings.commissionRate,
+        dealCategory: closings.dealCategory,
+        bhbShare: closingAgents.bhbShare,
+        closingDate: effectiveDate,
+      })
+      .from(closingAgents)
+      .innerJoin(closingSides, eq(closingAgents.closingSideId, closingSides.id))
+      .innerJoin(closings, eq(closingSides.closingId, closings.id))
+      .where(and(
+        eq(closingAgents.employeeId, employeeId),
+        sql`${effectiveStatus} = 'completed'`,
+        sql`${effectiveDate} IS NOT NULL`,
+        sql`${effectiveDate} >= ${rangeStart}`,
+        sql`${effectiveDate} <= ${rangeEnd}`,
+      ));
+
+    const islemOrani = (r: { saleValue: string | null; commissionRate?: string | null; dealCategory?: string | null; bhbShare: string | null }) => {
+      const sale = parseFloat(r.saleValue ?? "0");
+      const rate = parseFloat(r.commissionRate ?? "0");
+      const perSide = r.dealCategory === "Kiralık" ? sale / 2 : sale * rate / 100;
+      if (perSide <= 0) return 0;
+      return parseFloat(r.bhbShare ?? "0") / perSide;
+    };
+
+    type QuarterBucket = { total: number; q1: number; q2: number; q3: number; q4: number };
+    const blank = (): QuarterBucket => ({ total: 0, q1: 0, q2: 0, q3: 0, q4: 0 });
+    const bhbByYear: Record<number, QuarterBucket> = {};
+    const toplamByYear: Record<number, QuarterBucket> = {};
+    const satilikByYear: Record<number, QuarterBucket> = {};
+    const kiralikByYear: Record<number, QuarterBucket> = {};
+    for (const y of years) {
+      bhbByYear[y] = blank(); toplamByYear[y] = blank(); satilikByYear[y] = blank(); kiralikByYear[y] = blank();
+    }
+
+    // Hacim/ortalama oran closing bazında dedup edilmeli (aynı işlemde hem alıcı hem satıcı
+    // tarafında olabilir) — adet/BHB ise ajan payı bazlı, dedup edilmeden toplanır (Mahalle
+    // Bazlı Danışman Karnesi'ndeki ile aynı yöntem).
+    const satilikClosingsByYear = new Map<number, Map<number, { saleValue: number; commissionRate: number }>>();
+    for (const y of years) satilikClosingsByYear.set(y, new Map());
+
+    for (const r of rows) {
+      if (!r.closingDate) continue;
+      const d = new Date(r.closingDate);
+      const year = d.getFullYear();
+      if (!years.includes(year)) continue;
+      const qKey = (`q${Math.floor(d.getMonth() / 3) + 1}`) as "q1" | "q2" | "q3" | "q4";
+
+      const bhb = parseFloat(r.bhbShare ?? "0");
+      bhbByYear[year].total += bhb;
+      bhbByYear[year][qKey] += bhb;
+
+      const ratio = islemOrani(r);
+      toplamByYear[year].total += ratio;
+      toplamByYear[year][qKey] += ratio;
+      const isKiralik = r.dealCategory === "Kiralık";
+      const bucket = isKiralik ? kiralikByYear : satilikByYear;
+      bucket[year].total += ratio;
+      bucket[year][qKey] += ratio;
+
+      if (!isKiralik) {
+        const map = satilikClosingsByYear.get(year)!;
+        if (!map.has(r.closingId)) {
+          map.set(r.closingId, { saleValue: parseFloat(r.saleValue ?? "0"), commissionRate: parseFloat(r.commissionRate ?? "0") });
+        }
+      }
+    }
+
+    // İşlem adedi (kesirli oranlardan oluşuyor) görüntülenirken tam sayıya yuvarlanır — BHB
+    // (para) değerleri ondalıklı bırakılır, client tr-TR formatıyla gösterir.
+    const roundIslem = (v: Record<number, QuarterBucket>): Record<number, QuarterBucket> => {
+      const out: Record<number, QuarterBucket> = {};
+      for (const y of years) {
+        const b = v[y];
+        out[y] = { total: Math.round(b.total), q1: Math.round(b.q1), q2: Math.round(b.q2), q3: Math.round(b.q3), q4: Math.round(b.q4) };
+      }
+      return out;
+    };
+
+    const satilikStatsByYear: Record<number, { avgCommissionRate: number; totalVolume: number }> = {};
+    for (const y of years) {
+      const closingsThisYear = Array.from(satilikClosingsByYear.get(y)!.values());
+      const totalVolume = closingsThisYear.reduce((s, c) => s + c.saleValue, 0);
+      const avgCommissionRate = closingsThisYear.length > 0
+        ? closingsThisYear.reduce((s, c) => s + c.commissionRate, 0) / closingsThisYear.length
+        : 0;
+      satilikStatsByYear[y] = { avgCommissionRate, totalVolume };
+    }
+
+    // ── Portföy: aktif ilanlar (en son eklenen aktif ilanın tarihi + adet + hacim) ──
+    const portfolioRows = await db
+      .select({ price: listings.price, firstSeenAt: listings.firstSeenAt })
+      .from(listings)
+      .where(and(eq(listings.employeeId, employeeId), eq(listings.status, "active")));
+    const activeCount = portfolioRows.length;
+    const activeVolume = portfolioRows.reduce((s, r) => s + parseFloat(r.price ?? "0"), 0);
+    const lastPortfolioDate = portfolioRows.reduce<Date | null>((max, r) => {
+      if (!r.firstSeenAt) return max;
+      const d = new Date(r.firstSeenAt);
+      return !max || d > max ? d : max;
+    }, null);
+
+    return {
+      employeeId,
+      employeeName: emp?.name ?? `#${employeeId}`,
+      kwuid: emp?.kwuid ?? "",
+      cap: {
+        capAmount: capStatus?.capAmount ?? null,
+        capUsed: capStatus?.capUsed ?? 0,
+        capRemaining: capStatus?.capRemaining ?? null,
+        periodStart: capStatus?.periodStart ? new Date(capStatus.periodStart).toISOString().slice(0, 10) : "",
+        capYear: capStatus?.capYear ?? currentYear,
+      },
+      years,
+      bhbByYear,
+      islemByYear: {
+        toplam: roundIslem(toplamByYear),
+        satilik: roundIslem(satilikByYear),
+        kiralik: roundIslem(kiralikByYear),
+      },
+      satilikStatsByYear,
+      portfolio: {
+        lastPortfolioDate: lastPortfolioDate ? lastPortfolioDate.toISOString().slice(0, 10) : null,
+        activeCount,
+        activeVolume,
+      },
+    };
+  }
+
   async getFinancialTargets(year: number, office: string = ""): Promise<FinancialTarget[]> {
     return db.select().from(financialTargets)
       .where(and(eq(financialTargets.year, year), eq(financialTargets.office, office)))

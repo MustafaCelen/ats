@@ -1838,6 +1838,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // Tekil danışman karnesi (Cap + yıllık/çeyreklik BHB-işlem + portföy) — eski
+  // "DANIŞMAN KARNESİ" Excel şablonunun canlı hâli.
+  app.get("/api/employees/:id/personal-scorecard", requireAuth, requireFinancialsAccess, async (req, res) => {
+    try {
+      const employeeId = parseInt(req.params.id);
+      if (isNaN(employeeId)) return res.status(400).json({ message: "Geçersiz danışman id" });
+      res.json(await storage.getAdvisorPersonalScorecard(employeeId));
+    } catch (err) {
+      console.error("[GET /api/employees/:id/personal-scorecard]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   app.get("/api/reports/churn", requireAuth, requireHiringManagerOrAdmin, async (_req: any, res: any) => {
     try {
       res.json(await storage.getChurnReport());
