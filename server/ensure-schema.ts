@@ -200,6 +200,36 @@ export async function ensureSchema(): Promise<void> {
     CREATE TRIGGER employees_audit
       AFTER UPDATE OR DELETE ON employees
       FOR EACH ROW EXECUTE FUNCTION employees_audit_trigger();
+
+    -- candidates: kategori (K0/K1/K2) ve lisans durumu değişiklikleri. office kasıtlı olarak
+    -- hariç — o zaten employee_office_history üzerinden etkin-tarihli şekilde takip ediliyor.
+    CREATE OR REPLACE FUNCTION candidates_audit_trigger() RETURNS TRIGGER AS $func$
+    BEGIN
+      IF TG_OP = 'UPDATE' THEN
+        IF NEW.category IS DISTINCT FROM OLD.category THEN
+          INSERT INTO audit_log (table_name, record_id, field_name, old_value, new_value, action)
+          VALUES ('candidates', NEW.id, 'category', OLD.category, NEW.category, 'update');
+        END IF;
+        IF NEW.license_status IS DISTINCT FROM OLD.license_status THEN
+          INSERT INTO audit_log (table_name, record_id, field_name, old_value, new_value, action)
+          VALUES ('candidates', NEW.id, 'license_status', OLD.license_status, NEW.license_status, 'update');
+        END IF;
+        RETURN NEW;
+      ELSIF TG_OP = 'DELETE' THEN
+        INSERT INTO audit_log (table_name, record_id, field_name, old_value, new_value, action)
+        VALUES
+          ('candidates', OLD.id, 'category', OLD.category, NULL, 'delete'),
+          ('candidates', OLD.id, 'license_status', OLD.license_status, NULL, 'delete');
+        RETURN OLD;
+      END IF;
+      RETURN NULL;
+    END;
+    $func$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS candidates_audit ON candidates;
+    CREATE TRIGGER candidates_audit
+      AFTER UPDATE OR DELETE ON candidates
+      FOR EACH ROW EXECUTE FUNCTION candidates_audit_trigger();
   `;
   try {
     await pool.query(sql);

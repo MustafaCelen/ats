@@ -1560,6 +1560,8 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
             </div>
           </EditGroup>
 
+          <CandidateAuditLogSection candidateId={candidate.id} />
+
           <div className="flex gap-2 pt-2">
             <Button variant="outline" className="flex-1" onClick={() => onOpenChange(false)}>İptal</Button>
             <Button className="flex-1" onClick={handleSave} disabled={isPending} data-testid="btn-save-candidate">
@@ -1569,6 +1571,66 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ── Değişiklik Geçmişi (Audit Log) — kategori / lisans durumu ───────────────
+interface CandidateAuditLogRow {
+  id: number;
+  field_name: string;
+  old_value: string | null;
+  new_value: string | null;
+  action: "update" | "delete";
+  changed_at: string;
+}
+
+const CANDIDATE_AUDIT_FIELD_LABELS: Record<string, string> = {
+  category: "Kategori",
+  license_status: "Lisans Durumu",
+};
+const CANDIDATE_AUDIT_VALUE_LABELS: Record<string, string> = {
+  unlicensed: "Lisanssız",
+  pending: "Beklemede",
+  licensed: "Lisanslı",
+};
+const candidateAuditValueLabel = (v: string | null) => (v == null ? "—" : CANDIDATE_AUDIT_VALUE_LABELS[v] ?? v);
+
+function CandidateAuditLogSection({ candidateId }: { candidateId: number }) {
+  const { data: log = [] } = useQuery<CandidateAuditLogRow[]>({
+    queryKey: [`/api/candidates/${candidateId}/audit-log`],
+    queryFn: async () => {
+      const r = await fetch(`/api/candidates/${candidateId}/audit-log`, { credentials: "include" });
+      if (!r.ok) return [];
+      const data = await r.json();
+      return Array.isArray(data) ? data : [];
+    },
+    enabled: !!candidateId,
+  });
+  const safeLog = Array.isArray(log) ? log : [];
+  if (safeLog.length === 0) return null;
+
+  return (
+    <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
+      <p className="text-xs font-semibold flex items-center gap-2">
+        Değişiklik Geçmişi
+        <span className="text-[10px] text-muted-foreground font-normal">— kategori / lisans durumu</span>
+      </p>
+      <div className="space-y-1">
+        {safeLog.map((h) => (
+          <div key={h.id} className="flex items-center gap-2 text-xs bg-background rounded px-2 py-1.5 border border-border">
+            <span className="font-mono text-muted-foreground">
+              {new Date(h.changed_at).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+            </span>
+            <span className="font-semibold">{CANDIDATE_AUDIT_FIELD_LABELS[h.field_name] ?? h.field_name}</span>
+            {h.action === "delete" ? (
+              <span className="text-red-600">silindi (son değer: {candidateAuditValueLabel(h.old_value)})</span>
+            ) : (
+              <span>{candidateAuditValueLabel(h.old_value)} → {candidateAuditValueLabel(h.new_value)}</span>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 

@@ -3105,6 +3105,23 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // ── Candidate Audit Log (kategori / lisans durumu değişiklikleri) ──
+  app.get("/api/candidates/:id/audit-log", requireAuth, async (req, res) => {
+    try {
+      const candidateId = parseInt(req.params.id);
+      const rows = await db.execute(sql`
+        SELECT id, field_name, old_value, new_value, action, changed_at
+        FROM audit_log
+        WHERE table_name = 'candidates' AND record_id = ${candidateId}
+        ORDER BY changed_at DESC, id DESC
+      `);
+      res.json(rows.rows);
+    } catch (err: any) {
+      console.error("[GET /api/candidates/:id/audit-log]", err);
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   // ── Employee Audit Log (sözleşme türü / durum / cap ayı değişiklikleri) ──
   app.get("/api/employees/:id/audit-log", requireAuth, async (req, res) => {
     try {
