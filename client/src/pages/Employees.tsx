@@ -15,13 +15,13 @@ import {
 import {
   Users, Search, Phone, Mail, MapPin, Award, Building2,
   MoreHorizontal, ExternalLink, CheckCircle2, XCircle, Briefcase, CalendarDays,
-  Upload, Download, Pencil, Key, AtSign, AlertCircle, FileText, UserCheck, HandCoins, RotateCcw,
+  Upload, Download, Pencil, Key, AtSign, AlertCircle, FileText, UserCheck, HandCoins, RotateCcw, History,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { type PublicUser } from "@shared/schema";
 import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
-import { EmployeeEditDialog } from "@/components/EmployeeEditDialog";
+import { EmployeeEditDialog, AuditLogSection } from "@/components/EmployeeEditDialog";
 import { useAuth } from "@/hooks/use-auth";
 
 
@@ -52,6 +52,37 @@ function CategoryBadge({ category }: { category?: string }) {
     <span className={`inline-flex items-center text-xs font-bold px-2 py-0.5 rounded-full ring-1 ${colors[category ?? "K0"] ?? colors.K0}`}>
       {category ?? "K0"}
     </span>
+  );
+}
+
+// Salt-okunur ofis transfer ge\u00e7mi\u015fi (Ge\u00e7mi\u015f sekmesi i\u00e7in \u2014 ekleme/silme burada yok, o D\u00fczenle'de)
+function EmployeeOfficeHistoryReadOnly({ employeeId }: { employeeId: number }) {
+  const { data: history = [] } = useQuery<Array<{ id: number; office: string; effective_from: string; notes: string | null }>>({
+    queryKey: [`/api/employees/${employeeId}/office-history`],
+    queryFn: async () => {
+      const r = await fetch(`/api/employees/${employeeId}/office-history`, { credentials: "include" });
+      if (!r.ok) return [];
+      const data = await r.json();
+      return Array.isArray(data) ? data : [];
+    },
+    enabled: !!employeeId,
+  });
+  const safeHistory = Array.isArray(history) ? history : [];
+  if (safeHistory.length === 0) return null;
+
+  return (
+    <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
+      <p className="text-xs font-semibold">Ofis Transfer Ge\u00e7mi\u015fi</p>
+      <div className="space-y-1">
+        {safeHistory.map((h) => (
+          <div key={h.id} className="flex items-center gap-2 text-xs bg-background rounded px-2 py-1.5 border border-border">
+            <span className="font-mono text-muted-foreground">{h.effective_from}</span>
+            <span className="font-semibold">\u2192 {h.office}</span>
+            {h.notes && <span className="text-muted-foreground italic">\u00b7 {h.notes}</span>}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -144,7 +175,7 @@ export default function Employees() {
   const [page, setPage] = useState(0);
   const PAGE_SIZE = 50;
   const [detailEmployee, setDetailEmployee] = useState<any | null>(null);
-  const [detailTab, setDetailTab] = useState<"profil" | "islemler">("profil");
+  const [detailTab, setDetailTab] = useState<"profil" | "islemler" | "history">("profil");
   const [editEmployee, setEditEmployee] = useState<any | null>(null);
   const [pendingPassiveEmp, setPendingPassiveEmp] = useState<any | null>(null);
   const [passiveDateInput, setPassiveDateInput] = useState("");
@@ -630,6 +661,12 @@ export default function Employees() {
                   <HandCoins className="h-3.5 w-3.5" /> İşlemler
                 </button>
               )}
+              <button
+                onClick={() => setDetailTab("history")}
+                className={`pb-2 text-sm font-medium transition-colors border-b-2 -mb-px flex items-center gap-1.5 ${detailTab === "history" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+              >
+                <History className="h-3.5 w-3.5" /> Geçmiş
+              </button>
             </div>
 
             {detailTab === "profil" && (
@@ -915,6 +952,13 @@ export default function Employees() {
                   </div>
                 )}
                 </div>
+              </div>
+            )}
+
+            {detailTab === "history" && (
+              <div className="pt-2 space-y-3 flex-1 overflow-y-auto pr-1">
+                <AuditLogSection employeeId={detailEmployee.id} />
+                <EmployeeOfficeHistoryReadOnly employeeId={detailEmployee.id} />
               </div>
             )}
 

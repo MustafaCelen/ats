@@ -744,7 +744,7 @@ const AUDIT_VALUE_LABELS: Record<string, string> = {
 };
 const auditValueLabel = (v: string | null) => (v == null ? "—" : AUDIT_VALUE_LABELS[v] ?? v);
 
-function AuditLogSection({ employeeId }: { employeeId: number }) {
+export function AuditLogSection({ employeeId }: { employeeId: number }) {
   const { data: log = [] } = useQuery<AuditLogRow[]>({
     queryKey: [`/api/employees/${employeeId}/audit-log`],
     queryFn: async () => {

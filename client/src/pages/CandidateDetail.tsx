@@ -1067,6 +1067,7 @@ export default function CandidateDetail() {
         {/* ── History Tab ── */}
         {activeTab === "history" && (
           <div className="space-y-4">
+            <CandidateAuditLogSection candidateId={candidateId} />
             {history.length === 0 ? (
               <div className="text-center py-12 text-muted-foreground text-sm">
                 <History className="h-8 w-8 mx-auto mb-2 opacity-30" />
@@ -1559,8 +1560,6 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
               </div>
             </div>
           </EditGroup>
-
-          <CandidateAuditLogSection candidateId={candidate.id} />
 
           <div className="flex gap-2 pt-2">
             <Button variant="outline" className="flex-1" onClick={() => onOpenChange(false)}>İptal</Button>
