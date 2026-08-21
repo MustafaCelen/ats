@@ -4409,25 +4409,32 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
-  // ── Tekil Danışman Karnesi (Cap + yıllık/çeyreklik BHB-işlem + portföy) ──
-  // Eski "DANIŞMAN KARNESİ" Excel şablonunun canlı hâli. 3 yıllık pencere her zaman
-  // dinamik: bu yıl + önceki 2 yıl. Yıllık BHB hedefi şablonda vardı ama sistemde
-  // danışman bazlı hiçbir yerde tutulmadığı için bilinçli olarak dışarıda bırakıldı.
+  // ── Tekil Danışman Karnesi (Cap + aylık/yıllık BHB-işlem + portföy) ──
+  // Eski "BM DETAYLI DANIŞMAN KARNESİ" Excel şablonunun canlı hâli. 3 yıllık pencere her
+  // zaman dinamik: bu yıl + önceki 2 yıl. Yıllık BHB hedefi (pasta grafikler) şablonda vardı
+  // ama sistemde danışman bazlı hiçbir yerde tutulmadığı için bilinçli olarak dışarıda
+  // bırakıldı; "İlk İşlem Günü" alanının tam tanımı netleşmediği için de henüz eklenmedi.
   async getAdvisorPersonalScorecard(employeeId: number): Promise<{
     employeeId: number; employeeName: string; kwuid: string;
-    cap: { capAmount: number | null; capUsed: number; capRemaining: number | null; periodStart: string; capYear: number };
+    ukStartDate: string | null;
+    cap: { capAmount: number | null; capUsed: number; capRemaining: number | null; periodStart: string; capYear: number; isCapper: boolean };
     years: number[];
-    bhbByYear: Record<number, { total: number; q1: number; q2: number; q3: number; q4: number }>;
+    bhbByYear: Record<number, { total: number; months: number[] }>;
     islemByYear: {
-      toplam: Record<number, { total: number; q1: number; q2: number; q3: number; q4: number }>;
-      satilik: Record<number, { total: number; q1: number; q2: number; q3: number; q4: number }>;
-      kiralik: Record<number, { total: number; q1: number; q2: number; q3: number; q4: number }>;
+      toplam: Record<number, { total: number; months: number[] }>;
+      satilik: Record<number, { total: number; months: number[] }>;
+      kiralik: Record<number, { total: number; months: number[] }>;
     };
+    sozlesmeByYear: Record<number, { total: number; months: number[] }>;
     satilikStatsByYear: Record<number, { avgCommissionRate: number; totalVolume: number }>;
-    portfolio: { lastPortfolioDate: string | null; activeCount: number; activeVolume: number };
+    portfolio: {
+      satilik: { activeCount: number; activeVolume: number; lastDate: string | null; daysSinceLast: number | null };
+      kiralik: { activeCount: number; activeVolume: number; lastDate: string | null; daysSinceLast: number | null };
+    };
+    donusSuresi: { satilikAvgDays: number | null; kiralikAvgDays: number | null };
   }> {
     const [emp] = await db
-      .select({ id: employees.id, kwuid: employees.kwuid, name: candidates.name })
+      .select({ id: employees.id, kwuid: employees.kwuid, name: candidates.name, ukStartDate: employees.ukStartDate })
       .from(employees)
       .leftJoin(candidates, eq(candidates.id, employees.candidateId))
       .where(eq(employees.id, employeeId));
@@ -4442,13 +4449,16 @@ export class DatabaseStorage implements IStorage {
     const effectiveStatus = sql<string>`COALESCE(${closingAgents.status}, ${closings.status})`;
     const effectiveDate = sql<Date>`COALESCE(${closingAgents.closingDate}, ${closings.closingDate})`;
 
-    const rows = await db
+    // Tüm zamanların kapanışları — İşleme Dönme Süresi (ortalama durationDays) 3 yıllık
+    // pencereyle sınırlı değil, tüm geçmiş üzerinden hesaplanır (şablonda da tek bir değer).
+    const allRows = await db
       .select({
         closingId: closings.id,
         saleValue: closings.saleValue,
         commissionRate: closings.commissionRate,
         dealCategory: closings.dealCategory,
         bhbShare: closingAgents.bhbShare,
+        durationDays: closings.durationDays,
         closingDate: effectiveDate,
       })
       .from(closingAgents)
@@ -4458,8 +4468,6 @@ export class DatabaseStorage implements IStorage {
         eq(closingAgents.employeeId, employeeId),
         sql`${effectiveStatus} = 'completed'`,
         sql`${effectiveDate} IS NOT NULL`,
-        sql`${effectiveDate} >= ${rangeStart}`,
-        sql`${effectiveDate} <= ${rangeEnd}`,
       ));
 
     const islemOrani = (r: { saleValue: string | null; commissionRate?: string | null; dealCategory?: string | null; bhbShare: string | null }) => {
@@ -4470,40 +4478,47 @@ export class DatabaseStorage implements IStorage {
       return parseFloat(r.bhbShare ?? "0") / perSide;
     };
 
-    type QuarterBucket = { total: number; q1: number; q2: number; q3: number; q4: number };
-    const blank = (): QuarterBucket => ({ total: 0, q1: 0, q2: 0, q3: 0, q4: 0 });
-    const bhbByYear: Record<number, QuarterBucket> = {};
-    const toplamByYear: Record<number, QuarterBucket> = {};
-    const satilikByYear: Record<number, QuarterBucket> = {};
-    const kiralikByYear: Record<number, QuarterBucket> = {};
+    type MonthBucket = { total: number; months: number[] };
+    const blankMonths = (): MonthBucket => ({ total: 0, months: new Array(12).fill(0) });
+    const bhbByYear: Record<number, MonthBucket> = {};
+    const toplamByYear: Record<number, MonthBucket> = {};
+    const satilikByYear: Record<number, MonthBucket> = {};
+    const kiralikByYear: Record<number, MonthBucket> = {};
     for (const y of years) {
-      bhbByYear[y] = blank(); toplamByYear[y] = blank(); satilikByYear[y] = blank(); kiralikByYear[y] = blank();
+      bhbByYear[y] = blankMonths(); toplamByYear[y] = blankMonths();
+      satilikByYear[y] = blankMonths(); kiralikByYear[y] = blankMonths();
     }
 
-    // Hacim/ortalama oran closing bazında dedup edilmeli (aynı işlemde hem alıcı hem satıcı
-    // tarafında olabilir) — adet/BHB ise ajan payı bazlı, dedup edilmeden toplanır (Mahalle
-    // Bazlı Danışman Karnesi'ndeki ile aynı yöntem).
+    // Hacim/ortalama oran ve İşleme Dönme Süresi closing bazında dedup edilmeli (aynı işlemde
+    // hem alıcı hem satıcı tarafında olabilir) — adet/BHB ise ajan payı bazlı, dedup edilmeden
+    // toplanır (Mahalle Bazlı Danışman Karnesi'ndeki ile aynı yöntem).
     const satilikClosingsByYear = new Map<number, Map<number, { saleValue: number; commissionRate: number }>>();
     for (const y of years) satilikClosingsByYear.set(y, new Map());
+    const durationById = new Map<number, { days: number; category: string }>();
 
-    for (const r of rows) {
+    for (const r of allRows) {
       if (!r.closingDate) continue;
       const d = new Date(r.closingDate);
+      const isKiralik = r.dealCategory === "Kiralık";
+
+      if (!durationById.has(r.closingId) && r.durationDays && r.durationDays > 0 && r.durationDays <= 3650) {
+        durationById.set(r.closingId, { days: r.durationDays, category: r.dealCategory ?? "Satış" });
+      }
+
       const year = d.getFullYear();
       if (!years.includes(year)) continue;
-      const qKey = (`q${Math.floor(d.getMonth() / 3) + 1}`) as "q1" | "q2" | "q3" | "q4";
+      const month = d.getMonth(); // 0-11
 
       const bhb = parseFloat(r.bhbShare ?? "0");
       bhbByYear[year].total += bhb;
-      bhbByYear[year][qKey] += bhb;
+      bhbByYear[year].months[month] += bhb;
 
       const ratio = islemOrani(r);
       toplamByYear[year].total += ratio;
-      toplamByYear[year][qKey] += ratio;
-      const isKiralik = r.dealCategory === "Kiralık";
+      toplamByYear[year].months[month] += ratio;
       const bucket = isKiralik ? kiralikByYear : satilikByYear;
       bucket[year].total += ratio;
-      bucket[year][qKey] += ratio;
+      bucket[year].months[month] += ratio;
 
       if (!isKiralik) {
         const map = satilikClosingsByYear.get(year)!;
@@ -4515,11 +4530,10 @@ export class DatabaseStorage implements IStorage {
 
     // İşlem adedi (kesirli oranlardan oluşuyor) görüntülenirken tam sayıya yuvarlanır — BHB
     // (para) değerleri ondalıklı bırakılır, client tr-TR formatıyla gösterir.
-    const roundIslem = (v: Record<number, QuarterBucket>): Record<number, QuarterBucket> => {
-      const out: Record<number, QuarterBucket> = {};
+    const roundIslem = (v: Record<number, MonthBucket>): Record<number, MonthBucket> => {
+      const out: Record<number, MonthBucket> = {};
       for (const y of years) {
-        const b = v[y];
-        out[y] = { total: Math.round(b.total), q1: Math.round(b.q1), q2: Math.round(b.q2), q3: Math.round(b.q3), q4: Math.round(b.q4) };
+        out[y] = { total: Math.round(v[y].total), months: v[y].months.map((m) => Math.round(m)) };
       }
       return out;
     };
@@ -4534,29 +4548,66 @@ export class DatabaseStorage implements IStorage {
       satilikStatsByYear[y] = { avgCommissionRate, totalVolume };
     }
 
-    // ── Portföy: aktif ilanlar (en son eklenen aktif ilanın tarihi + adet + hacim) ──
+    // İşleme Dönme Süresi: kategoriye göre ortalama durationDays (tüm zamanlar)
+    const allDurations = Array.from(durationById.values());
+    const calcAvgDays = (cat: string) => {
+      const items = allDurations.filter((d) => d.category === cat);
+      return items.length > 0 ? Math.round(items.reduce((s, d) => s + d.days, 0) / items.length) : null;
+    };
+    const donusSuresi = { satilikAvgDays: calcAvgDays("Satış"), kiralikAvgDays: calcAvgDays("Kiralık") };
+
+    // ── Alınan Sözleşme Sayıları: o ay portföye eklenen yeni ilan sayısı (firstSeenAt) ──
+    const sozlesmeRows = await db
+      .select({ firstSeenAt: listings.firstSeenAt })
+      .from(listings)
+      .where(and(
+        eq(listings.employeeId, employeeId),
+        sql`${listings.firstSeenAt} IS NOT NULL`,
+        sql`${listings.firstSeenAt} >= ${rangeStart}`,
+        sql`${listings.firstSeenAt} <= ${rangeEnd}`,
+      ));
+    const sozlesmeByYear: Record<number, MonthBucket> = {};
+    for (const y of years) sozlesmeByYear[y] = blankMonths();
+    for (const r of sozlesmeRows) {
+      if (!r.firstSeenAt) continue;
+      const d = new Date(r.firstSeenAt);
+      const year = d.getFullYear();
+      if (!years.includes(year)) continue;
+      sozlesmeByYear[year].total += 1;
+      sozlesmeByYear[year].months[d.getMonth()] += 1;
+    }
+
+    // ── Portföy: Satılık/Kiralık ayrı ayrı (aktif adet/hacim + en son eklenen tarih) ──
     const portfolioRows = await db
-      .select({ price: listings.price, firstSeenAt: listings.firstSeenAt })
+      .select({ price: listings.price, firstSeenAt: listings.firstSeenAt, dealCategory: listings.dealCategory })
       .from(listings)
       .where(and(eq(listings.employeeId, employeeId), eq(listings.status, "active")));
-    const activeCount = portfolioRows.length;
-    const activeVolume = portfolioRows.reduce((s, r) => s + parseFloat(r.price ?? "0"), 0);
-    const lastPortfolioDate = portfolioRows.reduce<Date | null>((max, r) => {
-      if (!r.firstSeenAt) return max;
-      const d = new Date(r.firstSeenAt);
-      return !max || d > max ? d : max;
-    }, null);
+
+    const buildPortfolioStat = (isKiralik: boolean) => {
+      const rows = portfolioRows.filter((r) => (r.dealCategory === "Kiralık") === isKiralik);
+      const activeCount = rows.length;
+      const activeVolume = rows.reduce((s, r) => s + parseFloat(r.price ?? "0"), 0);
+      const lastDate = rows.reduce<Date | null>((max, r) => {
+        if (!r.firstSeenAt) return max;
+        const d = new Date(r.firstSeenAt);
+        return !max || d > max ? d : max;
+      }, null);
+      const daysSinceLast = lastDate ? Math.floor((Date.now() - lastDate.getTime()) / 86400000) : null;
+      return { activeCount, activeVolume, lastDate: lastDate ? lastDate.toISOString().slice(0, 10) : null, daysSinceLast };
+    };
 
     return {
       employeeId,
       employeeName: emp?.name ?? `#${employeeId}`,
       kwuid: emp?.kwuid ?? "",
+      ukStartDate: emp?.ukStartDate ?? null,
       cap: {
         capAmount: capStatus?.capAmount ?? null,
         capUsed: capStatus?.capUsed ?? 0,
         capRemaining: capStatus?.capRemaining ?? null,
         periodStart: capStatus?.periodStart ? new Date(capStatus.periodStart).toISOString().slice(0, 10) : "",
         capYear: capStatus?.capYear ?? currentYear,
+        isCapper: !!(capStatus?.capAmount != null && capStatus.capUsed >= capStatus.capAmount),
       },
       years,
       bhbByYear,
@@ -4565,12 +4616,13 @@ export class DatabaseStorage implements IStorage {
         satilik: roundIslem(satilikByYear),
         kiralik: roundIslem(kiralikByYear),
       },
+      sozlesmeByYear,
       satilikStatsByYear,
       portfolio: {
-        lastPortfolioDate: lastPortfolioDate ? lastPortfolioDate.toISOString().slice(0, 10) : null,
-        activeCount,
-        activeVolume,
+        satilik: buildPortfolioStat(false),
+        kiralik: buildPortfolioStat(true),
       },
+      donusSuresi,
     };
   }
 

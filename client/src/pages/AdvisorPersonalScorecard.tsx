@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Layout } from "@/components/Layout";
-import { User, ChevronDown, Check, Wallet, CalendarClock, Target, Home } from "lucide-react";
+import { User, ChevronDown, Check, Wallet, CalendarClock, Target, Award, Timer } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
@@ -19,16 +19,25 @@ function fmtDate(v: string | null) {
   if (isNaN(d.getTime())) return "—";
   return d.toLocaleDateString("tr-TR", { day: "2-digit", month: "long", year: "numeric" });
 }
+function fmtDays(n: number | null) {
+  return n == null ? "—" : `${n.toLocaleString("tr-TR")} gün`;
+}
 
-type QuarterBucket = { total: number; q1: number; q2: number; q3: number; q4: number };
+type MonthBucket = { total: number; months: number[] };
 interface PersonalScorecardData {
   employeeId: number; employeeName: string; kwuid: string;
-  cap: { capAmount: number | null; capUsed: number; capRemaining: number | null; periodStart: string; capYear: number };
+  ukStartDate: string | null;
+  cap: { capAmount: number | null; capUsed: number; capRemaining: number | null; periodStart: string; capYear: number; isCapper: boolean };
   years: number[];
-  bhbByYear: Record<number, QuarterBucket>;
-  islemByYear: { toplam: Record<number, QuarterBucket>; satilik: Record<number, QuarterBucket>; kiralik: Record<number, QuarterBucket> };
+  bhbByYear: Record<number, MonthBucket>;
+  islemByYear: { toplam: Record<number, MonthBucket>; satilik: Record<number, MonthBucket>; kiralik: Record<number, MonthBucket> };
+  sozlesmeByYear: Record<number, MonthBucket>;
   satilikStatsByYear: Record<number, { avgCommissionRate: number; totalVolume: number }>;
-  portfolio: { lastPortfolioDate: string | null; activeCount: number; activeVolume: number };
+  portfolio: {
+    satilik: { activeCount: number; activeVolume: number; lastDate: string | null; daysSinceLast: number | null };
+    kiralik: { activeCount: number; activeVolume: number; lastDate: string | null; daysSinceLast: number | null };
+  };
+  donusSuresi: { satilikAvgDays: number | null; kiralikAvgDays: number | null };
 }
 
 function useAdvisorPersonalScorecard(employeeId: number | null) {
@@ -97,16 +106,10 @@ function AdvisorPicker({ employeeId, onChange }: { employeeId: number | null; on
   );
 }
 
-const QUARTER_ROWS: Array<{ key: keyof QuarterBucket; label: string }> = [
-  { key: "total", label: "Toplam" },
-  { key: "q1", label: "1. Çeyrek" },
-  { key: "q2", label: "2. Çeyrek" },
-  { key: "q3", label: "3. Çeyrek" },
-  { key: "q4", label: "4. Çeyrek" },
-];
+const MONTH_LABELS = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"];
 
-function QuarterTable({ title, years, byYear, format }: {
-  title: string; years: number[]; byYear: Record<number, QuarterBucket>; format: (n: number) => string;
+function MonthTable({ title, years, byYear, format }: {
+  title: string; years: number[]; byYear: Record<number, MonthBucket>; format: (n: number) => string;
 }) {
   return (
     <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
@@ -122,16 +125,51 @@ function QuarterTable({ title, years, byYear, format }: {
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {QUARTER_ROWS.map((row) => (
-              <tr key={row.key} className={row.key === "total" ? "font-semibold bg-muted/20" : ""}>
-                <td className="px-3 py-1.5">{row.label}</td>
+            <tr className="font-semibold bg-muted/20">
+              <td className="px-3 py-1.5">Toplam</td>
+              {years.map((y) => <td key={y} className="text-right px-3 py-1.5 font-mono">{format(byYear[y]?.total ?? 0)}</td>)}
+            </tr>
+            {MONTH_LABELS.map((label, i) => (
+              <tr key={label}>
+                <td className="px-3 py-1.5">{label}</td>
                 {years.map((y) => (
-                  <td key={y} className="text-right px-3 py-1.5 font-mono">{format(byYear[y]?.[row.key] ?? 0)}</td>
+                  <td key={y} className="text-right px-3 py-1.5 font-mono">{format(byYear[y]?.months?.[i] ?? 0)}</td>
                 ))}
               </tr>
             ))}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+}
+
+function PortfolioCategoryBlock({ title, stat }: {
+  title: string;
+  stat: { activeCount: number; activeVolume: number; lastDate: string | null; daysSinceLast: number | null };
+}) {
+  return (
+    <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+      <div className="px-4 py-2.5 border-b border-border">
+        <h3 className="text-sm font-semibold">{title}</h3>
+      </div>
+      <div className="grid grid-cols-2 gap-3 p-4">
+        <div>
+          <p className="text-xs text-muted-foreground">Aktif Portföy Adedi</p>
+          <p className="text-base font-bold">{stat.activeCount.toLocaleString("tr-TR")}</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">Aktif Portföy Hacmi</p>
+          <p className="text-base font-bold">{fmtTRY(stat.activeVolume)}</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">Son Portföy Tarihi</p>
+          <p className="text-base font-bold">{fmtDate(stat.lastDate)}</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">Kaç Gündür Portföy Almıyor</p>
+          <p className="text-base font-bold">{fmtDays(stat.daysSinceLast)}</p>
+        </div>
       </div>
     </div>
   );
@@ -149,9 +187,14 @@ export default function AdvisorPersonalScorecard() {
             <h1 className="text-2xl font-bold flex items-center gap-2">
               <User className="h-6 w-6 text-primary" />
               Danışman Karnesi
+              {data?.cap.isCapper && (
+                <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 ring-1 ring-amber-300">
+                  CAPPER
+                </span>
+              )}
             </h1>
             <p className="text-sm text-muted-foreground mt-0.5">
-              Tek bir danışmanın Cap durumu, çeyreklik BHB/işlem geçmişi ve portföyü
+              Tek bir danışmanın Cap durumu, aylık BHB/işlem geçmişi ve portföyü
             </p>
           </div>
           <AdvisorPicker employeeId={employeeId} onChange={setEmployeeId} />
@@ -169,8 +212,8 @@ export default function AdvisorPersonalScorecard() {
 
         {employeeId && !isLoading && data && (
           <>
-            {/* ── Cap ── */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {/* ── Cap + ÜK ── */}
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
               <StatTile
                 icon={<Wallet className="h-4.5 w-4.5" />}
                 label="Cap'e Kalan Tutar"
@@ -179,17 +222,21 @@ export default function AdvisorPersonalScorecard() {
               />
               <StatTile icon={<CalendarClock className="h-4.5 w-4.5" />} label="CAP Yıldönümü" value={fmtDate(data.cap.periodStart)} />
               <StatTile icon={<Target className="h-4.5 w-4.5" />} label="CAP Tutarı" value={data.cap.capAmount != null ? fmtTRY(data.cap.capAmount) : "—"} />
+              <StatTile icon={<Award className="h-4.5 w-4.5" />} label="ÜK Giriş Tarihi" value={data.ukStartDate ? fmtDate(data.ukStartDate) : "—"} />
             </div>
 
-            {/* ── BHB çeyreklik ── */}
-            <QuarterTable title="BHB" years={data.years} byYear={data.bhbByYear} format={fmtTRY} />
+            {/* ── BHB aylık ── */}
+            <MonthTable title="BHB" years={data.years} byYear={data.bhbByYear} format={fmtTRY} />
 
-            {/* ── İşlem adedi çeyreklik: Toplam / Satılık / Kiralık ── */}
+            {/* ── İşlem adedi aylık: Toplam / Satılık / Kiralık ── */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-              <QuarterTable title="Toplam İşlem" years={data.years} byYear={data.islemByYear.toplam} format={(n) => n.toLocaleString("tr-TR")} />
-              <QuarterTable title="Satılık İşlem" years={data.years} byYear={data.islemByYear.satilik} format={(n) => n.toLocaleString("tr-TR")} />
-              <QuarterTable title="Kiralık İşlem" years={data.years} byYear={data.islemByYear.kiralik} format={(n) => n.toLocaleString("tr-TR")} />
+              <MonthTable title="Toplam İşlem" years={data.years} byYear={data.islemByYear.toplam} format={(n) => n.toLocaleString("tr-TR")} />
+              <MonthTable title="Satılık İşlem" years={data.years} byYear={data.islemByYear.satilik} format={(n) => n.toLocaleString("tr-TR")} />
+              <MonthTable title="Kiralık İşlem" years={data.years} byYear={data.islemByYear.kiralik} format={(n) => n.toLocaleString("tr-TR")} />
             </div>
+
+            {/* ── Alınan Sözleşme Sayıları (aylık, portföye eklenen yeni ilan) ── */}
+            <MonthTable title="Alınan Sözleşme Sayıları" years={data.years} byYear={data.sozlesmeByYear} format={(n) => n.toLocaleString("tr-TR")} />
 
             {/* ── Yıllık satılık özet ── */}
             <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
@@ -222,11 +269,16 @@ export default function AdvisorPersonalScorecard() {
               </div>
             </div>
 
-            {/* ── Portföy ── */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <StatTile icon={<Home className="h-4.5 w-4.5" />} label="Son Portföy Tarihi" value={fmtDate(data.portfolio.lastPortfolioDate)} />
-              <StatTile icon={<Home className="h-4.5 w-4.5" />} label="Aktif Portföy Adedi" value={data.portfolio.activeCount.toLocaleString("tr-TR")} />
-              <StatTile icon={<Home className="h-4.5 w-4.5" />} label="Aktif Portföy Hacmi" value={fmtTRY(data.portfolio.activeVolume)} />
+            {/* ── İşleme Dönme Süresi ── */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <StatTile icon={<Timer className="h-4.5 w-4.5" />} label="Satılık İşleme Dönme Süresi" value={fmtDays(data.donusSuresi.satilikAvgDays)} />
+              <StatTile icon={<Timer className="h-4.5 w-4.5" />} label="Kiralık İşleme Dönme Süresi" value={fmtDays(data.donusSuresi.kiralikAvgDays)} />
+            </div>
+
+            {/* ── Portföy: Satılık / Kiralık ayrı ── */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              <PortfolioCategoryBlock title="Aktif Satılık Portföy" stat={data.portfolio.satilik} />
+              <PortfolioCategoryBlock title="Aktif Kiralık Portföy" stat={data.portfolio.kiralik} />
             </div>
           </>
         )}
