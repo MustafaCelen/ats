@@ -737,10 +737,14 @@ const AUDIT_FIELD_LABELS: Record<string, string> = {
   contract_type: "Sözleşme Türü",
   status: "Durum",
   cap_month: "Cap Ayı",
+  uretkenlik_koclugu: "ÜK Durumu",
+  uretkenlik_koclugu_oran: "ÜK Oranı",
 };
 const AUDIT_VALUE_LABELS: Record<string, string> = {
   active: "Aktif",
   inactive: "Pasif",
+  true: "Açık",
+  false: "Kapalı",
 };
 const auditValueLabel = (v: string | null) => (v == null ? "—" : AUDIT_VALUE_LABELS[v] ?? v);
 

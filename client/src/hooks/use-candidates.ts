@@ -71,6 +71,7 @@ export function useUpdateCandidate() {
     onSuccess: (_data, { id }) => {
       queryClient.invalidateQueries({ queryKey: [api.candidates.list.path] });
       queryClient.invalidateQueries({ queryKey: [api.candidates.list.path, id] });
+      queryClient.invalidateQueries({ queryKey: [`/api/candidates/${id}/audit-log`] });
     },
   });
 }

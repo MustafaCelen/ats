@@ -32,8 +32,9 @@ export function useUpdateEmployee() {
   return useMutation({
     mutationFn: ({ id, ...data }: { id: number; status?: string; passiveAt?: string | null; title?: string; notes?: string; kwuid?: string; kwMail?: string; startDate?: string; contractType?: string | null; uretkenlikKoclugu?: boolean; uretkenlikKocluguManagerId?: number | null; uretkenlikKocluguOran?: string | null; capMonth?: string; capValue?: string; billingName?: string; billingAddress?: string; billingDistrict?: string; billingCity?: string; billingCountry?: string; taxOffice?: string; taxId?: string; birthDate?: string }) =>
       apiRequest("PATCH", `${KEY}/${id}`, data),
-    onSuccess: () => {
+    onSuccess: (_data, { id }) => {
       qc.invalidateQueries({ queryKey: [KEY] });
+      qc.invalidateQueries({ queryKey: [`${KEY}/${id}/audit-log`] });
     },
   });
 }

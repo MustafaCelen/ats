@@ -183,13 +183,23 @@ export async function ensureSchema(): Promise<void> {
           INSERT INTO audit_log (table_name, record_id, field_name, old_value, new_value, action)
           VALUES ('employees', NEW.id, 'cap_month', OLD.cap_month, NEW.cap_month, 'update');
         END IF;
+        IF NEW.uretkenlik_koclugu IS DISTINCT FROM OLD.uretkenlik_koclugu THEN
+          INSERT INTO audit_log (table_name, record_id, field_name, old_value, new_value, action)
+          VALUES ('employees', NEW.id, 'uretkenlik_koclugu', OLD.uretkenlik_koclugu::text, NEW.uretkenlik_koclugu::text, 'update');
+        END IF;
+        IF NEW.uretkenlik_koclugu_oran IS DISTINCT FROM OLD.uretkenlik_koclugu_oran THEN
+          INSERT INTO audit_log (table_name, record_id, field_name, old_value, new_value, action)
+          VALUES ('employees', NEW.id, 'uretkenlik_koclugu_oran', OLD.uretkenlik_koclugu_oran, NEW.uretkenlik_koclugu_oran, 'update');
+        END IF;
         RETURN NEW;
       ELSIF TG_OP = 'DELETE' THEN
         INSERT INTO audit_log (table_name, record_id, field_name, old_value, new_value, action)
         VALUES
           ('employees', OLD.id, 'contract_type', OLD.contract_type, NULL, 'delete'),
           ('employees', OLD.id, 'status', OLD.status, NULL, 'delete'),
-          ('employees', OLD.id, 'cap_month', OLD.cap_month, NULL, 'delete');
+          ('employees', OLD.id, 'cap_month', OLD.cap_month, NULL, 'delete'),
+          ('employees', OLD.id, 'uretkenlik_koclugu', OLD.uretkenlik_koclugu::text, NULL, 'delete'),
+          ('employees', OLD.id, 'uretkenlik_koclugu_oran', OLD.uretkenlik_koclugu_oran, NULL, 'delete');
         RETURN OLD;
       END IF;
       RETURN NULL;
