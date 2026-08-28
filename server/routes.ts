@@ -3259,6 +3259,45 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // Yetim (hiçbir closing_agent'a bağlı olmayan) "ÜK Geliri" masraf kayıtlarını bul/temizle
+  app.get("/api/office-expenses/uk-income-orphans", requireAuth, requireAdmin, async (_req, res) => {
+    try {
+      res.json(await storage.getOrphanedUkIncomeExpenses());
+    } catch (err: any) {
+      console.error("[GET /api/office-expenses/uk-income-orphans]", err);
+      res.status(500).json({ message: err.message });
+    }
+  });
+  app.post("/api/office-expenses/uk-income-orphans/delete", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter((n: number) => !isNaN(n)) : [];
+      const deleted = await storage.deleteOrphanedUkIncomeExpenses(ids);
+      res.json({ deleted });
+    } catch (err: any) {
+      console.error("[POST /api/office-expenses/uk-income-orphans/delete]", err);
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Tekrar tekrar import edilmiş (aynı adres+tarih+bedel) duplike kapanışları bul/temizle
+  app.get("/api/closings/duplicates", requireAuth, requireAdmin, async (_req, res) => {
+    try {
+      res.json(await storage.getDuplicateClosingGroups());
+    } catch (err: any) {
+      console.error("[GET /api/closings/duplicates]", err);
+      res.status(500).json({ message: err.message });
+    }
+  });
+  app.post("/api/closings/duplicates/cleanup", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter((n: number) => !isNaN(n)) : [];
+      res.json(await storage.cleanupDuplicateClosings(ids));
+    } catch (err: any) {
+      console.error("[POST /api/closings/duplicates/cleanup]", err);
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   // ── Growth (Brüt / Net büyüme) ───────────────────────────────────────────
   app.get("/api/growth/stats", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
     try {

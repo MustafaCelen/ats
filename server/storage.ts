@@ -2878,6 +2878,45 @@ export class DatabaseStorage implements IStorage {
     return { synced, deleted };
   }
 
+  // "ÜK Geliri" masraf kayıtları closing_agents.uk_expense_id üzerinden 1:1 bağlıdır
+  // (bkz. syncClosingAgentUkIncome). deleteClosing() normalde bu kaydı da temizler, ama bir
+  // closing farklı bir yoldan (ör. eski/hatalı bir silme akışı) closing_agents satırı
+  // silinmeden temizlenmişse, office_expenses tarafında YETİM bir "ÜK Geliri" kaydı kalır —
+  // sonraki re-import yeni bir kayıt yarattığında bu duplikasyona neden olur. Bu, hiçbir
+  // closing_agents.uk_expense_id tarafından referans edilmeyen (yani artık hiçbir gerçek
+  // işleme bağlı olmayan) "ÜK Geliri" kayıtlarını bulur — silinmesi güvenlidir.
+  async getOrphanedUkIncomeExpenses(): Promise<Array<{
+    id: number; employeeId: number | null; employeeName: string; amount: string; date: string; notes: string | null;
+  }>> {
+    const rows = await db.execute(sql`
+      SELECT oe.id, oe.employee_id, c.name AS employee_name, oe.amount, oe.date, oe.notes
+      FROM office_expenses oe
+      LEFT JOIN employees e ON e.id = oe.employee_id
+      LEFT JOIN candidates c ON c.id = e.candidate_id
+      WHERE oe.category = 'ÜK Geliri'
+        AND NOT EXISTS (SELECT 1 FROM closing_agents ca WHERE ca.uk_expense_id = oe.id)
+      ORDER BY oe.date DESC
+    `);
+    return (rows.rows as any[]).map(r => ({
+      id: r.id, employeeId: r.employee_id, employeeName: r.employee_name ?? `#${r.employee_id ?? "?"}`,
+      amount: r.amount, date: r.date, notes: r.notes,
+    }));
+  }
+
+  // Yalnızca verilen id'leri, hâlâ yetim olduklarını (bir closing_agent'a bağlı olmadığını)
+  // tekrar kontrol ederek siler — çağrı ile silme arasında yeni bir closing bu kayda
+  // bağlanmışsa (teorik olarak imkansız ama) yanlışlıkla gerçek bir kaydı silmemek için.
+  async deleteOrphanedUkIncomeExpenses(ids: number[]): Promise<number> {
+    if (ids.length === 0) return 0;
+    const res = await db.execute(sql`
+      DELETE FROM office_expenses
+      WHERE id = ANY(${ids})
+        AND category = 'ÜK Geliri'
+        AND NOT EXISTS (SELECT 1 FROM closing_agents ca WHERE ca.uk_expense_id = office_expenses.id)
+    `);
+    return res.rowCount ?? 0;
+  }
+
   async updateClosingSide(id: number, data: Partial<{ kasa: string; nakit: string; banka: string }>): Promise<void> {
     if (Object.keys(data).length === 0) return;
     await db.update(closingSides).set(data as any).where(eq(closingSides.id, id));
@@ -3151,6 +3190,69 @@ export class DatabaseStorage implements IStorage {
     }
     await db.delete(closingSides).where(eq(closingSides.closingId, id));
     await db.delete(closings).where(eq(closings.id, id));
+  }
+
+  // Aynı adres + kapanış tarihi + satış bedeline sahip (tekrar tekrar CSV import edilmiş)
+  // kapanış gruplarını bulur. En yeni (en yüksek id) kayıt "tutulacak", diğerleri
+  // "silinecek" olarak işaretlenir — asıl silme cleanupDuplicateClosings() ile, mevcut
+  // deleteClosing() üzerinden (ÜK geliri / closing_agents / closing_sides dahil tam
+  // temizlik) yapılır.
+  async getDuplicateClosingGroups(): Promise<Array<{
+    propertyAddress: string; closingDate: string | null; saleValue: string;
+    keepId: number; deleteIds: number[]; agentNames: string[];
+  }>> {
+    const rows = await db.execute(sql`
+      SELECT c.id, c.property_address, c.closing_date, c.sale_value,
+        MAX(c.id) OVER (PARTITION BY c.property_address, c.closing_date, c.sale_value) AS keep_id,
+        COUNT(*) OVER (PARTITION BY c.property_address, c.closing_date, c.sale_value) AS grp_count
+      FROM closings c
+      WHERE c.property_address IS NOT NULL AND c.property_address <> ''
+    `);
+    const groups = new Map<string, { propertyAddress: string; closingDate: string | null; saleValue: string; keepId: number; ids: number[] }>();
+    for (const r of rows.rows as any[]) {
+      if (Number(r.grp_count) <= 1) continue;
+      const key = `${r.property_address}||${r.closing_date}||${r.sale_value}`;
+      if (!groups.has(key)) {
+        groups.set(key, { propertyAddress: r.property_address, closingDate: r.closing_date, saleValue: r.sale_value, keepId: r.keep_id, ids: [] });
+      }
+      groups.get(key)!.ids.push(r.id);
+    }
+
+    const result: Array<{ propertyAddress: string; closingDate: string | null; saleValue: string; keepId: number; deleteIds: number[]; agentNames: string[] }> = [];
+    for (const g of Array.from(groups.values())) {
+      const deleteIds = g.ids.filter((id) => id !== g.keepId);
+      if (deleteIds.length === 0) continue;
+      const agentRows = await db.execute(sql`
+        SELECT DISTINCT cand.name FROM closing_agents ca
+        JOIN closing_sides cs ON cs.id = ca.closing_side_id
+        JOIN employees e ON e.id = ca.employee_id
+        JOIN candidates cand ON cand.id = e.candidate_id
+        WHERE cs.closing_id = ${g.keepId}
+      `);
+      result.push({
+        propertyAddress: g.propertyAddress,
+        closingDate: g.closingDate,
+        saleValue: g.saleValue,
+        keepId: g.keepId,
+        deleteIds,
+        agentNames: (agentRows.rows as any[]).map((r) => r.name),
+      });
+    }
+    return result.sort((a, b) => b.deleteIds.length - a.deleteIds.length);
+  }
+
+  // Yalnızca hâlâ gerçekten "silinecek" (tutulan id değil, ve grubu hâlâ duplike) olan
+  // id'leri siler — çağrı ile silme arasında biri manuel müdahale etmiş olabilir diye.
+  async cleanupDuplicateClosings(deleteIds: number[]): Promise<{ deleted: number; skipped: number }> {
+    const groups = await this.getDuplicateClosingGroups();
+    const stillValid = new Set(groups.flatMap((g) => g.deleteIds));
+    let deleted = 0, skipped = 0;
+    for (const id of deleteIds) {
+      if (!stillValid.has(id)) { skipped++; continue; }
+      await this.deleteClosing(id);
+      deleted++;
+    }
+    return { deleted, skipped };
   }
 
   async replaceClosingSides(closingId: number, saleValue: string, commissionRate: string, sides: Array<{

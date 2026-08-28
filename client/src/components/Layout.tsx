@@ -84,6 +84,7 @@ const adminNavItems: NavEntry[] = [
   reportsGroupAdmin,
   { icon: Users2,          label: "Takımlar",       href: "/teams"      },
   { icon: Copy,            label: "Danışman Birleştir", href: "/duplicate-merge" },
+  { icon: Copy,            label: "Duplike Kapanışlar", href: "/duplicate-closings" },
   { icon: MessageCircle,   label: "WhatsApp Toplu Mesaj", href: "/whatsapp-bulk" },
   { icon: Puzzle,          label: "Fonzip",         href: "/fonzip"     },
   { icon: Shield,          label: "Kullanıcılar",   href: "/users"      },

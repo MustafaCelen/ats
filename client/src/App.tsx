@@ -24,6 +24,7 @@ import Coaching from "@/pages/Coaching";
 import Expenses from "@/pages/Expenses";
 import ExpenseReports from "@/pages/ExpenseReports";
 import DuplicateMerge from "@/pages/DuplicateMerge";
+import DuplicateClosings from "@/pages/DuplicateClosings";
 import Campaigns from "@/pages/Campaigns";
 import CampaignDetail from "@/pages/CampaignDetail";
 import PLReport from "@/pages/PLReport";
@@ -98,6 +99,7 @@ function Router() {
       <Route path="/expenses" component={() => <ProtectedRoute adminOnly><Expenses /></ProtectedRoute>} />
       <Route path="/expense-reports" component={() => <ProtectedRoute adminOnly><ExpenseReports /></ProtectedRoute>} />
       <Route path="/duplicate-merge" component={() => <ProtectedRoute adminOnly><DuplicateMerge /></ProtectedRoute>} />
+      <Route path="/duplicate-closings" component={() => <ProtectedRoute adminOnly><DuplicateClosings /></ProtectedRoute>} />
       <Route path="/campaigns" component={() => <ProtectedRoute><Campaigns /></ProtectedRoute>} />
       <Route path="/campaigns/:id" component={() => <ProtectedRoute><CampaignDetail /></ProtectedRoute>} />
       <Route path="/pl-report" component={() => <ProtectedRoute adminOnly><PLReport /></ProtectedRoute>} />
