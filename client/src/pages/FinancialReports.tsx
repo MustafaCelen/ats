@@ -528,17 +528,26 @@ function useGrowthRangeStats(months: { year: number; month: number }[], office: 
 function sumFinancialTargetsInRange(targetsForYear: any[], year: number, startYmd: string, endYmd: string) {
   const tMap = new Map(targetsForYear.map((t: any) => [t.month, t]));
   const s = new Date(startYmd + "T00:00:00"), e = new Date(endYmd + "T00:00:00");
-  let bhb = 0, bm = 0;
+  let bhb = 0, bm = 0, bhbHigh = 0, bmHigh = 0;
   const cur = new Date(s.getFullYear(), s.getMonth(), 1);
   const endD = new Date(e.getFullYear(), e.getMonth(), 1);
   while (cur <= endD) {
     if (cur.getFullYear() === year) {
       const t = tMap.get(cur.getMonth() + 1) as any;
-      if (t) { bhb += parseFloat(t.bhbTarget ?? "0"); bm += parseFloat(t.bmTarget ?? "0"); }
+      if (t) {
+        bhb += parseFloat(t.bhbTarget ?? "0"); bm += parseFloat(t.bmTarget ?? "0");
+        bhbHigh += parseFloat(t.bhbHighTarget ?? "0"); bmHigh += parseFloat(t.bmHighTarget ?? "0");
+      }
     }
     cur.setMonth(cur.getMonth() + 1);
   }
-  return { bhb, bm };
+  return { bhb, bm, bhbHigh, bmHigh };
+}
+
+// Forecast/Re-Forecast sayfa-geneli toggle'ına göre tek bir hedef değeri seçer — ikisi de
+// seçiliyse Re-Forecast öncelikli (sayfadaki diğer kartlarla aynı kural: showYuksekTarget varsa o kazanır).
+function resolveForecastTarget(normal: number, high: number, _showForecast: boolean, showReForecast: boolean): number {
+  return showReForecast ? high : normal;
 }
 
 interface PeriodRow {
@@ -547,9 +556,10 @@ interface PeriodRow {
   net: number; bhb: number; companyTl: number;
 }
 
-function PeriodComparisonTable({ computedStart, computedEnd, office, useCustomRange, fromDate, toDate, viewDate }: {
+function PeriodComparisonTable({ computedStart, computedEnd, office, useCustomRange, fromDate, toDate, viewDate, showForecast, showReForecast }: {
   computedStart: string; computedEnd: string; office?: string;
   useCustomRange: boolean; fromDate: string; toDate: string; viewDate: Date;
+  showForecast: boolean; showReForecast: boolean;
 }) {
   const year = new Date(computedEnd + "T00:00:00").getFullYear();
   const ytdStart = formatYMD(new Date(year, 0, 1));
@@ -591,7 +601,9 @@ function PeriodComparisonTable({ computedStart, computedEnd, office, useCustomRa
     randevuK0: periodApptTarget.K0, randevuK1: periodApptTarget.K1, randevuK2: periodApptTarget.K2,
     brutToplam: growthPeriod?.brutTarget ?? 0,
     brutK0: growthPeriod?.brutTargetByCategory.K0 ?? 0, brutK1: growthPeriod?.brutTargetByCategory.K1 ?? 0, brutK2: growthPeriod?.brutTargetByCategory.K2 ?? 0,
-    net: growthPeriod?.netTarget ?? 0, bhb: periodFinTarget.bhb, companyTl: periodFinTarget.bm,
+    net: growthPeriod?.netTarget ?? 0,
+    bhb: resolveForecastTarget(periodFinTarget.bhb, periodFinTarget.bhbHigh, showForecast, showReForecast),
+    companyTl: resolveForecastTarget(periodFinTarget.bm, periodFinTarget.bmHigh, showForecast, showReForecast),
   };
   const realizasyonRow: PeriodRow = {
     randevuToplam: periodApptActual.K0 + periodApptActual.K1 + periodApptActual.K2,
@@ -612,7 +624,9 @@ function PeriodComparisonTable({ computedStart, computedEnd, office, useCustomRa
     randevuK0: ytdApptTarget.K0, randevuK1: ytdApptTarget.K1, randevuK2: ytdApptTarget.K2,
     brutToplam: growthYtd?.brutTarget ?? 0,
     brutK0: growthYtd?.brutTargetByCategory.K0 ?? 0, brutK1: growthYtd?.brutTargetByCategory.K1 ?? 0, brutK2: growthYtd?.brutTargetByCategory.K2 ?? 0,
-    net: growthYtd?.netTarget ?? 0, bhb: ytdFinTarget.bhb, companyTl: ytdFinTarget.bm,
+    net: growthYtd?.netTarget ?? 0,
+    bhb: resolveForecastTarget(ytdFinTarget.bhb, ytdFinTarget.bhbHigh, showForecast, showReForecast),
+    companyTl: resolveForecastTarget(ytdFinTarget.bm, ytdFinTarget.bmHigh, showForecast, showReForecast),
   };
 
   const COLS: { key: keyof PeriodRow; fmt: "int" | "money" }[] = [
@@ -1199,6 +1213,7 @@ export default function FinancialReports() {
         <PeriodComparisonTable
           computedStart={computedStart} computedEnd={computedEnd} office={officeFilter}
           useCustomRange={useCustomRange} fromDate={fromDate} toDate={toDate} viewDate={viewDate}
+          showForecast={showReelTarget} showReForecast={showYuksekTarget}
         />
 
         {/* ── Randevu Hedef Takibi ── */}

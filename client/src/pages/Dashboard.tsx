@@ -424,6 +424,7 @@ export default function Dashboard() {
                   <th key={cat} className={`text-center font-semibold py-2.5 px-4 ${CAT_COLORS[cat].text}`}>{cat}</th>
                 ))}
                 <th className="text-center font-medium text-muted-foreground py-2.5 px-4">Toplam Brüt</th>
+                <th className="text-center font-medium text-muted-foreground py-2.5 px-4">Net Hedef</th>
               </tr>
             );
 
@@ -440,6 +441,13 @@ export default function Dashboard() {
                   </td>
                 ))}
                 <td className="py-3 px-4 text-center font-medium">{brutTotal(t)}</td>
+                <td className="py-3 px-4 text-center">
+                  <TargetCell
+                    value={t.netTarget}
+                    onSave={(v) => onSave({ netTarget: v })}
+                    readOnly={isAllOffices}
+                  />
+                </td>
               </tr>
             );
 
@@ -472,6 +480,7 @@ export default function Dashboard() {
                           </td>
                         ))}
                         <td className="py-2.5 px-4 text-center">{allValues.reduce((s, t) => s + brutTotal(t), 0)}</td>
+                        <td className="py-2.5 px-4 text-center">{allValues.reduce((s, t) => s + t.netTarget, 0)}</td>
                       </tr>
                     </tbody>
                   </table>
