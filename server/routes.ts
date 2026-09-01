@@ -1851,6 +1851,198 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // ── Advisor BHB Targets (çeyrek bazlı) ────────────────────────────────────────
+
+  app.get("/api/employees/:id/bhb-targets", requireAuth, requireFinancialsAccess, async (req, res) => {
+    try {
+      const employeeId = parseInt(req.params.id);
+      if (isNaN(employeeId)) return res.status(400).json({ message: "Geçersiz danışman id" });
+      res.json(await storage.getAdvisorBhbTargets(employeeId));
+    } catch (err) {
+      console.error("[GET /api/employees/:id/bhb-targets]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.put("/api/employees/:id/bhb-targets", requireAuth, requireFinancialsAccess, async (req, res) => {
+    try {
+      const employeeId = parseInt(req.params.id);
+      if (isNaN(employeeId)) return res.status(400).json({ message: "Geçersiz danışman id" });
+      const { year, quarter, bhbTarget } = req.body ?? {};
+      if (!year || !quarter) return res.status(400).json({ message: "year, quarter gerekli" });
+      if (quarter < 1 || quarter > 4) return res.status(400).json({ message: "quarter 1-4 arasında olmalı" });
+      const row = await storage.upsertAdvisorBhbTarget({
+        employeeId,
+        year: Number(year),
+        quarter: Number(quarter),
+        bhbTarget: String(bhbTarget ?? 0),
+      });
+      res.json(row);
+    } catch (err) {
+      console.error("[PUT /api/employees/:id/bhb-targets]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Advisor Notes ──────────────────────────────────────────────────────────────
+
+  app.get("/api/employees/:id/notes", requireAuth, async (req, res) => {
+    res.json(await storage.getAdvisorNotes(Number(req.params.id)));
+  });
+
+  app.post("/api/employees/:id/notes", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
+    try {
+      const { content, authorName } = req.body;
+      if (!content) return res.status(400).json({ message: "Content is required" });
+      const note = await storage.createAdvisorNote({
+        employeeId: Number(req.params.id),
+        content,
+        authorName: authorName || req.user!.name,
+      });
+      res.status(201).json(note);
+    } catch (err) {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.delete("/api/advisor-notes/:id", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
+    await storage.deleteAdvisorNote(Number(req.params.id));
+    res.status(204).send();
+  });
+
+  // ── Advisor Appointments ───────────────────────────────────────────────────────
+
+  app.get("/api/employees/:id/appointments", requireAuth, async (req, res) => {
+    res.json(await storage.getAdvisorAppointments(Number(req.params.id)));
+  });
+
+  app.post("/api/employees/:id/appointments", requireAuth, async (req, res) => {
+    try {
+      const { title, startTime, endTime, location, notes } = req.body ?? {};
+      if (!startTime || !endTime) return res.status(400).json({ message: "startTime, endTime gerekli" });
+      const appointment = await storage.createAdvisorAppointment({
+        employeeId: Number(req.params.id),
+        title: title || "Görüşme",
+        startTime: new Date(startTime),
+        endTime: new Date(endTime),
+        location: location || null,
+        notes: notes || null,
+        status: "scheduled",
+        createdByUserId: req.user!.id,
+      });
+      res.status(201).json(appointment);
+    } catch (err) {
+      console.error("[POST /api/employees/:id/appointments]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.patch("/api/advisor-appointments/:id", requireAuth, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const { startTime, endTime, status } = req.body ?? {};
+      if (startTime && endTime) {
+        const updated = await storage.updateAdvisorAppointment(id, { startTime: new Date(startTime), endTime: new Date(endTime) });
+        if (!updated) return res.status(404).json({ message: "Randevu bulunamadı" });
+        if (updated.calendarEventId) {
+          try {
+            const user = await storage.getUserById(req.user!.id);
+            if (user?.googleAccessToken) {
+              await updateCalendarEvent(user, updated.calendarEventId, {
+                title: updated.title,
+                startTime: new Date(updated.startTime),
+                endTime: new Date(updated.endTime),
+                location: updated.location ?? undefined,
+              });
+            }
+          } catch (err) {
+            console.error("[PATCH /api/advisor-appointments/:id] calendar update failed", err);
+          }
+        }
+        return res.json(updated);
+      }
+      if (!status) return res.status(400).json({ message: "status veya startTime+endTime gerekli" });
+      const updated = await storage.updateAdvisorAppointmentStatus(id, status);
+      if (!updated) return res.status(404).json({ message: "Randevu bulunamadı" });
+      if (status === "cancelled" && updated.calendarEventId) {
+        try {
+          const user = await storage.getUserById(req.user!.id);
+          if (user?.googleAccessToken) {
+            await deleteCalendarEvent(user, updated.calendarEventId);
+            await storage.setAdvisorAppointmentCalendarEventId(id, "");
+          }
+        } catch (err) {
+          console.error("[PATCH /api/advisor-appointments/:id] calendar delete failed", err);
+        }
+      }
+      res.json(updated);
+    } catch (err) {
+      console.error("[PATCH /api/advisor-appointments/:id]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.delete("/api/advisor-appointments/:id", requireAuth, requireAdmin, async (req, res) => {
+    await storage.deleteAdvisorAppointment(Number(req.params.id));
+    res.status(204).send();
+  });
+
+  app.post("/api/advisor-appointments/:id/calendar", requireAuth, async (req, res) => {
+    const id = parseInt(req.params.id);
+    const appointment = await storage.getAdvisorAppointment(id);
+    if (!appointment) return res.status(404).json({ message: "Randevu bulunamadı" });
+
+    const user = await storage.getUserById(req.user!.id);
+    if (!user?.googleAccessToken) {
+      return res.status(400).json({ message: "Google Calendar not connected" });
+    }
+
+    const advisorCandidate = appointment.employee?.candidate;
+    const title = `${appointment.title}: ${advisorCandidate?.name ?? "Danışman"}`;
+    const description = appointment.notes ?? "";
+    const attendeeEmails: string[] = [];
+    if (advisorCandidate?.email) attendeeEmails.push(advisorCandidate.email);
+
+    try {
+      const eventId = await createCalendarEvent(user, {
+        title,
+        description,
+        startTime: new Date(appointment.startTime),
+        endTime: new Date(appointment.endTime),
+        location: appointment.location ?? undefined,
+        attendeeEmails,
+      });
+
+      if (eventId) {
+        await storage.setAdvisorAppointmentCalendarEventId(id, eventId);
+      }
+
+      res.json({ success: true, eventId });
+    } catch (err: any) {
+      console.error("Calendar error:", err);
+      res.status(500).json({ message: err.message || "Calendar error" });
+    }
+  });
+
+  app.delete("/api/advisor-appointments/:id/calendar", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
+    const id = parseInt(req.params.id);
+    const appointment = await storage.getAdvisorAppointment(id);
+    if (!appointment) return res.status(404).json({ message: "Randevu bulunamadı" });
+
+    const user = await storage.getUserById(req.user!.id);
+    if (!user?.googleAccessToken || !appointment.calendarEventId) {
+      return res.status(400).json({ message: "No calendar event to remove" });
+    }
+
+    try {
+      await deleteCalendarEvent(user, appointment.calendarEventId);
+      await storage.setAdvisorAppointmentCalendarEventId(id, "");
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message || "Calendar delete error" });
+    }
+  });
+
   app.get("/api/reports/churn", requireAuth, requireHiringManagerOrAdmin, async (_req: any, res: any) => {
     try {
       res.json(await storage.getChurnReport());

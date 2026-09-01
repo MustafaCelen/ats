@@ -1,3 +1,4 @@
 # Shell scripts must use LF so they run under sh/dash in the Docker image,
 # regardless of the checkout platform (Windows autocrlf would otherwise break them).
 *.sh text eol=lf
+graphify-out/graph.json merge=graphify

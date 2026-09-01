@@ -5,6 +5,7 @@ import {
   capSettings, closings, closingSides, closingAgents, interviewTargets,
   officeExpenses, listings, financialTargets, listingAgreementFiles,
   teams, teamMembers, fonzipSyncedDebts, whatsappBulkSends,
+  advisorBhbTargets, advisorNotes, advisorAppointments,
   APPLICATION_STAGES, BM_PREPAYMENT_CATEGORY, LISTING_RENTAL_PRICE_THRESHOLD,
   type Job, type InsertJob,
   type Candidate, type InsertCandidate,
@@ -26,6 +27,9 @@ import {
   type Team, type TeamWithMembers,
   type FonzipSyncedDebt,
   type WhatsappBulkSend,
+  type AdvisorBhbTarget, type InsertAdvisorBhbTarget,
+  type AdvisorNote, type InsertAdvisorNote,
+  type AdvisorAppointment, type InsertAdvisorAppointment,
 } from "@shared/schema";
 import { eq, ne, desc, asc, count, sql, gte, lte, lt, and, or, isNull, isNotNull, inArray, notInArray } from "drizzle-orm";
 import { differenceInDays } from "date-fns";
@@ -195,6 +199,18 @@ export interface IStorage {
   getEmployeeByKwuid(kwuid: string): Promise<EmployeeWithRelations | undefined>;
   createEmployee(data: InsertEmployee): Promise<Employee>;
   updateEmployee(id: number, data: Partial<InsertEmployee>): Promise<Employee | undefined>;
+  getAdvisorBhbTargets(employeeId: number): Promise<AdvisorBhbTarget[]>;
+  upsertAdvisorBhbTarget(input: InsertAdvisorBhbTarget): Promise<AdvisorBhbTarget>;
+  getAdvisorNotes(employeeId: number): Promise<AdvisorNote[]>;
+  createAdvisorNote(note: InsertAdvisorNote): Promise<AdvisorNote>;
+  deleteAdvisorNote(id: number): Promise<void>;
+  getAdvisorAppointments(employeeId: number): Promise<AdvisorAppointment[]>;
+  getAdvisorAppointment(id: number): Promise<(AdvisorAppointment & { employee?: EmployeeWithRelations }) | null>;
+  createAdvisorAppointment(appointment: InsertAdvisorAppointment): Promise<AdvisorAppointment>;
+  updateAdvisorAppointment(id: number, data: { startTime: Date; endTime: Date }): Promise<AdvisorAppointment | undefined>;
+  updateAdvisorAppointmentStatus(id: number, status: string): Promise<AdvisorAppointment | undefined>;
+  setAdvisorAppointmentCalendarEventId(id: number, eventId: string): Promise<void>;
+  deleteAdvisorAppointment(id: number): Promise<void>;
   updateStageHistoryDate(id: number, enteredAt: Date): Promise<{ id: number; enteredAt: Date | null } | undefined>;
   deleteEmployee(id: number): Promise<void>;
   updateEmployeeCapAdjustment(id: number, amount: string): Promise<void>;
@@ -1917,6 +1933,64 @@ export class DatabaseStorage implements IStorage {
 
   async deleteEmployee(id: number): Promise<void> {
     await db.delete(employees).where(eq(employees.id, id));
+  }
+
+  async getAdvisorBhbTargets(employeeId: number): Promise<AdvisorBhbTarget[]> {
+    return db.select().from(advisorBhbTargets).where(eq(advisorBhbTargets.employeeId, employeeId)).orderBy(desc(advisorBhbTargets.year), desc(advisorBhbTargets.quarter));
+  }
+  async upsertAdvisorBhbTarget(input: InsertAdvisorBhbTarget): Promise<AdvisorBhbTarget> {
+    const [row] = await db
+      .insert(advisorBhbTargets)
+      .values(input)
+      .onConflictDoUpdate({
+        target: [advisorBhbTargets.employeeId, advisorBhbTargets.year, advisorBhbTargets.quarter],
+        set: { bhbTarget: input.bhbTarget, updatedAt: new Date() },
+      })
+      .returning();
+    return row;
+  }
+
+  async getAdvisorNotes(employeeId: number): Promise<AdvisorNote[]> {
+    return db.select().from(advisorNotes).where(eq(advisorNotes.employeeId, employeeId)).orderBy(desc(advisorNotes.createdAt));
+  }
+  async createAdvisorNote(note: InsertAdvisorNote): Promise<AdvisorNote> {
+    const [n] = await db.insert(advisorNotes).values(note).returning();
+    return n;
+  }
+  async deleteAdvisorNote(id: number): Promise<void> {
+    await db.delete(advisorNotes).where(eq(advisorNotes.id, id));
+  }
+
+  async getAdvisorAppointments(employeeId: number): Promise<AdvisorAppointment[]> {
+    return db.select().from(advisorAppointments).where(eq(advisorAppointments.employeeId, employeeId)).orderBy(desc(advisorAppointments.startTime));
+  }
+  async getAdvisorAppointment(id: number): Promise<(AdvisorAppointment & { employee?: EmployeeWithRelations }) | null> {
+    const [a] = await db.select().from(advisorAppointments).where(eq(advisorAppointments.id, id));
+    if (!a) return null;
+    const employee = await this.getEmployee(a.employeeId);
+    return { ...a, employee: employee ?? undefined };
+  }
+  async createAdvisorAppointment(appointment: InsertAdvisorAppointment): Promise<AdvisorAppointment> {
+    const [a] = await db.insert(advisorAppointments).values(appointment).returning();
+    return a;
+  }
+  async updateAdvisorAppointment(id: number, data: { startTime: Date; endTime: Date }): Promise<AdvisorAppointment | undefined> {
+    const [a] = await db
+      .update(advisorAppointments)
+      .set({ startTime: data.startTime, endTime: data.endTime, rescheduleCount: sql`${advisorAppointments.rescheduleCount} + 1` })
+      .where(eq(advisorAppointments.id, id))
+      .returning();
+    return a;
+  }
+  async updateAdvisorAppointmentStatus(id: number, status: string): Promise<AdvisorAppointment | undefined> {
+    const [a] = await db.update(advisorAppointments).set({ status }).where(eq(advisorAppointments.id, id)).returning();
+    return a;
+  }
+  async setAdvisorAppointmentCalendarEventId(id: number, eventId: string): Promise<void> {
+    await db.update(advisorAppointments).set({ calendarEventId: eventId }).where(eq(advisorAppointments.id, id));
+  }
+  async deleteAdvisorAppointment(id: number): Promise<void> {
+    await db.delete(advisorAppointments).where(eq(advisorAppointments.id, id));
   }
 
   async getTasks(options: { assignedToUserId?: number; createdByUserId?: number }): Promise<TaskWithRelations[]> {

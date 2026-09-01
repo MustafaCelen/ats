@@ -292,6 +292,64 @@ export type InsertEmployee = z.infer<typeof insertEmployeeSchema>;
 export type Employee = typeof employees.$inferSelect;
 export type EmployeeWithRelations = Employee & { candidate?: Candidate; job?: Job };
 
+// ── Advisor BHB Targets (per-advisor, quarterly) ───────────────────────────────
+export const advisorBhbTargets = pgTable("advisor_bhb_targets", {
+  id: serial("id").primaryKey(),
+  employeeId: integer("employee_id").notNull(),
+  year: integer("year").notNull(),
+  quarter: integer("quarter").notNull(), // 1-4
+  bhbTarget: numeric("bhb_target", { precision: 15, scale: 2 }).notNull().default("0"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (t) => ({
+  uq: uniqueIndex("advisor_bhb_targets_uq").on(t.employeeId, t.year, t.quarter),
+  empIdx: index("advisor_bhb_targets_emp_idx").on(t.employeeId),
+}));
+export const insertAdvisorBhbTargetSchema = createInsertSchema(advisorBhbTargets).omit({ id: true, createdAt: true, updatedAt: true });
+export type AdvisorBhbTarget = typeof advisorBhbTargets.$inferSelect;
+export type InsertAdvisorBhbTarget = z.infer<typeof insertAdvisorBhbTargetSchema>;
+
+// ── Advisor Notes (mirrors candidateNotes) ──────────────────────────────────────
+export const advisorNotes = pgTable("advisor_notes", {
+  id: serial("id").primaryKey(),
+  employeeId: integer("employee_id").notNull(),
+  content: text("content").notNull(),
+  authorName: text("author_name").notNull().default("Coach"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (t) => ({
+  employeeIdIdx: index("advisor_notes_employee_id_idx").on(t.employeeId),
+}));
+export const advisorNotesRelations = relations(advisorNotes, ({ one }) => ({
+  employee: one(employees, { fields: [advisorNotes.employeeId], references: [employees.id] }),
+}));
+export const insertAdvisorNoteSchema = createInsertSchema(advisorNotes).omit({ id: true, createdAt: true });
+export type AdvisorNote = typeof advisorNotes.$inferSelect;
+export type InsertAdvisorNote = z.infer<typeof insertAdvisorNoteSchema>;
+
+// ── Advisor Appointments (mirrors interviews, scoped to an employee instead of an application) ──
+export const advisorAppointments = pgTable("advisor_appointments", {
+  id: serial("id").primaryKey(),
+  employeeId: integer("employee_id").notNull(),
+  title: text("title").notNull().default("Görüşme"),
+  startTime: timestamp("start_time").notNull(),
+  endTime: timestamp("end_time").notNull(),
+  location: text("location"),
+  status: text("status").notNull().default("scheduled"), // scheduled | completed | cancelled
+  notes: text("notes"),
+  calendarEventId: text("calendar_event_id"),
+  rescheduleCount: integer("reschedule_count").notNull().default(0),
+  createdByUserId: integer("created_by_user_id"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (t) => ({
+  employeeIdIdx: index("advisor_appointments_employee_id_idx").on(t.employeeId),
+}));
+export const advisorAppointmentsRelations = relations(advisorAppointments, ({ one }) => ({
+  employee: one(employees, { fields: [advisorAppointments.employeeId], references: [employees.id] }),
+}));
+export const insertAdvisorAppointmentSchema = createInsertSchema(advisorAppointments).omit({ id: true, createdAt: true, calendarEventId: true, rescheduleCount: true });
+export type AdvisorAppointment = typeof advisorAppointments.$inferSelect;
+export type InsertAdvisorAppointment = z.infer<typeof insertAdvisorAppointmentSchema>;
+
 // ── Tasks ─────────────────────────────────────────────────────────────────────
 export const TASK_STATUSES = ["pending", "in_progress", "done"] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
