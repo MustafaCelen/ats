@@ -3,12 +3,26 @@ import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { AdvisorBhbTarget, AdvisorNote, AdvisorAppointment } from "@shared/schema";
 
+async function fetchArray<T>(url: string): Promise<T[]> {
+  const response = await fetch(url, { credentials: "include" });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new Error(body?.message || `İstek başarısız (${response.status})`);
+  }
+
+  const data = await response.json();
+  if (!Array.isArray(data)) {
+    throw new Error("Sunucudan beklenmeyen veri biçimi geldi");
+  }
+  return data as T[];
+}
+
 // ── BHB Targets (çeyrek bazlı) ──────────────────────────────────────────────────
 
 export function useAdvisorBhbTargets(employeeId: number | null) {
   return useQuery<AdvisorBhbTarget[]>({
     queryKey: ["/api/employees", employeeId, "bhb-targets"],
-    queryFn: () => fetch(`/api/employees/${employeeId}/bhb-targets`).then((r) => r.json()),
+    queryFn: () => fetchArray<AdvisorBhbTarget>(`/api/employees/${employeeId}/bhb-targets`),
     enabled: employeeId != null,
   });
 }
@@ -27,7 +41,7 @@ export function useUpsertAdvisorBhbTarget(employeeId: number | null) {
 export function useAdvisorNotes(employeeId: number | null) {
   return useQuery<AdvisorNote[]>({
     queryKey: ["/api/employees", employeeId, "notes"],
-    queryFn: () => fetch(`/api/employees/${employeeId}/notes`).then((r) => r.json()),
+    queryFn: () => fetchArray<AdvisorNote>(`/api/employees/${employeeId}/notes`),
     enabled: employeeId != null,
   });
 }
@@ -54,7 +68,7 @@ export function useDeleteAdvisorNote(employeeId: number | null) {
 export function useAdvisorAppointments(employeeId: number | null) {
   return useQuery<AdvisorAppointment[]>({
     queryKey: ["/api/employees", employeeId, "appointments"],
-    queryFn: () => fetch(`/api/employees/${employeeId}/appointments`).then((r) => r.json()),
+    queryFn: () => fetchArray<AdvisorAppointment>(`/api/employees/${employeeId}/appointments`),
     enabled: employeeId != null,
   });
 }
