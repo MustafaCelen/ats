@@ -33,7 +33,7 @@ import {
 } from "@shared/schema";
 import { eq, ne, desc, asc, count, sql, gte, lte, lt, and, or, isNull, isNotNull, inArray, notInArray } from "drizzle-orm";
 import { differenceInDays } from "date-fns";
-import { randomBytes } from "crypto";
+import { randomBytes, randomUUID } from "crypto";
 import { appendClosingToSheet } from "./google-sheets";
 
 export type ApplicationWithRelations = Application & { candidate?: Candidate; job?: Job };
@@ -5275,6 +5275,33 @@ export class DatabaseStorage implements IStorage {
 
   async deleteOfficeExpense(id: number): Promise<void> {
     await db.delete(officeExpenses).where(eq(officeExpenses.id, id));
+  }
+
+  async createSplitOfficeExpense(data: {
+    type: string; category: string; amount: number; date: string; notes: string | null;
+    employeeId: number | null; createdByUserId: number | null;
+    allocations: [{ office: string; percent: number }, { office: string; percent: number }];
+  }): Promise<OfficeExpense[]> {
+    const splitGroupId = randomUUID();
+    const [alloc1, alloc2] = data.allocations;
+    const amount1 = Math.round(data.amount * alloc1.percent) / 100;
+    const amount2 = Math.round((data.amount - amount1) * 100) / 100;
+
+    return db.transaction(async (tx) => {
+      const [row1] = await tx.insert(officeExpenses).values({
+        type: data.type, category: data.category, date: data.date, notes: data.notes,
+        employeeId: data.employeeId, createdByUserId: data.createdByUserId,
+        office: alloc1.office, splitGroupId, splitPercent: alloc1.percent,
+        amount: String(amount1),
+      }).returning();
+      const [row2] = await tx.insert(officeExpenses).values({
+        type: data.type, category: data.category, date: data.date, notes: data.notes,
+        employeeId: data.employeeId, createdByUserId: data.createdByUserId,
+        office: alloc2.office, splitGroupId, splitPercent: alloc2.percent,
+        amount: String(amount2),
+      }).returning();
+      return [row1, row2];
+    });
   }
 
   async getMonthlyPL(year: number): Promise<{

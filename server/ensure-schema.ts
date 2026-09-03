@@ -240,6 +240,39 @@ export async function ensureSchema(): Promise<void> {
     CREATE TRIGGER candidates_audit
       AFTER UPDATE OR DELETE ON candidates
       FOR EACH ROW EXECUTE FUNCTION candidates_audit_trigger();
+
+    -- Danışman karnesi: çeyreklik BHB hedefi, notlar, randevu/takvim
+    CREATE TABLE IF NOT EXISTS advisor_bhb_targets (
+      id SERIAL PRIMARY KEY, employee_id INTEGER NOT NULL,
+      year INTEGER NOT NULL, quarter INTEGER NOT NULL,
+      bhb_target NUMERIC(15,2) NOT NULL DEFAULT 0,
+      created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS advisor_bhb_targets_uq ON advisor_bhb_targets(employee_id, year, quarter);
+    CREATE INDEX IF NOT EXISTS advisor_bhb_targets_emp_idx ON advisor_bhb_targets(employee_id);
+
+    CREATE TABLE IF NOT EXISTS advisor_notes (
+      id SERIAL PRIMARY KEY, employee_id INTEGER NOT NULL,
+      content TEXT NOT NULL, author_name TEXT NOT NULL DEFAULT 'Coach',
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS advisor_notes_employee_id_idx ON advisor_notes(employee_id);
+
+    CREATE TABLE IF NOT EXISTS advisor_appointments (
+      id SERIAL PRIMARY KEY, employee_id INTEGER NOT NULL,
+      title TEXT NOT NULL DEFAULT 'Görüşme',
+      start_time TIMESTAMP NOT NULL, end_time TIMESTAMP NOT NULL,
+      location TEXT, status TEXT NOT NULL DEFAULT 'scheduled', notes TEXT,
+      calendar_event_id TEXT, reschedule_count INTEGER NOT NULL DEFAULT 0,
+      created_by_user_id INTEGER, created_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS advisor_appointments_employee_id_idx ON advisor_appointments(employee_id);
+
+    -- Masraf kayıtlarına ofis + yüzdesel bölme (kart/banka ekstresi import + manuel giriş)
+    ALTER TABLE office_expenses ADD COLUMN IF NOT EXISTS office TEXT NOT NULL DEFAULT '';
+    ALTER TABLE office_expenses ADD COLUMN IF NOT EXISTS split_group_id TEXT;
+    ALTER TABLE office_expenses ADD COLUMN IF NOT EXISTS split_percent INTEGER;
+    CREATE INDEX IF NOT EXISTS office_expenses_office_idx ON office_expenses(office);
   `;
   try {
     await pool.query(sql);

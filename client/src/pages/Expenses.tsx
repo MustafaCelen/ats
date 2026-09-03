@@ -15,7 +15,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { Plus, Pencil, Trash2, TrendingUp, TrendingDown, Receipt, Upload, FileText, CheckSquare, Square, AlertCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { INCOME_CATEGORIES, EXPENSE_CATEGORY_GROUPS, BM_PREPAYMENT_CATEGORY } from "@shared/schema";
+import { INCOME_CATEGORIES, EXPENSE_CATEGORY_GROUPS, BM_PREPAYMENT_CATEGORY, OFFICES } from "@shared/schema";
 import { EmployeePicker } from "@/components/EmployeePicker";
 
 const MONTHS_TR = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"];
@@ -65,6 +65,7 @@ type ImportRow = {
   description: string;
   amount: number;
   category: string;
+  office: string;
   notes: string;
   included: boolean;
   selected: boolean;
@@ -98,6 +99,7 @@ function parseGarantiCSV(text: string): ImportRow[] {
       description: description.trim(),
       amount: Math.abs(amount),
       category: "",
+      office: "",
       notes: description.trim(),
       included: true,
       selected: false,
@@ -115,6 +117,7 @@ type CreditCardRow = {
   etiket: string;
   amount: number;
   category: string;
+  office: string;
   notes: string;
   included: boolean;
   selected: boolean;
@@ -153,6 +156,7 @@ function parseCreditCardCSV(text: string): CreditCardRow[] {
       etiket: etiket?.trim() ?? "",
       amount: Math.abs(amount),
       category: "",
+      office: "",
       notes: description.trim(),
       included: true,
       selected: false,
@@ -198,7 +202,7 @@ function CreditCardImportDialog({
 
   const included = rows.filter((r) => r.included);
   const selectedRows = rows.filter((r) => r.selected);
-  const allCategorized = included.length > 0 && included.every((r) => r.category);
+  const allCategorized = included.length > 0 && included.every((r) => r.category && r.office);
   const totalAmount = included.reduce((s, r) => s + r.amount, 0);
 
   const toggleAll = () => {
@@ -231,7 +235,7 @@ function CreditCardImportDialog({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
-          body: JSON.stringify({ type: "expense", category: row.category, amount: String(row.amount), date: row.date, notes: row.notes || null, employeeId: null }),
+          body: JSON.stringify({ type: "expense", category: row.category, office: row.office, amount: String(row.amount), date: row.date, notes: row.notes || null, employeeId: null }),
         });
         if (res.ok) success++;
       } catch {}
@@ -328,6 +332,7 @@ function CreditCardImportDialog({
                     <th className="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">Etiket</th>
                     <th className="px-3 py-2 text-right text-xs font-semibold text-muted-foreground whitespace-nowrap">Tutar</th>
                     <th className="px-3 py-2 text-left text-xs font-semibold text-muted-foreground w-52">Kategori *</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-muted-foreground w-28">Ofis *</th>
                     <th className="px-3 py-2 text-left text-xs font-semibold text-muted-foreground w-36">Not</th>
                   </tr>
                 </thead>
@@ -386,6 +391,9 @@ function CreditCardImportDialog({
                         </Select>
                       </td>
                       <td className="px-3 py-1.5" onClick={(e) => e.stopPropagation()}>
+                        <OfficeSelect value={row.office} onChange={(v) => updateRow(row.uid, { office: v })} className="h-7 text-xs" />
+                      </td>
+                      <td className="px-3 py-1.5" onClick={(e) => e.stopPropagation()}>
                         <Input className="h-7 text-xs" value={row.notes} onChange={(e) => updateRow(row.uid, { notes: e.target.value })} placeholder="Not..." />
                       </td>
                     </tr>
@@ -396,7 +404,7 @@ function CreditCardImportDialog({
 
             {!allCategorized && included.length > 0 && (
               <p className="text-xs text-amber-600 flex items-center gap-1">
-                <AlertCircle className="h-3 w-3" /> Tüm dahil edilen satırlar için kategori seçin.
+                <AlertCircle className="h-3 w-3" /> Tüm dahil edilen satırlar için kategori ve ofis seçin.
               </p>
             )}
 
@@ -451,7 +459,7 @@ function BankStatementImportDialog({
 
   const included = rows.filter((r) => r.included);
   const selectedRows = rows.filter((r) => r.selected);
-  const allCategorized = included.length > 0 && included.every((r) => r.category);
+  const allCategorized = included.length > 0 && included.every((r) => r.category && r.office);
   const totalAmount = included.reduce((s, r) => s + r.amount, 0);
   const allIncludedSelected = included.length > 0 && included.every((r) => r.selected);
 
@@ -487,7 +495,7 @@ function BankStatementImportDialog({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
-          body: JSON.stringify({ type: "expense", category: row.category, amount: String(row.amount), date: row.date, notes: row.notes || null, employeeId: null }),
+          body: JSON.stringify({ type: "expense", category: row.category, office: row.office, amount: String(row.amount), date: row.date, notes: row.notes || null, employeeId: null }),
         });
         if (res.ok) success++;
       } catch {}
@@ -581,6 +589,7 @@ function BankStatementImportDialog({
                     <th className="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">Açıklama</th>
                     <th className="px-3 py-2 text-right text-xs font-semibold text-muted-foreground whitespace-nowrap">Tutar</th>
                     <th className="px-3 py-2 text-left text-xs font-semibold text-muted-foreground w-52">Kategori *</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-muted-foreground w-28">Ofis *</th>
                     <th className="px-3 py-2 text-left text-xs font-semibold text-muted-foreground w-44">Not</th>
                   </tr>
                 </thead>
@@ -636,6 +645,9 @@ function BankStatementImportDialog({
                         </Select>
                       </td>
                       <td className="px-3 py-1.5" onClick={(e) => e.stopPropagation()}>
+                        <OfficeSelect value={row.office} onChange={(v) => updateRow(row.uid, { office: v })} className="h-7 text-xs" />
+                      </td>
+                      <td className="px-3 py-1.5" onClick={(e) => e.stopPropagation()}>
                         <Input className="h-7 text-xs" value={row.notes} onChange={(e) => updateRow(row.uid, { notes: e.target.value })} placeholder="Not..." />
                       </td>
                     </tr>
@@ -646,7 +658,7 @@ function BankStatementImportDialog({
 
             {!allCategorized && included.length > 0 && (
               <p className="text-xs text-amber-600 flex items-center gap-1">
-                <AlertCircle className="h-3 w-3" /> Tüm dahil edilen satırlar için kategori seçin.
+                <AlertCircle className="h-3 w-3" /> Tüm dahil edilen satırlar için kategori ve ofis seçin.
               </p>
             )}
 
@@ -664,6 +676,19 @@ function BankStatementImportDialog({
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ── Office Select ─────────────────────────────────────────────────────────────
+
+function OfficeSelect({ value, onChange, exclude, className }: { value: string; onChange: (v: string) => void; exclude?: string; className?: string }) {
+  return (
+    <Select value={value} onValueChange={onChange}>
+      <SelectTrigger className={className}><SelectValue placeholder="Ofis..." /></SelectTrigger>
+      <SelectContent>
+        {OFFICES.filter((o) => o !== exclude).map((o) => <SelectItem key={o} value={o} className={className ? "text-xs" : undefined}>{o}</SelectItem>)}
+      </SelectContent>
+    </Select>
   );
 }
 
@@ -714,6 +739,11 @@ function ExpenseDialog({
   const [date, setDate] = useState(initial?.date ?? todayYMD());
   const [notes, setNotes] = useState(initial?.notes ?? "");
   const [employeeId, setEmployeeId] = useState<string>(initial?.employeeId ? String(initial.employeeId) : "");
+  const [office, setOffice] = useState(initial?.office ?? "");
+  const [splitEnabled, setSplitEnabled] = useState(false);
+  const [office2, setOffice2] = useState("");
+  const [splitPercent1, setSplitPercent1] = useState("50");
+  const isSplitPart = isEdit && !!initial?.splitGroupId;
 
   const isBmPrepayment = type === "income" && category === BM_PREPAYMENT_CATEGORY;
 
@@ -755,6 +785,29 @@ function ExpenseDialog({
     onError: () => toast({ title: "Hata", variant: "destructive" }),
   });
 
+  const splitMutate = useMutation({
+    mutationFn: async (data: any) => {
+      const res = await fetch("/api/office-expenses/split", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/office-expenses"] });
+      qc.invalidateQueries({ queryKey: ["/api/office-expenses/monthly-pl"] });
+      toast({ title: "İki ofise bölünerek kaydedildi" });
+      onOpenChange(false);
+    },
+    onError: () => toast({ title: "Hata", variant: "destructive" }),
+  });
+
+  const pct1 = parseInt(splitPercent1, 10) || 0;
+  const pct2 = 100 - pct1;
+
   const handleSave = () => {
     if (!category || !amount || !date) {
       toast({ title: "Tüm zorunlu alanları doldurun", variant: "destructive" });
@@ -764,9 +817,34 @@ function ExpenseDialog({
       toast({ title: "Danışman seçimi zorunlu", variant: "destructive" });
       return;
     }
+    if (splitEnabled) {
+      if (!office || !office2 || office === office2) {
+        toast({ title: "İki farklı ofis seçin", variant: "destructive" });
+        return;
+      }
+      if (pct1 < 1 || pct1 > 99) {
+        toast({ title: "Yüzde 1-99 arasında olmalı", variant: "destructive" });
+        return;
+      }
+      splitMutate.mutate({
+        type,
+        category,
+        amount: parseFloat(amount.replace(",", ".")),
+        date,
+        notes: notes || null,
+        employeeId: isBmPrepayment ? Number(employeeId) : null,
+        allocations: [{ office, percent: pct1 }, { office: office2, percent: pct2 }],
+      });
+      return;
+    }
+    if (!office) {
+      toast({ title: "Ofis seçimi zorunlu", variant: "destructive" });
+      return;
+    }
     mutate.mutate({
       type,
       category,
+      office,
       amount: String(parseFloat(amount.replace(",", "."))),
       date,
       notes: notes || null,
@@ -823,6 +901,52 @@ function ExpenseDialog({
             <CategorySelect type={type} value={category} onChange={setCategory} />
           </div>
 
+          {/* Office (+ optional percentage split) */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <Label className="text-xs block">Ofis *</Label>
+              {!isSplitPart && (
+                <button
+                  type="button"
+                  onClick={() => setSplitEnabled((v) => !v)}
+                  className="text-[11px] text-primary hover:underline"
+                >
+                  {splitEnabled ? "Tek ofise geri dön" : "İki ofise böl"}
+                </button>
+              )}
+            </div>
+            {isSplitPart && (
+              <p className="text-[10px] text-muted-foreground mb-1">
+                Bölünmüş bir kaydın parçası (%{initial.splitPercent}) — bağımsız düzenlenir.
+              </p>
+            )}
+            {!splitEnabled ? (
+              <OfficeSelect value={office} onChange={setOffice} />
+            ) : (
+              <div className="space-y-2">
+                <div className="grid grid-cols-2 gap-2 items-center">
+                  <OfficeSelect value={office} onChange={setOffice} exclude={office2} />
+                  <div className="flex items-center gap-1">
+                    <Input
+                      type="number" min={1} max={99}
+                      value={splitPercent1}
+                      onChange={(e) => setSplitPercent1(e.target.value)}
+                      className="h-9"
+                    />
+                    <span className="text-xs text-muted-foreground">%</span>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2 items-center">
+                  <OfficeSelect value={office2} onChange={setOffice2} exclude={office} />
+                  <div className="flex items-center gap-1">
+                    <Input value={String(pct2)} disabled className="h-9 bg-muted/40" />
+                    <span className="text-xs text-muted-foreground">%</span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Employee picker — only for BM Payı Ön Ödemesi */}
           {isBmPrepayment && (
             <div>
@@ -868,9 +992,9 @@ function ExpenseDialog({
             <Button
               className={`flex-1 ${type === "income" ? "bg-emerald-600 hover:bg-emerald-700" : "bg-red-600 hover:bg-red-700"}`}
               onClick={handleSave}
-              disabled={mutate.isPending}
+              disabled={mutate.isPending || splitMutate.isPending}
             >
-              {mutate.isPending ? "Kaydediliyor..." : (isEdit ? "Güncelle" : "Kaydet")}
+              {(mutate.isPending || splitMutate.isPending) ? "Kaydediliyor..." : (isEdit ? "Güncelle" : "Kaydet")}
             </Button>
           </div>
         </div>
@@ -1023,9 +1147,10 @@ export default function Expenses() {
 
         {/* Table */}
         <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
-          <div className="grid grid-cols-[1fr_2fr_auto_1fr_auto] gap-4 px-4 py-2.5 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <div className="grid grid-cols-[1fr_2fr_auto_auto_1fr_auto] gap-4 px-4 py-2.5 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             <div>Tarih</div>
             <div>Kategori</div>
+            <div>Ofis</div>
             <div>Tür</div>
             <div className="text-right">Tutar</div>
             <div />
@@ -1046,7 +1171,7 @@ export default function Expenses() {
           {!isLoading && filtered.length > 0 && (
             <div className="divide-y divide-border">
               {filtered.map((row: any) => (
-                <div key={row.id} className="grid grid-cols-[1fr_2fr_auto_1fr_auto] gap-4 px-4 py-3 items-center hover:bg-muted/20 transition-colors group">
+                <div key={row.id} className="grid grid-cols-[1fr_2fr_auto_auto_1fr_auto] gap-4 px-4 py-3 items-center hover:bg-muted/20 transition-colors group">
                   <div className="text-sm text-muted-foreground">
                     {row.date ? format(new Date(row.date + "T12:00:00"), "dd.MM.yyyy") : "—"}
                   </div>
@@ -1056,6 +1181,15 @@ export default function Expenses() {
                       <p className="text-xs text-blue-700 font-medium truncate">{row.employeeName}</p>
                     )}
                     {row.notes && <p className="text-xs text-muted-foreground truncate">{row.notes}</p>}
+                  </div>
+                  <div>
+                    {row.office ? (
+                      <span className="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full bg-muted text-foreground border border-border whitespace-nowrap">
+                        {row.office}{row.splitPercent ? ` %${row.splitPercent}` : ""}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground/50">—</span>
+                    )}
                   </div>
                   <div>
                     {row.type === "income" ? (

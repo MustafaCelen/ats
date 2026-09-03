@@ -651,11 +651,15 @@ export const officeExpenses = pgTable("office_expenses", {
   date: text("date").notNull(),                // YYYY-MM-DD
   notes: text("notes"),
   employeeId: integer("employee_id"),          // Optional — required for BM_PREPAYMENT_CATEGORY
+  office: text("office").notNull().default(""),  // "" = legacy/unassigned, otherwise a value from OFFICES
+  splitGroupId: text("split_group_id"),           // links the two rows created by a percentage split — informational only
+  splitPercent: integer("split_percent"),         // this row's share (%) of the original amount when split, else null
   createdByUserId: integer("created_by_user_id"),
   createdAt: timestamp("created_at").defaultNow(),
 }, (t) => ({
   dateIdx: index("office_expenses_date_idx").on(t.date),
   typeIdx: index("office_expenses_type_idx").on(t.type),
+  officeIdx: index("office_expenses_office_idx").on(t.office),
 }));
 
 export const insertOfficeExpenseSchema = createInsertSchema(officeExpenses).omit({ id: true, createdAt: true });

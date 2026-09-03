@@ -7,7 +7,7 @@ import { sql } from "drizzle-orm";
 import { requireAuth, requireAdmin, requireHiringManagerOrAdmin, requireFinancialsAccess } from "./auth";
 import { api } from "@shared/routes";
 import { z } from "zod";
-import { insertInterviewSchema, insertOfferSchema, type InsertTask, TASK_STATUSES } from "@shared/schema";
+import { insertInterviewSchema, insertOfferSchema, type InsertTask, TASK_STATUSES, OFFICES } from "@shared/schema";
 import { getAuthUrl, createOAuth2Client, createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from "./google";
 import { sendWhatsApp, sendWhatsAppTemplate, checkWhatsAppStatus, publicBaseUrl, listWhatsAppTemplates } from "./whatsapp";
 import { sendEmail } from "./email";
@@ -3813,6 +3813,38 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.status(201).json(row);
     } catch (err) {
       console.error("[POST /api/office-expenses]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.post("/api/office-expenses/split", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const { type, category, amount, date, notes, employeeId, allocations } = req.body ?? {};
+      if (!type || !category || !amount || !date) {
+        return res.status(400).json({ message: "type, category, amount, date gerekli" });
+      }
+      if (!Array.isArray(allocations) || allocations.length !== 2) {
+        return res.status(400).json({ message: "allocations tam olarak 2 eleman içermeli" });
+      }
+      const [a1, a2] = allocations;
+      const pct1 = Number(a1?.percent);
+      const pct2 = Number(a2?.percent);
+      if (!Number.isInteger(pct1) || !Number.isInteger(pct2) || pct1 < 1 || pct1 > 99 || pct2 < 1 || pct2 > 99 || pct1 + pct2 !== 100) {
+        return res.status(400).json({ message: "yüzdeler 1-99 arasında ve toplamı 100 olmalı" });
+      }
+      if (!a1?.office || !a2?.office || a1.office === a2.office || !OFFICES.includes(a1.office) || !OFFICES.includes(a2.office)) {
+        return res.status(400).json({ message: "iki farklı, geçerli ofis seçilmeli" });
+      }
+      const rows = await storage.createSplitOfficeExpense({
+        type, category, date, notes: notes || null,
+        employeeId: employeeId ? Number(employeeId) : null,
+        createdByUserId: req.user!.id,
+        amount: Number(amount),
+        allocations: [{ office: a1.office, percent: pct1 }, { office: a2.office, percent: pct2 }],
+      });
+      res.status(201).json(rows);
+    } catch (err) {
+      console.error("[POST /api/office-expenses/split]", err);
       res.status(500).json({ message: "Internal server error" });
     }
   });
