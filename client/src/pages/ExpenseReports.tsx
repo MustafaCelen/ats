@@ -13,13 +13,14 @@ import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid,
   LineChart, Line,
 } from "recharts";
-import { EXPENSE_CATEGORY_GROUPS, EXPENSE_CATEGORIES, INCOME_CATEGORIES } from "@shared/schema";
+import { EXPENSE_CATEGORY_GROUPS, EXPENSE_CATEGORIES, INCOME_CATEGORIES, OFFICES } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 
 interface BreakdownRow {
   month: string;
   type: "income" | "expense";
   category: string;
+  office: string;
   count: number;
   total: string;
 }
@@ -29,6 +30,7 @@ interface TopRow {
   date: string;
   type: string;
   category: string;
+  office: string;
   amount: string;
   notes: string | null;
   employee_id: number | null;
@@ -96,6 +98,7 @@ export default function ExpenseReports() {
   const [startMonth, setStartMonth] = useState(shiftYM(today, -4));
   const [endMonth, setEndMonth] = useState(today);
   const [type, setType] = useState<"expense" | "income" | "all">("expense");
+  const [office, setOffice] = useState<string>("all");
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [excludeVat, setExcludeVat] = useState(false);
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
@@ -128,20 +131,22 @@ export default function ExpenseReports() {
   });
 
   const { data: rawBreakdown = [], isLoading } = useQuery<BreakdownRow[]>({
-    queryKey: ["/api/office-expenses/reports/breakdown", startMonth, endMonth, type],
+    queryKey: ["/api/office-expenses/reports/breakdown", startMonth, endMonth, type, office],
     queryFn: () => {
       const params = new URLSearchParams({ startMonth, endMonth });
       if (type !== "all") params.set("type", type);
+      if (office !== "all") params.set("office", office);
       return fetch(`/api/office-expenses/reports/breakdown?${params}`, { credentials: "include" }).then(r => r.json());
     },
   });
 
   const { data: rawTopTransactions = [] } = useQuery<TopRow[]>({
-    queryKey: ["/api/office-expenses/reports/top", startMonth, endMonth, type, selectedCategory],
+    queryKey: ["/api/office-expenses/reports/top", startMonth, endMonth, type, selectedCategory, office],
     queryFn: () => {
       const params = new URLSearchParams({ startMonth, endMonth, limit: "15" });
       if (type !== "all") params.set("type", type);
       if (selectedCategory) params.set("category", selectedCategory);
+      if (office !== "all") params.set("office", office);
       return fetch(`/api/office-expenses/reports/top?${params}`, { credentials: "include" }).then(r => r.json());
     },
   });
@@ -239,6 +244,17 @@ export default function ExpenseReports() {
     return Array.from(map.entries()).map(([group, total]) => ({ group, total })).sort((a, b) => b.total - a.total);
   }, [breakdown]);
 
+  // Ofis bazlı toplam (ofis filtresi "Tümü" iken dağılımı gösterir; bölünmüş kayıtlar
+  // zaten kendi ofisine prorate edilmiş tutarla ayrı satır olduğu için ekstra hesap gerekmez)
+  const officeTotals = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const r of breakdown) {
+      const key = r.office || "Belirtilmemiş";
+      map.set(key, (map.get(key) ?? 0) + parseFloat(r.total));
+    }
+    return Array.from(map.entries()).map(([office, total]) => ({ office, total })).sort((a, b) => b.total - a.total);
+  }, [breakdown]);
+
   return (
     <Layout>
       <div className="space-y-6">
@@ -267,6 +283,16 @@ export default function ExpenseReports() {
                     <SelectItem value="expense">Masraf</SelectItem>
                     <SelectItem value="income">Gelir</SelectItem>
                     <SelectItem value="all">Her ikisi</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-xs mb-1 block">Ofis</Label>
+                <Select value={office} onValueChange={setOffice}>
+                  <SelectTrigger className="w-36 h-9"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Tümü</SelectItem>
+                    {OFFICES.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
@@ -327,6 +353,32 @@ export default function ExpenseReports() {
             );
           })}
         </div>
+
+        {/* Ofis Dağılımı — sadece "Tümü" seçiliyken anlamlı, filtre uygulanınca tek ofis kalır */}
+        {office === "all" && officeTotals.length > 0 && (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium">Ofis Dağılımı</CardTitle>
+            </CardHeader>
+            <CardContent className="pt-0">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                {officeTotals.map(({ office: o, total }) => (
+                  <button
+                    key={o}
+                    onClick={() => setOffice(o === "Belirtilmemiş" ? "all" : o)}
+                    className="rounded-lg border border-border p-3 text-left hover:border-primary/50 hover:bg-muted/30 transition-colors"
+                  >
+                    <p className="text-xs text-muted-foreground truncate">{o}</p>
+                    <p className="text-lg font-bold">{fmtTRY(total)}</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      {grandTotal > 0 ? `%${((total / grandTotal) * 100).toFixed(1)}` : "—"}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Açılmış grubun kategori kırılımı (Katalog dip toplam içeriği) */}
         {expandedGroup && (
@@ -581,6 +633,7 @@ export default function ExpenseReports() {
                   <TableRow>
                     <TableHead>Tarih</TableHead>
                     <TableHead>Kategori</TableHead>
+                    <TableHead>Ofis</TableHead>
                     <TableHead>Açıklama</TableHead>
                     <TableHead className="text-right">Tutar</TableHead>
                   </TableRow>
@@ -590,6 +643,7 @@ export default function ExpenseReports() {
                     <TableRow key={t.id}>
                       <TableCell className="text-xs">{new Date(t.date).toLocaleDateString("tr-TR")}</TableCell>
                       <TableCell className="text-xs">{t.category}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{t.office || "—"}</TableCell>
                       <TableCell className="text-xs text-muted-foreground max-w-md truncate">{t.notes ?? "—"}</TableCell>
                       <TableCell className={`text-right font-medium ${t.type === "income" ? "text-emerald-700" : "text-red-600"}`}>
                         {fmtTRYFull(parseFloat(t.amount))}

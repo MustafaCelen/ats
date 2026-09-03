@@ -3721,6 +3721,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const startMonth = String(req.query.startMonth ?? "");
       const endMonth = String(req.query.endMonth ?? "");
       const type = (req.query.type === "income" || req.query.type === "expense") ? req.query.type : null;
+      const office = req.query.office ? String(req.query.office) : null;
 
       if (!/^\d{4}-\d{2}$/.test(startMonth) || !/^\d{4}-\d{2}$/.test(endMonth)) {
         return res.status(400).json({ message: "startMonth ve endMonth 'YYYY-MM' formatında olmalı" });
@@ -3731,16 +3732,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const endDate = new Date(ey, em, 0).toISOString().slice(0, 10);
 
       const typeFilter = type ? sql` AND type = ${type}` : sql``;
+      const officeFilter = office ? sql` AND office = ${office}` : sql``;
       const result = await db.execute(sql`
         SELECT
           TO_CHAR(date::date, 'YYYY-MM') AS month,
           type,
           category,
+          office,
           COUNT(*)::int AS count,
           SUM(amount)::numeric AS total
         FROM office_expenses
-        WHERE date::date >= ${startDate}::date AND date::date <= ${endDate}::date ${typeFilter}
-        GROUP BY month, type, category
+        WHERE date::date >= ${startDate}::date AND date::date <= ${endDate}::date ${typeFilter} ${officeFilter}
+        GROUP BY month, type, category, office
         ORDER BY month, type, category
       `);
       res.json(result.rows);
@@ -3757,6 +3760,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const endMonth = String(req.query.endMonth ?? "");
       const type = (req.query.type === "income" || req.query.type === "expense") ? req.query.type : null;
       const category = req.query.category ? String(req.query.category) : null;
+      const office = req.query.office ? String(req.query.office) : null;
       const limit = Math.max(1, Math.min(100, parseInt(String(req.query.limit ?? "20"))));
 
       if (!/^\d{4}-\d{2}$/.test(startMonth) || !/^\d{4}-\d{2}$/.test(endMonth)) {
@@ -3768,10 +3772,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       const typeFilter = type ? sql` AND type = ${type}` : sql``;
       const catFilter = category ? sql` AND category = ${category}` : sql``;
+      const officeFilter = office ? sql` AND office = ${office}` : sql``;
       const result = await db.execute(sql`
-        SELECT id, date::date AS date, type, category, amount::numeric AS amount, notes, employee_id
+        SELECT id, date::date AS date, type, category, office, amount::numeric AS amount, notes, employee_id
         FROM office_expenses
-        WHERE date::date >= ${startDate}::date AND date::date <= ${endDate}::date ${typeFilter} ${catFilter}
+        WHERE date::date >= ${startDate}::date AND date::date <= ${endDate}::date ${typeFilter} ${catFilter} ${officeFilter}
         ORDER BY amount DESC
         LIMIT ${limit}
       `);

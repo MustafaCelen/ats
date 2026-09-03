@@ -26,6 +26,12 @@ function fmtTRY(n: number) {
   return new Intl.NumberFormat("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n) + " ₺";
 }
 
+function isRowOfficeValid(row: { office: string; splitEnabled: boolean; office2: string; splitPercent1: string }): boolean {
+  if (!row.splitEnabled) return !!row.office;
+  const pct1 = parseInt(row.splitPercent1, 10);
+  return !!row.office && !!row.office2 && row.office !== row.office2 && pct1 >= 1 && pct1 <= 99;
+}
+
 function todayYMD() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -66,6 +72,9 @@ type ImportRow = {
   amount: number;
   category: string;
   office: string;
+  splitEnabled: boolean;
+  office2: string;
+  splitPercent1: string;
   notes: string;
   included: boolean;
   selected: boolean;
@@ -100,6 +109,9 @@ function parseGarantiCSV(text: string): ImportRow[] {
       amount: Math.abs(amount),
       category: "",
       office: "",
+      splitEnabled: false,
+      office2: "",
+      splitPercent1: "50",
       notes: description.trim(),
       included: true,
       selected: false,
@@ -118,6 +130,9 @@ type CreditCardRow = {
   amount: number;
   category: string;
   office: string;
+  splitEnabled: boolean;
+  office2: string;
+  splitPercent1: string;
   notes: string;
   included: boolean;
   selected: boolean;
@@ -157,6 +172,9 @@ function parseCreditCardCSV(text: string): CreditCardRow[] {
       amount: Math.abs(amount),
       category: "",
       office: "",
+      splitEnabled: false,
+      office2: "",
+      splitPercent1: "50",
       notes: description.trim(),
       included: true,
       selected: false,
@@ -202,7 +220,7 @@ function CreditCardImportDialog({
 
   const included = rows.filter((r) => r.included);
   const selectedRows = rows.filter((r) => r.selected);
-  const allCategorized = included.length > 0 && included.every((r) => r.category && r.office);
+  const allCategorized = included.length > 0 && included.every((r) => r.category && isRowOfficeValid(r));
   const totalAmount = included.reduce((s, r) => s + r.amount, 0);
 
   const toggleAll = () => {
@@ -231,11 +249,21 @@ function CreditCardImportDialog({
     let success = 0;
     for (const row of included) {
       try {
-        const res = await fetch("/api/office-expenses", {
+        const url = row.splitEnabled ? "/api/office-expenses/split" : "/api/office-expenses";
+        const body = row.splitEnabled
+          ? {
+              type: "expense", category: row.category, amount: row.amount, date: row.date, notes: row.notes || null, employeeId: null,
+              allocations: [
+                { office: row.office, percent: parseInt(row.splitPercent1, 10) },
+                { office: row.office2, percent: 100 - parseInt(row.splitPercent1, 10) },
+              ],
+            }
+          : { type: "expense", category: row.category, office: row.office, amount: String(row.amount), date: row.date, notes: row.notes || null, employeeId: null };
+        const res = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
-          body: JSON.stringify({ type: "expense", category: row.category, office: row.office, amount: String(row.amount), date: row.date, notes: row.notes || null, employeeId: null }),
+          body: JSON.stringify(body),
         });
         if (res.ok) success++;
       } catch {}
@@ -332,7 +360,7 @@ function CreditCardImportDialog({
                     <th className="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">Etiket</th>
                     <th className="px-3 py-2 text-right text-xs font-semibold text-muted-foreground whitespace-nowrap">Tutar</th>
                     <th className="px-3 py-2 text-left text-xs font-semibold text-muted-foreground w-52">Kategori *</th>
-                    <th className="px-3 py-2 text-left text-xs font-semibold text-muted-foreground w-28">Ofis *</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-muted-foreground w-40">Ofis *</th>
                     <th className="px-3 py-2 text-left text-xs font-semibold text-muted-foreground w-36">Not</th>
                   </tr>
                 </thead>
@@ -390,8 +418,8 @@ function CreditCardImportDialog({
                           </SelectContent>
                         </Select>
                       </td>
-                      <td className="px-3 py-1.5" onClick={(e) => e.stopPropagation()}>
-                        <OfficeSelect value={row.office} onChange={(v) => updateRow(row.uid, { office: v })} className="h-7 text-xs" />
+                      <td className="px-3 py-1.5 align-top" onClick={(e) => e.stopPropagation()}>
+                        <SplitOfficeCell row={row} onChange={(patch) => updateRow(row.uid, patch)} />
                       </td>
                       <td className="px-3 py-1.5" onClick={(e) => e.stopPropagation()}>
                         <Input className="h-7 text-xs" value={row.notes} onChange={(e) => updateRow(row.uid, { notes: e.target.value })} placeholder="Not..." />
@@ -459,7 +487,7 @@ function BankStatementImportDialog({
 
   const included = rows.filter((r) => r.included);
   const selectedRows = rows.filter((r) => r.selected);
-  const allCategorized = included.length > 0 && included.every((r) => r.category && r.office);
+  const allCategorized = included.length > 0 && included.every((r) => r.category && isRowOfficeValid(r));
   const totalAmount = included.reduce((s, r) => s + r.amount, 0);
   const allIncludedSelected = included.length > 0 && included.every((r) => r.selected);
 
@@ -491,11 +519,21 @@ function BankStatementImportDialog({
     let success = 0;
     for (const row of included) {
       try {
-        const res = await fetch("/api/office-expenses", {
+        const url = row.splitEnabled ? "/api/office-expenses/split" : "/api/office-expenses";
+        const body = row.splitEnabled
+          ? {
+              type: "expense", category: row.category, amount: row.amount, date: row.date, notes: row.notes || null, employeeId: null,
+              allocations: [
+                { office: row.office, percent: parseInt(row.splitPercent1, 10) },
+                { office: row.office2, percent: 100 - parseInt(row.splitPercent1, 10) },
+              ],
+            }
+          : { type: "expense", category: row.category, office: row.office, amount: String(row.amount), date: row.date, notes: row.notes || null, employeeId: null };
+        const res = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
-          body: JSON.stringify({ type: "expense", category: row.category, office: row.office, amount: String(row.amount), date: row.date, notes: row.notes || null, employeeId: null }),
+          body: JSON.stringify(body),
         });
         if (res.ok) success++;
       } catch {}
@@ -589,7 +627,7 @@ function BankStatementImportDialog({
                     <th className="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">Açıklama</th>
                     <th className="px-3 py-2 text-right text-xs font-semibold text-muted-foreground whitespace-nowrap">Tutar</th>
                     <th className="px-3 py-2 text-left text-xs font-semibold text-muted-foreground w-52">Kategori *</th>
-                    <th className="px-3 py-2 text-left text-xs font-semibold text-muted-foreground w-28">Ofis *</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-muted-foreground w-40">Ofis *</th>
                     <th className="px-3 py-2 text-left text-xs font-semibold text-muted-foreground w-44">Not</th>
                   </tr>
                 </thead>
@@ -644,8 +682,8 @@ function BankStatementImportDialog({
                           </SelectContent>
                         </Select>
                       </td>
-                      <td className="px-3 py-1.5" onClick={(e) => e.stopPropagation()}>
-                        <OfficeSelect value={row.office} onChange={(v) => updateRow(row.uid, { office: v })} className="h-7 text-xs" />
+                      <td className="px-3 py-1.5 align-top" onClick={(e) => e.stopPropagation()}>
+                        <SplitOfficeCell row={row} onChange={(patch) => updateRow(row.uid, patch)} />
                       </td>
                       <td className="px-3 py-1.5" onClick={(e) => e.stopPropagation()}>
                         <Input className="h-7 text-xs" value={row.notes} onChange={(e) => updateRow(row.uid, { notes: e.target.value })} placeholder="Not..." />
@@ -689,6 +727,54 @@ function OfficeSelect({ value, onChange, exclude, className }: { value: string; 
         {OFFICES.filter((o) => o !== exclude).map((o) => <SelectItem key={o} value={o} className={className ? "text-xs" : undefined}>{o}</SelectItem>)}
       </SelectContent>
     </Select>
+  );
+}
+
+// ── Split-capable office cell for CSV import row previews ─────────────────────
+
+type SplitRowFields = { office: string; splitEnabled: boolean; office2: string; splitPercent1: string };
+
+function SplitOfficeCell<T extends SplitRowFields>({ row, onChange }: { row: T; onChange: (patch: Partial<T>) => void }) {
+  if (!row.splitEnabled) {
+    return (
+      <div className="flex items-center gap-1">
+        <OfficeSelect value={row.office} onChange={(v) => onChange({ office: v } as Partial<T>)} className="h-7 text-xs" />
+        <button
+          type="button"
+          title="İki ofise böl"
+          onClick={() => onChange({ splitEnabled: true, office2: "" } as Partial<T>)}
+          className="shrink-0 text-[10px] text-primary hover:underline whitespace-nowrap"
+        >
+          böl
+        </button>
+      </div>
+    );
+  }
+  const pct1 = parseInt(row.splitPercent1, 10) || 0;
+  return (
+    <div className="flex flex-col gap-1 min-w-[150px]">
+      <div className="flex items-center gap-1">
+        <OfficeSelect value={row.office} onChange={(v) => onChange({ office: v } as Partial<T>)} exclude={row.office2} className="h-7 text-xs w-24" />
+        <Input
+          type="number" min={1} max={99}
+          value={row.splitPercent1}
+          onChange={(e) => onChange({ splitPercent1: e.target.value } as Partial<T>)}
+          className="h-7 text-xs w-14 px-1"
+        />
+      </div>
+      <div className="flex items-center gap-1">
+        <OfficeSelect value={row.office2} onChange={(v) => onChange({ office2: v } as Partial<T>)} exclude={row.office} className="h-7 text-xs w-24" />
+        <span className="text-[10px] text-muted-foreground w-14 text-center">%{100 - pct1}</span>
+        <button
+          type="button"
+          title="Bölmeyi kaldır"
+          onClick={() => onChange({ splitEnabled: false, office2: "" } as Partial<T>)}
+          className="shrink-0 text-[10px] text-muted-foreground hover:text-red-600"
+        >
+          ✕
+        </button>
+      </div>
+    </div>
   );
 }
 
