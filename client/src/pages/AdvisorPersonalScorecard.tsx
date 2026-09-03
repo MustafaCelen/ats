@@ -57,6 +57,7 @@ type PortfolioStat = { activeCount: number; activeVolume: number; lastDate: stri
 interface PersonalScorecardData {
   employeeId: number; employeeName: string; kwuid: string;
   ukStartDate: string | null;
+  coachingType: "uk" | "dua" | "performans" | null;
   cap: {
     capAmount: number | null; capUsed: number; capRemaining: number | null; periodStart: string; capYear: number; isCapper: boolean;
     contractType: string | null; grossBhbRemaining: number | null;
@@ -722,7 +723,11 @@ export default function AdvisorPersonalScorecard() {
               />
               <StatTile icon={<CalendarClock className="h-4.5 w-4.5" />} label="CAP Yıldönümü" value={fmtDate(data.cap.periodStart)} />
               <StatTile icon={<Target className="h-4.5 w-4.5" />} label="CAP Tutarı" value={data.cap.capAmount != null ? fmtTRY(data.cap.capAmount) : "—"} />
-              <StatTile icon={<Award className="h-4.5 w-4.5" />} label="ÜK Giriş Tarihi" value={data.ukStartDate ? fmtDate(data.ukStartDate) : "—"} />
+              <StatTile
+                icon={<Award className="h-4.5 w-4.5" />}
+                label={data.coachingType === "performans" ? "PK Giriş Tarihi" : data.coachingType === "dua" ? "DÜA Giriş Tarihi" : "ÜK Giriş Tarihi"}
+                value={data.ukStartDate ? fmtDate(data.ukStartDate) : "—"}
+              />
               <StatTile icon={<Building2 className="h-4.5 w-4.5" />} label="Toplam Kiralık Portföy Hacmi" value={fmtTRY(data.portfolio.kiralik.activeVolume)} />
             </div>
 

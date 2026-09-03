@@ -4606,6 +4606,7 @@ export class DatabaseStorage implements IStorage {
   async getAdvisorPersonalScorecard(employeeId: number): Promise<{
     employeeId: number; employeeName: string; kwuid: string;
     ukStartDate: string | null;
+    coachingType: "uk" | "dua" | "performans" | null;
     cap: {
       capAmount: number | null; capUsed: number; capRemaining: number | null; periodStart: string; capYear: number; isCapper: boolean;
       contractType: string | null; grossBhbRemaining: number | null;
@@ -4626,7 +4627,10 @@ export class DatabaseStorage implements IStorage {
     donusSuresi: { satilikAvgDays: number | null; kiralikAvgDays: number | null };
   }> {
     const [emp] = await db
-      .select({ id: employees.id, kwuid: employees.kwuid, name: candidates.name, ukStartDate: employees.ukStartDate, contractType: employees.contractType })
+      .select({
+        id: employees.id, kwuid: employees.kwuid, name: candidates.name, ukStartDate: employees.ukStartDate, contractType: employees.contractType,
+        uretkenlikKoclugu: employees.uretkenlikKoclugu, dua: employees.dua, performansKariyerKoclugu: employees.performansKariyerKoclugu,
+      })
       .from(employees)
       .leftJoin(candidates, eq(candidates.id, employees.candidateId))
       .where(eq(employees.id, employeeId));
@@ -4800,6 +4804,7 @@ export class DatabaseStorage implements IStorage {
       employeeName: emp?.name ?? `#${employeeId}`,
       kwuid: emp?.kwuid ?? "",
       ukStartDate: emp?.ukStartDate ?? null,
+      coachingType: emp?.uretkenlikKoclugu ? "uk" : emp?.performansKariyerKoclugu ? "performans" : emp?.dua ? "dua" : null,
       cap: {
         capAmount: capStatus?.capAmount ?? null,
         capUsed: capStatus?.capUsed ?? 0,
