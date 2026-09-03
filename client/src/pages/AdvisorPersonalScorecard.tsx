@@ -708,7 +708,7 @@ export default function AdvisorPersonalScorecard() {
         {employeeId && !isLoading && data && (
           <>
             {/* ── Cap + ÜK ── */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-3">
               <StatTile
                 icon={<Wallet className="h-4.5 w-4.5" />}
                 label="Cap'e Kalan Tutar"
@@ -728,7 +728,6 @@ export default function AdvisorPersonalScorecard() {
                 label={data.coachingType === "performans" ? "PK Giriş Tarihi" : data.coachingType === "dua" ? "DÜA Giriş Tarihi" : "ÜK Giriş Tarihi"}
                 value={data.ukStartDate ? fmtDate(data.ukStartDate) : "—"}
               />
-              <StatTile icon={<Building2 className="h-4.5 w-4.5" />} label="Toplam Kiralık Portföy Hacmi" value={fmtTRY(data.portfolio.kiralik.activeVolume)} />
             </div>
 
             {/* ── BHB Hedefi & Gerçekleşen (Pie Chart) ── */}
@@ -747,10 +746,10 @@ export default function AdvisorPersonalScorecard() {
             {/* ── Alınan Sözleşme Sayıları (aylık, portföye eklenen yeni ilan) ── */}
             <MonthTable title="Alınan Sözleşme Sayıları" years={data.years} byYear={data.sozlesmeByYear} format={(n) => n.toLocaleString("tr-TR")} />
 
-            {/* ── Yıllık satılık özet ── */}
+            {/* ── Yıllık satılık ve kiralık özet ── */}
             <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
               <div className="px-4 py-2.5 border-b border-border">
-                <h3 className="text-sm font-semibold">Yıllık Satılık Özeti</h3>
+                <h3 className="text-sm font-semibold">Yıllık Satılık ve Kiralık Özeti</h3>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-xs">
@@ -771,6 +770,14 @@ export default function AdvisorPersonalScorecard() {
                       <td className="px-3 py-1.5">Toplam Satılık Hacmi</td>
                       {data.years.map((y) => (
                         <td key={y} className="text-right px-3 py-1.5 font-mono">{fmtTRY(data.satilikStatsByYear[y]?.totalVolume ?? 0)}</td>
+                      ))}
+                    </tr>
+                    <tr>
+                      <td className="px-3 py-1.5">Toplam Kiralık Portföy Hacmi (Güncel)</td>
+                      {data.years.map((y, i) => (
+                        <td key={y} className="text-right px-3 py-1.5 font-mono">
+                          {i === data.years.length - 1 ? fmtTRY(data.portfolio.kiralik.activeVolume) : "—"}
+                        </td>
                       ))}
                     </tr>
                   </tbody>
