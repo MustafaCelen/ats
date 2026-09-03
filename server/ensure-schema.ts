@@ -273,6 +273,17 @@ export async function ensureSchema(): Promise<void> {
     ALTER TABLE office_expenses ADD COLUMN IF NOT EXISTS split_group_id TEXT;
     ALTER TABLE office_expenses ADD COLUMN IF NOT EXISTS split_percent INTEGER;
     CREATE INDEX IF NOT EXISTS office_expenses_office_idx ON office_expenses(office);
+
+    -- Performans Kariyer Koçluğu: ÜK/DÜA ile aynı mantıkta 3. bağımsız koçluk tipi (oran yok)
+    ALTER TABLE employees ADD COLUMN IF NOT EXISTS performans_kariyer_koclugu BOOLEAN NOT NULL DEFAULT false;
+    ALTER TABLE employees ADD COLUMN IF NOT EXISTS performans_kariyer_koclugu_manager_id INTEGER;
+
+    -- Danışman notları: yapılandırılmış 4 alan (Görüşme Tarihi/Gündem/Koçun Notu/Sonraki Adım),
+    -- content serbest metin 5. alan olarak kalır
+    ALTER TABLE advisor_notes ADD COLUMN IF NOT EXISTS meeting_date TEXT;
+    ALTER TABLE advisor_notes ADD COLUMN IF NOT EXISTS agenda TEXT;
+    ALTER TABLE advisor_notes ADD COLUMN IF NOT EXISTS coach_note TEXT;
+    ALTER TABLE advisor_notes ADD COLUMN IF NOT EXISTS next_step TEXT;
   `;
   try {
     await pool.query(sql);

@@ -317,6 +317,16 @@ export interface IStorage {
   upsertInterviewTarget(data: { jobId: number; year: number; month: number; category: string; office: string; target: number }): Promise<void>;
 }
 
+type PortfolioListingRow = {
+  id: number; listingNumber: string | null; price: string | null; dealCategory: string | null;
+  firstSeenAt: Date | null; publishedDate: string | null;
+  ilce: string | null; mahalle: string | null; emlakTipi: string | null; odaSayisi: string | null; m2Net: string | null;
+};
+type PortfolioStat = {
+  activeCount: number; activeVolume: number; lastDate: string | null; daysSinceLast: number | null;
+  listings: PortfolioListingRow[];
+};
+
 export class DatabaseStorage implements IStorage {
   async getUserById(id: number): Promise<PublicUser | undefined> {
     const [u] = await db.select().from(users).where(eq(users.id, id));
@@ -356,6 +366,9 @@ export class DatabaseStorage implements IStorage {
     await db.update(employees)
       .set({ duaManagerId: null } as any)
       .where(eq((employees as any).duaManagerId, id));
+    await db.update(employees)
+      .set({ performansKariyerKocluguManagerId: null })
+      .where(eq(employees.performansKariyerKocluguManagerId, id));
     // Null out createdByUserId on candidates (nullable column)
     await db.update(candidates)
       .set({ createdByUserId: null })
@@ -4593,7 +4606,10 @@ export class DatabaseStorage implements IStorage {
   async getAdvisorPersonalScorecard(employeeId: number): Promise<{
     employeeId: number; employeeName: string; kwuid: string;
     ukStartDate: string | null;
-    cap: { capAmount: number | null; capUsed: number; capRemaining: number | null; periodStart: string; capYear: number; isCapper: boolean };
+    cap: {
+      capAmount: number | null; capUsed: number; capRemaining: number | null; periodStart: string; capYear: number; isCapper: boolean;
+      contractType: string | null; grossBhbRemaining: number | null;
+    };
     years: number[];
     bhbByYear: Record<number, { total: number; months: number[] }>;
     islemByYear: {
@@ -4604,13 +4620,13 @@ export class DatabaseStorage implements IStorage {
     sozlesmeByYear: Record<number, { total: number; months: number[] }>;
     satilikStatsByYear: Record<number, { avgCommissionRate: number; totalVolume: number }>;
     portfolio: {
-      satilik: { activeCount: number; activeVolume: number; lastDate: string | null; daysSinceLast: number | null };
-      kiralik: { activeCount: number; activeVolume: number; lastDate: string | null; daysSinceLast: number | null };
+      satilik: PortfolioStat;
+      kiralik: PortfolioStat;
     };
     donusSuresi: { satilikAvgDays: number | null; kiralikAvgDays: number | null };
   }> {
     const [emp] = await db
-      .select({ id: employees.id, kwuid: employees.kwuid, name: candidates.name, ukStartDate: employees.ukStartDate })
+      .select({ id: employees.id, kwuid: employees.kwuid, name: candidates.name, ukStartDate: employees.ukStartDate, contractType: employees.contractType })
       .from(employees)
       .leftJoin(candidates, eq(candidates.id, employees.candidateId))
       .where(eq(employees.id, employeeId));
@@ -4753,13 +4769,17 @@ export class DatabaseStorage implements IStorage {
       sozlesmeByYear[year].months[d.getMonth()] += 1;
     }
 
-    // ── Portföy: Satılık/Kiralık ayrı ayrı (aktif adet/hacim + en son eklenen tarih) ──
+    // ── Portföy: Satılık/Kiralık ayrı ayrı (aktif adet/hacim + en son eklenen tarih + tam liste) ──
     const portfolioRows = await db
-      .select({ price: listings.price, firstSeenAt: listings.firstSeenAt, dealCategory: listings.dealCategory })
+      .select({
+        id: listings.id, listingNumber: listings.listingNumber, price: listings.price, dealCategory: listings.dealCategory,
+        firstSeenAt: listings.firstSeenAt, publishedDate: listings.publishedDate,
+        ilce: listings.ilce, mahalle: listings.mahalle, emlakTipi: listings.emlakTipi, odaSayisi: listings.odaSayisi, m2Net: listings.m2Net,
+      })
       .from(listings)
       .where(and(eq(listings.employeeId, employeeId), eq(listings.status, "active")));
 
-    const buildPortfolioStat = (isKiralik: boolean) => {
+    const buildPortfolioStat = (isKiralik: boolean): PortfolioStat => {
       const rows = portfolioRows.filter((r) => (r.dealCategory === "Kiralık") === isKiralik);
       const activeCount = rows.length;
       const activeVolume = rows.reduce((s, r) => s + parseFloat(r.price ?? "0"), 0);
@@ -4769,7 +4789,10 @@ export class DatabaseStorage implements IStorage {
         return !max || d > max ? d : max;
       }, null);
       const daysSinceLast = lastDate ? Math.floor((Date.now() - lastDate.getTime()) / 86400000) : null;
-      return { activeCount, activeVolume, lastDate: lastDate ? lastDate.toISOString().slice(0, 10) : null, daysSinceLast };
+      return {
+        activeCount, activeVolume, lastDate: lastDate ? lastDate.toISOString().slice(0, 10) : null, daysSinceLast,
+        listings: rows.sort((a, b) => (b.firstSeenAt?.getTime() ?? 0) - (a.firstSeenAt?.getTime() ?? 0)),
+      };
     };
 
     return {
@@ -4784,6 +4807,12 @@ export class DatabaseStorage implements IStorage {
         periodStart: capStatus?.periodStart ? new Date(capStatus.periodStart).toISOString().slice(0, 10) : "",
         capYear: capStatus?.capYear ?? currentYear,
         isCapper: !!(capStatus?.capAmount != null && capStatus.capUsed >= capStatus.capAmount),
+        contractType: emp?.contractType ?? null,
+        // 50/50 sözleşmede brüt BHB'nin %30'u, 70/30 sözleşmede %27'si Cap'e gider —
+        // "cap'e ulaşmak için ne kadar brüt BHB daha üretmeli" sorusunun tersinden çözümü.
+        grossBhbRemaining: capStatus?.capRemaining != null
+          ? capStatus.capRemaining / (emp?.contractType === "50/50" ? 0.30 : 0.27)
+          : null,
       },
       years,
       bhbByYear,
@@ -4865,10 +4894,12 @@ export class DatabaseStorage implements IStorage {
         or(
           eq(employees.uretkenlikKoclugu, true),
           eq(employees.dua, true),
+          eq(employees.performansKariyerKoclugu, true),
         ),
         ...(coachUserId !== undefined ? [or(
           eq(employees.uretkenlikKocluguManagerId, coachUserId),
           eq(employees.duaManagerId, coachUserId),
+          eq(employees.performansKariyerKocluguManagerId, coachUserId),
         )] : []),
       ));
 
@@ -4995,11 +5026,12 @@ export class DatabaseStorage implements IStorage {
       ))
       .groupBy(closingAgents.employeeId),
 
-      // Coach user names (both ÜK and DUA coaches)
+      // Coach user names (ÜK, DUA, and Performans Kariyer Koçluğu coaches)
       (() => {
         const ids = [...new Set([
           ...activeUkEmps.map(e => e.emp.uretkenlikKocluguManagerId),
           ...activeUkEmps.map(e => (e.emp as any).duaManagerId),
+          ...activeUkEmps.map(e => e.emp.performansKariyerKocluguManagerId),
         ].filter(Boolean))] as number[];
         return ids.length > 0
           ? db.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, ids))
@@ -5185,9 +5217,12 @@ export class DatabaseStorage implements IStorage {
         kwuid: e.emp.kwuid ?? "",
         isUK: e.emp.uretkenlikKoclugu,
         isDua: (e.emp as any).dua ?? false,
+        isPerformans: e.emp.performansKariyerKoclugu ?? false,
         ukRate: e.emp.uretkenlikKocluguOran ?? "",
         coachId: e.emp.uretkenlikKoclugu
           ? (e.emp.uretkenlikKocluguManagerId ?? null)
+          : e.emp.performansKariyerKoclugu
+          ? (e.emp.performansKariyerKocluguManagerId ?? null)
           : ((e.emp as any).duaManagerId ?? null),
         totalClosings: Math.round(totalIslem),
         totalVolume,

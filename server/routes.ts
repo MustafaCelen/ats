@@ -1869,8 +1869,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const employeeId = parseInt(req.params.id);
       if (isNaN(employeeId)) return res.status(400).json({ message: "Geçersiz danışman id" });
       const { year, quarter, bhbTarget } = req.body ?? {};
-      if (!year || !quarter) return res.status(400).json({ message: "year, quarter gerekli" });
-      if (quarter < 1 || quarter > 4) return res.status(400).json({ message: "quarter 1-4 arasında olmalı" });
+      if (!year || quarter == null) return res.status(400).json({ message: "year, quarter gerekli" });
+      if (quarter < 0 || quarter > 4) return res.status(400).json({ message: "quarter 0-4 arasında olmalı (0 = yıllık)" });
       const row = await storage.upsertAdvisorBhbTarget({
         employeeId,
         year: Number(year),
@@ -1892,12 +1892,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/employees/:id/notes", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
     try {
-      const { content, authorName } = req.body;
-      if (!content) return res.status(400).json({ message: "Content is required" });
+      const { content, authorName, meetingDate, agenda, coachNote, nextStep } = req.body;
+      if (!content && !agenda && !coachNote && !nextStep) {
+        return res.status(400).json({ message: "En az bir alan doldurulmalı" });
+      }
       const note = await storage.createAdvisorNote({
         employeeId: Number(req.params.id),
-        content,
+        content: content || "",
         authorName: authorName || req.user!.name,
+        meetingDate: meetingDate || null,
+        agenda: agenda || null,
+        coachNote: coachNote || null,
+        nextStep: nextStep || null,
       });
       res.status(201).json(note);
     } catch (err) {
@@ -2231,7 +2237,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.patch("/api/employees/:id", requireAuth, async (req, res) => {
     try {
       const id = Number(req.params.id);
-      const { status, passiveAt, title, notes, startDate, kwuid, kwMail, contractType, uretkenlikKoclugu, uretkenlikKocluguManagerId, uretkenlikKocluguOran, dua, duaManagerId, ukStartDate, ukEndDate, capMonth, capValue, billingName, billingAddress, billingDistrict, billingCity, billingCountry, taxOffice, taxId, birthDate } = req.body;
+      const { status, passiveAt, title, notes, startDate, kwuid, kwMail, contractType, uretkenlikKoclugu, uretkenlikKocluguManagerId, uretkenlikKocluguOran, dua, duaManagerId, performansKariyerKoclugu, performansKariyerKocluguManagerId, ukStartDate, ukEndDate, capMonth, capValue, billingName, billingAddress, billingDistrict, billingCity, billingCountry, taxOffice, taxId, birthDate } = req.body;
       const update: any = {};
       if (status !== undefined) update.status = status;
       if (passiveAt !== undefined) update.passiveAt = passiveAt ? new Date(passiveAt) : null;
@@ -2246,6 +2252,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (uretkenlikKocluguOran !== undefined) update.uretkenlikKocluguOran = uretkenlikKocluguOran || null;
       if (dua !== undefined) update.dua = dua;
       if (duaManagerId !== undefined) update.duaManagerId = duaManagerId || null;
+      if (performansKariyerKoclugu !== undefined) update.performansKariyerKoclugu = performansKariyerKoclugu;
+      if (performansKariyerKocluguManagerId !== undefined) update.performansKariyerKocluguManagerId = performansKariyerKocluguManagerId || null;
       if (ukStartDate !== undefined) update.ukStartDate = ukStartDate || null;
       if (ukEndDate !== undefined) update.ukEndDate = ukEndDate || null;
       if (capMonth !== undefined) update.capMonth = capMonth || null;
@@ -2298,7 +2306,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (role === "hiring_manager") {
         const emp = await storage.getEmployee(id);
         const isAssigned = emp &&
-          (emp.uretkenlikKocluguManagerId === userId || emp.duaManagerId === userId);
+          (emp.uretkenlikKocluguManagerId === userId || emp.duaManagerId === userId || emp.performansKariyerKocluguManagerId === userId);
         if (!isAssigned) return res.status(403).json({ message: "Forbidden" });
       }
       const rows = await storage.getClosingsByEmployee(id);

@@ -35,7 +35,8 @@ export function useAdvisorNotes(employeeId: number | null) {
 export function useCreateAdvisorNote(employeeId: number | null) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (content: string) => apiRequest("POST", `/api/employees/${employeeId}/notes`, { content }),
+    mutationFn: (data: { content: string; meetingDate?: string; agenda?: string; coachNote?: string; nextStep?: string }) =>
+      apiRequest("POST", `/api/employees/${employeeId}/notes`, data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/employees", employeeId, "notes"] }),
   });
 }

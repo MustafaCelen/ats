@@ -257,6 +257,8 @@ export const employees = pgTable("employees", {
   uretkenlikKocluguOran: text("uretkenlik_koclugu_oran"), // 5% | 10%
   dua: boolean("dua").notNull().default(false),
   duaManagerId: integer("dua_manager_id"),
+  performansKariyerKoclugu: boolean("performans_kariyer_koclugu").notNull().default(false),
+  performansKariyerKocluguManagerId: integer("performans_kariyer_koclugu_manager_id"),
   ukStartDate: text("uk_start_date"),
   ukEndDate: text("uk_end_date"),
   capMonth: text("cap_month"),  // e.g. "2025-03"
@@ -315,6 +317,10 @@ export const advisorNotes = pgTable("advisor_notes", {
   employeeId: integer("employee_id").notNull(),
   content: text("content").notNull(),
   authorName: text("author_name").notNull().default("Coach"),
+  meetingDate: text("meeting_date"),   // Görüşme Tarihi (YYYY-MM-DD)
+  agenda: text("agenda"),              // Gündem
+  coachNote: text("coach_note"),       // Koçun Notu
+  nextStep: text("next_step"),         // Sonraki Adım
   createdAt: timestamp("created_at").defaultNow(),
 }, (t) => ({
   employeeIdIdx: index("advisor_notes_employee_id_idx").on(t.employeeId),
