@@ -4620,6 +4620,7 @@ export class DatabaseStorage implements IStorage {
     };
     sozlesmeByYear: Record<number, { total: number; months: number[] }>;
     satilikStatsByYear: Record<number, { avgCommissionRate: number; totalVolume: number }>;
+    kiralikStatsByYear: Record<number, { totalVolume: number }>;
     portfolio: {
       satilik: PortfolioStat;
       kiralik: PortfolioStat;
@@ -4690,6 +4691,8 @@ export class DatabaseStorage implements IStorage {
     // toplanır (Mahalle Bazlı Danışman Karnesi'ndeki ile aynı yöntem).
     const satilikClosingsByYear = new Map<number, Map<number, { saleValue: number; commissionRate: number }>>();
     for (const y of years) satilikClosingsByYear.set(y, new Map());
+    const kiralikClosingsByYear = new Map<number, Map<number, { saleValue: number }>>();
+    for (const y of years) kiralikClosingsByYear.set(y, new Map());
     const durationById = new Map<number, { days: number; category: string }>();
 
     for (const r of allRows) {
@@ -4721,6 +4724,11 @@ export class DatabaseStorage implements IStorage {
         if (!map.has(r.closingId)) {
           map.set(r.closingId, { saleValue: parseFloat(r.saleValue ?? "0"), commissionRate: parseFloat(r.commissionRate ?? "0") });
         }
+      } else {
+        const map = kiralikClosingsByYear.get(year)!;
+        if (!map.has(r.closingId)) {
+          map.set(r.closingId, { saleValue: parseFloat(r.saleValue ?? "0") });
+        }
       }
     }
 
@@ -4742,6 +4750,12 @@ export class DatabaseStorage implements IStorage {
         ? closingsThisYear.reduce((s, c) => s + c.commissionRate, 0) / closingsThisYear.length
         : 0;
       satilikStatsByYear[y] = { avgCommissionRate, totalVolume };
+    }
+
+    const kiralikStatsByYear: Record<number, { totalVolume: number }> = {};
+    for (const y of years) {
+      const closingsThisYear = Array.from(kiralikClosingsByYear.get(y)!.values());
+      kiralikStatsByYear[y] = { totalVolume: closingsThisYear.reduce((s, c) => s + c.saleValue, 0) };
     }
 
     // İşleme Dönme Süresi: kategoriye göre ortalama durationDays (tüm zamanlar)
@@ -4828,6 +4842,7 @@ export class DatabaseStorage implements IStorage {
       },
       sozlesmeByYear,
       satilikStatsByYear,
+      kiralikStatsByYear,
       portfolio: {
         satilik: buildPortfolioStat(false),
         kiralik: buildPortfolioStat(true),

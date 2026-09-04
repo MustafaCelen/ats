@@ -67,6 +67,7 @@ interface PersonalScorecardData {
   islemByYear: { toplam: Record<number, MonthBucket>; satilik: Record<number, MonthBucket>; kiralik: Record<number, MonthBucket> };
   sozlesmeByYear: Record<number, MonthBucket>;
   satilikStatsByYear: Record<number, { avgCommissionRate: number; totalVolume: number }>;
+  kiralikStatsByYear: Record<number, { totalVolume: number }>;
   portfolio: { satilik: PortfolioStat; kiralik: PortfolioStat };
   donusSuresi: { satilikAvgDays: number | null; kiralikAvgDays: number | null };
 }
@@ -772,12 +773,10 @@ export default function AdvisorPersonalScorecard() {
                         <td key={y} className="text-right px-3 py-1.5 font-mono">{fmtTRY(data.satilikStatsByYear[y]?.totalVolume ?? 0)}</td>
                       ))}
                     </tr>
-                    <tr>
-                      <td className="px-3 py-1.5">Toplam Kiralık Portföy Hacmi (Güncel)</td>
-                      {data.years.map((y, i) => (
-                        <td key={y} className="text-right px-3 py-1.5 font-mono">
-                          {i === data.years.length - 1 ? fmtTRY(data.portfolio.kiralik.activeVolume) : "—"}
-                        </td>
+                    <tr className="bg-emerald-100 font-semibold text-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-200">
+                      <td className="px-3 py-1.5">Toplam Kiralık Hacmi</td>
+                      {data.years.map((y) => (
+                        <td key={y} className="text-right px-3 py-1.5 font-mono">{fmtTRY(data.kiralikStatsByYear[y]?.totalVolume ?? 0)}</td>
                       ))}
                     </tr>
                   </tbody>
