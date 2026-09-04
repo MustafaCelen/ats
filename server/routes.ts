@@ -468,7 +468,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.get("/api/listings/reports/uk-breakdown", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
     try {
       const officeParam = req.query.office ? String(req.query.office) : undefined;
-      const officeFilter = officeParam ? sql`AND l.office = ${officeParam}` : sql``;
+      const officeFilter = officeParam ? sql`AND c.office = ${officeParam}` : sql``;
       const rows = await db.execute(sql`
         WITH grp AS (
           SELECT
@@ -483,6 +483,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             l.close_reason_requested_at
           FROM listings l
           LEFT JOIN employees e ON e.id = l.employee_id
+          LEFT JOIN candidates c ON c.id = e.candidate_id
           WHERE 1=1 ${officeFilter}
         )
         SELECT

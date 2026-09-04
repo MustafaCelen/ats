@@ -6075,7 +6075,7 @@ export class DatabaseStorage implements IStorage {
         .from(listings)
         .leftJoin(employees, eq(listings.employeeId, employees.id))
         .leftJoin(candidates, eq(employees.candidateId, candidates.id))
-        .where(office ? eq(listings.office, office) : undefined)
+        .where(office ? eq(candidates.office, office) : undefined)
         .groupBy(listings.employeeId, listings.advisorName, candidates.name)
         .orderBy(sql`count(*) filter (where ${listings.status} = 'active') desc`),
       db
@@ -6121,16 +6121,18 @@ export class DatabaseStorage implements IStorage {
     satilik: { active: number; passive: number; activeVolume: number; passiveVolume: number };
     kiralik: { active: number; passive: number; activeVolume: number; passiveVolume: number };
   }> {
-    const officeFilter = office ? sql`AND office = ${office}` : sql``;
+    const officeFilter = office ? sql`AND c.office = ${office}` : sql``;
     const rows = await db.execute(sql`
       SELECT
-        CASE WHEN price::numeric >= 1000000 THEN 'satilik' ELSE 'kiralik' END AS type,
-        status,
+        CASE WHEN l.price::numeric >= 1000000 THEN 'satilik' ELSE 'kiralik' END AS type,
+        l.status,
         COUNT(*)::int AS count,
-        COALESCE(SUM(price::numeric), 0) AS total_volume
-      FROM listings
-      WHERE price IS NOT NULL AND price::numeric > 0 ${officeFilter}
-      GROUP BY type, status
+        COALESCE(SUM(l.price::numeric), 0) AS total_volume
+      FROM listings l
+      LEFT JOIN employees e ON e.id = l.employee_id
+      LEFT JOIN candidates c ON c.id = e.candidate_id
+      WHERE l.price IS NOT NULL AND l.price::numeric > 0 ${officeFilter}
+      GROUP BY type, l.status
     `);
     const result = {
       satilik: { active: 0, passive: 0, activeVolume: 0, passiveVolume: 0 },
@@ -6255,27 +6257,29 @@ export class DatabaseStorage implements IStorage {
     satilikActive: number; satilikPassive: number; satilikVolume: number;
     kiralikActive: number; kiralikPassive: number; kiralikVolume: number;
   }[]> {
-    const officeFilter = office ? sql`AND office = ${office}` : sql``;
+    const officeFilter = office ? sql`AND c.office = ${office}` : sql``;
     const rows = await db.execute(sql`
       SELECT
         to_char(
           CASE
-            WHEN published_date ~ '^\d{1,2}/\d{1,2}/\d{4}$' THEN to_date(published_date, 'MM/DD/YYYY')
-            WHEN published_date ~ '^[A-Za-z]'                THEN to_date(published_date, 'Mon DD, YYYY')
+            WHEN l.published_date ~ '^\d{1,2}/\d{1,2}/\d{4}$' THEN to_date(l.published_date, 'MM/DD/YYYY')
+            WHEN l.published_date ~ '^[A-Za-z]'                THEN to_date(l.published_date, 'Mon DD, YYYY')
             ELSE NULL
           END,
           'YYYY-MM'
         ) AS month,
-        CASE WHEN price::numeric >= 1000000 THEN 'satilik' ELSE 'kiralik' END AS type,
-        status,
+        CASE WHEN l.price::numeric >= 1000000 THEN 'satilik' ELSE 'kiralik' END AS type,
+        l.status,
         COUNT(*)::int AS count,
-        COALESCE(SUM(price::numeric), 0) AS total_volume
-      FROM listings
-      WHERE published_date IS NOT NULL
-        AND published_date NOT LIKE '%null%'
-        AND price IS NOT NULL
-        AND price::numeric > 0 ${officeFilter}
-      GROUP BY month, type, status
+        COALESCE(SUM(l.price::numeric), 0) AS total_volume
+      FROM listings l
+      LEFT JOIN employees e ON e.id = l.employee_id
+      LEFT JOIN candidates c ON c.id = e.candidate_id
+      WHERE l.published_date IS NOT NULL
+        AND l.published_date NOT LIKE '%null%'
+        AND l.price IS NOT NULL
+        AND l.price::numeric > 0 ${officeFilter}
+      GROUP BY month, type, l.status
       ORDER BY month DESC
       LIMIT 96
     `);
@@ -6314,15 +6318,17 @@ export class DatabaseStorage implements IStorage {
   }[]> {
     const rows = await db
       .select({
-        office: listings.office,
+        office: candidates.office,
         totalActive:          sql<number>`count(*) filter (where ${listings.status} = 'active')`,
         totalPassive:         sql<number>`count(*) filter (where ${listings.status} = 'passive')`,
         agreementUploaded:    sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.agreementUploadedAt} is not null)`,
         closeReasonSubmitted: sql<number>`count(*) filter (where ${listings.status} = 'passive' and ${listings.closeReasonSubmittedAt} is not null)`,
       })
       .from(listings)
-      .where(office ? eq(listings.office, office) : undefined)
-      .groupBy(listings.office)
+      .leftJoin(employees, eq(listings.employeeId, employees.id))
+      .leftJoin(candidates, eq(employees.candidateId, candidates.id))
+      .where(office ? eq(candidates.office, office) : undefined)
+      .groupBy(candidates.office)
       .orderBy(sql`count(*) filter (where ${listings.status} = 'active') desc`);
 
     return rows.map((r) => ({
@@ -6344,11 +6350,13 @@ export class DatabaseStorage implements IStorage {
         count: sql<number>`count(*)`,
       })
       .from(listings)
+      .leftJoin(employees, eq(listings.employeeId, employees.id))
+      .leftJoin(candidates, eq(employees.candidateId, candidates.id))
       .where(and(
         eq(listings.status, "passive"),
         isNotNull(listings.closeReasonSubmittedAt),
         isNotNull(listings.closeReason),
-        office ? eq(listings.office, office) : undefined,
+        office ? eq(candidates.office, office) : undefined,
       ))
       .groupBy(listings.closeReason, listings.dealCategory)
       .orderBy(sql`count(*) desc`);
@@ -6361,24 +6369,26 @@ export class DatabaseStorage implements IStorage {
   // ── Feature 4: Aylık trend ───────────────────────────────────────────────────
 
   async getListingMonthlyTrend(office?: string): Promise<{ month: string; newActive: number; newPassive: number }[]> {
-    const officeFilter = office ? sql`AND office = ${office}` : sql``;
+    const officeFilter = office ? sql`AND c.office = ${office}` : sql``;
     const activeRows = await db.execute(sql`
       SELECT
         to_char(
           CASE
-            WHEN published_date ~ '^\d{1,2}/\d{1,2}/\d{4}$' THEN to_date(published_date, 'MM/DD/YYYY')
-            WHEN published_date ~ '^[A-Za-z]'                THEN to_date(published_date, 'Mon DD, YYYY')
+            WHEN l.published_date ~ '^\d{1,2}/\d{1,2}/\d{4}$' THEN to_date(l.published_date, 'MM/DD/YYYY')
+            WHEN l.published_date ~ '^[A-Za-z]'                THEN to_date(l.published_date, 'Mon DD, YYYY')
             ELSE NULL
           END,
           'YYYY-MM'
         ) AS month,
         count(*) AS cnt
-      FROM listings
-      WHERE published_date IS NOT NULL
-        AND (published_date ~ '^\d{1,2}/\d{1,2}/\d{4}$' OR published_date ~ '^[A-Za-z]')
+      FROM listings l
+      LEFT JOIN employees e ON e.id = l.employee_id
+      LEFT JOIN candidates c ON c.id = e.candidate_id
+      WHERE l.published_date IS NOT NULL
+        AND (l.published_date ~ '^\d{1,2}/\d{1,2}/\d{4}$' OR l.published_date ~ '^[A-Za-z]')
         AND extract(year from CASE
-          WHEN published_date ~ '^\d{1,2}/\d{1,2}/\d{4}$' THEN to_date(published_date, 'MM/DD/YYYY')
-          WHEN published_date ~ '^[A-Za-z]'                THEN to_date(published_date, 'Mon DD, YYYY')
+          WHEN l.published_date ~ '^\d{1,2}/\d{1,2}/\d{4}$' THEN to_date(l.published_date, 'MM/DD/YYYY')
+          WHEN l.published_date ~ '^[A-Za-z]'                THEN to_date(l.published_date, 'Mon DD, YYYY')
           ELSE NULL
         END) = extract(year from current_date) ${officeFilter}
       GROUP BY 1
@@ -6389,19 +6399,21 @@ export class DatabaseStorage implements IStorage {
       SELECT
         to_char(
           CASE
-            WHEN removed_date ~ '^\d{1,2}/\d{1,2}/\d{4}$' THEN to_date(removed_date, 'MM/DD/YYYY')
-            WHEN removed_date ~ '^[A-Za-z]'                THEN to_date(removed_date, 'Mon DD, YYYY')
+            WHEN l.removed_date ~ '^\d{1,2}/\d{1,2}/\d{4}$' THEN to_date(l.removed_date, 'MM/DD/YYYY')
+            WHEN l.removed_date ~ '^[A-Za-z]'                THEN to_date(l.removed_date, 'Mon DD, YYYY')
             ELSE NULL
           END,
           'YYYY-MM'
         ) AS month,
         count(*) AS cnt
-      FROM listings
-      WHERE removed_date IS NOT NULL
-        AND (removed_date ~ '^\d{1,2}/\d{1,2}/\d{4}$' OR removed_date ~ '^[A-Za-z]')
+      FROM listings l
+      LEFT JOIN employees e ON e.id = l.employee_id
+      LEFT JOIN candidates c ON c.id = e.candidate_id
+      WHERE l.removed_date IS NOT NULL
+        AND (l.removed_date ~ '^\d{1,2}/\d{1,2}/\d{4}$' OR l.removed_date ~ '^[A-Za-z]')
         AND extract(year from CASE
-          WHEN removed_date ~ '^\d{1,2}/\d{1,2}/\d{4}$' THEN to_date(removed_date, 'MM/DD/YYYY')
-          WHEN removed_date ~ '^[A-Za-z]'                THEN to_date(removed_date, 'Mon DD, YYYY')
+          WHEN l.removed_date ~ '^\d{1,2}/\d{1,2}/\d{4}$' THEN to_date(l.removed_date, 'MM/DD/YYYY')
+          WHEN l.removed_date ~ '^[A-Za-z]'                THEN to_date(l.removed_date, 'Mon DD, YYYY')
           ELSE NULL
         END) = extract(year from current_date) ${officeFilter}
       GROUP BY 1
@@ -6436,21 +6448,23 @@ export class DatabaseStorage implements IStorage {
     satilikCount: number; satilikVolume: number;
     kiralikCount: number; kiralikVolume: number;
   }[]> {
-    const officeFilter = office ? sql`AND office = ${office}` : sql``;
+    const officeFilter = office ? sql`AND c.office = ${office}` : sql``;
     const rows = await db.execute(sql`
       WITH parsed AS (
         SELECT
           CASE
-            WHEN published_date ~ '^\d+/\d+/\d+$' THEN to_date(published_date, 'MM/DD/YYYY')
-            WHEN published_date ~ '^[A-Za-z]'      THEN to_date(published_date, 'Mon DD, YYYY')
+            WHEN l.published_date ~ '^\d+/\d+/\d+$' THEN to_date(l.published_date, 'MM/DD/YYYY')
+            WHEN l.published_date ~ '^[A-Za-z]'      THEN to_date(l.published_date, 'Mon DD, YYYY')
             ELSE NULL
           END AS pub_date,
-          CASE WHEN price >= 1000000 THEN 'satilik' ELSE 'kiralik' END AS type,
-          price AS price_num
-        FROM listings
-        WHERE status = 'active'
-          AND published_date IS NOT NULL
-          AND price IS NOT NULL ${officeFilter}
+          CASE WHEN l.price >= 1000000 THEN 'satilik' ELSE 'kiralik' END AS type,
+          l.price AS price_num
+        FROM listings l
+        LEFT JOIN employees e ON e.id = l.employee_id
+        LEFT JOIN candidates c ON c.id = e.candidate_id
+        WHERE l.status = 'active'
+          AND l.published_date IS NOT NULL
+          AND l.price IS NOT NULL ${officeFilter}
       ),
       with_group AS (
         SELECT
@@ -6500,7 +6514,7 @@ export class DatabaseStorage implements IStorage {
     publishedDate: string | null;
     daysActive: number;
   }[]> {
-    const officeFilter = office ? sql`AND l.office = ${office}` : sql``;
+    const officeFilter = office ? sql`AND c.office = ${office}` : sql``;
     const rows = await db.execute(sql`
       SELECT
         l.id,
