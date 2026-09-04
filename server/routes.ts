@@ -419,54 +419,56 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ── Listing Reports ──────────────────────────────────────────────────────────
 
   // Feature 1: Danışman bazlı rapor
-  app.get("/api/listings/reports/advisor", requireAuth, requireHiringManagerOrAdmin, async (_req, res) => {
-    try { res.json(await storage.getListingReportByAdvisor()); }
+  app.get("/api/listings/reports/advisor", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
+    try { res.json(await storage.getListingReportByAdvisor(req.query.office ? String(req.query.office) : undefined)); }
     catch (err) { console.error("[GET /api/listings/reports/advisor]", err); res.status(500).json({ message: "Internal server error" }); }
   });
 
   // Feature 2: Ofis bazlı kırılım
-  app.get("/api/listings/reports/office", requireAuth, requireHiringManagerOrAdmin, async (_req, res) => {
-    try { res.json(await storage.getListingReportByOffice()); }
+  app.get("/api/listings/reports/office", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
+    try { res.json(await storage.getListingReportByOffice(req.query.office ? String(req.query.office) : undefined)); }
     catch (err) { console.error("[GET /api/listings/reports/office]", err); res.status(500).json({ message: "Internal server error" }); }
   });
 
   // Feature 3: Kalkış sebebi analizi
-  app.get("/api/listings/reports/close-reasons", requireAuth, requireHiringManagerOrAdmin, async (_req, res) => {
-    try { res.json(await storage.getListingCloseReasonStats()); }
+  app.get("/api/listings/reports/close-reasons", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
+    try { res.json(await storage.getListingCloseReasonStats(req.query.office ? String(req.query.office) : undefined)); }
     catch (err) { console.error("[GET /api/listings/reports/close-reasons]", err); res.status(500).json({ message: "Internal server error" }); }
   });
 
   // Feature 4: Aylık trend
-  app.get("/api/listings/reports/monthly-trend", requireAuth, requireHiringManagerOrAdmin, async (_req, res) => {
-    try { res.json(await storage.getListingMonthlyTrend()); }
+  app.get("/api/listings/reports/monthly-trend", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
+    try { res.json(await storage.getListingMonthlyTrend(req.query.office ? String(req.query.office) : undefined)); }
     catch (err) { console.error("[GET /api/listings/reports/monthly-trend]", err); res.status(500).json({ message: "Internal server error" }); }
   });
 
   // Satılık / Kiralık özet istatistikleri
-  app.get("/api/listings/reports/type-stats", requireAuth, requireHiringManagerOrAdmin, async (_req, res) => {
-    try { res.json(await storage.getListingTypeStats()); }
+  app.get("/api/listings/reports/type-stats", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
+    try { res.json(await storage.getListingTypeStats(req.query.office ? String(req.query.office) : undefined)); }
     catch (err) { console.error("[GET /api/listings/reports/type-stats]", err); res.status(500).json({ message: "Internal server error" }); }
   });
 
   // İlan tarihi bazlı rapor
-  app.get("/api/listings/reports/date-report", requireAuth, requireHiringManagerOrAdmin, async (_req, res) => {
-    try { res.json(await storage.getListingDateReport()); }
+  app.get("/api/listings/reports/date-report", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
+    try { res.json(await storage.getListingDateReport(req.query.office ? String(req.query.office) : undefined)); }
     catch (err) { console.error("[GET /api/listings/reports/date-report]", err); res.status(500).json({ message: "Internal server error" }); }
   });
 
-  app.get("/api/listings/reports/age-groups", requireAuth, requireHiringManagerOrAdmin, async (_req, res) => {
-    try { res.json(await storage.getListingAgeGroups()); }
+  app.get("/api/listings/reports/age-groups", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
+    try { res.json(await storage.getListingAgeGroups(req.query.office ? String(req.query.office) : undefined)); }
     catch (err) { console.error("[GET /api/listings/reports/age-groups]", err); res.status(500).json({ message: "Internal server error" }); }
   });
 
-  app.get("/api/listings/reports/over-90-days", requireAuth, requireHiringManagerOrAdmin, async (_req, res) => {
-    try { res.json(await storage.getListingsOver90Days()); }
+  app.get("/api/listings/reports/over-90-days", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
+    try { res.json(await storage.getListingsOver90Days(req.query.office ? String(req.query.office) : undefined)); }
     catch (err) { console.error("[GET /api/listings/reports/over-90-days]", err); res.status(500).json({ message: "Internal server error" }); }
   });
 
   // ÜK (Üretkenlik Koçluğu) bazlı ilan raporu
-  app.get("/api/listings/reports/uk-breakdown", requireAuth, requireHiringManagerOrAdmin, async (_req, res) => {
+  app.get("/api/listings/reports/uk-breakdown", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
     try {
+      const officeParam = req.query.office ? String(req.query.office) : undefined;
+      const officeFilter = officeParam ? sql`AND l.office = ${officeParam}` : sql``;
       const rows = await db.execute(sql`
         WITH grp AS (
           SELECT
@@ -481,6 +483,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             l.close_reason_requested_at
           FROM listings l
           LEFT JOIN employees e ON e.id = l.employee_id
+          WHERE 1=1 ${officeFilter}
         )
         SELECT
           bucket,

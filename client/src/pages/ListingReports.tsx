@@ -10,6 +10,7 @@ import {
   BarChart2, Building2, Users, TrendingDown, TrendingUp, Bell, RefreshCw,
   ChevronLeft, ChevronRight, Search, Clock, LayoutDashboard, Settings,
 } from "lucide-react";
+import { OFFICES } from "@shared/schema";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
   PieChart, Pie, Cell,
@@ -157,6 +158,8 @@ export default function ListingReports() {
   const { toast } = useToast();
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<TabKey>("genel");
+  const [officeFilter, setOfficeFilter] = useState<string>("all");
+  const officeParam = officeFilter !== "all" ? officeFilter : undefined;
 
   // ── Reminder settings ──
   const [agreementDays, setAgreementDays] = useState(3);
@@ -170,56 +173,57 @@ export default function ListingReports() {
   const [advisorPage, setAdvisorPage] = useState(0);
   const [advisorSearch, setAdvisorSearch] = useState("");
 
-  // ── Over-90 sort + pagination + office filter ──
+  // ── Over-90 sort + pagination ──
   type Over90SortKey = "listingNumber" | "employeeName" | "office" | "price" | "daysActive";
   const [o90Sort, setO90Sort] = useState<{ key: Over90SortKey; dir: "asc" | "desc" }>({ key: "daysActive", dir: "desc" });
   const [o90Page, setO90Page] = useState(0);
-  const [o90OfficeFilter, setO90OfficeFilter] = useState<string>("all");
 
   // ── Data queries ──
+  const withOffice = (path: string) => officeParam ? `${path}?office=${encodeURIComponent(officeParam)}` : path;
+
   const { data: advisorData = [], isLoading: loadingAdvisor } = useQuery<AdvisorReport[]>({
-    queryKey: ["/api/listings/reports/advisor"],
-    queryFn: () => fetch("/api/listings/reports/advisor", { credentials: "include" }).then((r) => r.json()),
+    queryKey: ["/api/listings/reports/advisor", officeParam],
+    queryFn: () => fetch(withOffice("/api/listings/reports/advisor"), { credentials: "include" }).then((r) => r.json()),
   });
 
   const { data: officeData = [], isLoading: loadingOffice } = useQuery<OfficeReport[]>({
-    queryKey: ["/api/listings/reports/office"],
-    queryFn: () => fetch("/api/listings/reports/office", { credentials: "include" }).then((r) => r.json()),
+    queryKey: ["/api/listings/reports/office", officeParam],
+    queryFn: () => fetch(withOffice("/api/listings/reports/office"), { credentials: "include" }).then((r) => r.json()),
   });
 
   const { data: closeReasonData = [], isLoading: loadingCloseReason } = useQuery<CloseReasonStat[]>({
-    queryKey: ["/api/listings/reports/close-reasons"],
-    queryFn: () => fetch("/api/listings/reports/close-reasons", { credentials: "include" }).then((r) => r.json()),
+    queryKey: ["/api/listings/reports/close-reasons", officeParam],
+    queryFn: () => fetch(withOffice("/api/listings/reports/close-reasons"), { credentials: "include" }).then((r) => r.json()),
   });
 
   const { data: trendData = [], isLoading: loadingTrend } = useQuery<MonthlyTrend[]>({
-    queryKey: ["/api/listings/reports/monthly-trend"],
-    queryFn: () => fetch("/api/listings/reports/monthly-trend", { credentials: "include" }).then((r) => r.json()),
+    queryKey: ["/api/listings/reports/monthly-trend", officeParam],
+    queryFn: () => fetch(withOffice("/api/listings/reports/monthly-trend"), { credentials: "include" }).then((r) => r.json()),
   });
 
   const { data: typeStats, isLoading: loadingTypeStats } = useQuery<TypeStats>({
-    queryKey: ["/api/listings/reports/type-stats"],
-    queryFn: () => fetch("/api/listings/reports/type-stats", { credentials: "include" }).then((r) => r.json()),
+    queryKey: ["/api/listings/reports/type-stats", officeParam],
+    queryFn: () => fetch(withOffice("/api/listings/reports/type-stats"), { credentials: "include" }).then((r) => r.json()),
   });
 
   const { data: dateReport = [], isLoading: loadingDateReport } = useQuery<DateReportRow[]>({
-    queryKey: ["/api/listings/reports/date-report"],
-    queryFn: () => fetch("/api/listings/reports/date-report", { credentials: "include" }).then((r) => r.json()),
+    queryKey: ["/api/listings/reports/date-report", officeParam],
+    queryFn: () => fetch(withOffice("/api/listings/reports/date-report"), { credentials: "include" }).then((r) => r.json()),
   });
 
   const { data: over90Data = [], isLoading: loadingOver90 } = useQuery<Over90DayListing[]>({
-    queryKey: ["/api/listings/reports/over-90-days"],
-    queryFn: () => fetch("/api/listings/reports/over-90-days", { credentials: "include" }).then((r) => r.json()),
+    queryKey: ["/api/listings/reports/over-90-days", officeParam],
+    queryFn: () => fetch(withOffice("/api/listings/reports/over-90-days"), { credentials: "include" }).then((r) => r.json()),
   });
 
   const { data: ageGroups = [], isLoading: loadingAgeGroups } = useQuery<AgeGroupRow[]>({
-    queryKey: ["/api/listings/reports/age-groups"],
-    queryFn: () => fetch("/api/listings/reports/age-groups", { credentials: "include" }).then((r) => r.json()),
+    queryKey: ["/api/listings/reports/age-groups", officeParam],
+    queryFn: () => fetch(withOffice("/api/listings/reports/age-groups"), { credentials: "include" }).then((r) => r.json()),
   });
 
   const { data: ukBreakdown = [], isLoading: loadingUk } = useQuery<UkBucketRow[]>({
-    queryKey: ["/api/listings/reports/uk-breakdown"],
-    queryFn: () => fetch("/api/listings/reports/uk-breakdown", { credentials: "include" }).then((r) => r.json()),
+    queryKey: ["/api/listings/reports/uk-breakdown", officeParam],
+    queryFn: () => fetch(withOffice("/api/listings/reports/uk-breakdown"), { credentials: "include" }).then((r) => r.json()),
   });
 
   const { data: teams = [] } = useQuery<{ id: number; name: string; memberIds: number[] }[]>({
@@ -309,23 +313,15 @@ export default function ListingReports() {
     setO90Sort(s => s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "desc" });
   };
 
-  const o90Offices = useMemo(() =>
-    Array.from(new Set(over90Data.map(r => r.office ?? "—"))).sort(),
-    [over90Data]
-  );
-
   const sortedO90 = useMemo(() => {
-    const filtered = o90OfficeFilter === "all"
-      ? over90Data
-      : over90Data.filter(r => (r.office ?? "—") === o90OfficeFilter);
-    return [...filtered].sort((a, b) => {
+    return [...over90Data].sort((a, b) => {
       const key = o90Sort.key;
       const av = key === "price" ? Number(a.price ?? 0) : key === "employeeName" ? (a.employeeName ?? a.advisorName ?? "") : (a as any)[key];
       const bv = key === "price" ? Number(b.price ?? 0) : key === "employeeName" ? (b.employeeName ?? b.advisorName ?? "") : (b as any)[key];
       const cmp = av < bv ? -1 : av > bv ? 1 : 0;
       return o90Sort.dir === "asc" ? cmp : -cmp;
     });
-  }, [over90Data, o90Sort, o90OfficeFilter]);
+  }, [over90Data, o90Sort]);
 
   const o90PageCount = Math.ceil(sortedO90.length / PAGE_SIZE);
   const o90PageRows = sortedO90.slice(o90Page * PAGE_SIZE, (o90Page + 1) * PAGE_SIZE);
@@ -405,14 +401,44 @@ export default function ListingReports() {
       <div className="space-y-6">
 
         {/* Header */}
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <BarChart2 className="h-6 w-6 text-primary" />
-            İlan Raporları
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Danışman, ofis ve kalkış sebebi bazlı detaylı ilan analizleri
-          </p>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-bold flex items-center gap-2">
+              <BarChart2 className="h-6 w-6 text-primary" />
+              İlan Raporları
+            </h1>
+            <p className="text-sm text-muted-foreground mt-1">
+              Danışman, ofis ve kalkış sebebi bazlı detaylı ilan analizleri
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">Ofis:</span>
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                onClick={() => setOfficeFilter("all")}
+                className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                  officeFilter === "all"
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "border-border text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Tümü
+              </button>
+              {OFFICES.map((o) => (
+                <button
+                  key={o}
+                  onClick={() => setOfficeFilter(o)}
+                  className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                    officeFilter === o
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "border-border text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {o}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
         {/* Tab Bar */}
@@ -775,47 +801,12 @@ export default function ListingReports() {
 
             {/* 90+ gün aktif ilanlar */}
             <div className="space-y-3">
-              {/* Office filter */}
-              {o90Offices.length > 0 && (
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground">Ofis:</span>
-                  <div className="flex flex-wrap gap-1.5">
-                    <button
-                      onClick={() => { setO90OfficeFilter("all"); setO90Page(0); }}
-                      className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
-                        o90OfficeFilter === "all"
-                          ? "bg-primary text-primary-foreground border-primary"
-                          : "border-border text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      Tümü ({over90Data.length})
-                    </button>
-                    {o90Offices.map(office => {
-                      const cnt = over90Data.filter(r => (r.office ?? "—") === office).length;
-                      return (
-                        <button
-                          key={office}
-                          onClick={() => { setO90OfficeFilter(office); setO90Page(0); }}
-                          className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
-                            o90OfficeFilter === office
-                              ? "bg-primary text-primary-foreground border-primary"
-                              : "border-border text-muted-foreground hover:text-foreground"
-                          }`}
-                        >
-                          {office} ({cnt})
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
               <SectionCard title={`90+ Gün Aktif İlanlar (${sortedO90.length})`} icon={Clock}>
                 {loadingOver90 ? (
                   <div className="p-6 text-center text-sm text-muted-foreground">Yükleniyor…</div>
                 ) : sortedO90.length === 0 ? (
                   <div className="p-6 text-center text-sm text-muted-foreground">
-                    {o90OfficeFilter !== "all" ? "Bu ofiste 90+ günlük aktif ilan yok." : "90 günden uzun süredir aktif ilan yok."}
+                    {officeFilter !== "all" ? "Bu ofiste 90+ günlük aktif ilan yok." : "90 günden uzun süredir aktif ilan yok."}
                   </div>
                 ) : (
                   <>

@@ -6044,7 +6044,7 @@ export class DatabaseStorage implements IStorage {
 
   // ── Feature 1: Danışman bazlı rapor ─────────────────────────────────────────
 
-  async getListingReportByAdvisor(): Promise<{
+  async getListingReportByAdvisor(office?: string): Promise<{
     employeeId: number | null;
     advisorName: string | null;
     employeeName: string | null;
@@ -6075,6 +6075,7 @@ export class DatabaseStorage implements IStorage {
         .from(listings)
         .leftJoin(employees, eq(listings.employeeId, employees.id))
         .leftJoin(candidates, eq(employees.candidateId, candidates.id))
+        .where(office ? eq(listings.office, office) : undefined)
         .groupBy(listings.employeeId, listings.advisorName, candidates.name)
         .orderBy(sql`count(*) filter (where ${listings.status} = 'active') desc`),
       db
@@ -6086,7 +6087,10 @@ export class DatabaseStorage implements IStorage {
         .from(closingAgents)
         .innerJoin(closingSides, eq(closingAgents.closingSideId, closingSides.id))
         .innerJoin(closings, eq(closingSides.closingId, closings.id))
-        .where(sql`extract(year from coalesce(${closingAgents.closingDate}, ${closings.closingDate})) = extract(year from current_date)`)
+        .where(and(
+          sql`extract(year from coalesce(${closingAgents.closingDate}, ${closings.closingDate})) = extract(year from current_date)`,
+          office ? eq(closingAgents.officeSnapshot, office) : undefined,
+        ))
         .groupBy(closingAgents.employeeId),
     ]);
 
@@ -6113,10 +6117,11 @@ export class DatabaseStorage implements IStorage {
 
   // ── Satılık / Kiralık type stats (price < 1M = kiralık, >= 1M = satılık) ────
 
-  async getListingTypeStats(): Promise<{
+  async getListingTypeStats(office?: string): Promise<{
     satilik: { active: number; passive: number; activeVolume: number; passiveVolume: number };
     kiralik: { active: number; passive: number; activeVolume: number; passiveVolume: number };
   }> {
+    const officeFilter = office ? sql`AND office = ${office}` : sql``;
     const rows = await db.execute(sql`
       SELECT
         CASE WHEN price::numeric >= 1000000 THEN 'satilik' ELSE 'kiralik' END AS type,
@@ -6124,7 +6129,7 @@ export class DatabaseStorage implements IStorage {
         COUNT(*)::int AS count,
         COALESCE(SUM(price::numeric), 0) AS total_volume
       FROM listings
-      WHERE price IS NOT NULL AND price::numeric > 0
+      WHERE price IS NOT NULL AND price::numeric > 0 ${officeFilter}
       GROUP BY type, status
     `);
     const result = {
@@ -6245,11 +6250,12 @@ export class DatabaseStorage implements IStorage {
 
   // ── Aylık ilan tarihi raporu (satılık/kiralık breakdown) ──────────────────
 
-  async getListingDateReport(): Promise<{
+  async getListingDateReport(office?: string): Promise<{
     month: string;
     satilikActive: number; satilikPassive: number; satilikVolume: number;
     kiralikActive: number; kiralikPassive: number; kiralikVolume: number;
   }[]> {
+    const officeFilter = office ? sql`AND office = ${office}` : sql``;
     const rows = await db.execute(sql`
       SELECT
         to_char(
@@ -6268,7 +6274,7 @@ export class DatabaseStorage implements IStorage {
       WHERE published_date IS NOT NULL
         AND published_date NOT LIKE '%null%'
         AND price IS NOT NULL
-        AND price::numeric > 0
+        AND price::numeric > 0 ${officeFilter}
       GROUP BY month, type, status
       ORDER BY month DESC
       LIMIT 96
@@ -6299,7 +6305,7 @@ export class DatabaseStorage implements IStorage {
 
   // ── Feature 2: Ofis bazlı kırılım ───────────────────────────────────────────
 
-  async getListingReportByOffice(): Promise<{
+  async getListingReportByOffice(office?: string): Promise<{
     office: string | null;
     totalActive: number;
     totalPassive: number;
@@ -6315,6 +6321,7 @@ export class DatabaseStorage implements IStorage {
         closeReasonSubmitted: sql<number>`count(*) filter (where ${listings.status} = 'passive' and ${listings.closeReasonSubmittedAt} is not null)`,
       })
       .from(listings)
+      .where(office ? eq(listings.office, office) : undefined)
       .groupBy(listings.office)
       .orderBy(sql`count(*) filter (where ${listings.status} = 'active') desc`);
 
@@ -6329,7 +6336,7 @@ export class DatabaseStorage implements IStorage {
 
   // ── Feature 3: Kalkış sebebi analizi ────────────────────────────────────────
 
-  async getListingCloseReasonStats(): Promise<{ closeReason: string; dealCategory: string; count: number }[]> {
+  async getListingCloseReasonStats(office?: string): Promise<{ closeReason: string; dealCategory: string; count: number }[]> {
     const rows = await db
       .select({
         closeReason: listings.closeReason,
@@ -6341,6 +6348,7 @@ export class DatabaseStorage implements IStorage {
         eq(listings.status, "passive"),
         isNotNull(listings.closeReasonSubmittedAt),
         isNotNull(listings.closeReason),
+        office ? eq(listings.office, office) : undefined,
       ))
       .groupBy(listings.closeReason, listings.dealCategory)
       .orderBy(sql`count(*) desc`);
@@ -6352,7 +6360,8 @@ export class DatabaseStorage implements IStorage {
 
   // ── Feature 4: Aylık trend ───────────────────────────────────────────────────
 
-  async getListingMonthlyTrend(): Promise<{ month: string; newActive: number; newPassive: number }[]> {
+  async getListingMonthlyTrend(office?: string): Promise<{ month: string; newActive: number; newPassive: number }[]> {
+    const officeFilter = office ? sql`AND office = ${office}` : sql``;
     const activeRows = await db.execute(sql`
       SELECT
         to_char(
@@ -6371,7 +6380,7 @@ export class DatabaseStorage implements IStorage {
           WHEN published_date ~ '^\d{1,2}/\d{1,2}/\d{4}$' THEN to_date(published_date, 'MM/DD/YYYY')
           WHEN published_date ~ '^[A-Za-z]'                THEN to_date(published_date, 'Mon DD, YYYY')
           ELSE NULL
-        END) = extract(year from current_date)
+        END) = extract(year from current_date) ${officeFilter}
       GROUP BY 1
       ORDER BY 1
     `);
@@ -6394,7 +6403,7 @@ export class DatabaseStorage implements IStorage {
           WHEN removed_date ~ '^\d{1,2}/\d{1,2}/\d{4}$' THEN to_date(removed_date, 'MM/DD/YYYY')
           WHEN removed_date ~ '^[A-Za-z]'                THEN to_date(removed_date, 'Mon DD, YYYY')
           ELSE NULL
-        END) = extract(year from current_date)
+        END) = extract(year from current_date) ${officeFilter}
       GROUP BY 1
       ORDER BY 1
     `);
@@ -6421,12 +6430,13 @@ export class DatabaseStorage implements IStorage {
 
   // ── İlan yaş grubu dağılımı (pie chart) ─────────────────────────────────────
 
-  async getListingAgeGroups(): Promise<{
+  async getListingAgeGroups(office?: string): Promise<{
     label: string; order: number;
     count: number; volume: number;
     satilikCount: number; satilikVolume: number;
     kiralikCount: number; kiralikVolume: number;
   }[]> {
+    const officeFilter = office ? sql`AND office = ${office}` : sql``;
     const rows = await db.execute(sql`
       WITH parsed AS (
         SELECT
@@ -6440,7 +6450,7 @@ export class DatabaseStorage implements IStorage {
         FROM listings
         WHERE status = 'active'
           AND published_date IS NOT NULL
-          AND price IS NOT NULL
+          AND price IS NOT NULL ${officeFilter}
       ),
       with_group AS (
         SELECT
@@ -6480,7 +6490,7 @@ export class DatabaseStorage implements IStorage {
 
   // ── 90+ gün aktif ilanlar ───────────────────────────────────────────────────
 
-  async getListingsOver90Days(): Promise<{
+  async getListingsOver90Days(office?: string): Promise<{
     id: number;
     listingNumber: string;
     advisorName: string | null;
@@ -6490,6 +6500,7 @@ export class DatabaseStorage implements IStorage {
     publishedDate: string | null;
     daysActive: number;
   }[]> {
+    const officeFilter = office ? sql`AND l.office = ${office}` : sql``;
     const rows = await db.execute(sql`
       SELECT
         l.id,
@@ -6514,7 +6525,7 @@ export class DatabaseStorage implements IStorage {
           WHEN l.published_date ~ '^\d{1,2}/\d{1,2}/\d{4}$' THEN to_date(l.published_date, 'MM/DD/YYYY')
           WHEN l.published_date ~ '^[A-Za-z]'                THEN to_date(l.published_date, 'Mon DD, YYYY')
           ELSE NULL
-        END) > 90
+        END) > 90 ${officeFilter}
       ORDER BY days_active DESC
     `);
     return (rows.rows as any[]).map(r => ({
