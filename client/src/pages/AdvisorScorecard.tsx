@@ -203,7 +203,7 @@ export default function AdvisorScorecard() {
                   </tbody>
                   {officeRows.length > 0 && (
                     <tfoot>
-                      <tr className="border-t-2 border-emerald-300 bg-emerald-50 font-semibold text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
+                      <tr className="border-t-2 border-border font-semibold bg-muted/20">
                         <td className="py-2 px-3">Genel Toplam</td>
                         <td className="py-2 px-3 text-right tabular-nums">{fmtTRY(officeTotal.bhb)}</td>
                         <td className="py-2 px-3 text-right tabular-nums">{fmtOran(officeTotal.oran)}</td>
@@ -265,7 +265,7 @@ export default function AdvisorScorecard() {
                         ))}
                       </tbody>
                       <tfoot>
-                        <tr className="border-t-2 border-emerald-300 bg-emerald-50 font-semibold text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
+                        <tr className="border-t-2 border-border font-semibold bg-muted/20">
                           <td className="py-2 px-3">Genel Toplam</td>
                           <td className="py-2 px-3 text-right tabular-nums">{fmtTRY(companyTotal.bhb)}</td>
                           <td className="py-2 px-3 text-right tabular-nums">{fmtOran(companyTotal.oran)}</td>

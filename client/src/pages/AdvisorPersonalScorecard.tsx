@@ -156,7 +156,7 @@ function MonthTable({ title, years, byYear, format }: {
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            <tr className="font-semibold bg-muted/20">
+            <tr className="border-y border-emerald-300 bg-emerald-100 font-semibold text-emerald-900 dark:border-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-200">
               <td className="px-3 py-1.5">Toplam</td>
               {years.map((y) => <td key={y} className="text-right px-3 py-1.5 font-mono">{format(byYear[y]?.total ?? 0)}</td>)}
             </tr>
@@ -760,13 +760,13 @@ export default function AdvisorPersonalScorecard() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
-                    <tr>
+                    <tr className="bg-emerald-100 font-semibold text-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-200">
                       <td className="px-3 py-1.5">Ortalama Satılık BHB Oranı</td>
                       {data.years.map((y) => (
                         <td key={y} className="text-right px-3 py-1.5 font-mono">{fmtPct(data.satilikStatsByYear[y]?.avgCommissionRate ?? 0)}</td>
                       ))}
                     </tr>
-                    <tr>
+                    <tr className="bg-emerald-100 font-semibold text-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-200">
                       <td className="px-3 py-1.5">Toplam Satılık Hacmi</td>
                       {data.years.map((y) => (
                         <td key={y} className="text-right px-3 py-1.5 font-mono">{fmtTRY(data.satilikStatsByYear[y]?.totalVolume ?? 0)}</td>
