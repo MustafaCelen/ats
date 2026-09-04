@@ -36,6 +36,7 @@ const reportsGroupHM: NavGroup = {
     { icon: GraduationCap, label: "ÜK & DÜA Raporları",    href: "/coaching"          },
     { icon: Building2,     label: "İlan Raporları",         href: "/listings/reports"  },
     { icon: TrendingUp,    label: "Trend Raporları",        href: "/closing-analytics" },
+    { icon: UserCheck,     label: "Danışman Karnesi",       href: "/advisor-personal-scorecard" },
   ],
 };
 
