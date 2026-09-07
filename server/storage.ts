@@ -431,17 +431,19 @@ export class DatabaseStorage implements IStorage {
     const empRows = await db.select({ candidateId: employees.candidateId }).from(employees);
     const empIds = empRows.map((e) => e.candidateId);
 
+    let rows: Candidate[];
+
     if (jobIds !== undefined) {
-      // Hiring manager: show candidates who applied to their jobs OR who they personally created
+      // Hiring manager (has explicit job assignments): show candidates who applied to their
+      // jobs OR who they personally created
       let appCandidateIds: number[] = [];
       if (jobIds.length > 0) {
-        const rows = await db.selectDistinct({ id: applications.candidateId })
+        const r = await db.selectDistinct({ id: applications.candidateId })
           .from(applications)
           .where(inArray(applications.jobId, jobIds));
-        appCandidateIds = rows.map((r) => r.id);
+        appCandidateIds = r.map((x) => x.id);
       }
 
-      // Also include candidates created by this HM
       let createdIds: number[] = [];
       if (createdByUserId !== undefined) {
         const created = await db.select({ id: candidates.id })
@@ -451,14 +453,31 @@ export class DatabaseStorage implements IStorage {
       }
 
       const allIds = Array.from(new Set([...appCandidateIds, ...createdIds])).filter((id) => !empIds.includes(id));
-      if (allIds.length === 0) return [];
-      return db.select().from(candidates).where(inArray(candidates.id, allIds)).orderBy(desc(candidates.createdAt));
+      rows = allIds.length
+        ? await db.select().from(candidates).where(inArray(candidates.id, allIds)).orderBy(desc(candidates.createdAt))
+        : [];
+    } else if (empIds.length > 0) {
+      rows = await db.select().from(candidates).where(notInArray(candidates.id, empIds)).orderBy(desc(candidates.createdAt));
+    } else {
+      rows = await db.select().from(candidates).orderBy(desc(candidates.createdAt));
     }
 
-    if (empIds.length > 0) {
-      return db.select().from(candidates).where(notInArray(candidates.id, empIds)).orderBy(desc(candidates.createdAt));
+    // Aday transferi: bu bir HM'in görünümüyse (createdByUserId verildi), transfer edilmiş
+    // adaylar sadece atanan HM'e görünür — hem job-scoped hem de "iş ataması yok, legacy
+    // olarak hepsini gör" yolunda (jobIds === undefined ama role hiring_manager) geçerli.
+    // Admin/assistant çağrıları createdByUserId geçmez, bu yüzden bu blok onları etkilemez.
+    if (createdByUserId !== undefined) {
+      rows = rows.filter((c) => c.assignedHiringManagerId == null || c.assignedHiringManagerId === createdByUserId);
+
+      const transferred = await db.select().from(candidates)
+        .where(and(eq(candidates.assignedHiringManagerId, createdByUserId), notInArray(candidates.id, empIds.length ? empIds : [-1])));
+      for (const c of transferred) {
+        if (!rows.some((r) => r.id === c.id)) rows.push(c);
+      }
+      rows.sort((a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0));
     }
-    return db.select().from(candidates).orderBy(desc(candidates.createdAt));
+
+    return rows;
   }
   async getCandidate(id: number): Promise<Candidate | undefined> {
     const [candidate] = await db.select().from(candidates).where(eq(candidates.id, id));
@@ -480,7 +499,7 @@ export class DatabaseStorage implements IStorage {
     const [candidate] = await db.insert(candidates).values(insertCandidate).returning();
     return candidate;
   }
-  async updateCandidate(id: number, update: Partial<InsertCandidate>): Promise<Candidate | undefined> {
+  async updateCandidate(id: number, update: Partial<InsertCandidate> & { assignedHiringManagerId?: number | null }): Promise<Candidate | undefined> {
     const [candidate] = await db.update(candidates).set(update).where(eq(candidates.id, id)).returning();
     return candidate;
   }

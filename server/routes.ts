@@ -1402,6 +1402,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const candidate = await storage.getCandidate(Number(req.params.id));
     if (!candidate) return res.status(404).json({ message: "Candidate not found" });
     if (req.user!.role === "hiring_manager") {
+      // Aday transfer edilmişse sadece atanan HM görebilir — job ataması/oluşturan eşleşmesi
+      // olsa bile eski HM'in erişimi tamamen kesilir.
+      if (candidate.assignedHiringManagerId != null) {
+        if (candidate.assignedHiringManagerId !== req.user!.id) {
+          return res.status(403).json({ message: "Forbidden" });
+        }
+        return res.json(candidate);
+      }
       // Allow if HM created this candidate
       if (candidate.createdByUserId === req.user!.id) {
         return res.json(candidate);
@@ -1417,6 +1425,29 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
     }
     res.json(candidate);
+  });
+
+  // Aday transferi: bir adayı belirli bir Hiring Manager'a (veya null ile tekrar herkese açık
+  // job-assignment tabanlı görünürlüğe) devreder. Riski minimize etmek için sadece admin
+  // başlatabilir — HM'lerin birbirinin adaylarını habersizce devretmesi engellenir.
+  app.post("/api/candidates/:id/transfer", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const { hiringManagerId } = req.body as { hiringManagerId: number | null };
+      if (hiringManagerId !== null && typeof hiringManagerId !== "number") {
+        return res.status(400).json({ message: "hiringManagerId gerekli (number veya null)" });
+      }
+      if (hiringManagerId !== null) {
+        const target = await storage.getUserById(hiringManagerId);
+        if (!target || target.role !== "hiring_manager") {
+          return res.status(400).json({ message: "Geçersiz Hiring Manager" });
+        }
+      }
+      const candidate = await storage.updateCandidate(Number(req.params.id), { assignedHiringManagerId: hiringManagerId });
+      if (!candidate) return res.status(404).json({ message: "Candidate not found" });
+      res.json(candidate);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message ?? "Transfer başarısız" });
+    }
   });
 
   // Türkiye: yerel format "05xxxxxxxxx" (11 hane). Yurt dışı: E.164 ("+" + ülke kodu + ulusal

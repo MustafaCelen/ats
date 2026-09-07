@@ -139,6 +139,11 @@ export const candidates = pgTable("candidates", {
   office: text("office"),                            // "Akatlar" | "Zekeriyaköy"
   campaignId: integer("campaign_id"),                // Hangi kampanyadan geldi (opsiyonel)
   createdByUserId: integer("created_by_user_id"),
+  // Aday transferi: set edilirse SADECE bu Hiring Manager (+admin) adayı görebilir — mevcut
+  // job-assignment tabanlı görünürlüğü (job_assignments) geçersiz kılar. Admin-only transfer
+  // endpoint'i (POST /api/candidates/:id/transfer) tarafından yönetilir; genel create/update
+  // API yüzeyinden bilinçli olarak dışlanmıştır (bkz. insertCandidateSchema omit).
+  assignedHiringManagerId: integer("assigned_hiring_manager_id"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -938,7 +943,7 @@ export type TeamWithMembers = Team & { memberIds: number[] };
 
 // Insert schemas
 export const insertJobSchema = createInsertSchema(jobs).omit({ id: true, createdAt: true });
-export const insertCandidateSchema = createInsertSchema(candidates).omit({ id: true, createdAt: true, createdByUserId: true });
+export const insertCandidateSchema = createInsertSchema(candidates).omit({ id: true, createdAt: true, createdByUserId: true, assignedHiringManagerId: true });
 export const insertApplicationSchema = createInsertSchema(applications).omit({ id: true, appliedAt: true });
 export const insertInterviewSchema = createInsertSchema(interviews).omit({ id: true, createdAt: true });
 export const insertOfferSchema = createInsertSchema(offers).omit({ id: true, createdAt: true });

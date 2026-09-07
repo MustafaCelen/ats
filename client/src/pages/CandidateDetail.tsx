@@ -255,6 +255,7 @@ export default function CandidateDetail() {
   const [editingHistoryDate, setEditingHistoryDate] = useState<string>("");
   const [activeTab, setActiveTab] = useState<"overview" | "applications" | "interviews" | "notes" | "islemler" | "history">("overview");
   const [editOpen, setEditOpen] = useState(false);
+  const [transferOpen, setTransferOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [reEnrollOpen, setReEnrollOpen] = useState(false);
   const [reEnrollJobId, setReEnrollJobId] = useState<number | null>(null);
@@ -330,16 +331,26 @@ export default function CandidateDetail() {
           </Link>
           <div className="flex items-center gap-2">
             {user?.role === "admin" && (
-              <Button
-                size="sm"
-                variant="outline"
-                className="text-destructive border-destructive/40 hover:bg-destructive/10"
-                onClick={() => setDeleteConfirmOpen(true)}
-                disabled={isDeleting}
-                data-testid="btn-delete-candidate"
-              >
-                <Trash2 className="h-3.5 w-3.5 mr-1.5" /> Sil
-              </Button>
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setTransferOpen(true)}
+                  data-testid="btn-transfer-candidate"
+                >
+                  <Users className="h-3.5 w-3.5 mr-1.5" /> Transfer Et
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-destructive border-destructive/40 hover:bg-destructive/10"
+                  onClick={() => setDeleteConfirmOpen(true)}
+                  disabled={isDeleting}
+                  data-testid="btn-delete-candidate"
+                >
+                  <Trash2 className="h-3.5 w-3.5 mr-1.5" /> Sil
+                </Button>
+              </>
             )}
             <Button size="sm" variant="outline" onClick={() => setEditOpen(true)} data-testid="btn-edit-candidate">
               <Pencil className="h-3.5 w-3.5 mr-1.5" /> Profili Düzenle
@@ -1211,6 +1222,10 @@ export default function CandidateDetail() {
         <EditCandidateDialog candidate={candidate} employeeRecord={null} open={editOpen} onOpenChange={setEditOpen} />
       )}
 
+      {candidate && (
+        <TransferCandidateDialog candidate={candidate} open={transferOpen} onOpenChange={setTransferOpen} />
+      )}
+
       <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -1333,6 +1348,85 @@ function ChipToggle({ options, value, onChange }: { options: string[]; value: st
         </button>
       ))}
     </div>
+  );
+}
+
+// ─── Transfer Dialog (admin-only: reassign a candidate to another Hiring Manager) ─────────────
+
+function TransferCandidateDialog({ candidate, open, onOpenChange }: { candidate: Candidate; open: boolean; onOpenChange: (v: boolean) => void }) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [selectedHmId, setSelectedHmId] = useState<string>(
+    (candidate as any).assignedHiringManagerId != null ? String((candidate as any).assignedHiringManagerId) : "none"
+  );
+
+  const { data: hiringManagers = [] } = useQuery<any[]>({
+    queryKey: ["/api/hiring-managers"],
+    queryFn: () => fetch("/api/hiring-managers", { credentials: "include" }).then((r) => r.json()),
+    enabled: open,
+  });
+
+  const { mutate: transfer, isPending } = useMutation({
+    mutationFn: async (hiringManagerId: number | null) => {
+      const res = await fetch(`/api/candidates/${candidate.id}/transfer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ hiringManagerId }),
+      });
+      if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.message ?? "Transfer başarısız"); }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/candidates"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/candidates", candidate.id] });
+      toast({ title: "Aday transfer edildi" });
+      onOpenChange(false);
+    },
+    onError: (err) => toast({ title: (err as Error).message, variant: "destructive" }),
+  });
+
+  const currentAssigned = (candidate as any).assignedHiringManagerId as number | null | undefined;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent aria-describedby="transfer-cd-desc" className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Adayı Transfer Et</DialogTitle>
+          <p id="transfer-cd-desc" className="text-sm text-muted-foreground">
+            {candidate.name} için sorumlu Hiring Manager'ı değiştir. Transfer edilen aday, ilan ataması ne olursa olsun
+            sadece seçilen Hiring Manager'a görünür — eski sorumlunun erişimi kesilir.
+          </p>
+        </DialogHeader>
+        <div className="space-y-4 pt-2">
+          <Select value={selectedHmId} onValueChange={setSelectedHmId}>
+            <SelectTrigger data-testid="select-transfer-hm"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">Herkese açık (job atamasına göre)</SelectItem>
+              {hiringManagers.map((hm) => (
+                <SelectItem key={hm.id} value={String(hm.id)}>{hm.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {currentAssigned != null && (
+            <p className="text-xs text-muted-foreground">
+              Şu an: {hiringManagers.find((hm) => hm.id === currentAssigned)?.name ?? `#${currentAssigned}`}'e devredilmiş.
+            </p>
+          )}
+          <div className="flex gap-2 pt-1">
+            <Button variant="outline" className="flex-1" onClick={() => onOpenChange(false)}>İptal</Button>
+            <Button
+              className="flex-1"
+              disabled={isPending}
+              onClick={() => transfer(selectedHmId === "none" ? null : Number(selectedHmId))}
+              data-testid="btn-confirm-transfer"
+            >
+              {isPending ? "Aktarılıyor..." : "Transfer Et"}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

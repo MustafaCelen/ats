@@ -224,6 +224,10 @@ export async function ensureSchema(): Promise<void> {
           INSERT INTO audit_log (table_name, record_id, field_name, old_value, new_value, action)
           VALUES ('candidates', NEW.id, 'license_status', OLD.license_status, NEW.license_status, 'update');
         END IF;
+        IF NEW.assigned_hiring_manager_id IS DISTINCT FROM OLD.assigned_hiring_manager_id THEN
+          INSERT INTO audit_log (table_name, record_id, field_name, old_value, new_value, action)
+          VALUES ('candidates', NEW.id, 'assigned_hiring_manager_id', OLD.assigned_hiring_manager_id::text, NEW.assigned_hiring_manager_id::text, 'update');
+        END IF;
         RETURN NEW;
       ELSIF TG_OP = 'DELETE' THEN
         INSERT INTO audit_log (table_name, record_id, field_name, old_value, new_value, action)
@@ -289,6 +293,10 @@ export async function ensureSchema(): Promise<void> {
     -- batch takibi için — canlı ilerleme in-memory, kalıcı sonuçlar burada)
     ALTER TABLE whatsapp_bulk_sends ADD COLUMN IF NOT EXISTS batch_id TEXT;
     CREATE INDEX IF NOT EXISTS whatsapp_bulk_sends_batch_id_idx ON whatsapp_bulk_sends(batch_id);
+
+    -- Aday transferi: set edilirse sadece bu Hiring Manager (+admin) adayı görebilir.
+    ALTER TABLE candidates ADD COLUMN IF NOT EXISTS assigned_hiring_manager_id INTEGER;
+    CREATE INDEX IF NOT EXISTS candidates_assigned_hm_idx ON candidates(assigned_hiring_manager_id);
   `;
   try {
     await pool.query(sql);
