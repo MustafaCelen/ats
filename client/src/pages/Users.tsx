@@ -55,7 +55,7 @@ export default function Users() {
 
   return (
     <Layout>
-      <div className="space-y-6 max-w-4xl">
+      <div className="space-y-6 max-w-6xl">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-display font-bold">Kullanıcı Yönetimi</h1>
@@ -66,7 +66,7 @@ export default function Users() {
 
         {/* Users Table */}
         <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-          <div className="hidden md:grid grid-cols-[2fr_2fr_120px_140px_100px] gap-4 px-5 py-3 bg-muted/30 border-b border-border text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <div className="hidden md:grid grid-cols-[2fr_2fr_120px_140px_220px] gap-4 px-5 py-3 bg-muted/30 border-b border-border text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             <div>Kullanıcı</div><div>E-posta</div><div>Rol</div><div>Üyelik</div><div></div>
           </div>
           {isLoading ? (
@@ -76,7 +76,7 @@ export default function Users() {
           ) : (
             <div className="divide-y divide-border">
               {users.map((user) => (
-                <div key={user.id} className="grid grid-cols-1 md:grid-cols-[2fr_2fr_120px_140px_100px] gap-4 px-5 py-4 items-center hover:bg-muted/10 transition-colors" data-testid={`row-user-${user.id}`}>
+                <div key={user.id} className="grid grid-cols-1 md:grid-cols-[2fr_2fr_120px_140px_220px] gap-4 px-5 py-4 items-center hover:bg-muted/10 transition-colors" data-testid={`row-user-${user.id}`}>
                   <div className="flex items-center gap-3">
                     <div className="h-8 w-8 rounded-full bg-gradient-to-br from-primary to-accent flex items-center justify-center text-white text-xs font-bold shrink-0">
                       {user.name.slice(0, 2).toUpperCase()}
@@ -88,7 +88,7 @@ export default function Users() {
                   <p className="text-xs text-muted-foreground whitespace-nowrap">
                     {user.createdAt ? formatDistanceToNow(new Date(user.createdAt), { addSuffix: true }) : "—"}
                   </p>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center flex-wrap gap-1">
                     {(user.role === "hiring_manager" || user.role === "assistant") && (
                       <Button
                         size="sm" variant="outline"
