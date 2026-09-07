@@ -24,8 +24,14 @@ type BatchState = {
   templateName: string;
   createdByUserId: number;
   stopRequested: boolean;
+  stopReason: "manual" | "consecutive_failures" | "error" | null;
   startedAt: Date;
 };
+
+// Art arda bu kadar mesaj başarısız olursa (örn. Twilio/Meta hesap seviyesinde kalıcı bir
+// hata — 24 saatlik mesajlaşma kotası dolması gibi) kampanyayı otomatik durdur. Tek bir
+// geçersiz telefon numarası gibi tekil arızalarla karışmaması için art arda şartı var.
+const CONSECUTIVE_FAILURE_LIMIT = 3;
 
 const activeBatches = new Map<string, BatchState>();
 
@@ -72,6 +78,7 @@ export function startBulkSendBatch(params: {
     templateName: params.templateName,
     createdByUserId: params.createdByUserId,
     stopRequested: false,
+    stopReason: null,
     startedAt: new Date(),
   };
   activeBatches.set(batchId, state);
@@ -81,15 +88,23 @@ export function startBulkSendBatch(params: {
   runBatch(state, params.templateSid, params.items).catch((err) => {
     console.error(`[whatsapp-bulk] batch ${batchId} crashed`, err);
     state.status = "stopped";
+    state.stopReason = "error";
+    state.current = null;
   });
 
   return batchId;
 }
 
 async function runBatch(state: BatchState, templateSid: string, items: BulkSendItem[]) {
+  // Sadece gerçek Twilio gönderim hatalarını sayar — telefon numarası eksikliği bir veri
+  // sorunudur, Twilio/Meta tarafında sistemik bir arızaya işaret etmez, o yüzden sayaca dahil
+  // edilmez (ne artırır ne sıfırlar).
+  let consecutiveFailures = 0;
+
   for (let i = 0; i < items.length; i++) {
     if (state.stopRequested) {
       state.status = "stopped";
+      state.stopReason = "manual";
       state.current = null;
       return;
     }
@@ -118,7 +133,21 @@ async function runBatch(state: BatchState, templateSid: string, items: BulkSendI
         error: msgId ? null : "Twilio gönderim hatası",
         createdByUserId: state.createdByUserId, batchId: state.batchId,
       });
-      if (msgId) state.sent++; else state.failed++;
+      if (msgId) {
+        state.sent++;
+        consecutiveFailures = 0;
+      } else {
+        state.failed++;
+        consecutiveFailures++;
+        // Art arda Twilio hatası (örn. 24 saatlik mesajlaşma kotası dolması gibi kalıcı bir
+        // sorun) — kalan tüm alıcılara boşuna denemek yerine kampanyayı burada durdur.
+        if (consecutiveFailures >= CONSECUTIVE_FAILURE_LIMIT) {
+          state.status = "stopped";
+          state.stopReason = "consecutive_failures";
+          state.current = null;
+          return;
+        }
+      }
     }
 
     // Twilio WhatsApp kanal hız limitine (63018) takılmamak için mesajlar arası

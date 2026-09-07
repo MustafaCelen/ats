@@ -79,26 +79,35 @@ export default function WhatsappBulk() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [progress, setProgress] = useState<{
     active: boolean; total: number; sent: number; failed: number; current: string | null; done: boolean; stopped: boolean;
+    autoStopped: boolean;
   } | null>(null);
 
   type ServerBatch = {
     batchId: string; status: "running" | "done" | "stopped";
     total: number; sent: number; failed: number; current: string | null;
+    stopReason?: "manual" | "consecutive_failures" | "error" | null;
   };
 
   const applyBatchState = (b: ServerBatch) => {
+    const isAutoStop = b.status === "stopped" && b.stopReason === "consecutive_failures";
     setProgress({
       active: b.status === "running",
       total: b.total, sent: b.sent, failed: b.failed, current: b.current,
       done: b.status !== "running", stopped: b.status === "stopped",
+      autoStopped: isAutoStop,
     });
     if (b.status !== "running") {
       setSending(false);
       if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
       refetchHistory();
       toast({
-        title: b.status === "stopped" ? "Gönderim durduruldu" : "Toplu gönderim tamamlandı",
-        description: `${b.sent} gönderildi, ${b.failed} başarısız`,
+        title: isAutoStop
+          ? "Kampanya otomatik durduruldu"
+          : b.status === "stopped" ? "Gönderim durduruldu" : "Toplu gönderim tamamlandı",
+        description: isAutoStop
+          ? `Art arda mesajlar Twilio'da gönderilemediği için kampanya durduruldu. ${b.sent} gönderildi, ${b.failed} başarısız. Kalan alıcılara gönderim yapılmadı.`
+          : `${b.sent} gönderildi, ${b.failed} başarısız`,
+        variant: isAutoStop ? "destructive" : undefined,
       });
     }
   };
@@ -171,7 +180,7 @@ export default function WhatsappBulk() {
     }
 
     setSending(true);
-    setProgress({ active: true, total: ids.length, sent: 0, failed: 0, current: null, done: false, stopped: false });
+    setProgress({ active: true, total: ids.length, sent: 0, failed: 0, current: null, done: false, stopped: false, autoStopped: false });
 
     try {
       const res = await fetch("/api/whatsapp/bulk-send", {
@@ -296,12 +305,14 @@ export default function WhatsappBulk() {
             </Button>
 
             {progress && (progress.active || progress.done) && (
-              <div className={`rounded-xl border bg-card p-3 space-y-2 ${progress.stopped ? "border-orange-300" : "border-border"}`}>
+              <div className={`rounded-xl border bg-card p-3 space-y-2 ${progress.autoStopped ? "border-red-300" : progress.stopped ? "border-orange-300" : "border-border"}`}>
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-medium flex items-center gap-2">
                     {progress.active
                       ? <><RefreshCw className="h-3.5 w-3.5 animate-spin text-primary" /> Gönderiliyor…</>
-                      : <><CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> {progress.stopped ? "Durduruldu" : "Tamamlandı"}</>}
+                      : progress.autoStopped
+                        ? <><CheckCircle2 className="h-3.5 w-3.5 text-red-600" /> Art arda hata nedeniyle otomatik durduruldu</>
+                        : <><CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> {progress.stopped ? "Durduruldu" : "Tamamlandı"}</>}
                   </span>
                   {progress.active && (
                     <button onClick={stopSend} className="text-xs px-2 py-1 rounded bg-red-100 text-red-700 hover:bg-red-200 font-medium">Durdur</button>
