@@ -6918,7 +6918,7 @@ export class DatabaseStorage implements IStorage {
     employeeId: number | null; employeeName: string | null; phone: string;
     templateSid: string; templateName: string; variables: Record<string, string>;
     status: "sent" | "failed"; messageSid?: string | null; error?: string | null;
-    createdByUserId?: number | null;
+    createdByUserId?: number | null; batchId?: string | null;
   }): Promise<void> {
     await db.insert(whatsappBulkSends).values({
       employeeId: data.employeeId,
@@ -6931,6 +6931,7 @@ export class DatabaseStorage implements IStorage {
       messageSid: data.messageSid ?? null,
       error: data.error ?? null,
       createdByUserId: data.createdByUserId ?? null,
+      batchId: data.batchId ?? null,
     });
   }
 

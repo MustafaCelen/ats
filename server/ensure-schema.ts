@@ -284,6 +284,11 @@ export async function ensureSchema(): Promise<void> {
     ALTER TABLE advisor_notes ADD COLUMN IF NOT EXISTS agenda TEXT;
     ALTER TABLE advisor_notes ADD COLUMN IF NOT EXISTS coach_note TEXT;
     ALTER TABLE advisor_notes ADD COLUMN IF NOT EXISTS next_step TEXT;
+
+    -- WhatsApp toplu gönderim: her mesaj logunu ait olduğu batch'e bağlar (sunucu taraflı
+    -- batch takibi için — canlı ilerleme in-memory, kalıcı sonuçlar burada)
+    ALTER TABLE whatsapp_bulk_sends ADD COLUMN IF NOT EXISTS batch_id TEXT;
+    CREATE INDEX IF NOT EXISTS whatsapp_bulk_sends_batch_id_idx ON whatsapp_bulk_sends(batch_id);
   `;
   try {
     await pool.query(sql);

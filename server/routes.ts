@@ -10,6 +10,7 @@ import { z } from "zod";
 import { insertInterviewSchema, insertOfferSchema, type InsertTask, TASK_STATUSES, OFFICES } from "@shared/schema";
 import { getAuthUrl, createOAuth2Client, createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from "./google";
 import { sendWhatsApp, sendWhatsAppTemplate, checkWhatsAppStatus, publicBaseUrl, listWhatsAppTemplates } from "./whatsapp";
+import { startBulkSendBatch, getActiveBatchForUser, getBatch, requestStop, type BulkSendItem } from "./whatsapp-bulk-runner";
 import { sendEmail } from "./email";
 import { isFonzipConfigured, fetchFonzipPreview, fetchFonzipUsers, fetchFonzipDebts, fetchFonzipDonations, syncFonzipDebts, syncFonzipUsersFinancials, getFonzipUserFinancialsReport, importFonzipExcel, syncFonzipRecentDebts } from "./fonzip";
 import { isMetaConfigured, isMetaWebhookConfigured, metaConfig, syncMetaCampaigns, fetchMetaLead, mapLeadToCandidate, verifyWebhookSignature } from "./meta";
@@ -1030,6 +1031,57 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       console.error("[GET /api/whatsapp/bulk-sends]", err);
       res.status(500).json({ message: "Internal server error" });
     }
+  });
+
+  // Sunucu taraflı toplu gönderim: sayfa yenilense de gönderim durmaz, ilerleme
+  // batchId ile sorgulanabilir (server/whatsapp-bulk-runner.ts).
+  app.post("/api/whatsapp/bulk-send", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const { employeeIds, templateSid, templateName, variablesByEmployeeId } = req.body as {
+        employeeIds: number[]; templateSid: string; templateName: string;
+        variablesByEmployeeId?: Record<number, Record<string, string>>;
+      };
+      if (!Array.isArray(employeeIds) || employeeIds.length === 0 || !templateSid) {
+        return res.status(400).json({ message: "employeeIds, templateSid gerekli" });
+      }
+
+      const items: BulkSendItem[] = [];
+      for (const employeeId of employeeIds) {
+        const emp = await storage.getEmployee(employeeId) as any;
+        items.push({
+          employeeId,
+          name: emp?.candidate?.name ?? `Danışman #${employeeId}`,
+          phone: emp?.candidate?.phone ?? null,
+          variables: variablesByEmployeeId?.[employeeId] ?? {},
+        });
+      }
+
+      const batchId = startBulkSendBatch({
+        createdByUserId: req.user!.id,
+        templateSid,
+        templateName: templateName ?? templateSid,
+        items,
+      });
+      res.json({ batchId });
+    } catch (err) {
+      console.error("[POST /api/whatsapp/bulk-send]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.get("/api/whatsapp/bulk-send/active", requireAuth, requireAdmin, async (req, res) => {
+    res.json(getActiveBatchForUser(req.user!.id));
+  });
+
+  app.get("/api/whatsapp/bulk-send/:batchId", requireAuth, requireAdmin, async (req, res) => {
+    const batch = getBatch(req.params.batchId);
+    if (!batch) return res.status(404).json({ message: "Batch bulunamadı" });
+    res.json(batch);
+  });
+
+  app.post("/api/whatsapp/bulk-send/:batchId/stop", requireAuth, requireAdmin, async (req, res) => {
+    const ok = requestStop(req.params.batchId);
+    res.json({ ok });
   });
 
   // ── Google OAuth ─────────────────────────────────────────────────────────────

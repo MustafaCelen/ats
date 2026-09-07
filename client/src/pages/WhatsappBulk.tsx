@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Layout } from "@/components/Layout";
 import { Button } from "@/components/ui/button";
@@ -75,10 +75,60 @@ export default function WhatsappBulk() {
   const [sharedVars, setSharedVars] = useState<Record<string, string>>({});
 
   const [sending, setSending] = useState(false);
-  const stopRef = useRef(false);
+  const [batchId, setBatchId] = useState<string | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [progress, setProgress] = useState<{
     active: boolean; total: number; sent: number; failed: number; current: string | null; done: boolean; stopped: boolean;
   } | null>(null);
+
+  type ServerBatch = {
+    batchId: string; status: "running" | "done" | "stopped";
+    total: number; sent: number; failed: number; current: string | null;
+  };
+
+  const applyBatchState = (b: ServerBatch) => {
+    setProgress({
+      active: b.status === "running",
+      total: b.total, sent: b.sent, failed: b.failed, current: b.current,
+      done: b.status !== "running", stopped: b.status === "stopped",
+    });
+    if (b.status !== "running") {
+      setSending(false);
+      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+      refetchHistory();
+      toast({
+        title: b.status === "stopped" ? "Gönderim durduruldu" : "Toplu gönderim tamamlandı",
+        description: `${b.sent} gönderildi, ${b.failed} başarısız`,
+      });
+    }
+  };
+
+  const pollBatch = (id: string) => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      const res = await fetch(`/api/whatsapp/bulk-send/${id}`, { credentials: "include" });
+      if (!res.ok) { if (pollRef.current) clearInterval(pollRef.current); return; }
+      applyBatchState(await res.json());
+    }, 1500);
+  };
+
+  // Sayfa yenilenince de kaldığı yerden takip edebilmek için: mount olduğunda
+  // bu kullanıcının devam eden bir batch'i var mı diye sorulur — gönderim
+  // sunucuda zaten kesintisiz devam ediyordu, burada sadece izlemeye geri dönülür.
+  useEffect(() => {
+    (async () => {
+      const res = await fetch("/api/whatsapp/bulk-send/active", { credentials: "include" });
+      if (!res.ok) return;
+      const active = await res.json();
+      if (active) {
+        setBatchId(active.batchId);
+        setSending(true);
+        applyBatchState(active);
+        pollBatch(active.batchId);
+      }
+    })();
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, []);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -109,54 +159,47 @@ export default function WhatsappBulk() {
 
   const handleSend = async () => {
     if (!selectedTemplate || selected.size === 0 || sending) return;
-    stopRef.current = false;
-    setSending(true);
     const ids = Array.from(selected);
-    setProgress({ active: true, total: ids.length, sent: 0, failed: 0, current: null, done: false, stopped: false });
 
-    let sent = 0, failed = 0;
-    for (let i = 0; i < ids.length; i++) {
-      if (stopRef.current) break;
-      const emp = employees.find((e) => e.id === ids[i]);
-      const name = emp?.candidate?.name ?? `#${ids[i]}`;
-      setProgress((s) => (s ? { ...s, current: name } : s));
-
+    const variablesByEmployeeId: Record<number, Record<string, string>> = {};
+    for (const id of ids) {
+      const emp = employees.find((e) => e.id === id);
+      const name = emp?.candidate?.name ?? `#${id}`;
       const vars: Record<string, string> = { ...sharedVars };
       if (autoFillName && selectedTemplate.variables.includes("1")) vars["1"] = name;
-
-      try {
-        const res = await fetch("/api/whatsapp/bulk-send-one", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({
-            employeeId: ids[i],
-            templateSid: selectedTemplate.sid,
-            templateName: selectedTemplate.friendlyName,
-            variables: vars,
-          }),
-        });
-        if (res.ok) sent++; else failed++;
-      } catch {
-        failed++;
-      }
-      setProgress((s) => (s ? { ...s, sent, failed } : s));
-      // Twilio WhatsApp kanal hız limitine (63018) takılmamak için mesajlar arası bekleme.
-      // Sunucu tarafı da 63018'de otomatik retry+backoff yapıyor (server/whatsapp.ts).
-      if (i < ids.length - 1 && !stopRef.current) await new Promise((r) => setTimeout(r, 1500));
+      variablesByEmployeeId[id] = vars;
     }
 
-    const wasStopped = stopRef.current;
-    setSending(false);
-    setProgress((s) => (s ? { ...s, active: false, done: true, current: null, stopped: wasStopped } : s));
-    toast({
-      title: wasStopped ? "Gönderim durduruldu" : "Toplu gönderim tamamlandı",
-      description: `${sent} gönderildi, ${failed} başarısız`,
-    });
-    refetchHistory();
+    setSending(true);
+    setProgress({ active: true, total: ids.length, sent: 0, failed: 0, current: null, done: false, stopped: false });
+
+    try {
+      const res = await fetch("/api/whatsapp/bulk-send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          employeeIds: ids,
+          templateSid: selectedTemplate.sid,
+          templateName: selectedTemplate.friendlyName,
+          variablesByEmployeeId,
+        }),
+      });
+      if (!res.ok) throw new Error();
+      const { batchId: newBatchId } = await res.json();
+      setBatchId(newBatchId);
+      pollBatch(newBatchId);
+    } catch {
+      setSending(false);
+      setProgress(null);
+      toast({ title: "Hata", description: "Gönderim başlatılamadı.", variant: "destructive" });
+    }
   };
 
-  const stopSend = () => { stopRef.current = true; };
+  const stopSend = async () => {
+    if (!batchId) return;
+    await fetch(`/api/whatsapp/bulk-send/${batchId}/stop`, { method: "POST", credentials: "include" });
+  };
 
   return (
     <Layout>

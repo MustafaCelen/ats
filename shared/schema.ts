@@ -1023,8 +1023,10 @@ export const whatsappBulkSends = pgTable("whatsapp_bulk_sends", {
   messageSid: text("message_sid"),
   error: text("error"),
   createdByUserId: integer("created_by_user_id"),
+  batchId: text("batch_id"),
   createdAt: timestamp("created_at").defaultNow(),
 }, (t) => ({
   createdAtIdx: index("whatsapp_bulk_sends_created_idx").on(t.createdAt),
+  batchIdIdx: index("whatsapp_bulk_sends_batch_id_idx").on(t.batchId),
 }));
 export type WhatsappBulkSend = typeof whatsappBulkSends.$inferSelect;
