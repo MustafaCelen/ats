@@ -23,10 +23,16 @@ type BatchState = {
   current: string | null;
   templateName: string;
   createdByUserId: number;
+  employeeIds: number[];
   stopRequested: boolean;
   stopReason: "manual" | "consecutive_failures" | "error" | null;
   startedAt: Date;
 };
+
+// "Kaldığı Yerden Devam Et" butonunun bir sayfa yenilemesinden sonra da çalışabilmesi için:
+// bitmiş/durmuş batch'leri de (sadece "running" olanları değil) bu süre boyunca hafızada
+// tutuyoruz — sunucu yeniden başlamadıkça hepsi ID ile sorgulanabilir kalır.
+const LAST_BATCH_LOOKUP_WINDOW_MS = 2 * 60 * 60 * 1000; // 2 saat
 
 // Art arda bu kadar mesaj başarısız olursa (örn. Twilio/Meta hesap seviyesinde kalıcı bir
 // hata — 24 saatlik mesajlaşma kotası dolması gibi) kampanyayı otomatik durdur. Tek bir
@@ -45,6 +51,19 @@ export function getActiveBatchForUser(userId: number) {
     if (s.createdByUserId === userId && s.status === "running") return toPublicState(s);
   }
   return null;
+}
+
+// Sayfa yenilendiğinde "Kaldığı Yerden Devam Et" butonunun geri gelebilmesi için: aktif
+// batch yoksa, bu kullanıcının yakın zamanda bitmiş/durmuş son batch'ini döner (varsa).
+export function getLastBatchForUser(userId: number) {
+  let latest: BatchState | null = null;
+  const cutoff = Date.now() - LAST_BATCH_LOOKUP_WINDOW_MS;
+  for (const s of Array.from(activeBatches.values())) {
+    if (s.createdByUserId !== userId) continue;
+    if (s.startedAt.getTime() < cutoff) continue;
+    if (!latest || s.startedAt.getTime() > latest.startedAt.getTime()) latest = s;
+  }
+  return latest ? toPublicState(latest) : null;
 }
 
 export function getBatch(batchId: string) {
@@ -77,6 +96,7 @@ export function startBulkSendBatch(params: {
     current: null,
     templateName: params.templateName,
     createdByUserId: params.createdByUserId,
+    employeeIds: params.items.map((i) => i.employeeId),
     stopRequested: false,
     stopReason: null,
     startedAt: new Date(),

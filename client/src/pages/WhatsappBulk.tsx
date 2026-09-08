@@ -98,9 +98,12 @@ export default function WhatsappBulk() {
     batchId: string; status: "running" | "done" | "stopped";
     total: number; sent: number; failed: number; current: string | null;
     stopReason?: "manual" | "consecutive_failures" | "error" | null;
+    employeeIds?: number[];
   };
 
-  const applyBatchState = (b: ServerBatch) => {
+  // silent: true sayfa mount olduğunda geçmişte kalmış (zaten bitmiş/durmuş) bir batch'i sessizce
+  // geri yüklemek için kullanılır — o an olan bir durum değişikliği olmadığından toast göstermez.
+  const applyBatchState = (b: ServerBatch, opts: { silent?: boolean } = {}) => {
     const isAutoStop = b.status === "stopped" && b.stopReason === "consecutive_failures";
     setProgress({
       active: b.status === "running",
@@ -108,19 +111,22 @@ export default function WhatsappBulk() {
       done: b.status !== "running", stopped: b.status === "stopped",
       autoStopped: isAutoStop,
     });
+    if (b.employeeIds) setLastBatchIds(b.employeeIds);
     if (b.status !== "running") {
       setSending(false);
       if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
-      refetchHistory();
-      toast({
-        title: isAutoStop
-          ? "Kampanya otomatik durduruldu"
-          : b.status === "stopped" ? "Gönderim durduruldu" : "Toplu gönderim tamamlandı",
-        description: isAutoStop
-          ? `Art arda mesajlar Twilio'da gönderilemediği için kampanya durduruldu. ${b.sent} gönderildi, ${b.failed} başarısız. Kalan alıcılara gönderim yapılmadı.`
-          : `${b.sent} gönderildi, ${b.failed} başarısız`,
-        variant: isAutoStop ? "destructive" : undefined,
-      });
+      if (!opts.silent) {
+        refetchHistory();
+        toast({
+          title: isAutoStop
+            ? "Kampanya otomatik durduruldu"
+            : b.status === "stopped" ? "Gönderim durduruldu" : "Toplu gönderim tamamlandı",
+          description: isAutoStop
+            ? `Art arda mesajlar Twilio'da gönderilemediği için kampanya durduruldu. ${b.sent} gönderildi, ${b.failed} başarısız. Kalan alıcılara gönderim yapılmadı.`
+            : `${b.sent} gönderildi, ${b.failed} başarısız`,
+          variant: isAutoStop ? "destructive" : undefined,
+        });
+      }
     }
   };
 
@@ -146,6 +152,17 @@ export default function WhatsappBulk() {
         setSending(true);
         applyBatchState(active);
         pollBatch(active.batchId);
+        return;
+      }
+
+      // Aktif gönderim yoksa: "Kaldığı Yerden Devam Et" butonunun sayfa yenilendikten sonra
+      // da görünebilmesi için, yakın zamanda bitmiş/durmuş son batch'i sessizce geri yükle.
+      const lastRes = await fetch("/api/whatsapp/bulk-send/last", { credentials: "include" });
+      if (!lastRes.ok) return;
+      const last = await lastRes.json();
+      if (last) {
+        setBatchId(last.batchId);
+        applyBatchState(last, { silent: true });
       }
     })();
     return () => { if (pollRef.current) clearInterval(pollRef.current); };

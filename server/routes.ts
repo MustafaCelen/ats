@@ -10,7 +10,7 @@ import { z } from "zod";
 import { insertInterviewSchema, insertOfferSchema, type InsertTask, TASK_STATUSES, OFFICES } from "@shared/schema";
 import { getAuthUrl, createOAuth2Client, createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from "./google";
 import { sendWhatsApp, sendWhatsAppTemplate, checkWhatsAppStatus, publicBaseUrl, listWhatsAppTemplates } from "./whatsapp";
-import { startBulkSendBatch, getActiveBatchForUser, getBatch, requestStop, type BulkSendItem } from "./whatsapp-bulk-runner";
+import { startBulkSendBatch, getActiveBatchForUser, getLastBatchForUser, getBatch, requestStop, type BulkSendItem } from "./whatsapp-bulk-runner";
 import { sendEmail } from "./email";
 import { isFonzipConfigured, fetchFonzipPreview, fetchFonzipUsers, fetchFonzipDebts, fetchFonzipDonations, syncFonzipDebts, syncFonzipUsersFinancials, getFonzipUserFinancialsReport, importFonzipExcel, syncFonzipRecentDebts } from "./fonzip";
 import { isMetaConfigured, isMetaWebhookConfigured, metaConfig, syncMetaCampaigns, fetchMetaLead, mapLeadToCandidate, verifyWebhookSignature } from "./meta";
@@ -1071,6 +1071,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.get("/api/whatsapp/bulk-send/active", requireAuth, requireAdmin, async (req, res) => {
     res.json(getActiveBatchForUser(req.user!.id));
+  });
+
+  // Sayfa yenilendikten sonra "Kaldığı Yerden Devam Et" butonunun geri gelebilmesi için:
+  // aktif batch yoksa, bu kullanıcının yakın zamanda bitmiş/durmuş son batch'ini döner.
+  app.get("/api/whatsapp/bulk-send/last", requireAuth, requireAdmin, async (req, res) => {
+    res.json(getLastBatchForUser(req.user!.id));
   });
 
   app.get("/api/whatsapp/bulk-send/:batchId", requireAuth, requireAdmin, async (req, res) => {
