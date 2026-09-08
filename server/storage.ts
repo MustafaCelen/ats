@@ -1136,290 +1136,327 @@ export class DatabaseStorage implements IStorage {
     const hasOfficeFilter = officeCandidateIds !== null;
     const hasOfficeCandidates = hasOfficeFilter && officeCandidateIds!.length > 0;
 
-    // ── 1. FUNNEL: all-time stage distribution (not date-filtered)
-    // The funnel shows the current state of every application in the pipeline,
-    // regardless of when the candidate applied. Date range only affects the
-    // other metrics (time-to-hire, weekly volume, etc.).
-    const funnelConds: any[] = [];
-    if (hasJobScope) funnelConds.push(inArray(applications.jobId, jobIds!));
-    if (hasOfficeCandidates) funnelConds.push(inArray(applications.candidateId, officeCandidateIds!));
+    // Aşağıdaki 9 blok (funnel, metric totals, stage times, contract-sign/employ süreleri,
+    // haftalık başvuru, teklif kabul oranı, mülakat/teklif sayıları, HM verimliliği) birbirinden
+    // tamamen bağımsız — hiçbiri diğerinin sonucuna ihtiyaç duymuyor, sadece yukarıda hesaplanan
+    // start/end/scoped/hasJobScope/hasOfficeCandidates/officeCandidateIds'i okuyor. Sırayla değil
+    // paralel çalıştırılıyor (aşağıdaki Promise.all).
+    const [
+      funnel,
+      metricResult,
+      stageTimes,
+      avgTimeToContractSign,
+      avgTimeToEmploy,
+      weeklyApplications,
+      offerResult,
+      intervalCounts,
+      managerRows,
+    ] = await Promise.all([
+      // ── 1. FUNNEL: all-time stage distribution (not date-filtered)
+      // The funnel shows the current state of every application in the pipeline,
+      // regardless of when the candidate applied. Date range only affects the
+      // other metrics (time-to-hire, weekly volume, etc.).
+      (async () => {
+        const funnelConds: any[] = [];
+        if (hasJobScope) funnelConds.push(inArray(applications.jobId, jobIds!));
+        if (hasOfficeCandidates) funnelConds.push(inArray(applications.candidateId, officeCandidateIds!));
 
-    const byStageRaw = (scoped && !hasJobScope) || (hasOfficeFilter && !hasOfficeCandidates)
-      ? []
-      : funnelConds.length > 0
-        ? await db
-            .select({ status: applications.status, count: count() })
-            .from(applications)
-            .where(and(...funnelConds))
-            .groupBy(applications.status)
-        : await db
-            .select({ status: applications.status, count: count() })
-            .from(applications)
-            .groupBy(applications.status);
-
-    const byStageMap: Record<string, number> = {};
-    for (const r of byStageRaw) byStageMap[r.status] = r.count;
-
-    const funnel = APPLICATION_STAGES.map((stage) => ({ stage, count: byStageMap[stage] || 0 }));
-
-    // ── Metric totals: date-scoped (separate from the all-time funnel) ─────────
-    const metricConds: any[] = [
-      gte(applications.appliedAt, start),
-      lte(applications.appliedAt, end),
-    ];
-    if (hasJobScope) metricConds.push(inArray(applications.jobId, jobIds!));
-    if (hasOfficeCandidates) metricConds.push(inArray(applications.candidateId, officeCandidateIds!));
-
-    const metricRaw = (scoped && !hasJobScope) || (hasOfficeFilter && !hasOfficeCandidates)
-      ? []
-      : await db
-          .select({ status: applications.status, count: count() })
-          .from(applications)
-          .where(and(...metricConds))
-          .groupBy(applications.status);
-
-    const metricMap: Record<string, number> = {};
-    for (const r of metricRaw) metricMap[r.status] = r.count;
-
-    const total = Object.values(metricMap).reduce((s, c) => s + c, 0);
-    // Count all post-contract stages: hired + every stage beyond it
-    const hired = (metricMap["hired"] || 0)
-      + (metricMap["myk_training"] || 0)
-      + (metricMap["account_setup"] || 0)
-      + (metricMap["documents"] || 0)
-      + (metricMap["employed"] || 0);
-    const rejected = metricMap["rejected"] || 0;
-    const conversionRate = total > 0 ? Math.round((hired / total) * 100) : 0;
-
-    // ── 2. STAGE TIMES ────────────────────────────────────────────────────────
-    // Use a separate date-scoped condition set so stage times respect the date filter
-    const dateScopedConds: any[] = [
-      gte(applications.appliedAt, start),
-      lte(applications.appliedAt, end),
-    ];
-    if (hasJobScope) dateScopedConds.push(inArray(applications.jobId, jobIds!));
-    if (hasOfficeCandidates) dateScopedConds.push(inArray(applications.candidateId, officeCandidateIds!));
-
-    // Fetch applications in range WITH their appliedAt so we can compute "applied" stage time
-    const relevantApps = (scoped && !hasJobScope) || (hasOfficeFilter && !hasOfficeCandidates)
-      ? []
-      : await db
-          .select({ id: applications.id, appliedAt: applications.appliedAt })
-          .from(applications)
-          .where(and(...dateScopedConds));
-
-    const relevantAppIds = relevantApps.map((r) => r.id);
-    const appliedAtMap = Object.fromEntries(relevantApps.map((r) => [r.id, r.appliedAt]));
-
-    const histories = relevantAppIds.length === 0
-      ? []
-      : await db
-          .select()
-          .from(stageHistory)
-          .where(inArray(stageHistory.applicationId, relevantAppIds))
-          .orderBy(stageHistory.enteredAt);
-
-    const byApp = new Map<number, typeof histories[number][]>();
-    for (const h of histories) {
-      const arr = byApp.get(h.applicationId) ?? [];
-      arr.push(h);
-      byApp.set(h.applicationId, arr);
-    }
-
-    const totals: Record<string, { sum: number; count: number }> = Object.fromEntries(
-      APPLICATION_STAGES.map((s) => [s, { sum: 0, count: 0 }]),
-    );
-
-    for (const [appId, rows] of Array.from(byApp.entries())) {
-      // Accumulate total time per stage for THIS application first, then contribute
-      // one data point per stage — prevents back-and-forth moves from inflating counts.
-      const appStageTotals: Record<string, number> = {};
-
-      // "applied" stage time: from appliedAt to first stage history entry
-      const appAppliedAt = appliedAtMap[appId];
-      if (appAppliedAt && rows.length > 0 && rows[0].enteredAt) {
-        const diff = differenceInDays(new Date(rows[0].enteredAt!), new Date(appAppliedAt));
-        if (diff > 0) appStageTotals["applied"] = (appStageTotals["applied"] ?? 0) + diff;
-      }
-
-      // All other stages: sum up time across all visits to the same stage
-      for (let i = 0; i < rows.length - 1; i++) {
-        const stage = rows[i].toStatus;
-        if (!totals[stage]) continue;
-        const startAt = rows[i].enteredAt ? new Date(rows[i].enteredAt!) : undefined;
-        const nextAt = rows[i + 1].enteredAt ? new Date(rows[i + 1].enteredAt!) : undefined;
-        if (!startAt || !nextAt) continue;
-        const diff = differenceInDays(nextAt, startAt);
-        if (diff > 0) appStageTotals[stage] = (appStageTotals[stage] ?? 0) + diff;
-      }
-
-      // Each application contributes exactly one data point per stage it passed through
-      for (const [stage, total] of Object.entries(appStageTotals)) {
-        if (totals[stage]) {
-          totals[stage].sum += total;
-          totals[stage].count += 1;
-        }
-      }
-    }
-
-    const stageTimes = APPLICATION_STAGES.map((stage) => ({
-      stage,
-      avgDays: totals[stage].count ? Math.round((totals[stage].sum / totals[stage].count) * 10) / 10 : 0,
-    }));
-
-    // ── 3a. AVG TIME TO CONTRACT SIGN: from appliedAt to first post-contract stage ─────
-    // Counts ANY entry into hired/myk_training/account_setup/documents/employed so direct
-    // skips (e.g. offer → myk_training) are included. Deduplicate per application, keep earliest.
-    const POST_CONTRACT_STAGES = ["hired", "myk_training", "account_setup", "documents", "employed"] as const;
-    const hiredHistoryConds: any[] = [
-      inArray(stageHistory.toStatus, [...POST_CONTRACT_STAGES]),
-      gte(stageHistory.enteredAt, start),
-      lte(stageHistory.enteredAt, end),
-    ];
-    if (hasJobScope) hiredHistoryConds.push(inArray(stageHistory.jobId, jobIds!));
-    if (hasOfficeCandidates) hiredHistoryConds.push(inArray(stageHistory.candidateId, officeCandidateIds!));
-
-    const hiredHistoryRaw = (scoped && !hasJobScope) || (hasOfficeFilter && !hasOfficeCandidates)
-      ? []
-      : await db
-          .select({ applicationId: stageHistory.applicationId, hiredAt: stageHistory.enteredAt })
-          .from(stageHistory)
-          .innerJoin(applications, eq(applications.id, stageHistory.applicationId))
-          .where(and(...hiredHistoryConds, inArray(applications.status, [...POST_CONTRACT_STAGES])));
-
-    // Keep only the earliest post-contract entry per application
-    const hiredEarliestMap = new Map<number, string>();
-    for (const row of hiredHistoryRaw) {
-      const existing = hiredEarliestMap.get(row.applicationId);
-      if (!existing || (row.hiredAt && row.hiredAt < existing)) {
-        hiredEarliestMap.set(row.applicationId, row.hiredAt!);
-      }
-    }
-    const hiredHistoryRows = Array.from(hiredEarliestMap.entries()).map(([applicationId, hiredAt]) => ({ applicationId, hiredAt }));
-
-    let avgTimeToContractSign = 0;
-    if (hiredHistoryRows.length > 0) {
-      const appIds = hiredHistoryRows.map((r) => r.applicationId);
-      const appRows = await db
-        .select({ id: applications.id, appliedAt: applications.appliedAt })
-        .from(applications)
-        .where(inArray(applications.id, appIds));
-      const appAppliedMap = Object.fromEntries(appRows.map((r) => [r.id, r.appliedAt]));
-
-      const diffs = hiredHistoryRows
-        .map((h) => {
-          const appliedAt = appAppliedMap[h.applicationId];
-          if (!appliedAt || !h.hiredAt) return null;
-          return differenceInDays(new Date(h.hiredAt), new Date(appliedAt));
-        })
-        .filter((d): d is number => d !== null && d >= 0);
-
-      avgTimeToContractSign = diffs.length > 0 ? Math.round(diffs.reduce((s, d) => s + d, 0) / diffs.length) : 0;
-    }
-
-    // ── 3b. AVG TIME TO EMPLOY: from appliedAt to when they first reached 'documents' stage ─────
-    const employedHistoryConds: any[] = [
-      eq(stageHistory.toStatus, "documents"),
-      gte(stageHistory.enteredAt, start),
-      lte(stageHistory.enteredAt, end),
-    ];
-    if (hasJobScope) employedHistoryConds.push(inArray(stageHistory.jobId, jobIds!));
-    if (hasOfficeCandidates) employedHistoryConds.push(inArray(stageHistory.candidateId, officeCandidateIds!));
-
-    const employedHistoryRows = (scoped && !hasJobScope) || (hasOfficeFilter && !hasOfficeCandidates)
-      ? []
-      : await db
-          .select({ applicationId: stageHistory.applicationId, employedAt: stageHistory.enteredAt })
-          .from(stageHistory)
-          .innerJoin(applications, eq(applications.id, stageHistory.applicationId))
-          .where(and(...employedHistoryConds, inArray(applications.status, ["documents", "employed"])));
-
-    let avgTimeToEmploy = 0;
-    if (employedHistoryRows.length > 0) {
-      const empAppIds = employedHistoryRows.map((r) => r.applicationId);
-      const empAppRows = await db
-        .select({ id: applications.id, appliedAt: applications.appliedAt })
-        .from(applications)
-        .where(inArray(applications.id, empAppIds));
-      const empAppliedMap = Object.fromEntries(empAppRows.map((r) => [r.id, r.appliedAt]));
-
-      const empDiffs = employedHistoryRows
-        .map((h) => {
-          const appliedAt = empAppliedMap[h.applicationId];
-          if (!appliedAt || !h.employedAt) return null;
-          return differenceInDays(new Date(h.employedAt), new Date(appliedAt));
-        })
-        .filter((d): d is number => d !== null && d >= 0);
-
-      avgTimeToEmploy = empDiffs.length > 0 ? Math.round(empDiffs.reduce((s, d) => s + d, 0) / empDiffs.length) : 0;
-    }
-
-    // ── 4. WEEKLY APPLICATIONS: within selected date range ────────────────────
-    const weeklyResult = hasOfficeFilter && !hasOfficeCandidates
-      ? { rows: [] }
-      : await db.execute(sql`
-      SELECT
-        TO_CHAR(DATE_TRUNC('week', applied_at), 'Mon DD') AS week,
-        DATE_TRUNC('week', applied_at) AS week_start,
-        COUNT(*)::int AS count
-      FROM applications
-      WHERE applied_at >= ${start} AND applied_at <= ${end}
-      ${hasJobScope ? sql`AND job_id IN (${sql.join(jobIds!.map((id) => sql`${id}`), sql`, `)})` : scoped ? sql`AND 1=0` : sql``}
-      ${hasOfficeCandidates ? sql`AND candidate_id IN (${sql.join(officeCandidateIds!.map((id) => sql`${id}`), sql`, `)})` : sql``}
-      GROUP BY DATE_TRUNC('week', applied_at)
-      ORDER BY DATE_TRUNC('week', applied_at)
-    `);
-    const weeklyApplications = (weeklyResult.rows as { week: string; count: number }[]).map((r) => ({
-      week: r.week,
-      count: r.count,
-    }));
-
-    // ── 5. OFFER ACCEPTANCE RATE within date range ────────────────────────────
-    const offerConds: any[] = [gte(offers.createdAt, start), lte(offers.createdAt, end)];
-    if (hasJobScope) offerConds.push(inArray(offers.jobId, jobIds!));
-    if (hasOfficeCandidates) offerConds.push(inArray(offers.candidateId, officeCandidateIds!));
-
-    const offersByStatus = (scoped && !hasJobScope) || (hasOfficeFilter && !hasOfficeCandidates)
-      ? []
-      : await db
-          .select({ status: offers.status, count: count() })
-          .from(offers)
-          .where(and(...offerConds))
-          .groupBy(offers.status);
-
-    const offerMap: Record<string, number> = {};
-    for (const r of offersByStatus) offerMap[r.status] = r.count;
-    const accOffers = offerMap["accepted"] || 0;
-    const decOffers = accOffers + (offerMap["rejected"] || 0);
-    const offerAcceptanceRate = decOffers > 0 ? Math.round((accOffers / decOffers) * 100) : 0;
-
-    // ── 6. TOTAL INTERVIEWS & OFFERS within date range ────────────────────────
-    const ivConds: any[] = [gte(interviews.createdAt, start), lte(interviews.createdAt, end)];
-    if (hasJobScope) ivConds.push(inArray(interviews.jobId, jobIds!));
-    if (hasOfficeCandidates) ivConds.push(inArray(interviews.candidateId, officeCandidateIds!));
-
-    const ivRow = (scoped && !hasJobScope) || (hasOfficeFilter && !hasOfficeCandidates)
-      ? [{ count: 0 }]
-      : await db.select({ count: count() }).from(interviews).where(and(...ivConds));
-
-    const ofRow = (scoped && !hasJobScope) || (hasOfficeFilter && !hasOfficeCandidates)
-      ? [{ count: 0 }]
-      : await db.select({ count: count() }).from(offers).where(and(...offerConds));
-
-    // ── 7. HIRING MANAGER EFFICIENCY within date range ────────────────────────
-    const managerIdRows = (hasOfficeFilter && !hasOfficeCandidates)
-      ? []
-      : hasJobScope
-        ? await db.select({ userId: jobAssignments.userId }).from(jobAssignments).where(inArray(jobAssignments.jobId, jobIds!))
-        : scoped
+        const byStageRaw = (scoped && !hasJobScope) || (hasOfficeFilter && !hasOfficeCandidates)
           ? []
-          : await db.select({ userId: users.id }).from(users).where(eq(users.role, "hiring_manager"));
+          : funnelConds.length > 0
+            ? await db
+                .select({ status: applications.status, count: count() })
+                .from(applications)
+                .where(and(...funnelConds))
+                .groupBy(applications.status)
+            : await db
+                .select({ status: applications.status, count: count() })
+                .from(applications)
+                .groupBy(applications.status);
 
-    // Deduplicate manager IDs
-    const uniqueManagerIds = Array.from(new Set(managerIdRows.map((m) => m.userId)));
+        const byStageMap: Record<string, number> = {};
+        for (const r of byStageRaw) byStageMap[r.status] = r.count;
 
-    const managerRows = await Promise.all(
-      uniqueManagerIds.map(async (userId) => {
+        return APPLICATION_STAGES.map((stage) => ({ stage, count: byStageMap[stage] || 0 }));
+      })(),
+
+      // ── Metric totals: date-scoped (separate from the all-time funnel) ─────────
+      (async () => {
+        const metricConds: any[] = [
+          gte(applications.appliedAt, start),
+          lte(applications.appliedAt, end),
+        ];
+        if (hasJobScope) metricConds.push(inArray(applications.jobId, jobIds!));
+        if (hasOfficeCandidates) metricConds.push(inArray(applications.candidateId, officeCandidateIds!));
+
+        const metricRaw = (scoped && !hasJobScope) || (hasOfficeFilter && !hasOfficeCandidates)
+          ? []
+          : await db
+              .select({ status: applications.status, count: count() })
+              .from(applications)
+              .where(and(...metricConds))
+              .groupBy(applications.status);
+
+        const metricMap: Record<string, number> = {};
+        for (const r of metricRaw) metricMap[r.status] = r.count;
+
+        const total = Object.values(metricMap).reduce((s, c) => s + c, 0);
+        // Count all post-contract stages: hired + every stage beyond it
+        const hired = (metricMap["hired"] || 0)
+          + (metricMap["myk_training"] || 0)
+          + (metricMap["account_setup"] || 0)
+          + (metricMap["documents"] || 0)
+          + (metricMap["employed"] || 0);
+        const rejected = metricMap["rejected"] || 0;
+        const conversionRate = total > 0 ? Math.round((hired / total) * 100) : 0;
+        return { total, hired, rejected, conversionRate };
+      })(),
+
+      // ── 2. STAGE TIMES ────────────────────────────────────────────────────────
+      (async () => {
+        // Use a separate date-scoped condition set so stage times respect the date filter
+        const dateScopedConds: any[] = [
+          gte(applications.appliedAt, start),
+          lte(applications.appliedAt, end),
+        ];
+        if (hasJobScope) dateScopedConds.push(inArray(applications.jobId, jobIds!));
+        if (hasOfficeCandidates) dateScopedConds.push(inArray(applications.candidateId, officeCandidateIds!));
+
+        // Fetch applications in range WITH their appliedAt so we can compute "applied" stage time
+        const relevantApps = (scoped && !hasJobScope) || (hasOfficeFilter && !hasOfficeCandidates)
+          ? []
+          : await db
+              .select({ id: applications.id, appliedAt: applications.appliedAt })
+              .from(applications)
+              .where(and(...dateScopedConds));
+
+        const relevantAppIds = relevantApps.map((r) => r.id);
+        const appliedAtMap = Object.fromEntries(relevantApps.map((r) => [r.id, r.appliedAt]));
+
+        const histories = relevantAppIds.length === 0
+          ? []
+          : await db
+              .select()
+              .from(stageHistory)
+              .where(inArray(stageHistory.applicationId, relevantAppIds))
+              .orderBy(stageHistory.enteredAt);
+
+        const byApp = new Map<number, typeof histories[number][]>();
+        for (const h of histories) {
+          const arr = byApp.get(h.applicationId) ?? [];
+          arr.push(h);
+          byApp.set(h.applicationId, arr);
+        }
+
+        const totals: Record<string, { sum: number; count: number }> = Object.fromEntries(
+          APPLICATION_STAGES.map((s) => [s, { sum: 0, count: 0 }]),
+        );
+
+        for (const [appId, rows] of Array.from(byApp.entries())) {
+          // Accumulate total time per stage for THIS application first, then contribute
+          // one data point per stage — prevents back-and-forth moves from inflating counts.
+          const appStageTotals: Record<string, number> = {};
+
+          // "applied" stage time: from appliedAt to first stage history entry
+          const appAppliedAt = appliedAtMap[appId];
+          if (appAppliedAt && rows.length > 0 && rows[0].enteredAt) {
+            const diff = differenceInDays(new Date(rows[0].enteredAt!), new Date(appAppliedAt));
+            if (diff > 0) appStageTotals["applied"] = (appStageTotals["applied"] ?? 0) + diff;
+          }
+
+          // All other stages: sum up time across all visits to the same stage
+          for (let i = 0; i < rows.length - 1; i++) {
+            const stage = rows[i].toStatus;
+            if (!totals[stage]) continue;
+            const startAt = rows[i].enteredAt ? new Date(rows[i].enteredAt!) : undefined;
+            const nextAt = rows[i + 1].enteredAt ? new Date(rows[i + 1].enteredAt!) : undefined;
+            if (!startAt || !nextAt) continue;
+            const diff = differenceInDays(nextAt, startAt);
+            if (diff > 0) appStageTotals[stage] = (appStageTotals[stage] ?? 0) + diff;
+          }
+
+          // Each application contributes exactly one data point per stage it passed through
+          for (const [stage, total] of Object.entries(appStageTotals)) {
+            if (totals[stage]) {
+              totals[stage].sum += total;
+              totals[stage].count += 1;
+            }
+          }
+        }
+
+        return APPLICATION_STAGES.map((stage) => ({
+          stage,
+          avgDays: totals[stage].count ? Math.round((totals[stage].sum / totals[stage].count) * 10) / 10 : 0,
+        }));
+      })(),
+
+      // ── 3a. AVG TIME TO CONTRACT SIGN: from appliedAt to first post-contract stage ─────
+      // Counts ANY entry into hired/myk_training/account_setup/documents/employed so direct
+      // skips (e.g. offer → myk_training) are included. Deduplicate per application, keep earliest.
+      (async () => {
+        const POST_CONTRACT_STAGES = ["hired", "myk_training", "account_setup", "documents", "employed"] as const;
+        const hiredHistoryConds: any[] = [
+          inArray(stageHistory.toStatus, [...POST_CONTRACT_STAGES]),
+          gte(stageHistory.enteredAt, start),
+          lte(stageHistory.enteredAt, end),
+        ];
+        if (hasJobScope) hiredHistoryConds.push(inArray(stageHistory.jobId, jobIds!));
+        if (hasOfficeCandidates) hiredHistoryConds.push(inArray(stageHistory.candidateId, officeCandidateIds!));
+
+        const hiredHistoryRaw = (scoped && !hasJobScope) || (hasOfficeFilter && !hasOfficeCandidates)
+          ? []
+          : await db
+              .select({ applicationId: stageHistory.applicationId, hiredAt: stageHistory.enteredAt })
+              .from(stageHistory)
+              .innerJoin(applications, eq(applications.id, stageHistory.applicationId))
+              .where(and(...hiredHistoryConds, inArray(applications.status, [...POST_CONTRACT_STAGES])));
+
+        // Keep only the earliest post-contract entry per application
+        const hiredEarliestMap = new Map<number, string>();
+        for (const row of hiredHistoryRaw) {
+          const existing = hiredEarliestMap.get(row.applicationId);
+          if (!existing || (row.hiredAt && row.hiredAt < existing)) {
+            hiredEarliestMap.set(row.applicationId, row.hiredAt!);
+          }
+        }
+        const hiredHistoryRows = Array.from(hiredEarliestMap.entries()).map(([applicationId, hiredAt]) => ({ applicationId, hiredAt }));
+
+        let avgTimeToContractSign = 0;
+        if (hiredHistoryRows.length > 0) {
+          const appIds = hiredHistoryRows.map((r) => r.applicationId);
+          const appRows = await db
+            .select({ id: applications.id, appliedAt: applications.appliedAt })
+            .from(applications)
+            .where(inArray(applications.id, appIds));
+          const appAppliedMap = Object.fromEntries(appRows.map((r) => [r.id, r.appliedAt]));
+
+          const diffs = hiredHistoryRows
+            .map((h) => {
+              const appliedAt = appAppliedMap[h.applicationId];
+              if (!appliedAt || !h.hiredAt) return null;
+              return differenceInDays(new Date(h.hiredAt), new Date(appliedAt));
+            })
+            .filter((d): d is number => d !== null && d >= 0);
+
+          avgTimeToContractSign = diffs.length > 0 ? Math.round(diffs.reduce((s, d) => s + d, 0) / diffs.length) : 0;
+        }
+        return avgTimeToContractSign;
+      })(),
+
+      // ── 3b. AVG TIME TO EMPLOY: from appliedAt to when they first reached 'documents' stage ─────
+      (async () => {
+        const employedHistoryConds: any[] = [
+          eq(stageHistory.toStatus, "documents"),
+          gte(stageHistory.enteredAt, start),
+          lte(stageHistory.enteredAt, end),
+        ];
+        if (hasJobScope) employedHistoryConds.push(inArray(stageHistory.jobId, jobIds!));
+        if (hasOfficeCandidates) employedHistoryConds.push(inArray(stageHistory.candidateId, officeCandidateIds!));
+
+        const employedHistoryRows = (scoped && !hasJobScope) || (hasOfficeFilter && !hasOfficeCandidates)
+          ? []
+          : await db
+              .select({ applicationId: stageHistory.applicationId, employedAt: stageHistory.enteredAt })
+              .from(stageHistory)
+              .innerJoin(applications, eq(applications.id, stageHistory.applicationId))
+              .where(and(...employedHistoryConds, inArray(applications.status, ["documents", "employed"])));
+
+        let avgTimeToEmploy = 0;
+        if (employedHistoryRows.length > 0) {
+          const empAppIds = employedHistoryRows.map((r) => r.applicationId);
+          const empAppRows = await db
+            .select({ id: applications.id, appliedAt: applications.appliedAt })
+            .from(applications)
+            .where(inArray(applications.id, empAppIds));
+          const empAppliedMap = Object.fromEntries(empAppRows.map((r) => [r.id, r.appliedAt]));
+
+          const empDiffs = employedHistoryRows
+            .map((h) => {
+              const appliedAt = empAppliedMap[h.applicationId];
+              if (!appliedAt || !h.employedAt) return null;
+              return differenceInDays(new Date(h.employedAt), new Date(appliedAt));
+            })
+            .filter((d): d is number => d !== null && d >= 0);
+
+          avgTimeToEmploy = empDiffs.length > 0 ? Math.round(empDiffs.reduce((s, d) => s + d, 0) / empDiffs.length) : 0;
+        }
+        return avgTimeToEmploy;
+      })(),
+
+      // ── 4. WEEKLY APPLICATIONS: within selected date range ────────────────────
+      (async () => {
+        const weeklyResult = hasOfficeFilter && !hasOfficeCandidates
+          ? { rows: [] }
+          : await db.execute(sql`
+          SELECT
+            TO_CHAR(DATE_TRUNC('week', applied_at), 'Mon DD') AS week,
+            DATE_TRUNC('week', applied_at) AS week_start,
+            COUNT(*)::int AS count
+          FROM applications
+          WHERE applied_at >= ${start} AND applied_at <= ${end}
+          ${hasJobScope ? sql`AND job_id IN (${sql.join(jobIds!.map((id) => sql`${id}`), sql`, `)})` : scoped ? sql`AND 1=0` : sql``}
+          ${hasOfficeCandidates ? sql`AND candidate_id IN (${sql.join(officeCandidateIds!.map((id) => sql`${id}`), sql`, `)})` : sql``}
+          GROUP BY DATE_TRUNC('week', applied_at)
+          ORDER BY DATE_TRUNC('week', applied_at)
+        `);
+        return (weeklyResult.rows as { week: string; count: number }[]).map((r) => ({
+          week: r.week,
+          count: r.count,
+        }));
+      })(),
+
+      // ── 5. OFFER ACCEPTANCE RATE within date range ────────────────────────────
+      (async () => {
+        const offerConds: any[] = [gte(offers.createdAt, start), lte(offers.createdAt, end)];
+        if (hasJobScope) offerConds.push(inArray(offers.jobId, jobIds!));
+        if (hasOfficeCandidates) offerConds.push(inArray(offers.candidateId, officeCandidateIds!));
+
+        const offersByStatus = (scoped && !hasJobScope) || (hasOfficeFilter && !hasOfficeCandidates)
+          ? []
+          : await db
+              .select({ status: offers.status, count: count() })
+              .from(offers)
+              .where(and(...offerConds))
+              .groupBy(offers.status);
+
+        const offerMap: Record<string, number> = {};
+        for (const r of offersByStatus) offerMap[r.status] = r.count;
+        const accOffers = offerMap["accepted"] || 0;
+        const decOffers = accOffers + (offerMap["rejected"] || 0);
+        const offerAcceptanceRate = decOffers > 0 ? Math.round((accOffers / decOffers) * 100) : 0;
+        // Toplam teklif sayısı offersByStatus'tan türetiliyor — ayrı bir "toplam say" sorgusuna
+        // gerek yok, zaten status bazlı grupla topluyoruz.
+        const totalOffers = Object.values(offerMap).reduce((s, c) => s + c, 0);
+        return { offerAcceptanceRate, totalOffers };
+      })(),
+
+      // ── 6. TOTAL INTERVIEWS within date range ──────────────────────────────────
+      (async () => {
+        const ivConds: any[] = [gte(interviews.createdAt, start), lte(interviews.createdAt, end)];
+        if (hasJobScope) ivConds.push(inArray(interviews.jobId, jobIds!));
+        if (hasOfficeCandidates) ivConds.push(inArray(interviews.candidateId, officeCandidateIds!));
+
+        const ivRow = (scoped && !hasJobScope) || (hasOfficeFilter && !hasOfficeCandidates)
+          ? [{ count: 0 }]
+          : await db.select({ count: count() }).from(interviews).where(and(...ivConds));
+        return ivRow[0]?.count || 0;
+      })(),
+
+      // ── 7. HIRING MANAGER EFFICIENCY within date range ────────────────────────
+      (async () => {
+      const managerIdRows = (hasOfficeFilter && !hasOfficeCandidates)
+        ? []
+        : hasJobScope
+          ? await db.select({ userId: jobAssignments.userId }).from(jobAssignments).where(inArray(jobAssignments.jobId, jobIds!))
+          : scoped
+            ? []
+            : await db.select({ userId: users.id }).from(users).where(eq(users.role, "hiring_manager"));
+
+      // Deduplicate manager IDs
+      const uniqueManagerIds = Array.from(new Set(managerIdRows.map((m) => m.userId)));
+
+      return Promise.all(
+        uniqueManagerIds.map(async (userId) => {
         const [u] = await db.select().from(users).where(eq(users.id, userId));
         const assignedJobs = await this.getAssignedJobIds(userId);
         if (assignedJobs.length === 0) {
@@ -1568,261 +1605,294 @@ export class DatabaseStorage implements IStorage {
           employedCount,
         };
       }),
-    );
+      );
+      })(),
+    ]);
+    const { total, hired, rejected, conversionRate } = metricResult;
+    const { offerAcceptanceRate, totalOffers } = offerResult;
+    const totalInterviews = intervalCounts;
 
-    // ── 8. ACTIVE JOB PERFORMANCE within date range ───────────────────────────
-    const activeJobRows = (hasOfficeFilter && !hasOfficeCandidates)
-      ? []
-      : hasJobScope
-        ? await db.select().from(jobs).where(inArray(jobs.id, jobIds!))
-        : scoped
+    // Aşağıdaki 6 blok da (aktif ilan performansı, ret düşüşü, pasif olan danışmanlar, yeni
+    // başlayan danışmanlar, yeni sözleşme imzalayanlar) birbirinden bağımsız — paralel çalıştırılıyor.
+    const [
+      activeJobPerformance,
+      rejectionDropoff,
+      passiveResult,
+      newResult,
+      contractResult,
+    ] = await Promise.all([
+      // ── 8. ACTIVE JOB PERFORMANCE within date range ───────────────────────────
+      (async () => {
+        const activeJobRows = (hasOfficeFilter && !hasOfficeCandidates)
           ? []
-          : await db.select().from(jobs).where(eq(jobs.status, "open"));
+          : hasJobScope
+            ? await db.select().from(jobs).where(inArray(jobs.id, jobIds!))
+            : scoped
+              ? []
+              : await db.select().from(jobs).where(eq(jobs.status, "open"));
 
-    const activeJobPerformance = await Promise.all(
-      activeJobRows.map(async (job) => {
-        // Applicants who applied within the date range
-        const appConds: any[] = [
-          eq(applications.jobId, job.id),
-          gte(applications.appliedAt, start),
-          lte(applications.appliedAt, end),
+        return Promise.all(
+          activeJobRows.map(async (job) => {
+            // Applicants who applied within the date range
+            const appConds: any[] = [
+              eq(applications.jobId, job.id),
+              gte(applications.appliedAt, start),
+              lte(applications.appliedAt, end),
+            ];
+            if (hasOfficeCandidates) appConds.push(inArray(applications.candidateId, officeCandidateIds!));
+            const jobApps = await db
+              .select({ applications, candidate: candidates })
+              .from(applications)
+              .leftJoin(candidates, eq(applications.candidateId, candidates.id))
+              .where(and(...appConds));
+
+            const applicants = jobApps.length;
+            const k0 = jobApps.filter((a) => a.candidate?.category === "K0").length;
+            const k1 = jobApps.filter((a) => a.candidate?.category === "K1").length;
+            const k2 = jobApps.filter((a) => a.candidate?.category === "K2").length;
+            const hiredCount = jobApps.filter((a) => a.applications.status === "hired").length;
+
+            // Interviews and offers within date range for this job
+            const [ivCountRow] = await db.select({ count: count() }).from(interviews)
+              .where(and(eq(interviews.jobId, job.id), gte(interviews.createdAt, start), lte(interviews.createdAt, end)));
+            const [ofCountRow] = await db.select({ count: count() }).from(offers)
+              .where(and(eq(offers.jobId, job.id), gte(offers.createdAt, start), lte(offers.createdAt, end)));
+
+            const interviewsCount = ivCountRow?.count || 0;
+            const offersCount = ofCountRow?.count || 0;
+            const daysOpen = job.createdAt ? differenceInDays(new Date(), new Date(job.createdAt)) : 0;
+            const interviewRate = applicants ? Math.round((interviewsCount / applicants) * 100) : 0;
+            const offerRate = interviewsCount ? Math.round((offersCount / interviewsCount) * 100) : 0;
+            const health = applicants >= 50 && interviewRate >= 10
+              ? "Healthy"
+              : applicants >= 20
+                ? "Watch"
+                : "Low";
+
+            return { jobId: job.id, title: job.title, department: job.department, daysOpen, applicants, k0, k1, k2, health, hired: hiredCount, interviewRate, offerRate };
+          }),
+        );
+      })(),
+
+      // ── 9. REJECTION DROP-OFF: which stage did rejected candidates come from ─────
+      // Rejection dropoff: for each application currently 'rejected', take the most recent
+      // stageHistory entry with toStatus='rejected' within the date range.
+      // Deduplicating by applicationId prevents counting back-and-forth moves multiple times.
+      (async () => {
+        const rejConds: any[] = [
+          eq(stageHistory.toStatus, "rejected"),
+          eq(applications.status, "rejected"),
+          gte(stageHistory.enteredAt, start),
+          lte(stageHistory.enteredAt, end),
         ];
-        if (hasOfficeCandidates) appConds.push(inArray(applications.candidateId, officeCandidateIds!));
-        const jobApps = await db
-          .select({ applications, candidate: candidates })
-          .from(applications)
-          .leftJoin(candidates, eq(applications.candidateId, candidates.id))
-          .where(and(...appConds));
+        if (hasJobScope) rejConds.push(inArray(stageHistory.jobId, jobIds!));
+        if (hasOfficeCandidates) rejConds.push(inArray(stageHistory.candidateId, officeCandidateIds!));
 
-        const applicants = jobApps.length;
-        const k0 = jobApps.filter((a) => a.candidate?.category === "K0").length;
-        const k1 = jobApps.filter((a) => a.candidate?.category === "K1").length;
-        const k2 = jobApps.filter((a) => a.candidate?.category === "K2").length;
-        const hiredCount = jobApps.filter((a) => a.applications.status === "hired").length;
+        const rejAllRows = (scoped && !hasJobScope) || (hasOfficeFilter && !hasOfficeCandidates)
+          ? []
+          : await db
+              .select({ applicationId: stageHistory.applicationId, fromStatus: stageHistory.fromStatus, enteredAt: stageHistory.enteredAt })
+              .from(stageHistory)
+              .innerJoin(applications, eq(applications.id, stageHistory.applicationId))
+              .where(and(...rejConds));
 
-        // Interviews and offers within date range for this job
-        const [ivCountRow] = await db.select({ count: count() }).from(interviews)
-          .where(and(eq(interviews.jobId, job.id), gte(interviews.createdAt, start), lte(interviews.createdAt, end)));
-        const [ofCountRow] = await db.select({ count: count() }).from(offers)
-          .where(and(eq(offers.jobId, job.id), gte(offers.createdAt, start), lte(offers.createdAt, end)));
+        // Keep only the most recent rejection entry per application
+        const rejByApp = new Map<number, { fromStatus: string | null; enteredAt: string | null }>();
+        for (const row of rejAllRows) {
+          const existing = rejByApp.get(row.applicationId);
+          if (!existing || (row.enteredAt && existing.enteredAt && row.enteredAt > existing.enteredAt)) {
+            rejByApp.set(row.applicationId, { fromStatus: row.fromStatus, enteredAt: row.enteredAt });
+          }
+        }
 
-        const interviewsCount = ivCountRow?.count || 0;
-        const offersCount = ofCountRow?.count || 0;
-        const daysOpen = job.createdAt ? differenceInDays(new Date(), new Date(job.createdAt)) : 0;
-        const interviewRate = applicants ? Math.round((interviewsCount / applicants) * 100) : 0;
-        const offerRate = interviewsCount ? Math.round((offersCount / interviewsCount) * 100) : 0;
-        const health = applicants >= 50 && interviewRate >= 10
-          ? "Healthy"
-          : applicants >= 20
-            ? "Watch"
-            : "Low";
+        // Group deduplicated entries by fromStatus
+        const rejCountMap = new Map<string, number>();
+        for (const { fromStatus } of rejByApp.values()) {
+          const key = fromStatus ?? "unknown";
+          rejCountMap.set(key, (rejCountMap.get(key) ?? 0) + 1);
+        }
 
-        return { jobId: job.id, title: job.title, department: job.department, daysOpen, applicants, k0, k1, k2, health, hired: hiredCount, interviewRate, offerRate };
-      }),
-    );
+        const result: RejectionDropoff[] = Array.from(rejCountMap.entries())
+          .map(([fromStage, count]) => ({ fromStage, count }))
+          .sort((a, b) => b.count - a.count);
+        return result;
+      })(),
 
-    // ── 9. REJECTION DROP-OFF: which stage did rejected candidates come from ─────
-    // Rejection dropoff: for each application currently 'rejected', take the most recent
-    // stageHistory entry with toStatus='rejected' within the date range.
-    // Deduplicating by applicationId prevents counting back-and-forth moves multiple times.
-    const rejConds: any[] = [
-      eq(stageHistory.toStatus, "rejected"),
-      eq(applications.status, "rejected"),
-      gte(stageHistory.enteredAt, start),
-      lte(stageHistory.enteredAt, end),
-    ];
-    if (hasJobScope) rejConds.push(inArray(stageHistory.jobId, jobIds!));
-    if (hasOfficeCandidates) rejConds.push(inArray(stageHistory.candidateId, officeCandidateIds!));
+      // ── 10. PASSIVE EMPLOYEES: became inactive within the date range ──────────────
+      // Include employees with null passiveAt (set inactive before tracking existed) always,
+      // and date-filtered ones within the selected range
+      (async () => {
+        const passiveCondsArr: any[] = [
+          eq(employees.status, "inactive"),
+          or(
+            isNull(employees.passiveAt),
+            and(gte(employees.passiveAt, start), lte(employees.passiveAt, end))
+          ),
+        ];
+        if (hasOfficeCandidates) passiveCondsArr.push(inArray(employees.candidateId, officeCandidateIds!));
 
-    const rejAllRows = (scoped && !hasJobScope) || (hasOfficeFilter && !hasOfficeCandidates)
-      ? []
-      : await db
-          .select({ applicationId: stageHistory.applicationId, fromStatus: stageHistory.fromStatus, enteredAt: stageHistory.enteredAt })
-          .from(stageHistory)
-          .innerJoin(applications, eq(applications.id, stageHistory.applicationId))
-          .where(and(...rejConds));
+        const passiveRaw = hasOfficeFilter && !hasOfficeCandidates
+          ? []
+          : await db
+              .select({
+                id: employees.id,
+                title: employees.title,
+                passiveAt: employees.passiveAt,
+                startDate: employees.startDate,
+                candidateName: candidates.name,
+                jobTitle: jobs.title,
+              })
+              .from(employees)
+              .leftJoin(candidates, eq(employees.candidateId, candidates.id))
+              .leftJoin(jobs, eq(employees.jobId, jobs.id))
+              .where(and(...passiveCondsArr))
+              .orderBy(desc(employees.passiveAt));
 
-    // Keep only the most recent rejection entry per application
-    const rejByApp = new Map<number, { fromStatus: string | null; enteredAt: string | null }>();
-    for (const row of rejAllRows) {
-      const existing = rejByApp.get(row.applicationId);
-      if (!existing || (row.enteredAt && existing.enteredAt && row.enteredAt > existing.enteredAt)) {
-        rejByApp.set(row.applicationId, { fromStatus: row.fromStatus, enteredAt: row.enteredAt });
-      }
-    }
+        // BHB by year for passive employees
+        const passiveIds = passiveRaw.map((r) => r.id);
+        const bhbByYearRaw = passiveIds.length > 0
+          ? await db
+              .select({
+                employeeId: closingAgents.employeeId,
+                year: sql<number>`extract(year from coalesce(${closingAgents.closingDate}, ${closings.closingDate}))::int`,
+                bhb: sql<string>`sum(${closingAgents.bhbShare})`,
+              })
+              .from(closingAgents)
+              .innerJoin(closingSides, eq(closingAgents.closingSideId, closingSides.id))
+              .innerJoin(closings, eq(closingSides.closingId, closings.id))
+              .where(inArray(closingAgents.employeeId, passiveIds))
+              .groupBy(closingAgents.employeeId, sql`extract(year from coalesce(${closingAgents.closingDate}, ${closings.closingDate}))`)
+              .orderBy(closingAgents.employeeId, sql`extract(year from coalesce(${closingAgents.closingDate}, ${closings.closingDate}))`)
+          : [];
 
-    // Group deduplicated entries by fromStatus
-    const rejCountMap = new Map<string, number>();
-    for (const { fromStatus } of rejByApp.values()) {
-      const key = fromStatus ?? "unknown";
-      rejCountMap.set(key, (rejCountMap.get(key) ?? 0) + 1);
-    }
+        const bhbMap = new Map<number, { year: number; bhb: number }[]>();
+        for (const r of bhbByYearRaw) {
+          if (!bhbMap.has(r.employeeId)) bhbMap.set(r.employeeId, []);
+          bhbMap.get(r.employeeId)!.push({ year: r.year, bhb: parseFloat(r.bhb ?? "0") });
+        }
 
-    const rejectionDropoff: RejectionDropoff[] = Array.from(rejCountMap.entries())
-      .map(([fromStage, count]) => ({ fromStage, count }))
-      .sort((a, b) => b.count - a.count);
+        const passiveEmployees: PassiveEmployee[] = passiveRaw.map((r) => ({
+          id: r.id,
+          name: r.candidateName ?? "—",
+          passiveAt: r.passiveAt,
+          startDate: r.startDate ?? null,
+          title: r.title,
+          jobTitle: r.jobTitle ?? null,
+          bhbByYear: bhbMap.get(r.id) ?? [],
+        }));
+        return { passiveEmployees, passiveEmployeeCount: passiveEmployees.length };
+      })(),
 
-    // ── 10. PASSIVE EMPLOYEES: became inactive within the date range ──────────────
-    // Include employees with null passiveAt (set inactive before tracking existed) always,
-    // and date-filtered ones within the selected range
-    const passiveCondsArr: any[] = [
-      eq(employees.status, "inactive"),
-      or(
-        isNull(employees.passiveAt),
-        and(gte(employees.passiveAt, start), lte(employees.passiveAt, end))
-      ),
-    ];
-    if (hasOfficeCandidates) passiveCondsArr.push(inArray(employees.candidateId, officeCandidateIds!));
+      // ── New employees who started in the selected period ──
+      (async () => {
+        const newCondsArr: any[] = [
+          isNotNull(employees.startDate),
+          gte(employees.startDate, start),
+          lte(employees.startDate, end),
+        ];
+        if (hasOfficeCandidates) newCondsArr.push(inArray(employees.candidateId, officeCandidateIds!));
 
-    const passiveRaw = hasOfficeFilter && !hasOfficeCandidates
-      ? []
-      : await db
-          .select({
-            id: employees.id,
-            title: employees.title,
-            passiveAt: employees.passiveAt,
-            startDate: employees.startDate,
-            candidateName: candidates.name,
-            jobTitle: jobs.title,
-          })
-          .from(employees)
-          .leftJoin(candidates, eq(employees.candidateId, candidates.id))
-          .leftJoin(jobs, eq(employees.jobId, jobs.id))
-          .where(and(...passiveCondsArr))
-          .orderBy(desc(employees.passiveAt));
+        const newRaw = hasOfficeFilter && !hasOfficeCandidates
+          ? []
+          : await db
+              .select({
+                id: employees.id,
+                title: employees.title,
+                startDate: employees.startDate,
+                kwuid: employees.kwuid,
+                contractType: employees.contractType,
+                candidateName: candidates.name,
+                category: candidates.category,
+                city: candidates.city,
+                jobTitle: jobs.title,
+              })
+              .from(employees)
+              .leftJoin(candidates, eq(employees.candidateId, candidates.id))
+              .leftJoin(jobs, eq(employees.jobId, jobs.id))
+              .where(and(...newCondsArr))
+              .orderBy(asc(employees.startDate));
 
-    // BHB by year for passive employees
-    const passiveIds = passiveRaw.map((r) => r.id);
-    const bhbByYearRaw = passiveIds.length > 0
-      ? await db
-          .select({
-            employeeId: closingAgents.employeeId,
-            year: sql<number>`extract(year from coalesce(${closingAgents.closingDate}, ${closings.closingDate}))::int`,
-            bhb: sql<string>`sum(${closingAgents.bhbShare})`,
-          })
-          .from(closingAgents)
-          .innerJoin(closingSides, eq(closingAgents.closingSideId, closingSides.id))
-          .innerJoin(closings, eq(closingSides.closingId, closings.id))
-          .where(inArray(closingAgents.employeeId, passiveIds))
-          .groupBy(closingAgents.employeeId, sql`extract(year from coalesce(${closingAgents.closingDate}, ${closings.closingDate}))`)
-          .orderBy(closingAgents.employeeId, sql`extract(year from coalesce(${closingAgents.closingDate}, ${closings.closingDate}))`)
-      : [];
+        const newEmployees: NewEmployee[] = newRaw.map((r) => ({
+          id: r.id,
+          name: r.candidateName ?? "—",
+          startDate: r.startDate,
+          title: r.title,
+          kwuid: r.kwuid ?? null,
+          contractType: r.contractType ?? null,
+          category: r.category ?? null,
+          city: r.city ?? null,
+          jobTitle: r.jobTitle ?? null,
+        }));
+        return { newEmployees, newEmployeeCount: newEmployees.length };
+      })(),
 
-    const bhbMap = new Map<number, { year: number; bhb: number }[]>();
-    for (const r of bhbByYearRaw) {
-      if (!bhbMap.has(r.employeeId)) bhbMap.set(r.employeeId, []);
-      bhbMap.get(r.employeeId)!.push({ year: r.year, bhb: parseFloat(r.bhb ?? "0") });
-    }
+      // ── New contract signers: first time reaching 'hired' stage in the period ──
+      (async () => {
+        const contractConds: any[] = [
+          eq(stageHistory.toStatus, "hired"),
+          gte(stageHistory.enteredAt, start),
+          lte(stageHistory.enteredAt, end),
+        ];
+        if (hasJobScope) contractConds.push(inArray(stageHistory.jobId, jobIds!));
+        if (hasOfficeCandidates) contractConds.push(inArray(stageHistory.candidateId, officeCandidateIds!));
 
-    const passiveEmployees: PassiveEmployee[] = passiveRaw.map((r) => ({
-      id: r.id,
-      name: r.candidateName ?? "—",
-      passiveAt: r.passiveAt,
-      startDate: r.startDate ?? null,
-      title: r.title,
-      jobTitle: r.jobTitle ?? null,
-      bhbByYear: bhbMap.get(r.id) ?? [],
-    }));
+        const contractRaw = (scoped && !hasJobScope) || (hasOfficeFilter && !hasOfficeCandidates)
+          ? []
+          : await db
+              .select({
+                applicationId: stageHistory.applicationId,
+                signedAt: stageHistory.enteredAt,
+                candidateName: candidates.name,
+                category: candidates.category,
+                city: candidates.city,
+                jobTitle: jobs.title,
+              })
+              .from(stageHistory)
+              .innerJoin(candidates, eq(stageHistory.candidateId, candidates.id))
+              .leftJoin(jobs, eq(stageHistory.jobId, jobs.id))
+              .where(and(...contractConds))
+              .orderBy(asc(stageHistory.enteredAt));
 
-    // ── New employees who started in the selected period ──
-    const newCondsArr: any[] = [
-      isNotNull(employees.startDate),
-      gte(employees.startDate, start),
-      lte(employees.startDate, end),
-    ];
-    if (hasOfficeCandidates) newCondsArr.push(inArray(employees.candidateId, officeCandidateIds!));
+        // Deduplicate by applicationId — keep earliest entry
+        const contractMap = new Map<number, typeof contractRaw[number]>();
+        for (const row of contractRaw) {
+          const existing = contractMap.get(row.applicationId);
+          if (!existing || (row.signedAt && existing.signedAt && row.signedAt < existing.signedAt)) {
+            contractMap.set(row.applicationId, row);
+          }
+        }
 
-    const newRaw = hasOfficeFilter && !hasOfficeCandidates
-      ? []
-      : await db
-          .select({
-            id: employees.id,
-            title: employees.title,
-            startDate: employees.startDate,
-            kwuid: employees.kwuid,
-            contractType: employees.contractType,
-            candidateName: candidates.name,
-            category: candidates.category,
-            city: candidates.city,
-            jobTitle: jobs.title,
-          })
-          .from(employees)
-          .leftJoin(candidates, eq(employees.candidateId, candidates.id))
-          .leftJoin(jobs, eq(employees.jobId, jobs.id))
-          .where(and(...newCondsArr))
-          .orderBy(asc(employees.startDate));
+        const newContractSigners: NewContractSigner[] = Array.from(contractMap.values()).map((r) => ({
+          applicationId: r.applicationId,
+          candidateName: r.candidateName ?? "—",
+          jobTitle: r.jobTitle ?? null,
+          category: r.category ?? null,
+          city: r.city ?? null,
+          signedAt: r.signedAt,
+        }));
+        return { newContractSigners, newContractSignerCount: newContractSigners.length };
+      })(),
+    ]);
 
-    const newEmployees: NewEmployee[] = newRaw.map((r) => ({
-      id: r.id,
-      name: r.candidateName ?? "—",
-      startDate: r.startDate,
-      title: r.title,
-      kwuid: r.kwuid ?? null,
-      contractType: r.contractType ?? null,
-      category: r.category ?? null,
-      city: r.city ?? null,
-      jobTitle: r.jobTitle ?? null,
-    }));
-
-    // ── New contract signers: first time reaching 'hired' stage in the period ──
-    const contractConds: any[] = [
-      eq(stageHistory.toStatus, "hired"),
-      gte(stageHistory.enteredAt, start),
-      lte(stageHistory.enteredAt, end),
-    ];
-    if (hasJobScope) contractConds.push(inArray(stageHistory.jobId, jobIds!));
-    if (hasOfficeCandidates) contractConds.push(inArray(stageHistory.candidateId, officeCandidateIds!));
-
-    const contractRaw = (scoped && !hasJobScope) || (hasOfficeFilter && !hasOfficeCandidates)
-      ? []
-      : await db
-          .select({
-            applicationId: stageHistory.applicationId,
-            signedAt: stageHistory.enteredAt,
-            candidateName: candidates.name,
-            category: candidates.category,
-            city: candidates.city,
-            jobTitle: jobs.title,
-          })
-          .from(stageHistory)
-          .innerJoin(candidates, eq(stageHistory.candidateId, candidates.id))
-          .leftJoin(jobs, eq(stageHistory.jobId, jobs.id))
-          .where(and(...contractConds))
-          .orderBy(asc(stageHistory.enteredAt));
-
-    // Deduplicate by applicationId — keep earliest entry
-    const contractMap = new Map<number, typeof contractRaw[number]>();
-    for (const row of contractRaw) {
-      const existing = contractMap.get(row.applicationId);
-      if (!existing || (row.signedAt && existing.signedAt && row.signedAt < existing.signedAt)) {
-        contractMap.set(row.applicationId, row);
-      }
-    }
-
-    const newContractSigners: NewContractSigner[] = Array.from(contractMap.values()).map((r) => ({
-      applicationId: r.applicationId,
-      candidateName: r.candidateName ?? "—",
-      jobTitle: r.jobTitle ?? null,
-      category: r.category ?? null,
-      city: r.city ?? null,
-      signedAt: r.signedAt,
-    }));
+    const { passiveEmployees, passiveEmployeeCount } = passiveResult;
+    const { newEmployees, newEmployeeCount } = newResult;
+    const { newContractSigners, newContractSignerCount } = contractResult;
 
     return {
       funnel, stageTimes, total, hired, rejected, conversionRate,
       avgTimeToContractSign, avgTimeToEmploy,
       weeklyApplications,
-      totalInterviews: ivRow[0]?.count || 0,
-      totalOffers: ofRow[0]?.count || 0,
+      totalInterviews,
+      totalOffers,
       hiringManagerEfficiency: managerRows,
       activeJobPerformance,
       rejectionDropoff,
       passiveEmployees,
-      passiveEmployeeCount: passiveEmployees.length,
+      passiveEmployeeCount,
       newEmployees,
-      newEmployeeCount: newEmployees.length,
+      newEmployeeCount,
       newContractSigners,
-      newContractSignerCount: newContractSigners.length,
+      newContractSignerCount,
     };
   }
 
