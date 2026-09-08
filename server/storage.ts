@@ -698,23 +698,40 @@ export class DatabaseStorage implements IStorage {
     // Scoped filters
     const scoped = jobIds !== undefined;
     const jobCond = scoped && jobIds!.length > 0 ? inArray(applications.jobId, jobIds!) : undefined;
+    const ivCond = scoped && jobIds!.length > 0 ? [inArray(interviews.jobId, jobIds!)] : scoped ? null : [];
+
+    // Bu 7 sorgu birbirinden bağımsız (hiçbiri diğerinin sonucuna ihtiyaç duymuyor) —
+    // sırayla değil paralel çalıştırılıyor.
+    const [allJobs, allCandidates, appCounts, ivRows, offerRows, recentApplications, allInterviews] = await Promise.all([
+      this.getJobs(jobIds),
+      this.getCandidates(jobIds),
+      jobCond
+        ? db.select({ status: applications.status, count: count() }).from(applications).where(jobCond).groupBy(applications.status)
+        : scoped && jobIds!.length === 0
+          ? Promise.resolve([])
+          : db.select({ status: applications.status, count: count() }).from(applications).groupBy(applications.status),
+      ivCond === null
+        ? Promise.resolve([{ count: 0 }])
+        : ivCond.length > 0
+          ? db.select({ count: count() }).from(interviews).where(and(...ivCond))
+          : db.select({ count: count() }).from(interviews),
+      scoped && jobIds!.length > 0
+        ? db.select({ status: offers.status, count: count() }).from(offers).where(inArray(offers.jobId, jobIds!)).groupBy(offers.status)
+        : scoped
+          ? Promise.resolve([])
+          : db.select({ status: offers.status, count: count() }).from(offers).groupBy(offers.status),
+      this.joinedApplications(undefined, undefined, jobIds),
+      this.getInterviews(undefined, jobIds),
+    ]);
 
     // Total jobs
-    const allJobs = await this.getJobs(jobIds);
     const totalJobs = allJobs.length;
     const openJobs = allJobs.filter((j) => j.status === "open").length;
 
     // Candidates
-    const allCandidates = await this.getCandidates(jobIds);
     const totalCandidates = allCandidates.length;
 
     // Applications counts by status
-    const appCounts = jobCond
-      ? await db.select({ status: applications.status, count: count() }).from(applications).where(jobCond).groupBy(applications.status)
-      : scoped && jobIds!.length === 0
-        ? []
-        : await db.select({ status: applications.status, count: count() }).from(applications).groupBy(applications.status);
-
     const appMap = Object.fromEntries(appCounts.map((r) => [r.status, r.count]));
     const totalApplications = Object.values(appMap).reduce((s, c) => s + c, 0);
     const hired = appMap["hired"] || 0;
@@ -722,31 +739,21 @@ export class DatabaseStorage implements IStorage {
     const inPipeline = totalApplications - hired - (appMap["rejected"] || 0);
 
     // Interviews count
-    const ivCond = scoped && jobIds!.length > 0 ? [inArray(interviews.jobId, jobIds!)] : scoped ? null : [];
-    const ivRows = ivCond === null ? [{ count: 0 }] : (ivCond.length > 0
-      ? await db.select({ count: count() }).from(interviews).where(and(...ivCond))
-      : await db.select({ count: count() }).from(interviews));
     const interviewsCount = ivRows[0]?.count || 0;
 
     // Funnel
     const funnel = APPLICATION_STAGES.map((stage) => ({ stage, count: appMap[stage] || 0 }));
 
     // Offer acceptance rate
-    const offerRows = scoped && jobIds!.length > 0
-      ? await db.select({ status: offers.status, count: count() }).from(offers).where(inArray(offers.jobId, jobIds!)).groupBy(offers.status)
-      : scoped ? []
-      : await db.select({ status: offers.status, count: count() }).from(offers).groupBy(offers.status);
     const offerMap = Object.fromEntries(offerRows.map((r) => [r.status, r.count]));
     const accepted = offerMap["accepted"] || 0;
     const decided = accepted + (offerMap["rejected"] || 0);
     const offerAcceptanceRate = decided > 0 ? Math.round((accepted / decided) * 100) : 0;
 
     // Recent applications
-    const recentApplications = await this.joinedApplications(undefined, undefined, jobIds);
     const recent = recentApplications.slice(0, 10);
 
     // Upcoming interviews
-    const allInterviews = await this.getInterviews(undefined, jobIds);
     const now = new Date();
     const upcomingInterviews = allInterviews
       .filter((iv) => iv.startTime && new Date(iv.startTime) >= now)
@@ -892,31 +899,6 @@ export class DatabaseStorage implements IStorage {
       return { series, data };
     };
 
-    // 1. Monthly volume (count + total value in selected currency)
-    const monthlyVolume = (await db.execute(sql`
-      SELECT
-        TO_CHAR(DATE_TRUNC('month', c.closing_date), 'YYYY-MM') AS month,
-        COUNT(*)::int AS count,
-        COALESCE(SUM(${convertedValue}), 0)::numeric AS "totalValue"
-      FROM closings c
-      ${rateJoin}
-      WHERE ${baseWhere}
-      GROUP BY DATE_TRUNC('month', c.closing_date)
-      ORDER BY DATE_TRUNC('month', c.closing_date)
-    `)).rows;
-
-    // 2. Monthly average sale price (in selected currency)
-    const monthlyAvgPrice = (await db.execute(sql`
-      SELECT
-        TO_CHAR(DATE_TRUNC('month', c.closing_date), 'YYYY-MM') AS month,
-        COALESCE(AVG(${convertedValue}), 0)::numeric AS "avgPrice"
-      FROM closings c
-      ${rateJoin}
-      WHERE ${baseWhere} AND c.sale_value IS NOT NULL AND c.sale_value::numeric > 0
-      GROUP BY DATE_TRUNC('month', c.closing_date)
-      ORDER BY DATE_TRUNC('month', c.closing_date)
-    `)).rows;
-
     // 3+4. District & Neighborhood TRENDS: fuzzy cluster (Turkish-aware) + min-count filter
     const buildLocationTrend = async (col: "ilce" | "mahalle", topN: number, minCount: number, threshold: number) => {
       const rawRows = (await db.execute(sql`
@@ -1004,9 +986,6 @@ export class DatabaseStorage implements IStorage {
       return pivot(outRows, "name", "count", seriesOrder);
     };
 
-    const districtsTrend = await buildLocationTrend("ilce", 6, 3, 0.65);
-    const neighborhoodsTrend = await buildLocationTrend("mahalle", 6, 3, 0.65);
-
     // 5. Price range TREND: buckets vary by currency
     const PRICE_BUCKETS: Record<"TL" | "USD" | "GOLD", { thresholds: number[]; labels: string[] }> = {
       TL:   { thresholds: [2_000_000, 5_000_000, 10_000_000, 25_000_000, 50_000_000],
@@ -1017,73 +996,105 @@ export class DatabaseStorage implements IStorage {
               labels:     ["0 - 500 gr", "500 - 1500 gr", "1.5 - 3K gr", "3 - 7K gr", "7 - 15K gr", "15K+ gr"] },
     };
     const bucket = PRICE_BUCKETS[currency];
-    const priceRangeRows = (await db.execute(sql`
-      SELECT
-        TO_CHAR(DATE_TRUNC('month', c.closing_date), 'YYYY-MM') AS month,
-        CASE
-          WHEN ${convertedValue} < ${bucket.thresholds[0]} THEN ${bucket.labels[0]}
-          WHEN ${convertedValue} < ${bucket.thresholds[1]} THEN ${bucket.labels[1]}
-          WHEN ${convertedValue} < ${bucket.thresholds[2]} THEN ${bucket.labels[2]}
-          WHEN ${convertedValue} < ${bucket.thresholds[3]} THEN ${bucket.labels[3]}
-          WHEN ${convertedValue} < ${bucket.thresholds[4]} THEN ${bucket.labels[4]}
-          ELSE ${bucket.labels[5]}
-        END AS range,
-        COUNT(*)::int AS count
-      FROM closings c
-      ${rateJoin}
-      WHERE ${baseWhere} AND c.sale_value IS NOT NULL AND c.sale_value::numeric > 0 AND ${convertedValue} IS NOT NULL
-      GROUP BY DATE_TRUNC('month', c.closing_date), range
-      ORDER BY DATE_TRUNC('month', c.closing_date)
-    `)).rows;
-    const priceRangeTrend = pivot(priceRangeRows, "range", "count", bucket.labels);
-
-    // 6. Category TREND: monthly count per deal_category
-    const categoryRows = (await db.execute(sql`
-      SELECT
-        TO_CHAR(DATE_TRUNC('month', c.closing_date), 'YYYY-MM') AS month,
-        COALESCE(NULLIF(TRIM(c.deal_category), ''), 'Belirtilmemiş') AS category,
-        COUNT(*)::int AS count
-      FROM closings c
-      WHERE ${baseWhere}
-      GROUP BY DATE_TRUNC('month', c.closing_date), 2
-      ORDER BY DATE_TRUNC('month', c.closing_date)
-    `)).rows;
     const CATEGORY_ORDER = ["Satış", "Kiralık", "Yönlendirme", "Belirtilmemiş"];
+
+    // Bu 9 sorgu birbirinden tamamen bağımsız (hepsi aynı baseWhere ile closings/exchange_rates
+    // tablolarını farklı açılardan özetliyor) — sırayla değil paralel çalıştırılıyor.
+    const [
+      monthlyVolume,
+      monthlyAvgPrice,
+      districtsTrend,
+      neighborhoodsTrend,
+      priceRangeRows,
+      categoryRows,
+      commissionRows,
+      durationRows,
+      availRows,
+    ] = await Promise.all([
+      db.execute(sql`
+        SELECT
+          TO_CHAR(DATE_TRUNC('month', c.closing_date), 'YYYY-MM') AS month,
+          COUNT(*)::int AS count,
+          COALESCE(SUM(${convertedValue}), 0)::numeric AS "totalValue"
+        FROM closings c
+        ${rateJoin}
+        WHERE ${baseWhere}
+        GROUP BY DATE_TRUNC('month', c.closing_date)
+        ORDER BY DATE_TRUNC('month', c.closing_date)
+      `).then((r) => r.rows),
+      db.execute(sql`
+        SELECT
+          TO_CHAR(DATE_TRUNC('month', c.closing_date), 'YYYY-MM') AS month,
+          COALESCE(AVG(${convertedValue}), 0)::numeric AS "avgPrice"
+        FROM closings c
+        ${rateJoin}
+        WHERE ${baseWhere} AND c.sale_value IS NOT NULL AND c.sale_value::numeric > 0
+        GROUP BY DATE_TRUNC('month', c.closing_date)
+        ORDER BY DATE_TRUNC('month', c.closing_date)
+      `).then((r) => r.rows),
+      buildLocationTrend("ilce", 6, 3, 0.65),
+      buildLocationTrend("mahalle", 6, 3, 0.65),
+      db.execute(sql`
+        SELECT
+          TO_CHAR(DATE_TRUNC('month', c.closing_date), 'YYYY-MM') AS month,
+          CASE
+            WHEN ${convertedValue} < ${bucket.thresholds[0]} THEN ${bucket.labels[0]}
+            WHEN ${convertedValue} < ${bucket.thresholds[1]} THEN ${bucket.labels[1]}
+            WHEN ${convertedValue} < ${bucket.thresholds[2]} THEN ${bucket.labels[2]}
+            WHEN ${convertedValue} < ${bucket.thresholds[3]} THEN ${bucket.labels[3]}
+            WHEN ${convertedValue} < ${bucket.thresholds[4]} THEN ${bucket.labels[4]}
+            ELSE ${bucket.labels[5]}
+          END AS range,
+          COUNT(*)::int AS count
+        FROM closings c
+        ${rateJoin}
+        WHERE ${baseWhere} AND c.sale_value IS NOT NULL AND c.sale_value::numeric > 0 AND ${convertedValue} IS NOT NULL
+        GROUP BY DATE_TRUNC('month', c.closing_date), range
+        ORDER BY DATE_TRUNC('month', c.closing_date)
+      `).then((r) => r.rows),
+      db.execute(sql`
+        SELECT
+          TO_CHAR(DATE_TRUNC('month', c.closing_date), 'YYYY-MM') AS month,
+          COALESCE(NULLIF(TRIM(c.deal_category), ''), 'Belirtilmemiş') AS category,
+          COUNT(*)::int AS count
+        FROM closings c
+        WHERE ${baseWhere}
+        GROUP BY DATE_TRUNC('month', c.closing_date), 2
+        ORDER BY DATE_TRUNC('month', c.closing_date)
+      `).then((r) => r.rows),
+      db.execute(sql`
+        SELECT
+          TO_CHAR(DATE_TRUNC('month', c.closing_date), 'YYYY-MM') AS month,
+          COALESCE(NULLIF(TRIM(c.deal_category), ''), 'Belirtilmemiş') AS category,
+          COALESCE(AVG(c.commission_rate::numeric), 0)::numeric AS "avgRate"
+        FROM closings c
+        WHERE ${baseWhere} AND c.commission_rate IS NOT NULL
+        GROUP BY DATE_TRUNC('month', c.closing_date), 2
+        ORDER BY DATE_TRUNC('month', c.closing_date)
+      `).then((r) => r.rows),
+      db.execute(sql`
+        SELECT
+          TO_CHAR(DATE_TRUNC('month', c.closing_date), 'YYYY-MM') AS month,
+          COALESCE(NULLIF(TRIM(c.deal_category), ''), 'Belirtilmemiş') AS category,
+          COALESCE(AVG(c.duration_days::numeric), 0)::numeric AS "avgDays"
+        FROM closings c
+        WHERE ${baseWhere} AND c.duration_days IS NOT NULL AND c.duration_days > 0
+        GROUP BY DATE_TRUNC('month', c.closing_date), 2
+        ORDER BY DATE_TRUNC('month', c.closing_date)
+      `).then((r) => r.rows),
+      db.execute(sql`
+        SELECT
+          COUNT(*) FILTER (WHERE usd_try IS NOT NULL) AS usd_count,
+          COUNT(*) FILTER (WHERE gold_gram_try IS NOT NULL) AS gold_count
+        FROM exchange_rates
+      `).then((r) => r.rows[0] as any),
+    ]);
+
+    const priceRangeTrend = pivot(priceRangeRows, "range", "count", bucket.labels);
     const categoryTrend = pivot(categoryRows, "category", "count", CATEGORY_ORDER);
-
-    // 7. Commission TREND: monthly avg rate per category
-    const commissionRows = (await db.execute(sql`
-      SELECT
-        TO_CHAR(DATE_TRUNC('month', c.closing_date), 'YYYY-MM') AS month,
-        COALESCE(NULLIF(TRIM(c.deal_category), ''), 'Belirtilmemiş') AS category,
-        COALESCE(AVG(c.commission_rate::numeric), 0)::numeric AS "avgRate"
-      FROM closings c
-      WHERE ${baseWhere} AND c.commission_rate IS NOT NULL
-      GROUP BY DATE_TRUNC('month', c.closing_date), 2
-      ORDER BY DATE_TRUNC('month', c.closing_date)
-    `)).rows;
     const commissionTrend = pivot(commissionRows, "category", "avgRate", CATEGORY_ORDER);
-
-    // 8. Duration TREND: monthly avg days per category
-    const durationRows = (await db.execute(sql`
-      SELECT
-        TO_CHAR(DATE_TRUNC('month', c.closing_date), 'YYYY-MM') AS month,
-        COALESCE(NULLIF(TRIM(c.deal_category), ''), 'Belirtilmemiş') AS category,
-        COALESCE(AVG(c.duration_days::numeric), 0)::numeric AS "avgDays"
-      FROM closings c
-      WHERE ${baseWhere} AND c.duration_days IS NOT NULL AND c.duration_days > 0
-      GROUP BY DATE_TRUNC('month', c.closing_date), 2
-      ORDER BY DATE_TRUNC('month', c.closing_date)
-    `)).rows;
     const durationTrend = pivot(durationRows, "category", "avgDays", CATEGORY_ORDER);
 
-    // Availability flags for currency options — UI uses these to enable/disable toggles.
-    const availRows = (await db.execute(sql`
-      SELECT
-        COUNT(*) FILTER (WHERE usd_try IS NOT NULL) AS usd_count,
-        COUNT(*) FILTER (WHERE gold_gram_try IS NOT NULL) AS gold_count
-      FROM exchange_rates
-    `)).rows[0] as any;
     const currencyAvailable = {
       TL: true,
       USD: Number(availRows?.usd_count ?? 0) > 0,
