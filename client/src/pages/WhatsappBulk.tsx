@@ -31,6 +31,7 @@ interface BulkSendLog {
   status: "sent" | "failed";
   error: string | null;
   createdAt: string;
+  batchId: string | null;
 }
 
 function useActiveAdvisors() {
@@ -76,11 +77,22 @@ export default function WhatsappBulk() {
 
   const [sending, setSending] = useState(false);
   const [batchId, setBatchId] = useState<string | null>(null);
+  const [lastBatchIds, setLastBatchIds] = useState<number[]>([]);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [progress, setProgress] = useState<{
     active: boolean; total: number; sent: number; failed: number; current: string | null; done: boolean; stopped: boolean;
     autoStopped: boolean;
   } | null>(null);
+
+  // Son biten/duran batch'te gönderilemeyenler (başarısız olanlar + otomatik durma nedeniyle
+  // hiç denenmemiş kalanlar) — "Kaldığı Yerden Devam Et" bunları hedef alır.
+  const remainingFromLastBatch = useMemo(() => {
+    if (!batchId || progress?.active || lastBatchIds.length === 0) return [];
+    const sentIds = new Set(
+      history.filter((h) => h.batchId === batchId && h.status === "sent" && h.employeeId != null).map((h) => h.employeeId as number)
+    );
+    return lastBatchIds.filter((id) => !sentIds.has(id));
+  }, [history, batchId, lastBatchIds, progress?.active]);
 
   type ServerBatch = {
     batchId: string; status: "running" | "done" | "stopped";
@@ -166,9 +178,8 @@ export default function WhatsappBulk() {
   const selectedTemplate = templates.find((t) => t.sid === templateSid) ?? null;
   const otherVariables = (selectedTemplate?.variables ?? []).filter((v) => !(autoFillName && v === "1"));
 
-  const handleSend = async () => {
-    if (!selectedTemplate || selected.size === 0 || sending) return;
-    const ids = Array.from(selected);
+  const sendBatch = async (ids: number[]) => {
+    if (!selectedTemplate || ids.length === 0 || sending) return;
 
     const variablesByEmployeeId: Record<number, Record<string, string>> = {};
     for (const id of ids) {
@@ -179,6 +190,7 @@ export default function WhatsappBulk() {
       variablesByEmployeeId[id] = vars;
     }
 
+    setLastBatchIds(ids);
     setSending(true);
     setProgress({ active: true, total: ids.length, sent: 0, failed: 0, current: null, done: false, stopped: false, autoStopped: false });
 
@@ -204,6 +216,9 @@ export default function WhatsappBulk() {
       toast({ title: "Hata", description: "Gönderim başlatılamadı.", variant: "destructive" });
     }
   };
+
+  const handleSend = () => sendBatch(Array.from(selected));
+  const handleContinueFailed = () => sendBatch(remainingFromLastBatch);
 
   const stopSend = async () => {
     if (!batchId) return;
@@ -330,6 +345,19 @@ export default function WhatsappBulk() {
                   {progress.failed > 0 && <span className="text-red-600">Başarısız: <b>{progress.failed}</b></span>}
                   {progress.current && <span className="text-primary">Şu an: <b>{progress.current}</b></span>}
                 </div>
+                {!progress.active && remainingFromLastBatch.length > 0 && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="w-full gap-1.5 text-xs h-8"
+                    disabled={sending}
+                    onClick={handleContinueFailed}
+                    data-testid="btn-continue-failed"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" />
+                    Kaldığı Yerden Devam Et ({remainingFromLastBatch.length} kişi)
+                  </Button>
+                )}
               </div>
             )}
           </div>
