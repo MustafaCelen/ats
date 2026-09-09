@@ -74,6 +74,28 @@ export default function Campaigns() {
     onError: (e: any) => toast({ title: "Meta senkronu başarısız", description: e?.message, variant: "destructive" }),
   });
 
+  const metaBackfill = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/meta/backfill-leads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) throw new Error((await res.json()).message ?? "Hata");
+      return res.json() as Promise<{ formsScanned: number; leadsScanned: number; imported: number; duplicates: number; errors: string[] }>;
+    },
+    onSuccess: (d) => {
+      qc.invalidateQueries({ queryKey: ["/api/campaigns"] });
+      toast({
+        title: "Geçmiş lead aktarımı tamamlandı",
+        description: `${d.formsScanned} form tarandı, ${d.leadsScanned} lead bulundu, ${d.imported} yeni aday açıldı, ${d.duplicates} zaten kayıtlıydı.` + (d.errors.length ? ` ${d.errors.length} hata.` : ""),
+        variant: d.errors.length && d.imported === 0 ? "destructive" : undefined,
+      });
+    },
+    onError: (e: any) => toast({ title: "Lead aktarımı başarısız", description: e?.message, variant: "destructive" }),
+  });
+
   const totalLeads = campaigns.reduce((s, c) => s + c.lead_count, 0);
   const totalConverted = campaigns.reduce((s, c) => s + c.converted_count, 0);
   const totalSpend = campaigns.reduce((s, c) => s + parseFloat(c.total_expense), 0);
@@ -95,9 +117,20 @@ export default function Campaigns() {
           {isAdmin && (
             <div className="flex items-center gap-2">
               {metaStatus?.configured && (
-                <Button variant="outline" onClick={() => metaSync.mutate()} disabled={metaSync.isPending} className="gap-1.5" title="Meta kampanyalarını ve harcamalarını senkronla">
-                  <RefreshCw className={`h-4 w-4 ${metaSync.isPending ? "animate-spin" : ""}`} /> Meta Senkronla
-                </Button>
+                <>
+                  <Button variant="outline" onClick={() => metaSync.mutate()} disabled={metaSync.isPending} className="gap-1.5" title="Meta kampanyalarını ve harcamalarını senkronla">
+                    <RefreshCw className={`h-4 w-4 ${metaSync.isPending ? "animate-spin" : ""}`} /> Meta Senkronla
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => metaBackfill.mutate()}
+                    disabled={metaBackfill.isPending}
+                    className="gap-1.5"
+                    title="Webhook kurulmadan önce Meta'da biriken lead'leri aday olarak içe aktar"
+                  >
+                    <RefreshCw className={`h-4 w-4 ${metaBackfill.isPending ? "animate-spin" : ""}`} /> Geçmiş Lead'leri İçe Aktar
+                  </Button>
+                </>
               )}
               <Button onClick={() => setCreateOpen(true)} className="gap-1.5">
                 <Plus className="h-4 w-4" /> Yeni Kampanya

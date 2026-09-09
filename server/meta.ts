@@ -29,9 +29,9 @@ export function isMetaWebhookConfigured(): boolean {
   return !!(metaConfig.appSecret && metaConfig.verifyToken && metaConfig.accessToken);
 }
 
-async function graphGet(path: string, params: Record<string, string | number> = {}): Promise<any> {
+async function graphGet(path: string, params: Record<string, string | number> = {}, tokenOverride?: string): Promise<any> {
   const url = new URL(`${GRAPH}/${path}`);
-  url.searchParams.set("access_token", metaConfig.accessToken);
+  url.searchParams.set("access_token", tokenOverride ?? metaConfig.accessToken);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
   const res = await fetch(url.toString());
   const json = await res.json();
@@ -39,6 +39,24 @@ async function graphGet(path: string, params: Record<string, string | number> = 
     throw new Error(`[meta] Graph API hata: ${json?.error?.message ?? res.status} (${path})`);
   }
   return json;
+}
+
+// Sayfaya özel (Page) access token — leadgen_forms / {form}/leads gibi bazı uçlar sistem
+// kullanıcısının kendi token'ıyla değil, sayfaya özel token'la çalışır ("This method must be
+// called with a Page Access Token" hatası buradan geliyor). me/accounts üzerinden alınır.
+let cachedPageToken: { pageId: string; token: string } | null = null;
+async function getPageAccessToken(): Promise<string | null> {
+  if (!metaConfig.pageId) return null;
+  if (cachedPageToken && cachedPageToken.pageId === metaConfig.pageId) return cachedPageToken.token;
+  try {
+    const data = await graphGet("me/accounts", { fields: "id,access_token", limit: 200 });
+    const match = (data.data ?? []).find((p: any) => String(p.id) === metaConfig.pageId);
+    if (!match?.access_token) return null;
+    cachedPageToken = { pageId: metaConfig.pageId, token: match.access_token };
+    return match.access_token;
+  } catch {
+    return null;
+  }
 }
 
 // ── Webhook imza doğrulaması (X-Hub-Signature-256) ──
@@ -170,4 +188,101 @@ export function mapLeadToCandidate(fields: Record<string, string>): { name: stri
   const email = pick("email", "e-mail", "eposta", "e-posta");
   const phone = pick("phone_number", "phone", "telefon", "tel", "gsm");
   return { name, email, phone };
+}
+
+// ── Geçmiş lead'leri geriye dönük içe aktarma (backfill) ──
+// Webhook sadece bundan sonra gelen lead'leri yakalar; sayfada webhook kurulmadan önce
+// birikmiş lead'ler burada Graph API'den toplu çekilip aynı ingestMetaLead ile (idempotent,
+// leadgen_id bazlı) adaya dönüştürülür — tekrar çalıştırmak güvenlidir, mükerrer açmaz.
+export async function listLeadForms(): Promise<{ id: string; name: string; status: string; leadsCount: number }[]> {
+  if (!isMetaConfigured() || !metaConfig.pageId) return [];
+  const pageToken = await getPageAccessToken();
+  if (!pageToken) return [];
+  const forms: any[] = [];
+  let after: string | undefined;
+  do {
+    const page = await graphGet(`${metaConfig.pageId}/leadgen_forms`, {
+      fields: "id,name,status,leads_count",
+      limit: 100,
+      ...(after ? { after } : {}),
+    }, pageToken);
+    forms.push(...(page.data ?? []));
+    after = page.paging?.cursors?.after && page.paging?.next ? page.paging.cursors.after : undefined;
+  } while (after);
+  return forms.map((f) => ({ id: String(f.id), name: f.name ?? `Form #${f.id}`, status: f.status ?? "UNKNOWN", leadsCount: f.leads_count ?? 0 }));
+}
+
+export async function fetchFormLeads(formId: string): Promise<{
+  id: string; createdTime: string | null; campaignId: string | null; adId: string | null; fields: Record<string, string>;
+}[]> {
+  const pageToken = await getPageAccessToken();
+  if (!pageToken) return [];
+  const rows: any[] = [];
+  let after: string | undefined;
+  do {
+    const page = await graphGet(`${formId}/leads`, {
+      fields: "id,created_time,campaign_id,ad_id,field_data",
+      limit: 100,
+      ...(after ? { after } : {}),
+    }, pageToken);
+    rows.push(...(page.data ?? []));
+    after = page.paging?.cursors?.after && page.paging?.next ? page.paging.cursors.after : undefined;
+  } while (after);
+  return rows.map((l) => {
+    const fields: Record<string, string> = {};
+    for (const f of l.field_data ?? []) {
+      const key = String(f.name ?? "").toLowerCase();
+      const val = Array.isArray(f.values) ? f.values.join(", ") : String(f.values ?? "");
+      if (key) fields[key] = val;
+    }
+    return {
+      id: String(l.id),
+      createdTime: l.created_time ?? null,
+      campaignId: l.campaign_id ? String(l.campaign_id) : null,
+      adId: l.ad_id ? String(l.ad_id) : null,
+      fields,
+    };
+  });
+}
+
+export async function backfillLeadsFromMeta(formId?: string): Promise<{
+  formsScanned: number; leadsScanned: number; imported: number; duplicates: number; errors: string[];
+}> {
+  if (!isMetaConfigured() || !metaConfig.pageId) {
+    return { formsScanned: 0, leadsScanned: 0, imported: 0, duplicates: 0, errors: ["Meta yapılandırılmamış"] };
+  }
+  const errors: string[] = [];
+  let leadsScanned = 0, imported = 0, duplicates = 0;
+
+  const targetFormIds = formId
+    ? [formId]
+    : (await listLeadForms()).filter((f) => f.leadsCount > 0).map((f) => f.id);
+
+  for (const fId of targetFormIds) {
+    try {
+      const leads = await fetchFormLeads(fId);
+      for (const lead of leads) {
+        leadsScanned++;
+        try {
+          const mapped = mapLeadToCandidate(lead.fields);
+          const result = await storage.ingestMetaLead({
+            leadgenId: lead.id,
+            campaignExternalId: lead.campaignId,
+            formId: fId,
+            adId: lead.adId,
+            name: mapped.name,
+            email: mapped.email,
+            phone: mapped.phone,
+            rawFields: lead.fields,
+          });
+          if (result.duplicate) duplicates++; else imported++;
+        } catch (e: any) {
+          errors.push(`lead ${lead.id}: ${e?.message ?? e}`);
+        }
+      }
+    } catch (e: any) {
+      errors.push(`form ${fId}: ${e?.message ?? e}`);
+    }
+  }
+  return { formsScanned: targetFormIds.length, leadsScanned, imported, duplicates, errors };
 }

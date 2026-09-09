@@ -2941,19 +2941,28 @@ export class DatabaseStorage implements IStorage {
       campaignId = camp.rows.length > 0 ? (camp.rows[0] as any).id : null;
     }
 
-    const [candidate] = await db.insert(candidates).values({
-      name: data.name,
-      email: data.email,
-      phone: data.phone,
-      campaignId: campaignId ?? undefined,
-    } as any).returning();
+    // Telefon zaten kayıtlı bir adaya aitse (başka bir kanaldan ya da daha önceki bir lead'den
+    // gelmiş olabilir), yeni bir mükerrer aday açmak yerine mevcut adayı bu lead'e bağla.
+    let candidateId: number;
+    let linkedExisting = false;
+    if (data.phone) {
+      const existing = await this.getCandidateByPhone(data.phone);
+      if (existing) { candidateId = existing.id; linkedExisting = true; }
+      else candidateId = (await db.insert(candidates).values({
+        name: data.name, email: data.email, phone: data.phone, campaignId: campaignId ?? undefined,
+      } as any).returning())[0].id;
+    } else {
+      candidateId = (await db.insert(candidates).values({
+        name: data.name, email: data.email, phone: data.phone, campaignId: campaignId ?? undefined,
+      } as any).returning())[0].id;
+    }
 
     await db.execute(sql`
       INSERT INTO meta_leads (leadgen_id, campaign_external_id, form_id, ad_id, candidate_id, campaign_id, raw_fields)
-      VALUES (${data.leadgenId}, ${data.campaignExternalId}, ${data.formId}, ${data.adId}, ${candidate.id}, ${campaignId}, ${JSON.stringify(data.rawFields)})
+      VALUES (${data.leadgenId}, ${data.campaignExternalId}, ${data.formId}, ${data.adId}, ${candidateId}, ${campaignId}, ${JSON.stringify(data.rawFields)})
       ON CONFLICT (leadgen_id) DO UPDATE SET candidate_id = EXCLUDED.candidate_id, campaign_id = EXCLUDED.campaign_id
     `);
-    return { candidateId: candidate.id, duplicate: false };
+    return { candidateId, duplicate: linkedExisting };
   }
 
   // Bir danışmanın belirli tarihteki ofisini döner (transfer geçmişine göre)

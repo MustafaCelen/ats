@@ -13,7 +13,7 @@ import { sendWhatsApp, sendWhatsAppTemplate, checkWhatsAppStatus, publicBaseUrl,
 import { startBulkSendBatch, getActiveBatchForUser, getLastBatchForUser, getBatch, requestStop, type BulkSendItem } from "./whatsapp-bulk-runner";
 import { sendEmail } from "./email";
 import { isFonzipConfigured, fetchFonzipPreview, fetchFonzipUsers, fetchFonzipDebts, fetchFonzipDonations, syncFonzipDebts, syncFonzipUsersFinancials, getFonzipUserFinancialsReport, importFonzipExcel, syncFonzipRecentDebts } from "./fonzip";
-import { isMetaConfigured, isMetaWebhookConfigured, metaConfig, syncMetaCampaigns, fetchMetaLead, mapLeadToCandidate, verifyWebhookSignature } from "./meta";
+import { isMetaConfigured, isMetaWebhookConfigured, metaConfig, syncMetaCampaigns, fetchMetaLead, mapLeadToCandidate, verifyWebhookSignature, listLeadForms, backfillLeadsFromMeta } from "./meta";
 
 // Scoping helper:
 //   admin      → undefined (all jobs)
@@ -3351,6 +3351,30 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.json(result);
     } catch (err: any) {
       console.error("[POST /api/meta/sync-campaigns]", err);
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Sayfadaki lead formlarını (lead sayılarıyla) listeler — hangi formda geçmiş lead
+  // biriktiğini görmek için (backfill öncesi önizleme).
+  app.get("/api/meta/lead-forms", requireAuth, requireAdmin, async (_req, res) => {
+    try {
+      res.json(await listLeadForms());
+    } catch (err: any) {
+      console.error("[GET /api/meta/lead-forms]", err);
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Webhook kurulmadan önce (ya da kaçırılmış) lead'leri geriye dönük içe aktarır. leadgen_id
+  // bazlı idempotent olduğu için tekrar çalıştırmak güvenlidir, mükerrer aday açmaz.
+  app.post("/api/meta/backfill-leads", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const formId = req.body?.formId ? String(req.body.formId) : undefined;
+      const result = await backfillLeadsFromMeta(formId);
+      res.json(result);
+    } catch (err: any) {
+      console.error("[POST /api/meta/backfill-leads]", err);
       res.status(500).json({ message: err.message });
     }
   });
