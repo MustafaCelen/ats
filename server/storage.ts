@@ -4711,6 +4711,10 @@ export class DatabaseStorage implements IStorage {
       capAmount: number | null; capUsed: number; capRemaining: number | null; periodStart: string; capYear: number; isCapper: boolean;
       contractType: string | null; grossBhbRemaining: number | null;
     };
+    capHistory: {
+      cycleStartYear: number; periodStart: string; periodEnd: string;
+      capAmount: number | null; capUsed: number; isCapper: boolean; percentFilled: number;
+    }[];
     years: number[];
     bhbByYear: Record<number, { total: number; months: number[] }>;
     islemByYear: {
@@ -4731,12 +4735,80 @@ export class DatabaseStorage implements IStorage {
       .select({
         id: employees.id, kwuid: employees.kwuid, name: candidates.name, ukStartDate: employees.ukStartDate, contractType: employees.contractType,
         uretkenlikKoclugu: employees.uretkenlikKoclugu, dua: employees.dua, performansKariyerKoclugu: employees.performansKariyerKoclugu,
+        capMonth: employees.capMonth, capValue: employees.capValue, capManualAdjustment: employees.capManualAdjustment,
       })
       .from(employees)
       .leftJoin(candidates, eq(candidates.id, employees.candidateId))
       .where(eq(employees.id, employeeId));
 
     const capStatus = await this.getEmployeeCapStatus(employeeId);
+
+    // ── Cap Geçmişi: son 3 cap döngüsü (capMonth'a göre yıl dönümü — takvim yılı değil) ──
+    // Her danışmanın kendi yıl dönümünden başlayan 12 aylık döngüsünde Capper olup olmadığını
+    // ve cap'in yüzde kaçını doldurduğunu gösterir. Geçmiş döngülere emp.capManualAdjustment
+    // uygulanmaz (o güncel/tek seferlik bir düzeltme kaydı — geçmiş döngülere ait değil).
+    const CAP_HISTORY_CYCLES = 3;
+    const capHistory: {
+      cycleStartYear: number; periodStart: string; periodEnd: string;
+      capAmount: number | null; capUsed: number; isCapper: boolean; percentFilled: number;
+    }[] = [];
+    if (capStatus && emp?.capMonth) {
+      const empCapValueNow = emp.capValue ? parseFloat(emp.capValue) : null;
+      const capSettingRows = await db.select().from(capSettings);
+      const capSettingByYear = new Map(capSettingRows.map((s) => [s.year, parseFloat(s.amount)]));
+      const effDateCapHist = sql<Date>`COALESCE(${closingAgents.closingDate}, ${closings.closingDate})`;
+
+      for (let i = 0; i < CAP_HISTORY_CYCLES; i++) {
+        const cycleStart = new Date(capStatus.periodStart);
+        cycleStart.setFullYear(cycleStart.getFullYear() - i);
+        const cycleEnd = new Date(cycleStart);
+        cycleEnd.setFullYear(cycleEnd.getFullYear() + 1);
+
+        const capAmountForCycle = empCapValueNow && empCapValueNow > 0
+          ? empCapValueNow
+          : (capSettingByYear.get(cycleStart.getFullYear()) ?? null);
+
+        const closingRowsForCycle = await db
+          .select({ marketCenterActual: closingAgents.marketCenterActual })
+          .from(closingAgents)
+          .innerJoin(closingSides, eq(closingAgents.closingSideId, closingSides.id))
+          .innerJoin(closings, eq(closingSides.closingId, closings.id))
+          .where(and(
+            eq(closingAgents.employeeId, employeeId),
+            sql`${effDateCapHist} IS NOT NULL`,
+            sql`${effDateCapHist} >= ${cycleStart}`,
+            sql`${effDateCapHist} < ${cycleEnd}`,
+          ));
+        const sumBM = closingRowsForCycle.reduce((s, r) => s + parseFloat(r.marketCenterActual ?? "0"), 0);
+
+        const cycleStartYmd = cycleStart.toISOString().slice(0, 10);
+        const cycleEndYmd = cycleEnd.toISOString().slice(0, 10);
+        const prepayRowsForCycle = await db
+          .select({ amount: officeExpenses.amount })
+          .from(officeExpenses)
+          .where(and(
+            eq(officeExpenses.type, "income"),
+            eq(officeExpenses.category, BM_PREPAYMENT_CATEGORY),
+            eq(officeExpenses.employeeId, employeeId),
+            gte(officeExpenses.date, cycleStartYmd),
+            lt(officeExpenses.date, cycleEndYmd),
+          ));
+        const sumPrepay = prepayRowsForCycle.reduce((s, r) => s + parseFloat(r.amount ?? "0"), 0);
+
+        const manualAdj = i === 0 ? parseFloat(emp.capManualAdjustment ?? "0") : 0;
+        const capUsed = sumBM + sumPrepay + manualAdj;
+        const isCapper = capAmountForCycle != null && capUsed >= capAmountForCycle;
+        const percentFilled = capAmountForCycle && capAmountForCycle > 0
+          ? Math.round((capUsed / capAmountForCycle) * 1000) / 10
+          : 0;
+
+        capHistory.push({
+          cycleStartYear: cycleStart.getFullYear(),
+          periodStart: cycleStartYmd, periodEnd: cycleEndYmd,
+          capAmount: capAmountForCycle, capUsed, isCapper, percentFilled,
+        });
+      }
+    }
 
     const currentYear = new Date().getFullYear();
     const years = [currentYear - 2, currentYear - 1, currentYear];
@@ -4933,6 +5005,7 @@ export class DatabaseStorage implements IStorage {
           ? capStatus.capRemaining / (emp?.contractType === "50/50" ? 0.30 : 0.27)
           : null,
       },
+      capHistory,
       years,
       bhbByYear,
       islemByYear: {

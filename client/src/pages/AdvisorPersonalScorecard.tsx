@@ -62,6 +62,10 @@ interface PersonalScorecardData {
     capAmount: number | null; capUsed: number; capRemaining: number | null; periodStart: string; capYear: number; isCapper: boolean;
     contractType: string | null; grossBhbRemaining: number | null;
   };
+  capHistory: {
+    cycleStartYear: number; periodStart: string; periodEnd: string;
+    capAmount: number | null; capUsed: number; isCapper: boolean; percentFilled: number;
+  }[];
   years: number[];
   bhbByYear: Record<number, MonthBucket>;
   islemByYear: { toplam: Record<number, MonthBucket>; satilik: Record<number, MonthBucket>; kiralik: Record<number, MonthBucket> };
@@ -730,6 +734,44 @@ export default function AdvisorPersonalScorecard() {
                 value={data.ukStartDate ? fmtDate(data.ukStartDate) : "—"}
               />
             </div>
+
+            {/* ── Cap Geçmişi: son 3 cap döngüsü (yıl dönümüne göre, takvim yılı değil) ── */}
+            {data.capHistory.length > 0 && (
+              <div className="rounded-xl border border-border bg-card p-4">
+                <h3 className="text-sm font-semibold mb-3 flex items-center gap-1.5">
+                  <Target className="h-4 w-4 text-primary" /> Cap Geçmişi
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {data.capHistory.map((c) => (
+                    <div key={c.cycleStartYear} className="rounded-lg border border-border p-3 space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium text-muted-foreground">
+                          {c.cycleStartYear} Dönemi
+                        </span>
+                        {c.isCapper && (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 ring-1 ring-amber-300">
+                            CAPPER
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-sm font-semibold">{fmtPct(c.percentFilled)} dolduruldu</div>
+                      <div className="w-full bg-muted rounded-full h-1.5">
+                        <div
+                          className={`h-1.5 rounded-full ${c.isCapper ? "bg-amber-500" : "bg-primary"}`}
+                          style={{ width: `${Math.min(100, c.percentFilled)}%` }}
+                        />
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {fmtTRY(c.capUsed)} {c.capAmount != null ? `/ ${fmtTRY(c.capAmount)}` : ""}
+                      </div>
+                      <div className="text-[11px] text-muted-foreground">
+                        {fmtDate(c.periodStart)} – {fmtDate(c.periodEnd)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* ── BHB Hedefi & Gerçekleşen (Pie Chart) ── */}
             <BhbTargetSection employeeId={employeeId} data={data} />
