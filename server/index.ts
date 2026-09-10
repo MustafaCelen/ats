@@ -10,6 +10,7 @@ import { createServer } from "http";
 import { isFonzipConfigured, syncFonzipRecentDebts, syncFonzipUsersFinancials } from "./fonzip";
 import { ensureSchema } from "./ensure-schema";
 import { ensureClosingSheetHeader } from "./google-sheets";
+import { isGoogleFormsConfigured, syncGoogleFormLeads } from "./google-forms";
 
 const PgStore = connectPgSimple(session);
 
@@ -389,5 +390,23 @@ app.use((req, res, next) => {
       }
     }, { timezone: "Europe/Istanbul" });
     log("[cron] Fonzip günlük sync planlandı: her gün 03:00");
+  }
+
+  // ── Google Form lead sync scheduler (her 15 dakikada bir) ──────────────────
+  // Meta lead formu yerine Google Form'a yönlendirilen reklamlardan gelen yanıtlar
+  // webhook'tan geçmiyor — burada periyodik taranıp aday olarak içe aktarılıyor.
+  // İdempotent (google_form_leads / row_key) olduğu için sık çalıştırmak güvenli.
+  if (isGoogleFormsConfigured()) {
+    cron.schedule("*/15 * * * *", async () => {
+      try {
+        const result = await syncGoogleFormLeads();
+        if (result.imported > 0 || result.errors.length > 0) {
+          log(`[cron] Google Form lead sync: ${JSON.stringify(result)}`);
+        }
+      } catch (e: any) {
+        log(`[cron] Google Form lead sync hata: ${e.message}`);
+      }
+    }, { timezone: "Europe/Istanbul" });
+    log("[cron] Google Form lead sync planlandı: her 15 dakikada bir");
   }
 })();
