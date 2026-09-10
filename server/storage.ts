@@ -6312,10 +6312,11 @@ export class DatabaseStorage implements IStorage {
     });
   }
 
-  // Danışman bazlı portföy özeti: kaç aktif satılık/kiralık ilanı var, hacimleri, ve
-  // satılık/kiralık için ayrı ayrı ortalama ilan süresi (duration_days, dolu olan satırlar
-  // üzerinden — genelde pasife düşünce hesaplanan bir alan). dealCategory doğrudan listings
-  // tablosundaki alan kullanılıyor (fiyat eşiğiyle tahmin değil).
+  // Danışman bazlı portföy özeti — SADECE aktif ilanlar (pasifler bu raporu ilgilendirmiyor):
+  // kaç satılık/kiralık ilanı var, hacimleri, ve satılık/kiralık için ayrı ayrı ortalama
+  // "yayında kaldığı gün sayısı" (published_date'ten bugüne). published_date text/ham geldiği
+  // için aynı parse mantığı age-groups/over-90-days raporlarındaki ile birebir aynı (MM/DD/YYYY
+  // veya "Mon DD, YYYY").
   async getListingAdvisorInventoryReport(office?: string): Promise<{
     employeeId: number | null;
     advisorName: string | null;
@@ -6328,30 +6329,45 @@ export class DatabaseStorage implements IStorage {
     avgDurationSatilik: number | null;
     avgDurationKiralik: number | null;
   }[]> {
-    const rows = await db
-      .select({
-        employeeId: listings.employeeId,
-        advisorName: listings.advisorName,
-        empName: candidates.name,
-        satilikCount: sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.dealCategory} = 'Satılık')`,
-        kiralikCount: sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.dealCategory} = 'Kiralık')`,
-        totalCount:   sql<number>`count(*) filter (where ${listings.status} = 'active')`,
-        satilikVolume: sql<string>`coalesce(sum(${listings.price}::numeric) filter (where ${listings.status} = 'active' and ${listings.dealCategory} = 'Satılık'), 0)`,
-        kiralikVolume: sql<string>`coalesce(sum(${listings.price}::numeric) filter (where ${listings.status} = 'active' and ${listings.dealCategory} = 'Kiralık'), 0)`,
-        avgDurationSatilik: sql<string | null>`avg(${listings.durationDays}) filter (where ${listings.dealCategory} = 'Satılık' and ${listings.durationDays} is not null)`,
-        avgDurationKiralik: sql<string | null>`avg(${listings.durationDays}) filter (where ${listings.dealCategory} = 'Kiralık' and ${listings.durationDays} is not null)`,
-      })
-      .from(listings)
-      .leftJoin(employees, eq(listings.employeeId, employees.id))
-      .leftJoin(candidates, eq(employees.candidateId, candidates.id))
-      .where(office ? eq(candidates.office, office) : undefined)
-      .groupBy(listings.employeeId, listings.advisorName, candidates.name)
-      .orderBy(sql`count(*) filter (where ${listings.status} = 'active') desc`);
+    const officeFilter = office ? sql`AND c.office = ${office}` : sql``;
+    const rows = (await db.execute(sql`
+      WITH parsed AS (
+        SELECT
+          l.employee_id,
+          l.advisor_name,
+          c.name AS employee_name,
+          l.deal_category,
+          l.price,
+          CASE
+            WHEN l.published_date ~ '^\\d{1,2}/\\d{1,2}/\\d{4}$' THEN to_date(l.published_date, 'MM/DD/YYYY')
+            WHEN l.published_date ~ '^[A-Za-z]'                THEN to_date(l.published_date, 'Mon DD, YYYY')
+            ELSE NULL
+          END AS pub_date
+        FROM listings l
+        LEFT JOIN employees e ON e.id = l.employee_id
+        LEFT JOIN candidates c ON c.id = e.candidate_id
+        WHERE l.status = 'active' ${officeFilter}
+      )
+      SELECT
+        employee_id AS "employeeId",
+        advisor_name AS "advisorName",
+        employee_name AS "employeeName",
+        count(*) FILTER (WHERE deal_category = 'Satılık')::int AS "satilikCount",
+        count(*) FILTER (WHERE deal_category = 'Kiralık')::int AS "kiralikCount",
+        count(*)::int AS "totalCount",
+        coalesce(sum(price::numeric) FILTER (WHERE deal_category = 'Satılık'), 0)::numeric AS "satilikVolume",
+        coalesce(sum(price::numeric) FILTER (WHERE deal_category = 'Kiralık'), 0)::numeric AS "kiralikVolume",
+        avg(current_date - pub_date) FILTER (WHERE deal_category = 'Satılık' AND pub_date IS NOT NULL) AS "avgDurationSatilik",
+        avg(current_date - pub_date) FILTER (WHERE deal_category = 'Kiralık' AND pub_date IS NOT NULL) AS "avgDurationKiralik"
+      FROM parsed
+      GROUP BY employee_id, advisor_name, employee_name
+      ORDER BY count(*) DESC
+    `)).rows as any[];
 
     return rows.map((r) => ({
       employeeId: r.employeeId ?? null,
       advisorName: r.advisorName ?? null,
-      employeeName: r.empName ?? null,
+      employeeName: r.employeeName ?? null,
       satilikCount: Number(r.satilikCount ?? 0),
       kiralikCount: Number(r.kiralikCount ?? 0),
       totalCount: Number(r.totalCount ?? 0),
@@ -6509,7 +6525,7 @@ export class DatabaseStorage implements IStorage {
       SELECT
         to_char(
           CASE
-            WHEN l.published_date ~ '^\d{1,2}/\d{1,2}/\d{4}$' THEN to_date(l.published_date, 'MM/DD/YYYY')
+            WHEN l.published_date ~ '^\\d{1,2}/\\d{1,2}/\\d{4}$' THEN to_date(l.published_date, 'MM/DD/YYYY')
             WHEN l.published_date ~ '^[A-Za-z]'                THEN to_date(l.published_date, 'Mon DD, YYYY')
             ELSE NULL
           END,
@@ -6621,7 +6637,7 @@ export class DatabaseStorage implements IStorage {
       SELECT
         to_char(
           CASE
-            WHEN l.published_date ~ '^\d{1,2}/\d{1,2}/\d{4}$' THEN to_date(l.published_date, 'MM/DD/YYYY')
+            WHEN l.published_date ~ '^\\d{1,2}/\\d{1,2}/\\d{4}$' THEN to_date(l.published_date, 'MM/DD/YYYY')
             WHEN l.published_date ~ '^[A-Za-z]'                THEN to_date(l.published_date, 'Mon DD, YYYY')
             ELSE NULL
           END,
@@ -6632,9 +6648,9 @@ export class DatabaseStorage implements IStorage {
       LEFT JOIN employees e ON e.id = l.employee_id
       LEFT JOIN candidates c ON c.id = e.candidate_id
       WHERE l.published_date IS NOT NULL
-        AND (l.published_date ~ '^\d{1,2}/\d{1,2}/\d{4}$' OR l.published_date ~ '^[A-Za-z]')
+        AND (l.published_date ~ '^\\d{1,2}/\\d{1,2}/\\d{4}$' OR l.published_date ~ '^[A-Za-z]')
         AND extract(year from CASE
-          WHEN l.published_date ~ '^\d{1,2}/\d{1,2}/\d{4}$' THEN to_date(l.published_date, 'MM/DD/YYYY')
+          WHEN l.published_date ~ '^\\d{1,2}/\\d{1,2}/\\d{4}$' THEN to_date(l.published_date, 'MM/DD/YYYY')
           WHEN l.published_date ~ '^[A-Za-z]'                THEN to_date(l.published_date, 'Mon DD, YYYY')
           ELSE NULL
         END) = extract(year from current_date) ${officeFilter}
@@ -6646,7 +6662,7 @@ export class DatabaseStorage implements IStorage {
       SELECT
         to_char(
           CASE
-            WHEN l.removed_date ~ '^\d{1,2}/\d{1,2}/\d{4}$' THEN to_date(l.removed_date, 'MM/DD/YYYY')
+            WHEN l.removed_date ~ '^\\d{1,2}/\\d{1,2}/\\d{4}$' THEN to_date(l.removed_date, 'MM/DD/YYYY')
             WHEN l.removed_date ~ '^[A-Za-z]'                THEN to_date(l.removed_date, 'Mon DD, YYYY')
             ELSE NULL
           END,
@@ -6657,9 +6673,9 @@ export class DatabaseStorage implements IStorage {
       LEFT JOIN employees e ON e.id = l.employee_id
       LEFT JOIN candidates c ON c.id = e.candidate_id
       WHERE l.removed_date IS NOT NULL
-        AND (l.removed_date ~ '^\d{1,2}/\d{1,2}/\d{4}$' OR l.removed_date ~ '^[A-Za-z]')
+        AND (l.removed_date ~ '^\\d{1,2}/\\d{1,2}/\\d{4}$' OR l.removed_date ~ '^[A-Za-z]')
         AND extract(year from CASE
-          WHEN l.removed_date ~ '^\d{1,2}/\d{1,2}/\d{4}$' THEN to_date(l.removed_date, 'MM/DD/YYYY')
+          WHEN l.removed_date ~ '^\\d{1,2}/\\d{1,2}/\\d{4}$' THEN to_date(l.removed_date, 'MM/DD/YYYY')
           WHEN l.removed_date ~ '^[A-Za-z]'                THEN to_date(l.removed_date, 'Mon DD, YYYY')
           ELSE NULL
         END) = extract(year from current_date) ${officeFilter}
@@ -6700,7 +6716,7 @@ export class DatabaseStorage implements IStorage {
       WITH parsed AS (
         SELECT
           CASE
-            WHEN l.published_date ~ '^\d+/\d+/\d+$' THEN to_date(l.published_date, 'MM/DD/YYYY')
+            WHEN l.published_date ~ '^\\d+/\\d+/\\d+$' THEN to_date(l.published_date, 'MM/DD/YYYY')
             WHEN l.published_date ~ '^[A-Za-z]'      THEN to_date(l.published_date, 'Mon DD, YYYY')
             ELSE NULL
           END AS pub_date,
@@ -6772,7 +6788,7 @@ export class DatabaseStorage implements IStorage {
         l.price,
         l.published_date,
         (current_date - CASE
-          WHEN l.published_date ~ '^\d{1,2}/\d{1,2}/\d{4}$' THEN to_date(l.published_date, 'MM/DD/YYYY')
+          WHEN l.published_date ~ '^\\d{1,2}/\\d{1,2}/\\d{4}$' THEN to_date(l.published_date, 'MM/DD/YYYY')
           WHEN l.published_date ~ '^[A-Za-z]'                THEN to_date(l.published_date, 'Mon DD, YYYY')
           ELSE NULL
         END)::int AS days_active
@@ -6781,9 +6797,9 @@ export class DatabaseStorage implements IStorage {
       LEFT JOIN candidates c ON e.candidate_id = c.id
       WHERE l.status = 'active'
         AND l.published_date IS NOT NULL
-        AND (l.published_date ~ '^\d{1,2}/\d{1,2}/\d{4}$' OR l.published_date ~ '^[A-Za-z]')
+        AND (l.published_date ~ '^\\d{1,2}/\\d{1,2}/\\d{4}$' OR l.published_date ~ '^[A-Za-z]')
         AND (current_date - CASE
-          WHEN l.published_date ~ '^\d{1,2}/\d{1,2}/\d{4}$' THEN to_date(l.published_date, 'MM/DD/YYYY')
+          WHEN l.published_date ~ '^\\d{1,2}/\\d{1,2}/\\d{4}$' THEN to_date(l.published_date, 'MM/DD/YYYY')
           WHEN l.published_date ~ '^[A-Za-z]'                THEN to_date(l.published_date, 'Mon DD, YYYY')
           ELSE NULL
         END) > 90 ${officeFilter}
