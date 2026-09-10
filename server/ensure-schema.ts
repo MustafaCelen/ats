@@ -297,6 +297,16 @@ export async function ensureSchema(): Promise<void> {
     -- Aday transferi: set edilirse sadece bu Hiring Manager (+admin) adayı görebilir.
     ALTER TABLE candidates ADD COLUMN IF NOT EXISTS assigned_hiring_manager_id INTEGER;
     CREATE INDEX IF NOT EXISTS candidates_assigned_hm_idx ON candidates(assigned_hiring_manager_id);
+
+    -- Google Form lead'leri: satır bazlı dedup (aynı senkron tekrar çalıştırılınca mükerrer
+    -- aday açmasın diye — row_key = spreadsheetId:sekme:satırNo).
+    CREATE TABLE IF NOT EXISTS google_form_leads (
+      row_key TEXT PRIMARY KEY,
+      candidate_id INTEGER,
+      raw_fields TEXT,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS google_form_leads_candidate_idx ON google_form_leads(candidate_id);
   `;
   try {
     await pool.query(sql);

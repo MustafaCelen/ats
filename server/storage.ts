@@ -2965,6 +2965,43 @@ export class DatabaseStorage implements IStorage {
     return { candidateId, duplicate: linkedExisting };
   }
 
+  // Google Form lead'ini aday olarak kaydeder — row_key ile idempotent (senkron tekrarına
+  // karşı). Meta lead'lerindeki gibi telefon zaten kayıtlıysa mevcut adaya bağlanır.
+  async ingestGoogleFormLead(data: {
+    rowKey: string;
+    name: string;
+    email: string | null;
+    phone: string | null;
+    freeText: string | null;
+    rawFields: Record<string, string>;
+  }): Promise<{ candidateId: number; duplicate: boolean }> {
+    const seen = await db.execute(sql`SELECT candidate_id FROM google_form_leads WHERE row_key = ${data.rowKey} LIMIT 1`);
+    if (seen.rows.length > 0 && (seen.rows[0] as any).candidate_id) {
+      return { candidateId: (seen.rows[0] as any).candidate_id, duplicate: true };
+    }
+
+    let candidateId: number;
+    let linkedExisting = false;
+    if (data.phone) {
+      const existing = await this.getCandidateByPhone(data.phone);
+      if (existing) { candidateId = existing.id; linkedExisting = true; }
+      else candidateId = (await db.insert(candidates).values({
+        name: data.name, email: data.email, phone: data.phone, resumeText: data.freeText,
+      } as any).returning())[0].id;
+    } else {
+      candidateId = (await db.insert(candidates).values({
+        name: data.name, email: data.email, phone: data.phone, resumeText: data.freeText,
+      } as any).returning())[0].id;
+    }
+
+    await db.execute(sql`
+      INSERT INTO google_form_leads (row_key, candidate_id, raw_fields)
+      VALUES (${data.rowKey}, ${candidateId}, ${JSON.stringify(data.rawFields)})
+      ON CONFLICT (row_key) DO UPDATE SET candidate_id = EXCLUDED.candidate_id
+    `);
+    return { candidateId, duplicate: linkedExisting };
+  }
+
   // Bir danışmanın belirli tarihteki ofisini döner (transfer geçmişine göre)
   // Öncelik: effective_from ≤ date olan en yeni kayıt → yoksa candidates.office
   async getEmployeeOfficeAt(employeeId: number, date: Date | string): Promise<string | null> {

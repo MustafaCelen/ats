@@ -14,6 +14,7 @@ import { startBulkSendBatch, getActiveBatchForUser, getLastBatchForUser, getBatc
 import { sendEmail } from "./email";
 import { isFonzipConfigured, fetchFonzipPreview, fetchFonzipUsers, fetchFonzipDebts, fetchFonzipDonations, syncFonzipDebts, syncFonzipUsersFinancials, getFonzipUserFinancialsReport, importFonzipExcel, syncFonzipRecentDebts } from "./fonzip";
 import { isMetaConfigured, isMetaWebhookConfigured, metaConfig, syncMetaCampaigns, fetchMetaLead, mapLeadToCandidate, verifyWebhookSignature, listLeadForms, backfillLeadsFromMeta } from "./meta";
+import { isGoogleFormsConfigured, syncGoogleFormLeads } from "./google-forms";
 
 // Scoping helper:
 //   admin      → undefined (all jobs)
@@ -3337,6 +3338,22 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.get("/api/campaigns/:id/leads", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
     try { res.json(await storage.getCampaignLeads(Number(req.params.id))); }
     catch (err: any) { res.status(500).json({ message: err.message }); }
+  });
+
+  // ── Google Form lead entegrasyonu (Meta lead formu yerine Google Form'a
+  // yönlendirilen reklamlar için) ─────────────────────────────────────────
+  app.get("/api/google-forms/status", requireAuth, requireAdmin, (_req, res) => {
+    res.json({ configured: isGoogleFormsConfigured() });
+  });
+
+  app.post("/api/google-forms/sync-leads", requireAuth, requireAdmin, async (_req, res) => {
+    try {
+      const result = await syncGoogleFormLeads();
+      res.json(result);
+    } catch (err: any) {
+      console.error("[POST /api/google-forms/sync-leads]", err);
+      res.status(500).json({ message: err.message });
+    }
   });
 
   // ── Meta (Facebook) entegrasyonu ─────────────────────────────────────────

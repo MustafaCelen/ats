@@ -74,6 +74,29 @@ export default function Campaigns() {
     onError: (e: any) => toast({ title: "Meta senkronu başarısız", description: e?.message, variant: "destructive" }),
   });
 
+  const { data: googleFormsStatus } = useQuery<{ configured: boolean }>({
+    queryKey: ["/api/google-forms/status"],
+    queryFn: () => fetch("/api/google-forms/status", { credentials: "include" }).then((r) => r.ok ? r.json() : { configured: false }),
+    enabled: isAdmin,
+  });
+
+  const googleFormsSync = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/google-forms/sync-leads", { method: "POST", credentials: "include" });
+      if (!res.ok) throw new Error((await res.json()).message ?? "Hata");
+      return res.json() as Promise<{ scanned: number; imported: number; duplicates: number; errors: string[] }>;
+    },
+    onSuccess: (d) => {
+      qc.invalidateQueries({ queryKey: ["/api/campaigns"] });
+      toast({
+        title: "Google Form lead senkronu tamamlandı",
+        description: `${d.scanned} satır tarandı, ${d.imported} yeni aday açıldı, ${d.duplicates} zaten kayıtlıydı.` + (d.errors.length ? ` ${d.errors.length} hata.` : ""),
+        variant: d.errors.length && d.imported === 0 ? "destructive" : undefined,
+      });
+    },
+    onError: (e: any) => toast({ title: "Google Form senkronu başarısız", description: e?.message, variant: "destructive" }),
+  });
+
   const metaBackfill = useMutation({
     mutationFn: async () => {
       const res = await fetch("/api/meta/backfill-leads", {
@@ -131,6 +154,17 @@ export default function Campaigns() {
                     <RefreshCw className={`h-4 w-4 ${metaBackfill.isPending ? "animate-spin" : ""}`} /> Geçmiş Lead'leri İçe Aktar
                   </Button>
                 </>
+              )}
+              {googleFormsStatus?.configured && (
+                <Button
+                  variant="outline"
+                  onClick={() => googleFormsSync.mutate()}
+                  disabled={googleFormsSync.isPending}
+                  className="gap-1.5"
+                  title="Google Form'a yönlendirilen reklamlardan gelen lead'leri aday olarak içe aktar"
+                >
+                  <RefreshCw className={`h-4 w-4 ${googleFormsSync.isPending ? "animate-spin" : ""}`} /> Google Form Lead'lerini Senkronla
+                </Button>
               )}
               <Button onClick={() => setCreateOpen(true)} className="gap-1.5">
                 <Plus className="h-4 w-4" /> Yeni Kampanya
