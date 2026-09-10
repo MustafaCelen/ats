@@ -425,6 +425,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     catch (err) { console.error("[GET /api/listings/reports/advisor]", err); res.status(500).json({ message: "Internal server error" }); }
   });
 
+  // Danışman bazlı portföy özeti: kaç satılık/kiralık ilanı var, hacimleri, ortalama süreler
+  app.get("/api/listings/reports/advisor-inventory", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
+    try { res.json(await storage.getListingAdvisorInventoryReport(req.query.office ? String(req.query.office) : undefined)); }
+    catch (err) { console.error("[GET /api/listings/reports/advisor-inventory]", err); res.status(500).json({ message: "Internal server error" }); }
+  });
+
   // Feature 2: Ofis bazlı kırılım
   app.get("/api/listings/reports/office", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
     try { res.json(await storage.getListingReportByOffice(req.query.office ? String(req.query.office) : undefined)); }

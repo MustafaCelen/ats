@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
+import * as XLSX from "xlsx";
 import { Layout } from "@/components/Layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,7 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import {
   BarChart2, Building2, Users, TrendingDown, TrendingUp, Bell, RefreshCw,
-  ChevronLeft, ChevronRight, Search, Clock, LayoutDashboard, Settings,
+  ChevronLeft, ChevronRight, Search, Clock, LayoutDashboard, Settings, Download,
 } from "lucide-react";
 import { OFFICES } from "@shared/schema";
 import {
@@ -52,6 +53,19 @@ interface DisplayRow {
   closeReasonPending: number;
   closingCount: number;
   lastClosingDate: string | null;
+}
+
+interface AdvisorInventoryReport {
+  employeeId: number | null;
+  advisorName: string | null;
+  employeeName: string | null;
+  satilikCount: number;
+  kiralikCount: number;
+  totalCount: number;
+  satilikVolume: number;
+  kiralikVolume: number;
+  avgDurationSatilik: number | null;
+  avgDurationKiralik: number | null;
 }
 
 interface OfficeReport {
@@ -122,16 +136,20 @@ function fmtMonth(ym: string): string {
   return `${monthNames[m - 1] ?? month} ${year}`;
 }
 
-function SectionCard({ title, icon: Icon, children }: {
+function SectionCard({ title, icon: Icon, action, children }: {
   title: string;
   icon: React.ElementType;
+  action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <div className="rounded-xl border border-border bg-card overflow-hidden">
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-border bg-muted/30">
-        <Icon className="h-4 w-4 text-primary" />
-        <h2 className="text-sm font-semibold">{title}</h2>
+      <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-border bg-muted/30">
+        <div className="flex items-center gap-2">
+          <Icon className="h-4 w-4 text-primary" />
+          <h2 className="text-sm font-semibold">{title}</h2>
+        </div>
+        {action}
       </div>
       <div className="overflow-x-auto">{children}</div>
     </div>
@@ -184,6 +202,11 @@ export default function ListingReports() {
   const { data: advisorData = [], isLoading: loadingAdvisor } = useQuery<AdvisorReport[]>({
     queryKey: ["/api/listings/reports/advisor", officeParam],
     queryFn: () => fetch(withOffice("/api/listings/reports/advisor"), { credentials: "include" }).then((r) => r.json()),
+  });
+
+  const { data: advisorInventory = [], isLoading: loadingAdvisorInventory } = useQuery<AdvisorInventoryReport[]>({
+    queryKey: ["/api/listings/reports/advisor-inventory", officeParam],
+    queryFn: () => fetch(withOffice("/api/listings/reports/advisor-inventory"), { credentials: "include" }).then((r) => r.json()),
   });
 
   const { data: officeData = [], isLoading: loadingOffice } = useQuery<OfficeReport[]>({
@@ -356,6 +379,25 @@ export default function ListingReports() {
       </div>
     );
   }
+
+  const handleExportAdvisorInventory = () => {
+    const rows = advisorInventory.map((r) => ({
+      "Danışman": r.employeeName ?? r.advisorName ?? "—",
+      "Toplam Aktif İlan": r.totalCount,
+      "Satılık Sayı": r.satilikCount,
+      "Kiralık Sayı": r.kiralikCount,
+      "Satılık Hacmi (₺)": r.satilikVolume,
+      "Kiralık Hacmi (₺)": r.kiralikVolume,
+      "Ort. Satılık Süresi (gün)": r.avgDurationSatilik ?? "",
+      "Ort. Kiralık Süresi (gün)": r.avgDurationKiralik ?? "",
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Danışman Portföy Özeti");
+    const officeLabel = officeParam ? `-${officeParam}` : "";
+    const today = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(wb, `danisman-portfoy-ozeti${officeLabel}-${today}.xlsx`);
+  };
 
   const handleRunReminders = async () => {
     setRunningReminders(true);
@@ -723,6 +765,52 @@ export default function ListingReports() {
                 </tbody>
               </table>
               <Pager page={advisorPage} total={advisorPageCount} onPage={setAdvisorPage} />
+            </SectionCard>
+
+            <SectionCard
+              title={`Danışman Portföy Özeti (${advisorInventory.length})`}
+              icon={BarChart2}
+              action={
+                <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5" onClick={handleExportAdvisorInventory} disabled={loadingAdvisorInventory || advisorInventory.length === 0}>
+                  <Download className="h-3.5 w-3.5" /> Excel'e Aktar
+                </Button>
+              }
+            >
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-muted/40 text-left text-xs text-muted-foreground">
+                    <th className="px-3 py-2.5 font-medium">Danışman</th>
+                    <th className="px-3 py-2.5 font-medium text-right">Toplam</th>
+                    <th className="px-3 py-2.5 font-medium text-right">Satılık</th>
+                    <th className="px-3 py-2.5 font-medium text-right">Kiralık</th>
+                    <th className="px-3 py-2.5 font-medium text-right">Satılık Hacmi</th>
+                    <th className="px-3 py-2.5 font-medium text-right">Kiralık Hacmi</th>
+                    <th className="px-3 py-2.5 font-medium text-right">Ort. Süre (Satılık)</th>
+                    <th className="px-3 py-2.5 font-medium text-right">Ort. Süre (Kiralık)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loadingAdvisorInventory ? (
+                    <tr><td colSpan={8} className="px-3 py-8 text-center text-muted-foreground">Yükleniyor…</td></tr>
+                  ) : advisorInventory.length === 0 ? (
+                    <tr><td colSpan={8} className="px-3 py-8 text-center text-muted-foreground">Veri yok.</td></tr>
+                  ) : advisorInventory.map((r, i) => (
+                    <tr key={i} className="border-b border-border last:border-0 hover:bg-muted/30">
+                      <td className="px-3 py-2.5">
+                        <div className="font-medium text-sm">{r.employeeName ?? r.advisorName ?? "—"}</div>
+                        {!r.employeeId && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">Eşleşmemiş</span>}
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-medium">{r.totalCount}</td>
+                      <td className="px-3 py-2.5 text-right text-emerald-700">{r.satilikCount}</td>
+                      <td className="px-3 py-2.5 text-right text-blue-700">{r.kiralikCount}</td>
+                      <td className="px-3 py-2.5 text-right whitespace-nowrap">{r.satilikVolume.toLocaleString("tr-TR")} ₺</td>
+                      <td className="px-3 py-2.5 text-right whitespace-nowrap">{r.kiralikVolume.toLocaleString("tr-TR")} ₺</td>
+                      <td className="px-3 py-2.5 text-right text-muted-foreground">{r.avgDurationSatilik != null ? `${r.avgDurationSatilik} gün` : "—"}</td>
+                      <td className="px-3 py-2.5 text-right text-muted-foreground">{r.avgDurationKiralik != null ? `${r.avgDurationKiralik} gün` : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </SectionCard>
 
           </div>

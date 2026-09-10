@@ -6312,6 +6312,56 @@ export class DatabaseStorage implements IStorage {
     });
   }
 
+  // Danışman bazlı portföy özeti: kaç aktif satılık/kiralık ilanı var, hacimleri, ve
+  // satılık/kiralık için ayrı ayrı ortalama ilan süresi (duration_days, dolu olan satırlar
+  // üzerinden — genelde pasife düşünce hesaplanan bir alan). dealCategory doğrudan listings
+  // tablosundaki alan kullanılıyor (fiyat eşiğiyle tahmin değil).
+  async getListingAdvisorInventoryReport(office?: string): Promise<{
+    employeeId: number | null;
+    advisorName: string | null;
+    employeeName: string | null;
+    satilikCount: number;
+    kiralikCount: number;
+    totalCount: number;
+    satilikVolume: number;
+    kiralikVolume: number;
+    avgDurationSatilik: number | null;
+    avgDurationKiralik: number | null;
+  }[]> {
+    const rows = await db
+      .select({
+        employeeId: listings.employeeId,
+        advisorName: listings.advisorName,
+        empName: candidates.name,
+        satilikCount: sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.dealCategory} = 'Satılık')`,
+        kiralikCount: sql<number>`count(*) filter (where ${listings.status} = 'active' and ${listings.dealCategory} = 'Kiralık')`,
+        totalCount:   sql<number>`count(*) filter (where ${listings.status} = 'active')`,
+        satilikVolume: sql<string>`coalesce(sum(${listings.price}::numeric) filter (where ${listings.status} = 'active' and ${listings.dealCategory} = 'Satılık'), 0)`,
+        kiralikVolume: sql<string>`coalesce(sum(${listings.price}::numeric) filter (where ${listings.status} = 'active' and ${listings.dealCategory} = 'Kiralık'), 0)`,
+        avgDurationSatilik: sql<string | null>`avg(${listings.durationDays}) filter (where ${listings.dealCategory} = 'Satılık' and ${listings.durationDays} is not null)`,
+        avgDurationKiralik: sql<string | null>`avg(${listings.durationDays}) filter (where ${listings.dealCategory} = 'Kiralık' and ${listings.durationDays} is not null)`,
+      })
+      .from(listings)
+      .leftJoin(employees, eq(listings.employeeId, employees.id))
+      .leftJoin(candidates, eq(employees.candidateId, candidates.id))
+      .where(office ? eq(candidates.office, office) : undefined)
+      .groupBy(listings.employeeId, listings.advisorName, candidates.name)
+      .orderBy(sql`count(*) filter (where ${listings.status} = 'active') desc`);
+
+    return rows.map((r) => ({
+      employeeId: r.employeeId ?? null,
+      advisorName: r.advisorName ?? null,
+      employeeName: r.empName ?? null,
+      satilikCount: Number(r.satilikCount ?? 0),
+      kiralikCount: Number(r.kiralikCount ?? 0),
+      totalCount: Number(r.totalCount ?? 0),
+      satilikVolume: Number(r.satilikVolume ?? 0),
+      kiralikVolume: Number(r.kiralikVolume ?? 0),
+      avgDurationSatilik: r.avgDurationSatilik != null ? Math.round(Number(r.avgDurationSatilik) * 10) / 10 : null,
+      avgDurationKiralik: r.avgDurationKiralik != null ? Math.round(Number(r.avgDurationKiralik) * 10) / 10 : null,
+    }));
+  }
+
   // ── Satılık / Kiralık type stats (price < 1M = kiralık, >= 1M = satılık) ────
 
   async getListingTypeStats(office?: string): Promise<{
