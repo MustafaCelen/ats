@@ -61,12 +61,22 @@ function mapRowToCandidate(headers: string[], row: string[]): {
     }
     return null;
   };
-  const name = pick("ad soyad", "isim", "full name", "name") ?? "Google Form Lead";
+
+  // "Ad Soyad", "Adınız - Soyadınız", "Adınız Soyadınız" gibi hem "ad" hem "soyad" geçen
+  // başlıklar Google Form'da en yaygın kalıp (tek bir alanda ad+soyad birlikte sorulur) —
+  // önce bunu dene, sonra tekil varyasyonlara (sadece "Adınız" gibi) düş.
+  const nameHeader = Object.keys(raw).find((fk) => {
+    const l = fk.toLowerCase();
+    return l.includes("ad") && l.includes("soyad");
+  });
+  const name = (nameHeader && raw[nameHeader]?.trim())
+    || pick("adınız", "adiniz", "isminiz", "isim soyisim", "isim", "full name", "name")
+    || "Google Form Lead";
   const email = pick("email", "e-posta", "eposta", "e-mail");
   const phone = pick("telefon", "phone", "gsm", "tel");
 
-  const knownKeys = ["ad soyad", "isim", "full name", "name", "email", "e-posta", "eposta", "e-mail", "telefon", "phone", "gsm", "tel", "timestamp", "zaman damgası"];
-  const freeTextKey = Object.keys(raw).find((k) => !knownKeys.some((kk) => k.toLowerCase().includes(kk)));
+  const knownKeys = ["adınız", "adiniz", "soyadınız", "soyadiniz", "isminiz", "isim", "full name", "name", "email", "e-posta", "eposta", "e-mail", "telefon", "phone", "gsm", "tel", "timestamp", "zaman damgası"];
+  const freeTextKey = Object.keys(raw).find((k) => k !== nameHeader && !knownKeys.some((kk) => k.toLowerCase().includes(kk)));
   const freeText = freeTextKey ? (raw[freeTextKey]?.trim() || null) : null;
 
   return { name, email, phone, freeText, raw };
