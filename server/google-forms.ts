@@ -15,6 +15,10 @@ export function isGoogleFormsConfigured(): boolean {
   return !!(SPREADSHEET_ID && SYNC_USER_EMAIL);
 }
 
+export function getGoogleFormsSpreadsheetId(): string | null {
+  return SPREADSHEET_ID ?? null;
+}
+
 let warnedMissingConfig = false;
 let warnedNotConnected = false;
 
@@ -103,6 +107,8 @@ export async function syncGoogleFormLeads(): Promise<{ scanned: number; imported
   }
   if (values.length < 2) return { scanned, imported, duplicates, errors };
 
+  const campaignId = await storage.getOrCreateGoogleFormsCampaign(SPREADSHEET_ID!);
+
   const headers = values[0];
   const tabKey = tabName ?? "sheet1";
   for (let i = 1; i < values.length; i++) {
@@ -119,6 +125,7 @@ export async function syncGoogleFormLeads(): Promise<{ scanned: number; imported
         phone: mapped.phone,
         freeText: mapped.freeText,
         rawFields: mapped.raw,
+        campaignId,
       });
       if (result.duplicate) duplicates++; else imported++;
     } catch (e: any) {

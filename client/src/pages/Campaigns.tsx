@@ -13,7 +13,7 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
-import { Megaphone, Plus, Users, TrendingUp, Wallet, Calendar, RefreshCw } from "lucide-react";
+import { Megaphone, Plus, Users, TrendingUp, Wallet, Calendar, RefreshCw, Link2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -119,6 +119,22 @@ export default function Campaigns() {
     onError: (e: any) => toast({ title: "Lead aktarımı başarısız", description: e?.message, variant: "destructive" }),
   });
 
+  const relinkOrphans = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/campaigns/relink-orphaned-leads", { method: "POST", credentials: "include" });
+      if (!res.ok) throw new Error((await res.json()).message ?? "Hata");
+      return res.json() as Promise<{ metaRelinked: number; googleFormsRelinked: number }>;
+    },
+    onSuccess: (d) => {
+      qc.invalidateQueries({ queryKey: ["/api/campaigns"] });
+      toast({
+        title: "Kopan lead'ler yeniden bağlandı",
+        description: `Meta: ${d.metaRelinked}, Google Form: ${d.googleFormsRelinked} aday kampanyasına bağlandı.`,
+      });
+    },
+    onError: (e: any) => toast({ title: "İşlem başarısız", description: e?.message, variant: "destructive" }),
+  });
+
   const totalLeads = campaigns.reduce((s, c) => s + c.lead_count, 0);
   const totalConverted = campaigns.reduce((s, c) => s + c.converted_count, 0);
   const totalSpend = campaigns.reduce((s, c) => s + parseFloat(c.total_expense), 0);
@@ -166,6 +182,15 @@ export default function Campaigns() {
                   <RefreshCw className={`h-4 w-4 ${googleFormsSync.isPending ? "animate-spin" : ""}`} /> Google Form Lead'lerini Senkronla
                 </Button>
               )}
+              <Button
+                variant="outline"
+                onClick={() => relinkOrphans.mutate()}
+                disabled={relinkOrphans.isPending}
+                className="gap-1.5"
+                title="Kampanya bağlantısı boş kalmış (Lead Takip'te görünmeyen) geçmiş lead'leri yeniden bağla"
+              >
+                <Link2 className={`h-4 w-4 ${relinkOrphans.isPending ? "animate-spin" : ""}`} /> Kopan Lead'leri Bağla
+              </Button>
               <Button onClick={() => setCreateOpen(true)} className="gap-1.5">
                 <Plus className="h-4 w-4" /> Yeni Kampanya
               </Button>

@@ -2928,6 +2928,44 @@ export class DatabaseStorage implements IStorage {
     return { id: (inserted.rows[0] as any).id, created: true };
   }
 
+  // Google Form senkronu için tek bir "kampanya" satırı — Meta'nın aksine burada gerçek çoklu
+  // kampanya kavramı yok (tek sheet/form), bu yüzden external_id olarak spreadsheet ID'yi
+  // kullanıp platform+external_id ile idempotent get-or-create yapıyoruz.
+  async getOrCreateGoogleFormsCampaign(spreadsheetId: string): Promise<number> {
+    const existing = await db.execute(sql`
+      SELECT id FROM campaigns WHERE platform = 'google_forms' AND external_id = ${spreadsheetId} LIMIT 1
+    `);
+    if (existing.rows.length > 0) return (existing.rows[0] as any).id;
+    const inserted = await db.execute(sql`
+      INSERT INTO campaigns (name, status, platform, external_id)
+      VALUES ('Google Form Lead''leri', 'active', 'google_forms', ${spreadsheetId})
+      RETURNING id
+    `);
+    return (inserted.rows[0] as any).id;
+  }
+
+  // Bir defalık düzeltme: campaign_id'si boş kalmış (kampanya senkronundan önce gelmiş ya da
+  // telefon eşleşmesiyle mevcut adaya bağlanmış) geçmiş lead'leri, meta_leads/google_form_leads
+  // tablolarındaki bilgiden geriye dönük ilişkilendirir.
+  async relinkOrphanedMetaLeads(): Promise<number> {
+    const result = await db.execute(sql`
+      UPDATE candidates SET campaign_id = ml.campaign_id
+      FROM meta_leads ml
+      WHERE candidates.id = ml.candidate_id AND candidates.campaign_id IS NULL AND ml.campaign_id IS NOT NULL
+      RETURNING candidates.id
+    `);
+    return result.rows.length;
+  }
+  async relinkOrphanedGoogleFormLeads(campaignId: number): Promise<number> {
+    const result = await db.execute(sql`
+      UPDATE candidates SET campaign_id = ${campaignId}
+      FROM google_form_leads gfl
+      WHERE candidates.id = gfl.candidate_id AND candidates.campaign_id IS NULL
+      RETURNING candidates.id
+    `);
+    return result.rows.length;
+  }
+
   // Meta lead'i aday olarak kaydeder — leadgen_id ile idempotent (webhook retry'lerine karşı).
   // Aynı lead ikinci kez gelirse yeni aday açmaz. campaignExternalId ile kampanyaya bağlar.
   async ingestMetaLead(data: {
@@ -2959,7 +2997,16 @@ export class DatabaseStorage implements IStorage {
     let linkedExisting = false;
     if (data.phone) {
       const existing = await this.getCandidateByPhone(data.phone);
-      if (existing) { candidateId = existing.id; linkedExisting = true; }
+      if (existing) {
+        candidateId = existing.id;
+        linkedExisting = true;
+        // Mevcut adayın campaignId'si boşsa (ör. daha önce manuel eklenmiş ya da kampanyasız
+        // gelmiş), gerçek bir kampanyadan gelen bu lead ile şimdi dolduruyoruz — aksi halde
+        // sırf "zaten kayıtlıydı" diye Lead Takip'te hiç görünmez kalırdı.
+        if (existing.campaignId == null && campaignId != null) {
+          await this.updateCandidate(existing.id, { campaignId });
+        }
+      }
       else candidateId = (await db.insert(candidates).values({
         name: data.name, email: data.email, phone: data.phone, campaignId: campaignId ?? undefined,
       } as any).returning())[0].id;
@@ -2986,6 +3033,7 @@ export class DatabaseStorage implements IStorage {
     phone: string | null;
     freeText: string | null;
     rawFields: Record<string, string>;
+    campaignId: number | null;
   }): Promise<{ candidateId: number; duplicate: boolean }> {
     const seen = await db.execute(sql`SELECT candidate_id FROM google_form_leads WHERE row_key = ${data.rowKey} LIMIT 1`);
     if (seen.rows.length > 0 && (seen.rows[0] as any).candidate_id) {
@@ -2996,13 +3044,19 @@ export class DatabaseStorage implements IStorage {
     let linkedExisting = false;
     if (data.phone) {
       const existing = await this.getCandidateByPhone(data.phone);
-      if (existing) { candidateId = existing.id; linkedExisting = true; }
+      if (existing) {
+        candidateId = existing.id;
+        linkedExisting = true;
+        if (existing.campaignId == null && data.campaignId != null) {
+          await this.updateCandidate(existing.id, { campaignId: data.campaignId });
+        }
+      }
       else candidateId = (await db.insert(candidates).values({
-        name: data.name, email: data.email, phone: data.phone, resumeText: data.freeText,
+        name: data.name, email: data.email, phone: data.phone, resumeText: data.freeText, campaignId: data.campaignId ?? undefined,
       } as any).returning())[0].id;
     } else {
       candidateId = (await db.insert(candidates).values({
-        name: data.name, email: data.email, phone: data.phone, resumeText: data.freeText,
+        name: data.name, email: data.email, phone: data.phone, resumeText: data.freeText, campaignId: data.campaignId ?? undefined,
       } as any).returning())[0].id;
     }
 

@@ -14,7 +14,7 @@ import { startBulkSendBatch, getActiveBatchForUser, getLastBatchForUser, getBatc
 import { sendEmail } from "./email";
 import { isFonzipConfigured, fetchFonzipPreview, fetchFonzipUsers, fetchFonzipDebts, fetchFonzipDonations, syncFonzipDebts, syncFonzipUsersFinancials, getFonzipUserFinancialsReport, importFonzipExcel, syncFonzipRecentDebts } from "./fonzip";
 import { isMetaConfigured, isMetaWebhookConfigured, metaConfig, syncMetaCampaigns, fetchMetaLead, mapLeadToCandidate, verifyWebhookSignature, listLeadForms, backfillLeadsFromMeta } from "./meta";
-import { isGoogleFormsConfigured, syncGoogleFormLeads } from "./google-forms";
+import { isGoogleFormsConfigured, syncGoogleFormLeads, getGoogleFormsSpreadsheetId } from "./google-forms";
 
 // Scoping helper:
 //   admin      → undefined (all jobs)
@@ -3421,6 +3421,26 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.json(result);
     } catch (err: any) {
       console.error("[POST /api/google-forms/sync-leads]", err);
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Bir defalık düzeltme: kampanya senkronundan önce gelmiş ya da telefon eşleşmesiyle mevcut
+  // adaya bağlanmış (bu yüzden campaign_id'si hiç set edilmemiş) geçmiş lead'leri, Lead Takip
+  // panosunda görünsün diye geriye dönük ilişkilendirir. Sync/webhook akışları artık bunu
+  // otomatik yapıyor — bu endpoint sadece o düzeltmeden ÖNCE ingest edilmiş kayıtlar için.
+  app.post("/api/campaigns/relink-orphaned-leads", requireAuth, requireAdmin, async (_req, res) => {
+    try {
+      const metaRelinked = await storage.relinkOrphanedMetaLeads();
+      let googleFormsRelinked = 0;
+      const spreadsheetId = getGoogleFormsSpreadsheetId();
+      if (isGoogleFormsConfigured() && spreadsheetId) {
+        const campaignId = await storage.getOrCreateGoogleFormsCampaign(spreadsheetId);
+        googleFormsRelinked = await storage.relinkOrphanedGoogleFormLeads(campaignId);
+      }
+      res.json({ metaRelinked, googleFormsRelinked });
+    } catch (err: any) {
+      console.error("[POST /api/campaigns/relink-orphaned-leads]", err);
       res.status(500).json({ message: err.message });
     }
   });
