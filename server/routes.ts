@@ -3256,7 +3256,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ── Coaching Stats ────────────────────────────────────────────────────────────
 
   // Seçilen tarih aralığında ÜK'ya giriş (şirkete giriş tarihi) ve çıkış (uk_end_date) yapanlar
-  app.get("/api/coaching/uk-entry-exit", requireAuth, requireHiringManagerOrAdmin, async (req: Request, res: Response) => {
+  // — bilinçli olarak herkese açık (requireAuth yeterli, rol kısıtı yok).
+  app.get("/api/coaching/uk-entry-exit", requireAuth, async (req: Request, res: Response) => {
     try {
       const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
       if (!startDate || !endDate) return res.status(400).json({ message: "startDate ve endDate gerekli" });
