@@ -1,8 +1,11 @@
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Layout } from "@/components/Layout";
 import { useApplications, useUpdateApplicationStatus, type ApplicationWithRelations } from "@/hooks/use-applications";
 import { useCompleteHiring } from "@/hooks/use-employees";
-import { STAGE_LABELS, APPLICATION_STAGES } from "@shared/schema";
+import { useCandidates } from "@/hooks/use-candidates";
+import { useAllJobs } from "@/hooks/use-jobs";
+import { STAGE_LABELS, APPLICATION_STAGES, type Candidate } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 import {
   DndContext, DragEndEvent, DragStartEvent, DragOverlay,
@@ -10,9 +13,13 @@ import {
 } from "@dnd-kit/core";
 import { useDroppable, useDraggable } from "@dnd-kit/core";
 import { motion, AnimatePresence } from "framer-motion";
-import { Target, GripVertical, CalendarDays, CheckCircle2, ExternalLink, Megaphone } from "lucide-react";
+import { Target, GripVertical, CalendarDays, CheckCircle2, ExternalLink, Megaphone, UserPlus } from "lucide-react";
 import { format } from "date-fns";
 import { Link } from "wouter";
+import { Button } from "@/components/ui/button";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel,
   AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
@@ -187,8 +194,104 @@ function OverlayCard({ app }: { app: ApplicationWithRelations }) {
   );
 }
 
+// "Yeni Lead" sütunu: henüz hiçbir ilana başvurusu (application) olmayan, sadece candidates
+// tablosunda duran lead'ler. Sürükle-bırak değil — hangi ilana atanacağı bilgisi gerektiği için
+// bir Select + buton ile "Başvuru Aç" (POST /api/applications) yapılır; başarılı olunca aday
+// otomatik olarak "Başvuru" sütununa geçer (artık bir application'ı olduğu için).
+function NewLeadCard({ candidate, jobs }: { candidate: Candidate; jobs: { id: number; title: string; status: string }[] }) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [jobId, setJobId] = useState<string>("");
+  const [submitting, setSubmitting] = useState(false);
+  const openJobs = jobs.filter((j) => j.status === "open");
+
+  const handleAssign = async () => {
+    if (!jobId) return;
+    setSubmitting(true);
+    try {
+      const res = await fetch("/api/applications", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ candidateId: candidate.id, jobId: Number(jobId), status: "applied" }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        toast({ title: "Hata", description: body?.message ?? "Başvuru açılamadı.", variant: "destructive" });
+        return;
+      }
+      toast({ title: `${candidate.name} için başvuru açıldı` });
+      qc.invalidateQueries({ queryKey: ["/api/applications"] });
+    } catch {
+      toast({ title: "Hata", description: "Başvuru açılamadı.", variant: "destructive" });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="bg-card border border-border rounded-lg shadow-sm p-3 space-y-2">
+      <Link
+        href={`/candidates/${candidate.id}`}
+        className="group inline-flex items-center gap-1 hover:underline"
+        data-testid={`link-new-lead-${candidate.id}`}
+      >
+        <span className="text-sm font-semibold text-foreground truncate group-hover:text-primary transition-colors">
+          {candidate.name}
+        </span>
+        <ExternalLink className="h-3 w-3 text-muted-foreground/60 group-hover:text-primary shrink-0 transition-colors" />
+      </Link>
+      <Select value={jobId} onValueChange={setJobId}>
+        <SelectTrigger className="h-8 text-xs" data-testid={`select-assign-job-${candidate.id}`}>
+          <SelectValue placeholder="İlan seçin…" />
+        </SelectTrigger>
+        <SelectContent>
+          {openJobs.map((j) => (
+            <SelectItem key={j.id} value={String(j.id)}>{j.title}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Button
+        size="sm"
+        className="w-full h-7 text-xs gap-1.5"
+        disabled={!jobId || submitting}
+        onClick={handleAssign}
+        data-testid={`btn-assign-job-${candidate.id}`}
+      >
+        <UserPlus className="h-3.5 w-3.5" /> Başvuru Aç
+      </Button>
+    </div>
+  );
+}
+
+function NewLeadColumn({ candidates, jobs }: { candidates: Candidate[]; jobs: { id: number; title: string; status: string }[] }) {
+  const meta = { color: "text-orange-700", bg: "bg-orange-50", dot: "bg-orange-500", border: "border-orange-200" };
+  return (
+    <div className={`flex flex-col rounded-xl border-2 min-w-[240px] flex-1 ${meta.border} bg-muted/20`} style={{ maxHeight: "calc(100vh - 260px)", minHeight: 220 }}>
+      <div className={`flex items-center justify-between px-3 py-2.5 border-b ${meta.border} sticky top-0 ${meta.bg} rounded-t-xl z-10`}>
+        <div className="flex items-center gap-2">
+          <span className={`h-2 w-2 rounded-full ${meta.dot}`} />
+          <span className={`text-xs font-semibold ${meta.color}`}>Yeni Lead (İlana Atanmamış)</span>
+        </div>
+        <span className="text-xs font-bold bg-background border border-border px-1.5 py-0.5 rounded-full text-muted-foreground">
+          {candidates.length}
+        </span>
+      </div>
+      <div className="p-2 space-y-2 overflow-y-auto flex-1">
+        {candidates.length === 0 ? (
+          <p className="text-xs text-muted-foreground text-center py-8 select-none">Atanmamış lead yok</p>
+        ) : (
+          candidates.map((c) => <NewLeadCard key={c.id} candidate={c} jobs={jobs} />)
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function LeadTrackingBoard() {
   const { data: allApplications, isLoading } = useApplications();
+  const { data: allCandidates = [] } = useCandidates();
+  const { data: allJobs = [] } = useAllJobs();
   const { mutate: updateStatus } = useUpdateApplicationStatus();
   const { mutate: completeHiring, isPending: completingHiring } = useCompleteHiring();
   const { toast } = useToast();
@@ -202,6 +305,13 @@ export default function LeadTrackingBoard() {
   // Sadece kampanyadan (Meta/Google Form) gelen, candidate.campaignId dolu lead'ler.
   const boardApps = (allApplications ?? []).filter(
     (a) => (a.candidate as any)?.campaignId != null
+  );
+
+  // Kampanyadan gelen ama henüz hiçbir ilana başvurusu (application) açılmamış lead'ler —
+  // bunlar boardApps'te hiç görünmez çünkü application'ları yok, "Yeni Lead" sütununda ayrı gösterilir.
+  const assignedCandidateIds = new Set((allApplications ?? []).map((a) => a.candidateId));
+  const unassignedLeads = allCandidates.filter(
+    (c) => (c as any).campaignId != null && !assignedCandidateIds.has(c.id)
   );
 
   const byStage = Object.fromEntries(
@@ -282,7 +392,7 @@ export default function LeadTrackingBoard() {
               <div key={s} className="min-w-[220px] flex-1 rounded-xl bg-muted/30 border border-border h-64 animate-pulse" />
             ))}
           </div>
-        ) : boardApps.length === 0 ? (
+        ) : boardApps.length === 0 && unassignedLeads.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 text-muted-foreground gap-2">
             <Target className="h-10 w-10 opacity-30" />
             <p className="text-sm">Henüz kampanyadan gelen lead yok</p>
@@ -290,6 +400,7 @@ export default function LeadTrackingBoard() {
         ) : (
           <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
             <div className="flex gap-3 overflow-x-auto pb-4">
+              <NewLeadColumn candidates={unassignedLeads} jobs={allJobs} />
               {BOARD_STAGES.map((stage) => (
                 <DroppableColumn
                   key={stage}
