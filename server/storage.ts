@@ -5110,6 +5110,61 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
+  // ÜK'ya seçilen tarih aralığında giriş/çıkış yapanların listesi. Giriş tarihi olarak ayrı
+  // bir "ÜK giriş tarihi" alanı değil, doğrudan şirkete giriş tarihi (employees.startDate)
+  // kullanılıyor — ÜK koçluğu işe başlamayla birlikte başlıyor. Çıkış için mevcut
+  // employees.uk_end_date (text, YYYY-MM-DD) kullanılıyor — biri şirkette kalırken de ÜK'dan
+  // çıkabilir, o yüzden ayrı bir alan.
+  async getUkEntryExitReport(startDate: Date, endDate: Date): Promise<{
+    entries: { employeeId: number; name: string; kwuid: string | null; startDate: string | null; office: string | null }[];
+    exits: { employeeId: number; name: string; kwuid: string | null; ukEndDate: string; office: string | null }[];
+  }> {
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999);
+    const startYmd = startDate.toISOString().slice(0, 10);
+    const endYmd = endDate.toISOString().slice(0, 10);
+
+    const [entryRows, exitRows] = await Promise.all([
+      db.select({
+        id: employees.id, kwuid: employees.kwuid, startDate: employees.startDate,
+        name: candidates.name, office: candidates.office,
+      })
+        .from(employees)
+        .leftJoin(candidates, eq(employees.candidateId, candidates.id))
+        .where(and(
+          eq(employees.uretkenlikKoclugu, true),
+          isNotNull(employees.startDate),
+          gte(employees.startDate, startDate),
+          lte(employees.startDate, end),
+        ))
+        .orderBy(employees.startDate),
+      db.select({
+        id: employees.id, kwuid: employees.kwuid, ukEndDate: employees.ukEndDate,
+        name: candidates.name, office: candidates.office,
+      })
+        .from(employees)
+        .leftJoin(candidates, eq(employees.candidateId, candidates.id))
+        .where(and(
+          isNotNull(employees.ukEndDate),
+          gte(employees.ukEndDate, startYmd),
+          lte(employees.ukEndDate, endYmd),
+        ))
+        .orderBy(employees.ukEndDate),
+    ]);
+
+    return {
+      entries: entryRows.map((r) => ({
+        employeeId: r.id, name: r.name ?? "—", kwuid: r.kwuid ?? null,
+        startDate: r.startDate ? new Date(r.startDate).toISOString().slice(0, 10) : null,
+        office: r.office ?? null,
+      })),
+      exits: exitRows.map((r) => ({
+        employeeId: r.id, name: r.name ?? "—", kwuid: r.kwuid ?? null,
+        ukEndDate: r.ukEndDate!, office: r.office ?? null,
+      })),
+    };
+  }
+
   async getCoachingStats(startDate: Date, endDate: Date, coachUserId?: number, includePassive = false) {
     const end = new Date(endDate);
     end.setHours(23, 59, 59, 999);

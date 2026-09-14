@@ -3255,6 +3255,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // ── Coaching Stats ────────────────────────────────────────────────────────────
 
+  // Seçilen tarih aralığında ÜK'ya giriş (şirkete giriş tarihi) ve çıkış (uk_end_date) yapanlar
+  app.get("/api/coaching/uk-entry-exit", requireAuth, requireHiringManagerOrAdmin, async (req: Request, res: Response) => {
+    try {
+      const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
+      if (!startDate || !endDate) return res.status(400).json({ message: "startDate ve endDate gerekli" });
+      res.json(await storage.getUkEntryExitReport(new Date(startDate), new Date(endDate)));
+    } catch (err) {
+      console.error("[GET /api/coaching/uk-entry-exit]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   app.get("/api/coaching/stats", requireAuth, async (req: Request, res: Response) => {
     try {
       const user = req.user!;

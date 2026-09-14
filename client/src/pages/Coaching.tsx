@@ -8,7 +8,7 @@ import {
 } from "recharts";
 import {
   Users, DollarSign, Handshake, ChevronDown, ChevronRight,
-  Award, Target, BarChart2, ChevronLeft, UserMinus,
+  Award, Target, BarChart2, ChevronLeft, UserMinus, UserPlus,
 } from "lucide-react";
 import { format } from "date-fns";
 import { tr } from "date-fns/locale";
@@ -31,6 +31,93 @@ const CURRENT_YEAR = new Date().getFullYear();
 function monthLabel(key: string) {
   const [, m] = key.split("-");
   return MONTH_NAMES[parseInt(m, 10) - 1] ?? key;
+}
+
+// ── ÜK Giriş / Çıkış Listesi ─────────────────────────────────────────────────
+// Giriş tarihi olarak employees.startDate (şirkete giriş) kullanılıyor — ÜK koçluğu işe
+// başlamayla başlıyor, ayrı bir "ÜK giriş tarihi" alanı yok (kasıtlı, bkz. server tarafı).
+function UkEntryExitSection() {
+  const [from, setFrom] = useState(() => formatYMD(new Date(CURRENT_YEAR, new Date().getMonth(), 1)));
+  const [to, setTo] = useState(() => formatYMD(new Date()));
+
+  const { data, isLoading } = useQuery<{
+    entries: { employeeId: number; name: string; kwuid: string | null; startDate: string | null; office: string | null }[];
+    exits: { employeeId: number; name: string; kwuid: string | null; ukEndDate: string; office: string | null }[];
+  }>({
+    queryKey: ["/api/coaching/uk-entry-exit", from, to],
+    queryFn: () => fetch(`/api/coaching/uk-entry-exit?startDate=${from}&endDate=${to}`, { credentials: "include" }).then(r => r.json()),
+    enabled: !!from && !!to,
+  });
+
+  const fmtDate = (d: string) => format(new Date(d), "d MMM yyyy", { locale: tr });
+
+  return (
+    <div className="rounded-xl border border-border bg-card overflow-hidden">
+      <div className="flex items-center justify-between flex-wrap gap-3 px-4 py-3 border-b border-border bg-muted/30">
+        <h2 className="text-sm font-semibold flex items-center gap-2">
+          <Users className="h-4 w-4 text-primary" /> ÜK Giriş / Çıkış Listesi
+        </h2>
+        <div className="flex items-center gap-1.5">
+          <input type="date" value={from} onChange={e => setFrom(e.target.value)}
+            className="h-8 rounded-lg border border-border bg-card px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary" />
+          <span className="text-xs text-muted-foreground">—</span>
+          <input type="date" value={to} onChange={e => setTo(e.target.value)}
+            className="h-8 rounded-lg border border-border bg-card px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary" />
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="p-8 text-center text-sm text-muted-foreground">Yükleniyor…</div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-border">
+          <div className="p-4">
+            <h3 className="text-xs font-semibold text-emerald-700 flex items-center gap-1.5 mb-3">
+              <UserPlus className="h-3.5 w-3.5" /> Giriş Yapanlar ({data?.entries.length ?? 0})
+            </h3>
+            {!data?.entries.length ? (
+              <p className="text-xs text-muted-foreground">Bu aralıkta ÜK'ya giriş yapan yok.</p>
+            ) : (
+              <div className="space-y-1.5">
+                {data.entries.map(e => (
+                  <div key={e.employeeId} className="flex items-center justify-between text-sm">
+                    <div className="min-w-0">
+                      <span className="font-medium truncate">{e.name}</span>
+                      {e.office && <span className="text-xs text-muted-foreground ml-1.5">({e.office})</span>}
+                    </div>
+                    <span className="text-xs text-muted-foreground whitespace-nowrap ml-2">
+                      {e.startDate ? fmtDate(e.startDate) : "—"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="p-4">
+            <h3 className="text-xs font-semibold text-rose-700 flex items-center gap-1.5 mb-3">
+              <UserMinus className="h-3.5 w-3.5" /> Çıkış Yapanlar ({data?.exits.length ?? 0})
+            </h3>
+            {!data?.exits.length ? (
+              <p className="text-xs text-muted-foreground">Bu aralıkta ÜK'dan çıkış yapan yok.</p>
+            ) : (
+              <div className="space-y-1.5">
+                {data.exits.map(e => (
+                  <div key={e.employeeId} className="flex items-center justify-between text-sm">
+                    <div className="min-w-0">
+                      <span className="font-medium truncate">{e.name}</span>
+                      {e.office && <span className="text-xs text-muted-foreground ml-1.5">({e.office})</span>}
+                    </div>
+                    <span className="text-xs text-muted-foreground whitespace-nowrap ml-2">
+                      {fmtDate(e.ukEndDate)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -500,6 +587,8 @@ export default function Coaching() {
             )}
           </div>
         </div>
+
+        <UkEntryExitSection />
 
         {isLoading && !data && (
           <div className="flex justify-center py-20">
