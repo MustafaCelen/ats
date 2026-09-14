@@ -138,6 +138,8 @@ export const candidates = pgTable("candidates", {
   emergencyContactPhone: text("emergency_contact_phone"),
   office: text("office"),                            // "Akatlar" | "Zekeriyaköy"
   campaignId: integer("campaign_id"),                // Hangi kampanyadan geldi (opsiyonel)
+  leadWhatsappSent: boolean("lead_whatsapp_sent").notNull().default(false), // Lead Takip: WhatsApp mesajı iletildi
+  leadPhoneCallDone: boolean("lead_phone_call_done").notNull().default(false), // Lead Takip: telefon görüşmesi yapıldı
   createdByUserId: integer("created_by_user_id"),
   // Aday transferi: set edilirse SADECE bu Hiring Manager (+admin) adayı görebilir — mevcut
   // job-assignment tabanlı görünürlüğü (job_assignments) geçersiz kılar. Admin-only transfer

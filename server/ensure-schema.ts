@@ -77,6 +77,8 @@ export async function ensureSchema(): Promise<void> {
 
     ALTER TABLE candidates ADD COLUMN IF NOT EXISTS campaign_id INTEGER;
     CREATE INDEX IF NOT EXISTS candidates_campaign_idx ON candidates(campaign_id);
+    ALTER TABLE candidates ADD COLUMN IF NOT EXISTS lead_whatsapp_sent BOOLEAN NOT NULL DEFAULT false;
+    ALTER TABLE candidates ADD COLUMN IF NOT EXISTS lead_phone_call_done BOOLEAN NOT NULL DEFAULT false;
 
     CREATE TABLE IF NOT EXISTS campaigns (
       id SERIAL PRIMARY KEY, name TEXT NOT NULL, description TEXT,

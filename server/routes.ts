@@ -1511,6 +1511,23 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.status(204).send();
   });
 
+  // Lead Takip Panosu: WhatsApp/telefon görüşme durumu için hafif toggle (tam candidate update şeması gerekmiyor)
+  app.patch("/api/candidates/:id/lead-tracking", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const update: { leadWhatsappSent?: boolean; leadPhoneCallDone?: boolean } = {};
+      if (typeof req.body?.leadWhatsappSent === "boolean") update.leadWhatsappSent = req.body.leadWhatsappSent;
+      if (typeof req.body?.leadPhoneCallDone === "boolean") update.leadPhoneCallDone = req.body.leadPhoneCallDone;
+      if (Object.keys(update).length === 0) return res.status(400).json({ message: "leadWhatsappSent veya leadPhoneCallDone gerekli" });
+      const candidate = await storage.updateCandidate(id, update);
+      if (!candidate) return res.status(404).json({ message: "Candidate not found" });
+      res.json(candidate);
+    } catch (err) {
+      console.error("[PATCH /api/candidates/:id/lead-tracking]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   // ── Candidate Notes ─────────────────────────────────────────────────────────
 
   app.get("/api/candidates/:id/history", requireAuth, async (req, res) => {
@@ -3282,9 +3299,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // — bilinçli olarak herkese açık (requireAuth yeterli, rol kısıtı yok).
   app.get("/api/coaching/uk-entry-exit", requireAuth, async (req: Request, res: Response) => {
     try {
-      const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
+      const { startDate, endDate, includePassive } = req.query as { startDate?: string; endDate?: string; includePassive?: string };
       if (!startDate || !endDate) return res.status(400).json({ message: "startDate ve endDate gerekli" });
-      res.json(await storage.getUkEntryExitReport(new Date(startDate), new Date(endDate)));
+      res.json(await storage.getUkEntryExitReport(new Date(startDate), new Date(endDate), includePassive === "true"));
     } catch (err) {
       console.error("[GET /api/coaching/uk-entry-exit]", err);
       res.status(500).json({ message: "Internal server error" });

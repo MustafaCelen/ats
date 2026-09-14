@@ -355,6 +355,34 @@ export default function LeadTrackingBoard() {
     return selected;
   }, [interviews]);
 
+  const updateLeadTracking = useMutation({
+    mutationFn: async ({ candidateId, field, value }: { candidateId: number; field: "leadWhatsappSent" | "leadPhoneCallDone"; value: boolean }) => {
+      const response = await apiRequest("PATCH", `/api/candidates/${candidateId}/lead-tracking`, { [field]: value });
+      return response.json();
+    },
+    onMutate: async ({ candidateId, field, value }) => {
+      await queryClient.cancelQueries({ queryKey: ["/api/candidates"] });
+      await queryClient.cancelQueries({ queryKey: ["/api/applications"] });
+      const prevCandidates = queryClient.getQueryData<Candidate[]>(["/api/candidates"]);
+      const prevApplications = queryClient.getQueryData<ApplicationWithRelations[]>(["/api/applications"]);
+      const patch = (c: Candidate) => (c.id === candidateId ? { ...c, [field]: value } : c);
+      queryClient.setQueryData<Candidate[]>(["/api/candidates"], (old) => old?.map(patch));
+      queryClient.setQueryData<ApplicationWithRelations[]>(["/api/applications"], (old) =>
+        old?.map((a) => (a.candidateId === candidateId && a.candidate ? { ...a, candidate: patch(a.candidate) } : a))
+      );
+      return { prevCandidates, prevApplications };
+    },
+    onError: (error: Error, _vars, context) => {
+      if (context?.prevCandidates) queryClient.setQueryData(["/api/candidates"], context.prevCandidates);
+      if (context?.prevApplications) queryClient.setQueryData(["/api/applications"], context.prevApplications);
+      toast({ title: "Güncellenemedi", description: error.message, variant: "destructive" });
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/candidates"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/applications"] });
+    },
+  });
+
   const updateProductionBand = useMutation({
     mutationFn: async ({ applicationId, jobId }: { applicationId: number; jobId: number }) => {
       const response = await apiRequest("PATCH", `/api/applications/${applicationId}/job`, { jobId });
@@ -458,6 +486,8 @@ export default function LeadTrackingBoard() {
                     <th className="px-4 py-2.5 text-left font-semibold">Lead</th>
                     <th className="px-3 py-2.5 text-left font-semibold">Telefon</th>
                     <th className="px-3 py-2.5 text-left font-semibold">Geliş Tarihi</th>
+                    <th className="w-[90px] px-3 py-2.5 text-center font-semibold">WhatsApp</th>
+                    <th className="w-[90px] px-3 py-2.5 text-center font-semibold">Telefon Gör.</th>
                     <th className="w-[280px] px-3 py-2.5 text-left font-semibold">Üretim Bandı</th>
                     <th className="w-[150px] px-3 py-2.5 text-left font-semibold">Aksiyon</th>
                   </tr>
@@ -473,6 +503,22 @@ export default function LeadTrackingBoard() {
                       </td>
                       <td className="px-3 py-3 text-slate-600">{candidate.phone || "—"}</td>
                       <td className="px-3 py-3 text-slate-600">{formatDate(candidate.createdAt)}</td>
+                      <td className="px-3 py-3 text-center">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 accent-emerald-600"
+                          checked={!!(candidate as any).leadWhatsappSent}
+                          onChange={(e) => updateLeadTracking.mutate({ candidateId: candidate.id, field: "leadWhatsappSent", value: e.target.checked })}
+                        />
+                      </td>
+                      <td className="px-3 py-3 text-center">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 accent-blue-600"
+                          checked={!!(candidate as any).leadPhoneCallDone}
+                          onChange={(e) => updateLeadTracking.mutate({ candidateId: candidate.id, field: "leadPhoneCallDone", value: e.target.checked })}
+                        />
+                      </td>
                       <td className="px-3 py-3">
                         <Select
                           value={newLeadJobIds[candidate.id] ?? ""}
@@ -518,6 +564,8 @@ export default function LeadTrackingBoard() {
                     <span className="inline-flex items-center gap-1.5"><UsersRound className="h-4 w-4" /> Lead</span>
                   </th>
                   <th className="min-w-[125px] px-3 py-3 text-left font-semibold">İletişim</th>
+                  <th className="min-w-[90px] px-3 py-3 text-center font-semibold">WhatsApp</th>
+                  <th className="min-w-[90px] px-3 py-3 text-center font-semibold">Telefon Gör.</th>
                   <th className="min-w-[135px] px-3 py-3 text-left font-semibold">Aşama</th>
                   <th className="min-w-[135px] bg-blue-50/70 px-3 py-3 text-left font-semibold text-blue-700">Randevu Durumu</th>
                   <th className="min-w-[165px] bg-blue-50/70 px-3 py-3 text-left font-semibold text-blue-700">Randevu Tarihi</th>
@@ -530,12 +578,12 @@ export default function LeadTrackingBoard() {
               <tbody className="divide-y divide-border">
                 {isLoading && (
                   <tr>
-                    <td colSpan={9} className="py-14 text-center text-muted-foreground">Lead bilgileri yükleniyor...</td>
+                    <td colSpan={11} className="py-14 text-center text-muted-foreground">Lead bilgileri yükleniyor...</td>
                   </tr>
                 )}
                 {!isLoading && boardApps.length === 0 && (
                   <tr>
-                    <td colSpan={9} className="py-14 text-center">
+                    <td colSpan={11} className="py-14 text-center">
                       <Target className="mx-auto mb-2 h-8 w-8 text-muted-foreground/30" />
                       <p className="text-sm text-muted-foreground">Aramanızla eşleşen kampanya lead'i bulunamadı.</p>
                     </td>
@@ -588,6 +636,24 @@ export default function LeadTrackingBoard() {
                             <Phone className="h-3.5 w-3.5" />
                           </Button>
                         </div>
+                      </td>
+                      <td className="px-3 py-3 text-center">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 accent-emerald-600"
+                          checked={!!(candidate as any)?.leadWhatsappSent}
+                          disabled={!candidate}
+                          onChange={(e) => candidate && updateLeadTracking.mutate({ candidateId: candidate.id, field: "leadWhatsappSent", value: e.target.checked })}
+                        />
+                      </td>
+                      <td className="px-3 py-3 text-center">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 accent-blue-600"
+                          checked={!!(candidate as any)?.leadPhoneCallDone}
+                          disabled={!candidate}
+                          onChange={(e) => candidate && updateLeadTracking.mutate({ candidateId: candidate.id, field: "leadPhoneCallDone", value: e.target.checked })}
+                        />
                       </td>
                       <td className="px-3 py-3">
                         <Badge variant="outline" className={STAGE_COLORS[application.status] ?? ""}>

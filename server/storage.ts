@@ -5120,19 +5120,20 @@ export class DatabaseStorage implements IStorage {
   // kullanılıyor — ÜK koçluğu işe başlamayla birlikte başlıyor. Çıkış için mevcut
   // employees.uk_end_date (text, YYYY-MM-DD) kullanılıyor — biri şirkette kalırken de ÜK'dan
   // çıkabilir, o yüzden ayrı bir alan.
-  async getUkEntryExitReport(startDate: Date, endDate: Date): Promise<{
-    entries: { employeeId: number; name: string; kwuid: string | null; startDate: string | null; office: string | null }[];
-    exits: { employeeId: number; name: string; kwuid: string | null; ukEndDate: string; office: string | null }[];
+  async getUkEntryExitReport(startDate: Date, endDate: Date, includePassive = false): Promise<{
+    entries: { employeeId: number; name: string; kwuid: string | null; startDate: string | null; office: string | null; status: string }[];
+    exits: { employeeId: number; name: string; kwuid: string | null; ukEndDate: string; office: string | null; status: string }[];
   }> {
     const end = new Date(endDate);
     end.setHours(23, 59, 59, 999);
     const startYmd = startDate.toISOString().slice(0, 10);
     const endYmd = endDate.toISOString().slice(0, 10);
+    const passiveFilter = includePassive ? sql`true` : eq(employees.status, "active");
 
     const [entryRows, exitRows] = await Promise.all([
       db.select({
         id: employees.id, kwuid: employees.kwuid, startDate: employees.startDate,
-        name: candidates.name, office: candidates.office,
+        name: candidates.name, office: candidates.office, status: employees.status,
       })
         .from(employees)
         .leftJoin(candidates, eq(employees.candidateId, candidates.id))
@@ -5141,11 +5142,12 @@ export class DatabaseStorage implements IStorage {
           isNotNull(employees.startDate),
           gte(employees.startDate, startDate),
           lte(employees.startDate, end),
+          passiveFilter,
         ))
         .orderBy(employees.startDate),
       db.select({
         id: employees.id, kwuid: employees.kwuid, ukEndDate: employees.ukEndDate,
-        name: candidates.name, office: candidates.office,
+        name: candidates.name, office: candidates.office, status: employees.status,
       })
         .from(employees)
         .leftJoin(candidates, eq(employees.candidateId, candidates.id))
@@ -5153,6 +5155,7 @@ export class DatabaseStorage implements IStorage {
           isNotNull(employees.ukEndDate),
           gte(employees.ukEndDate, startYmd),
           lte(employees.ukEndDate, endYmd),
+          passiveFilter,
         ))
         .orderBy(employees.ukEndDate),
     ]);
@@ -5161,11 +5164,11 @@ export class DatabaseStorage implements IStorage {
       entries: entryRows.map((r) => ({
         employeeId: r.id, name: r.name ?? "—", kwuid: r.kwuid ?? null,
         startDate: r.startDate ? new Date(r.startDate).toISOString().slice(0, 10) : null,
-        office: r.office ?? null,
+        office: r.office ?? null, status: r.status,
       })),
       exits: exitRows.map((r) => ({
         employeeId: r.id, name: r.name ?? "—", kwuid: r.kwuid ?? null,
-        ukEndDate: r.ukEndDate!, office: r.office ?? null,
+        ukEndDate: r.ukEndDate!, office: r.office ?? null, status: r.status,
       })),
     };
   }
