@@ -27,7 +27,6 @@ import {
   Phone,
   Search,
   Target,
-  UserPlus,
   UserRound,
   UsersRound,
   XCircle,
@@ -238,12 +237,12 @@ function AppointmentDialog({
 }
 
 function NoteDialog({
-  application,
+  target,
   open,
   onOpenChange,
   onNoteAdded,
 }: {
-  application: ApplicationWithRelations | null;
+  target: { candidateId: number; candidateName: string; latestNote?: string | null } | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onNoteAdded: (candidateId: number) => void;
@@ -254,19 +253,19 @@ function NoteDialog({
 
   useEffect(() => {
     if (open) setContent("");
-  }, [open, application?.id]);
+  }, [open, target?.candidateId]);
 
   const addNote = useMutation({
     mutationFn: async () => {
-      if (!application) throw new Error("Aday seçilmedi");
-      const response = await apiRequest("POST", `/api/candidates/${application.candidateId}/notes`, { content });
+      if (!target) throw new Error("Aday seçilmedi");
+      const response = await apiRequest("POST", `/api/candidates/${target.candidateId}/notes`, { content });
       return response.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/applications"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/candidates", application?.candidateId, "notes"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/candidates", target?.candidateId, "notes"] });
       toast({ title: "Not kaydedildi", description: "Not aday profilinde de görüntülenecek." });
-      if (application) onNoteAdded(application.candidateId);
+      if (target) onNoteAdded(target.candidateId);
       onOpenChange(false);
     },
     onError: (error: Error) => {
@@ -280,14 +279,14 @@ function NoteDialog({
         <DialogHeader>
           <DialogTitle>Ekip Notu Ekle</DialogTitle>
           <p id="lead-note-description" className="text-sm text-muted-foreground">
-            {application?.candidate?.name} için eklenen not aday profilindeki Notlar bölümüne kaydedilir.
+            {target?.candidateName} için eklenen not aday profilindeki Notlar bölümüne kaydedilir.
           </p>
         </DialogHeader>
         <div className="space-y-4 pt-2">
-          {application?.latestNote && (
+          {target?.latestNote && (
             <div className="rounded-lg border border-violet-100 bg-violet-50/70 p-3">
               <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-violet-700">Son not</p>
-              <p className="text-sm text-slate-700">{application.latestNote}</p>
+              <p className="text-sm text-slate-700">{target.latestNote}</p>
             </div>
           )}
           <Textarea
@@ -386,7 +385,7 @@ export default function LeadTrackingBoard() {
   const [search, setSearch] = useState("");
   const [newLeadJobIds, setNewLeadJobIds] = useState<Record<number, string>>({});
   const [appointmentTarget, setAppointmentTarget] = useState<ApplicationWithRelations | null>(null);
-  const [noteTarget, setNoteTarget] = useState<ApplicationWithRelations | null>(null);
+  const [noteTarget, setNoteTarget] = useState<{ candidateId: number; candidateName: string; latestNote?: string | null } | null>(null);
   const [fieldNoteTarget, setFieldNoteTarget] = useState<{ candidate: Candidate; field: LeadTrackingField; title: string; description: string } | null>(null);
 
   const productionJobs = useMemo(() => {
@@ -433,6 +432,22 @@ export default function LeadTrackingBoard() {
       })
       .sort((a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime());
   }, [allApplications, allCandidates, search]);
+
+  type LeadRow =
+    | { kind: "unassigned"; candidate: Candidate; application: null; sortKey: number }
+    | { kind: "assigned"; candidate: Candidate | undefined; application: ApplicationWithRelations; sortKey: number };
+
+  const leadRows = useMemo<LeadRow[]>(() => {
+    const unassigned: LeadRow[] = unassignedLeads.map((candidate) => ({
+      kind: "unassigned", candidate, application: null,
+      sortKey: new Date(candidate.createdAt ?? 0).getTime(),
+    }));
+    const assigned: LeadRow[] = boardApps.map((application) => ({
+      kind: "assigned", candidate: application.candidate, application,
+      sortKey: new Date(application.appliedAt ?? 0).getTime(),
+    }));
+    return [...unassigned, ...assigned].sort((a, b) => b.sortKey - a.sortKey);
+  }, [unassignedLeads, boardApps]);
 
   const interviewByApplication = useMemo(() => {
     const grouped = new Map<number, InterviewWithRelations[]>();
@@ -567,110 +582,6 @@ export default function LeadTrackingBoard() {
           </div>
         </div>
 
-        {unassignedLeads.length > 0 && (
-          <div className="overflow-hidden rounded-2xl border border-orange-200 bg-card shadow-sm">
-            <div className="flex items-center justify-between border-b border-orange-100 bg-orange-50 px-4 py-3">
-              <div>
-                <h2 className="flex items-center gap-2 text-sm font-semibold text-orange-800">
-                  <UserPlus className="h-4 w-4" /> Atanmamış Lead'ler
-                </h2>
-                <p className="mt-0.5 text-xs text-orange-700/70">Üretim bandı seçildiğinde lead için başvuru kaydı oluşturulur.</p>
-              </div>
-              <Badge variant="outline" className="border-orange-200 bg-white text-orange-700">{unassignedLeads.length}</Badge>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[760px] border-collapse text-xs">
-                <thead>
-                  <tr className="border-b border-orange-100 bg-orange-50/40 text-slate-600">
-                    <th className="px-4 py-2.5 text-left font-semibold">Lead</th>
-                    <th className="px-3 py-2.5 text-left font-semibold">Telefon</th>
-                    <th className="px-3 py-2.5 text-left font-semibold">Geliş Tarihi</th>
-                    <th className="w-[90px] px-3 py-2.5 text-center font-semibold">WhatsApp</th>
-                    <th className="w-[90px] px-3 py-2.5 text-center font-semibold">Telefon Gör.</th>
-                    <th className="w-[160px] px-3 py-2.5 text-left font-semibold">Telefon Notu</th>
-                    <th className="w-[140px] px-3 py-2.5 text-left font-semibold">Meslek</th>
-                    <th className="w-[280px] px-3 py-2.5 text-left font-semibold">Üretim Bandı</th>
-                    <th className="w-[150px] px-3 py-2.5 text-left font-semibold">Aksiyon</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-orange-100">
-                  {unassignedLeads.map((candidate) => (
-                    <tr key={candidate.id} className="hover:bg-orange-50/30">
-                      <td className="px-4 py-3">
-                        <Link href={`/candidates/${candidate.id}`} className="font-semibold text-slate-900 hover:text-orange-700 hover:underline">
-                          {candidate.name}
-                        </Link>
-                        <p className="mt-0.5 text-[11px] text-slate-500">{candidate.city || "Şehir belirtilmemiş"}</p>
-                      </td>
-                      <td className="px-3 py-3 text-slate-600">{candidate.phone || "—"}</td>
-                      <td className="px-3 py-3 text-slate-600">{formatDate(candidate.createdAt)}</td>
-                      <td className="px-3 py-3 text-center">
-                        <input
-                          type="checkbox"
-                          className="h-4 w-4 accent-emerald-600"
-                          checked={!!(candidate as any).leadWhatsappSent}
-                          onChange={(e) => updateLeadTracking.mutate({ candidateId: candidate.id, field: "leadWhatsappSent", value: e.target.checked })}
-                        />
-                      </td>
-                      <td className="px-3 py-3 text-center">
-                        <input
-                          type="checkbox"
-                          className="h-4 w-4 accent-blue-600"
-                          checked={!!(candidate as any).leadPhoneCallDone}
-                          onChange={(e) => updateLeadTracking.mutate({ candidateId: candidate.id, field: "leadPhoneCallDone", value: e.target.checked })}
-                        />
-                      </td>
-                      <td className="px-3 py-3">
-                        <button
-                          type="button"
-                          className="line-clamp-2 w-full rounded-lg px-2 py-1.5 text-left leading-relaxed text-slate-600 hover:bg-orange-50"
-                          onClick={() => setFieldNoteTarget({ candidate, field: "leadCallNotes", title: "Telefon Görüşmesi Notu", description: "telefon görüşmesi notları" })}
-                        >
-                          {(candidate as any).leadCallNotes || <span className="text-slate-400">Not ekle...</span>}
-                        </button>
-                      </td>
-                      <td className="px-3 py-3">
-                        <ProfessionCell
-                          candidate={candidate}
-                          onSave={(candidateId, value) => updateLeadTracking.mutate({ candidateId, field: "profession", value })}
-                        />
-                      </td>
-                      <td className="px-3 py-3">
-                        <Select
-                          value={newLeadJobIds[candidate.id] ?? ""}
-                          onValueChange={(value) => setNewLeadJobIds((current) => ({ ...current, [candidate.id]: value }))}
-                        >
-                          <SelectTrigger className="h-9 border-orange-200 bg-white text-xs">
-                            <SelectValue placeholder="Üretim bandı seçin" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {productionJobs.map((job) => (
-                              <SelectItem key={job.id} value={String(job.id)}>{job.title}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </td>
-                      <td className="px-3 py-3">
-                        <Button
-                          size="sm"
-                          className="h-8 bg-orange-600 text-xs text-white hover:bg-orange-700"
-                          disabled={!newLeadJobIds[candidate.id] || createApplication.isPending}
-                          onClick={() => createApplication.mutate({
-                            candidateId: candidate.id,
-                            jobId: Number(newLeadJobIds[candidate.id]),
-                          })}
-                        >
-                          <UserPlus className="mr-1.5 h-3.5 w-3.5" /> Başvuru Aç
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
         <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
           <div className="overflow-x-auto">
             <table className="min-w-[2400px] w-full border-collapse text-xs">
@@ -703,7 +614,7 @@ export default function LeadTrackingBoard() {
                     <td colSpan={17} className="py-14 text-center text-muted-foreground">Lead bilgileri yükleniyor...</td>
                   </tr>
                 )}
-                {!isLoading && boardApps.length === 0 && (
+                {!isLoading && leadRows.length === 0 && (
                   <tr>
                     <td colSpan={17} className="py-14 text-center">
                       <Target className="mx-auto mb-2 h-8 w-8 text-muted-foreground/30" />
@@ -711,16 +622,18 @@ export default function LeadTrackingBoard() {
                     </td>
                   </tr>
                 )}
-                {!isLoading && boardApps.map((application) => {
-                  const candidate = application.candidate;
-                  const interview = interviewByApplication.get(application.id);
+                {!isLoading && leadRows.map((row) => {
+                  const { candidate, application } = row;
+                  const interview = application ? interviewByApplication.get(application.id) : undefined;
                   const status = interview ? INTERVIEW_STATUS[interview.status] : null;
                   const whatsapp = whatsappNumber(candidate?.phone);
+                  const rowKey = application ? `app-${application.id}` : `cand-${candidate!.id}`;
+                  const candidateId = application ? application.candidateId : candidate!.id;
 
                   return (
-                    <tr key={application.id} className="group bg-white transition-colors hover:bg-slate-50/70">
-                      <td className="sticky left-0 z-10 bg-white px-4 py-3 group-hover:bg-slate-50">
-                        <Link href={`/candidates/${application.candidateId}`} className="flex items-center gap-2.5">
+                    <tr key={rowKey} className={`group transition-colors hover:bg-slate-50/70 ${row.kind === "unassigned" ? "bg-orange-50/30" : "bg-white"}`}>
+                      <td className={`sticky left-0 z-10 px-4 py-3 group-hover:bg-slate-50 ${row.kind === "unassigned" ? "bg-orange-50/30" : "bg-white"}`}>
+                        <Link href={`/candidates/${candidateId}`} className="flex items-center gap-2.5">
                           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-violet-100 font-semibold text-violet-700">
                             {(candidate?.name ?? "?").split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toLocaleUpperCase("tr-TR")}
                           </span>
@@ -730,7 +643,7 @@ export default function LeadTrackingBoard() {
                               <ExternalLink className="h-3 w-3 shrink-0 text-slate-400" />
                             </span>
                             <span className="mt-0.5 block text-[11px] text-slate-500">
-                              {[candidate?.city, formatDate(application.appliedAt)].filter(Boolean).join(" · ")}
+                              {[candidate?.city, formatDate(application ? application.appliedAt : candidate?.createdAt)].filter(Boolean).join(" · ")}
                             </span>
                           </span>
                         </Link>
@@ -797,28 +710,42 @@ export default function LeadTrackingBoard() {
                         )}
                       </td>
                       <td className="px-3 py-3">
-                        <Badge variant="outline" className={STAGE_COLORS[application.status] ?? ""}>
-                          {STAGE_LABELS[application.status] ?? application.status}
-                        </Badge>
+                        {application ? (
+                          <Badge variant="outline" className={STAGE_COLORS[application.status] ?? ""}>
+                            {STAGE_LABELS[application.status] ?? application.status}
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="border-orange-200 bg-orange-50 text-orange-700">Yeni Lead</Badge>
+                        )}
                       </td>
                       <td className="bg-blue-50/25 px-3 py-3">
-                        {status ? (
+                        {!application ? (
+                          <span className="text-slate-300">—</span>
+                        ) : status ? (
                           <Badge variant="outline" className={status.className}>{status.label}</Badge>
                         ) : (
                           <span className="text-slate-400">Randevu yok</span>
                         )}
                       </td>
                       <td className="bg-blue-50/25 px-3 py-3">
-                        <div className="flex items-center gap-1.5 text-slate-700">
-                          <CalendarRange className="h-3.5 w-3.5 text-blue-500" />
-                          <span>{formatDateTime(interview?.startTime)}</span>
-                        </div>
+                        {application ? (
+                          <div className="flex items-center gap-1.5 text-slate-700">
+                            <CalendarRange className="h-3.5 w-3.5 text-blue-500" />
+                            <span>{formatDateTime(interview?.startTime)}</span>
+                          </div>
+                        ) : (
+                          <span className="text-slate-300">—</span>
+                        )}
                       </td>
                       <td className="bg-blue-50/25 px-3 py-3">
-                        <div className="flex items-center gap-1.5 text-slate-700">
-                          <UserRound className="h-3.5 w-3.5 text-blue-500" />
-                          <span>{jobLeaderNames.get(application.jobId) || "—"}</span>
-                        </div>
+                        {application ? (
+                          <div className="flex items-center gap-1.5 text-slate-700">
+                            <UserRound className="h-3.5 w-3.5 text-blue-500" />
+                            <span>{jobLeaderNames.get(application.jobId) || "—"}</span>
+                          </div>
+                        ) : (
+                          <span className="text-slate-300">—</span>
+                        )}
                       </td>
                       <td className="bg-blue-50/25 px-3 py-3 text-center">
                         {candidate && (
@@ -831,23 +758,44 @@ export default function LeadTrackingBoard() {
                         )}
                       </td>
                       <td className="bg-violet-50/25 px-3 py-3">
-                        <Select
-                          value={String(application.jobId)}
-                          disabled={updateProductionBand.isPending}
-                          onValueChange={(value) => updateProductionBand.mutate({
-                            applicationId: application.id,
-                            jobId: Number(value),
-                          })}
-                        >
-                          <SelectTrigger className="h-9 border-violet-200 bg-white text-xs">
-                            <SelectValue placeholder="Üretim bandı seçin" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {productionJobs.map((job) => (
-                              <SelectItem key={job.id} value={String(job.id)}>{job.title}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        {application ? (
+                          <Select
+                            value={String(application.jobId)}
+                            disabled={updateProductionBand.isPending}
+                            onValueChange={(value) => updateProductionBand.mutate({
+                              applicationId: application.id,
+                              jobId: Number(value),
+                            })}
+                          >
+                            <SelectTrigger className="h-9 border-violet-200 bg-white text-xs">
+                              <SelectValue placeholder="Üretim bandı seçin" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {productionJobs.map((job) => (
+                                <SelectItem key={job.id} value={String(job.id)}>{job.title}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <Select
+                            value={newLeadJobIds[candidate!.id] ?? ""}
+                            disabled={createApplication.isPending}
+                            onValueChange={(value) => {
+                              const id = candidate!.id;
+                              setNewLeadJobIds((current) => ({ ...current, [id]: value }));
+                              createApplication.mutate({ candidateId: id, jobId: Number(value) });
+                            }}
+                          >
+                            <SelectTrigger className="h-9 border-orange-200 bg-white text-xs">
+                              <SelectValue placeholder="Üretim bandı seçin" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {productionJobs.map((job) => (
+                                <SelectItem key={job.id} value={String(job.id)}>{job.title}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
                       </td>
                       <td className="px-3 py-3 text-center">
                         {candidate && (
@@ -871,16 +819,18 @@ export default function LeadTrackingBoard() {
                         )}
                       </td>
                       <td className="bg-emerald-50/20 px-3 py-3">
-                        <button
-                          type="button"
-                          className="flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-emerald-50"
-                          onClick={() => setNoteTarget(application)}
-                        >
-                          <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" />
-                          <span className="line-clamp-2 leading-relaxed text-slate-600">
-                            {application.latestNote || "Not eklemek için tıklayın"}
-                          </span>
-                        </button>
+                        {candidate && (
+                          <button
+                            type="button"
+                            className="flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-emerald-50"
+                            onClick={() => setNoteTarget({ candidateId: candidate.id, candidateName: candidate.name, latestNote: application?.latestNote })}
+                          >
+                            <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                            <span className="line-clamp-2 leading-relaxed text-slate-600">
+                              {(application?.latestNote) || "Not eklemek için tıklayın"}
+                            </span>
+                          </button>
+                        )}
                       </td>
                       <td className="bg-emerald-50/20 px-3 py-3 text-center">
                         {candidate && (
@@ -894,14 +844,18 @@ export default function LeadTrackingBoard() {
                         )}
                       </td>
                       <td className="px-3 py-3">
-                        <Button
-                          size="sm"
-                          className="h-8 bg-violet-600 text-xs text-white hover:bg-violet-700"
-                          onClick={() => setAppointmentTarget(application)}
-                        >
-                          <CalendarPlus className="mr-1.5 h-3.5 w-3.5" />
-                          Randevu Oluştur
-                        </Button>
+                        {application ? (
+                          <Button
+                            size="sm"
+                            className="h-8 bg-violet-600 text-xs text-white hover:bg-violet-700"
+                            onClick={() => setAppointmentTarget(application)}
+                          >
+                            <CalendarPlus className="mr-1.5 h-3.5 w-3.5" />
+                            Randevu Oluştur
+                          </Button>
+                        ) : (
+                          <span className="text-xs text-slate-400">Önce üretim bandı seçin</span>
+                        )}
                       </td>
                     </tr>
                   );
@@ -923,7 +877,7 @@ export default function LeadTrackingBoard() {
         onOpenChange={(open) => { if (!open) setAppointmentTarget(null); }}
       />
       <NoteDialog
-        application={noteTarget}
+        target={noteTarget}
         open={!!noteTarget}
         onOpenChange={(open) => { if (!open) setNoteTarget(null); }}
         onNoteAdded={(candidateId) => updateLeadTracking.mutate({ candidateId, field: "leadTeamNoteRead", value: false })}
