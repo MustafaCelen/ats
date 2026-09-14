@@ -84,9 +84,10 @@ export async function ensureSchema(): Promise<void> {
     ALTER TABLE candidates ADD COLUMN IF NOT EXISTS lead_no_appointment BOOLEAN NOT NULL DEFAULT false;
     ALTER TABLE candidates ADD COLUMN IF NOT EXISTS lead_callback_needed BOOLEAN NOT NULL DEFAULT false;
     ALTER TABLE candidates ADD COLUMN IF NOT EXISTS lead_callback_notes TEXT;
-    ALTER TABLE candidates ADD COLUMN IF NOT EXISTS lead_second_note TEXT;
-    ALTER TABLE candidates ADD COLUMN IF NOT EXISTS lead_second_note_read BOOLEAN NOT NULL DEFAULT false;
-    ALTER TABLE candidates ADD COLUMN IF NOT EXISTS lead_joined_company BOOLEAN NOT NULL DEFAULT false;
+    ALTER TABLE candidates ADD COLUMN IF NOT EXISTS lead_team_note_read BOOLEAN NOT NULL DEFAULT false;
+    ALTER TABLE candidates DROP COLUMN IF EXISTS lead_second_note;
+    ALTER TABLE candidates DROP COLUMN IF EXISTS lead_second_note_read;
+    ALTER TABLE candidates DROP COLUMN IF EXISTS lead_joined_company;
 
     CREATE TABLE IF NOT EXISTS campaigns (
       id SERIAL PRIMARY KEY, name TEXT NOT NULL, description TEXT,

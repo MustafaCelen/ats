@@ -145,9 +145,7 @@ export const candidates = pgTable("candidates", {
   leadNoAppointment: boolean("lead_no_appointment").notNull().default(false), // Lead Takip: randevu oluşturulamadı
   leadCallbackNeeded: boolean("lead_callback_needed").notNull().default(false), // Lead Takip: tekrar arama gerekiyor
   leadCallbackNotes: text("lead_callback_notes"),     // Lead Takip: tekrar arama notları
-  leadSecondNote: text("lead_second_note"),           // Lead Takip: ikinci ekip notu (ör. koordinasyon notu)
-  leadSecondNoteRead: boolean("lead_second_note_read").notNull().default(false), // Lead Takip: ikinci not okundu onayı
-  leadJoinedCompany: boolean("lead_joined_company").notNull().default(false), // Lead Takip: şirkete katıldı
+  leadTeamNoteRead: boolean("lead_team_note_read").notNull().default(false), // Lead Takip: ekip notu okundu onayı (yeni not eklenince otomatik false'a döner)
   createdByUserId: integer("created_by_user_id"),
   // Aday transferi: set edilirse SADECE bu Hiring Manager (+admin) adayı görebilir — mevcut
   // job-assignment tabanlı görünürlüğü (job_assignments) geçersiz kılar. Admin-only transfer

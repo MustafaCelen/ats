@@ -1514,10 +1514,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // Lead Takip Panosu: takip alanları için hafif toggle/metin güncellemesi (tam candidate update şeması gerekmiyor)
   const LEAD_TRACKING_BOOLEAN_FIELDS = [
     "leadWhatsappSent", "leadPhoneCallDone", "leadNoAppointment",
-    "leadCallbackNeeded", "leadSecondNoteRead", "leadJoinedCompany",
+    "leadCallbackNeeded", "leadTeamNoteRead",
   ] as const;
   const LEAD_TRACKING_TEXT_FIELDS = [
-    "profession", "leadCallNotes", "leadCallbackNotes", "leadSecondNote",
+    "profession", "leadCallNotes", "leadCallbackNotes",
   ] as const;
   app.patch("/api/candidates/:id/lead-tracking", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
     try {
