@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Users, Briefcase, BarChart2, ChevronRight, Menu, X,
   Calendar, Shield, LogOut, ClipboardList, UserCheck, KanbanSquare, DollarSign, GraduationCap,
   Receipt, TrendingUp, Building2, Trophy, ShieldAlert, Users2, Puzzle, BarChart3, Copy, Megaphone,
-  MessageCircle, MapPin,
+  MessageCircle, MapPin, Target,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { useState } from "react";
@@ -64,6 +64,7 @@ const hiringManagerNavItems: NavEntry[] = [
   { icon: UserCheck,       label: "Danışmanlar",  href: "/employees"  },
   { icon: Calendar,        label: "Randevular",   href: "/interviews" },
   { icon: KanbanSquare,    label: "Onboarding",   href: "/onboarding" },
+  { icon: Target,          label: "Lead Takibi",  href: "/lead-tracking" },
   { icon: ClipboardList,   label: "Görevler",     href: "/tasks"      },
   { icon: Megaphone,       label: "Kampanyalar",  href: "/campaigns"  },
   reportsGroupHM,
@@ -76,6 +77,7 @@ const adminNavItems: NavEntry[] = [
   { icon: UserCheck,       label: "Danışmanlar",    href: "/employees"  },
   { icon: Calendar,        label: "Randevular",     href: "/interviews" },
   { icon: KanbanSquare,    label: "Onboarding",     href: "/onboarding" },
+  { icon: Target,          label: "Lead Takibi",    href: "/lead-tracking" },
   { icon: ClipboardList,   label: "Görevler",       href: "/tasks"      },
   { icon: Megaphone,       label: "Kampanyalar",    href: "/campaigns"  },
   { icon: DollarSign,      label: "İşlem Kapanış",  href: "/closings"   },
@@ -97,6 +99,7 @@ const assistantNavItems: NavEntry[] = [
   { icon: UserCheck,     label: "Danışmanlar",    href: "/employees"  },
   { icon: Calendar,      label: "Randevular",     href: "/interviews" },
   { icon: KanbanSquare,  label: "Onboarding",     href: "/onboarding" },
+  { icon: Target,        label: "Lead Takibi",    href: "/lead-tracking" },
   { icon: ClipboardList, label: "Görevler",       href: "/tasks"      },
   { icon: Building2,     label: "Portal İlanları", href: "/listings"  },
 ];
@@ -133,6 +136,7 @@ export function Layout({ children }: LayoutProps) {
     { icon: UserCheck,       label: "Danışmanlar",  href: "/employees"  },
     { icon: Calendar,        label: "Randevular",   href: "/interviews" },
     { icon: KanbanSquare,    label: "Onboarding",   href: "/onboarding" },
+    { icon: Target,          label: "Lead Takibi",  href: "/lead-tracking" },
     { icon: ClipboardList,   label: "Görevler",     href: "/tasks"      },
     user?.canViewFinancials ? reportsGroupAdmin : reportsGroupHM,
   ];
