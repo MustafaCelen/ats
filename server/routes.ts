@@ -1511,14 +1511,25 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.status(204).send();
   });
 
-  // Lead Takip Panosu: WhatsApp/telefon görüşme durumu için hafif toggle (tam candidate update şeması gerekmiyor)
+  // Lead Takip Panosu: takip alanları için hafif toggle/metin güncellemesi (tam candidate update şeması gerekmiyor)
+  const LEAD_TRACKING_BOOLEAN_FIELDS = [
+    "leadWhatsappSent", "leadPhoneCallDone", "leadNoAppointment",
+    "leadCallbackNeeded", "leadSecondNoteRead", "leadJoinedCompany",
+  ] as const;
+  const LEAD_TRACKING_TEXT_FIELDS = [
+    "profession", "leadCallNotes", "leadCallbackNotes", "leadSecondNote",
+  ] as const;
   app.patch("/api/candidates/:id/lead-tracking", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
     try {
       const id = Number(req.params.id);
-      const update: { leadWhatsappSent?: boolean; leadPhoneCallDone?: boolean } = {};
-      if (typeof req.body?.leadWhatsappSent === "boolean") update.leadWhatsappSent = req.body.leadWhatsappSent;
-      if (typeof req.body?.leadPhoneCallDone === "boolean") update.leadPhoneCallDone = req.body.leadPhoneCallDone;
-      if (Object.keys(update).length === 0) return res.status(400).json({ message: "leadWhatsappSent veya leadPhoneCallDone gerekli" });
+      const update: Record<string, boolean | string | null> = {};
+      for (const field of LEAD_TRACKING_BOOLEAN_FIELDS) {
+        if (typeof req.body?.[field] === "boolean") update[field] = req.body[field];
+      }
+      for (const field of LEAD_TRACKING_TEXT_FIELDS) {
+        if (typeof req.body?.[field] === "string") update[field] = req.body[field];
+      }
+      if (Object.keys(update).length === 0) return res.status(400).json({ message: "Güncellenecek geçerli bir alan gerekli" });
       const candidate = await storage.updateCandidate(id, update);
       if (!candidate) return res.status(404).json({ message: "Candidate not found" });
       res.json(candidate);
@@ -1526,6 +1537,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       console.error("[PATCH /api/candidates/:id/lead-tracking]", err);
       res.status(500).json({ message: "Internal server error" });
     }
+  });
+
+  // Lead Takip Panosu: "Randevu Lideri" = ilanın (üretim bandının) atandığı hiring manager(lar)
+  app.get("/api/job-assignments", requireAuth, async (_req, res) => {
+    res.json(await storage.getAllJobAssignments());
   });
 
   // ── Candidate Notes ─────────────────────────────────────────────────────────

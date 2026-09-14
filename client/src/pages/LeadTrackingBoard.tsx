@@ -33,6 +33,22 @@ import {
   XCircle,
 } from "lucide-react";
 
+type LeadTrackingField =
+  | "leadWhatsappSent" | "leadPhoneCallDone" | "leadNoAppointment"
+  | "leadCallbackNeeded" | "leadSecondNoteRead" | "leadJoinedCompany"
+  | "profession" | "leadCallNotes" | "leadCallbackNotes" | "leadSecondNote";
+
+function useJobAssignments() {
+  return useQuery<{ jobId: number; userId: number; userName: string }[]>({
+    queryKey: ["/api/job-assignments"],
+    queryFn: async () => {
+      const response = await fetch("/api/job-assignments", { credentials: "include" });
+      if (!response.ok) throw new Error("Atamalar alınamadı");
+      return response.json();
+    },
+  });
+}
+
 type InterviewWithRelations = Interview & {
   candidate?: Candidate;
   job?: Job;
@@ -287,23 +303,103 @@ function NoteDialog({
   );
 }
 
+function LeadNoteDialog({
+  candidate,
+  field,
+  title,
+  description,
+  open,
+  onOpenChange,
+  onSave,
+}: {
+  candidate: Candidate | null;
+  field: LeadTrackingField;
+  title: string;
+  description: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSave: (candidateId: number, field: LeadTrackingField, value: string) => void;
+}) {
+  const [content, setContent] = useState("");
+
+  useEffect(() => {
+    if (open) setContent(((candidate as any)?.[field] as string | null) ?? "");
+  }, [open, candidate, field]);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg" aria-describedby="lead-field-note-description">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <p id="lead-field-note-description" className="text-sm text-muted-foreground">
+            {candidate?.name} — {description}
+          </p>
+        </DialogHeader>
+        <div className="space-y-4 pt-2">
+          <Textarea value={content} onChange={(event) => setContent(event.target.value)} placeholder="Not yazın..." rows={4} />
+          <Button
+            className="w-full"
+            onClick={() => {
+              if (candidate) onSave(candidate.id, field, content);
+              onOpenChange(false);
+            }}
+          >
+            <FileText className="mr-2 h-4 w-4" /> Notu Kaydet
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ProfessionCell({ candidate, onSave }: { candidate: Candidate; onSave: (candidateId: number, value: string) => void }) {
+  const [value, setValue] = useState((candidate as any).profession ?? "");
+
+  useEffect(() => {
+    setValue((candidate as any).profession ?? "");
+  }, [candidate]);
+
+  return (
+    <Input
+      value={value}
+      onChange={(event) => setValue(event.target.value)}
+      onBlur={() => {
+        if (value !== ((candidate as any).profession ?? "")) onSave(candidate.id, value);
+      }}
+      placeholder="Meslek"
+      className="h-8 text-xs"
+    />
+  );
+}
+
 export default function LeadTrackingBoard() {
   const { data: allApplications, isLoading: applicationsLoading } = useApplications();
   const { data: allCandidates, isLoading: candidatesLoading } = useCandidates();
   const { data: interviews, isLoading: interviewsLoading } = useInterviews();
   const { data: allJobs } = useAllJobs();
+  const { data: jobAssignments } = useJobAssignments();
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [search, setSearch] = useState("");
   const [newLeadJobIds, setNewLeadJobIds] = useState<Record<number, string>>({});
   const [appointmentTarget, setAppointmentTarget] = useState<ApplicationWithRelations | null>(null);
   const [noteTarget, setNoteTarget] = useState<ApplicationWithRelations | null>(null);
+  const [fieldNoteTarget, setFieldNoteTarget] = useState<{ candidate: Candidate; field: LeadTrackingField; title: string; description: string } | null>(null);
 
   const productionJobs = useMemo(() => {
     const openJobs = (allJobs ?? []).filter((job) => job.status === "open");
     const production = openJobs.filter((job) => job.title.toLocaleLowerCase("tr-TR").includes("üretim bandı"));
     return production.length > 0 ? production : openJobs;
   }, [allJobs]);
+
+  const jobLeaderNames = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const row of jobAssignments ?? []) {
+      const current = map.get(row.jobId);
+      map.set(row.jobId, current ? `${current}, ${row.userName}` : row.userName);
+    }
+    return map;
+  }, [jobAssignments]);
 
   const boardApps = useMemo(() => {
     const query = search.trim().toLocaleLowerCase("tr-TR");
@@ -356,7 +452,7 @@ export default function LeadTrackingBoard() {
   }, [interviews]);
 
   const updateLeadTracking = useMutation({
-    mutationFn: async ({ candidateId, field, value }: { candidateId: number; field: "leadWhatsappSent" | "leadPhoneCallDone"; value: boolean }) => {
+    mutationFn: async ({ candidateId, field, value }: { candidateId: number; field: LeadTrackingField; value: boolean | string }) => {
       const response = await apiRequest("PATCH", `/api/candidates/${candidateId}/lead-tracking`, { [field]: value });
       return response.json();
     },
@@ -488,6 +584,8 @@ export default function LeadTrackingBoard() {
                     <th className="px-3 py-2.5 text-left font-semibold">Geliş Tarihi</th>
                     <th className="w-[90px] px-3 py-2.5 text-center font-semibold">WhatsApp</th>
                     <th className="w-[90px] px-3 py-2.5 text-center font-semibold">Telefon Gör.</th>
+                    <th className="w-[160px] px-3 py-2.5 text-left font-semibold">Telefon Notu</th>
+                    <th className="w-[140px] px-3 py-2.5 text-left font-semibold">Meslek</th>
                     <th className="w-[280px] px-3 py-2.5 text-left font-semibold">Üretim Bandı</th>
                     <th className="w-[150px] px-3 py-2.5 text-left font-semibold">Aksiyon</th>
                   </tr>
@@ -517,6 +615,21 @@ export default function LeadTrackingBoard() {
                           className="h-4 w-4 accent-blue-600"
                           checked={!!(candidate as any).leadPhoneCallDone}
                           onChange={(e) => updateLeadTracking.mutate({ candidateId: candidate.id, field: "leadPhoneCallDone", value: e.target.checked })}
+                        />
+                      </td>
+                      <td className="px-3 py-3">
+                        <button
+                          type="button"
+                          className="line-clamp-2 w-full rounded-lg px-2 py-1.5 text-left leading-relaxed text-slate-600 hover:bg-orange-50"
+                          onClick={() => setFieldNoteTarget({ candidate, field: "leadCallNotes", title: "Telefon Görüşmesi Notu", description: "telefon görüşmesi notları" })}
+                        >
+                          {(candidate as any).leadCallNotes || <span className="text-slate-400">Not ekle...</span>}
+                        </button>
+                      </td>
+                      <td className="px-3 py-3">
+                        <ProfessionCell
+                          candidate={candidate}
+                          onSave={(candidateId, value) => updateLeadTracking.mutate({ candidateId, field: "profession", value })}
                         />
                       </td>
                       <td className="px-3 py-3">
@@ -557,7 +670,7 @@ export default function LeadTrackingBoard() {
 
         <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
           <div className="overflow-x-auto">
-            <table className="min-w-[1450px] w-full border-collapse text-xs">
+            <table className="min-w-[2400px] w-full border-collapse text-xs">
               <thead>
                 <tr className="border-b border-border bg-slate-50 text-slate-600">
                   <th className="sticky left-0 z-20 min-w-[190px] bg-slate-50 px-4 py-3 text-left font-semibold">
@@ -566,11 +679,19 @@ export default function LeadTrackingBoard() {
                   <th className="min-w-[125px] px-3 py-3 text-left font-semibold">İletişim</th>
                   <th className="min-w-[90px] px-3 py-3 text-center font-semibold">WhatsApp</th>
                   <th className="min-w-[90px] px-3 py-3 text-center font-semibold">Telefon Gör.</th>
+                  <th className="min-w-[160px] px-3 py-3 text-left font-semibold">Telefon Notu</th>
+                  <th className="min-w-[140px] px-3 py-3 text-left font-semibold">Meslek</th>
                   <th className="min-w-[135px] px-3 py-3 text-left font-semibold">Aşama</th>
                   <th className="min-w-[135px] bg-blue-50/70 px-3 py-3 text-left font-semibold text-blue-700">Randevu Durumu</th>
                   <th className="min-w-[165px] bg-blue-50/70 px-3 py-3 text-left font-semibold text-blue-700">Randevu Tarihi</th>
                   <th className="min-w-[145px] bg-blue-50/70 px-3 py-3 text-left font-semibold text-blue-700">Randevu Lideri</th>
+                  <th className="min-w-[110px] bg-blue-50/70 px-3 py-3 text-center font-semibold text-blue-700">Randevu Oluşturmadı</th>
                   <th className="min-w-[220px] bg-violet-50/70 px-3 py-3 text-left font-semibold text-violet-700">Üretim Bandı</th>
+                  <th className="min-w-[90px] px-3 py-3 text-center font-semibold">Tekrar Arama</th>
+                  <th className="min-w-[160px] px-3 py-3 text-left font-semibold">Tekrar Arama Notu</th>
+                  <th className="min-w-[110px] bg-emerald-50/70 px-3 py-3 text-center font-semibold text-emerald-700">KW'ye Katıldı</th>
+                  <th className="min-w-[160px] px-3 py-3 text-left font-semibold">İkinci Not</th>
+                  <th className="min-w-[90px] px-3 py-3 text-center font-semibold">İkinci Not Okundu</th>
                   <th className="min-w-[280px] bg-emerald-50/70 px-3 py-3 text-left font-semibold text-emerald-700">Ekip Notları</th>
                   <th className="min-w-[150px] px-3 py-3 text-left font-semibold">Aksiyon</th>
                 </tr>
@@ -578,12 +699,12 @@ export default function LeadTrackingBoard() {
               <tbody className="divide-y divide-border">
                 {isLoading && (
                   <tr>
-                    <td colSpan={11} className="py-14 text-center text-muted-foreground">Lead bilgileri yükleniyor...</td>
+                    <td colSpan={19} className="py-14 text-center text-muted-foreground">Lead bilgileri yükleniyor...</td>
                   </tr>
                 )}
                 {!isLoading && boardApps.length === 0 && (
                   <tr>
-                    <td colSpan={11} className="py-14 text-center">
+                    <td colSpan={19} className="py-14 text-center">
                       <Target className="mx-auto mb-2 h-8 w-8 text-muted-foreground/30" />
                       <p className="text-sm text-muted-foreground">Aramanızla eşleşen kampanya lead'i bulunamadı.</p>
                     </td>
@@ -656,6 +777,25 @@ export default function LeadTrackingBoard() {
                         />
                       </td>
                       <td className="px-3 py-3">
+                        {candidate && (
+                          <button
+                            type="button"
+                            className="line-clamp-2 w-full rounded-lg px-2 py-1.5 text-left leading-relaxed text-slate-600 hover:bg-slate-100"
+                            onClick={() => setFieldNoteTarget({ candidate, field: "leadCallNotes", title: "Telefon Görüşmesi Notu", description: "telefon görüşmesi notları" })}
+                          >
+                            {(candidate as any).leadCallNotes || <span className="text-slate-400">Not ekle...</span>}
+                          </button>
+                        )}
+                      </td>
+                      <td className="px-3 py-3">
+                        {candidate && (
+                          <ProfessionCell
+                            candidate={candidate}
+                            onSave={(candidateId, value) => updateLeadTracking.mutate({ candidateId, field: "profession", value })}
+                          />
+                        )}
+                      </td>
+                      <td className="px-3 py-3">
                         <Badge variant="outline" className={STAGE_COLORS[application.status] ?? ""}>
                           {STAGE_LABELS[application.status] ?? application.status}
                         </Badge>
@@ -676,8 +816,18 @@ export default function LeadTrackingBoard() {
                       <td className="bg-blue-50/25 px-3 py-3">
                         <div className="flex items-center gap-1.5 text-slate-700">
                           <UserRound className="h-3.5 w-3.5 text-blue-500" />
-                          <span>{interview?.interviewerName || "—"}</span>
+                          <span>{jobLeaderNames.get(application.jobId) || "—"}</span>
                         </div>
+                      </td>
+                      <td className="bg-blue-50/25 px-3 py-3 text-center">
+                        {candidate && (
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 accent-rose-600"
+                            checked={!!(candidate as any).leadNoAppointment}
+                            onChange={(e) => updateLeadTracking.mutate({ candidateId: candidate.id, field: "leadNoAppointment", value: e.target.checked })}
+                          />
+                        )}
                       </td>
                       <td className="bg-violet-50/25 px-3 py-3">
                         <Select
@@ -697,6 +847,58 @@ export default function LeadTrackingBoard() {
                             ))}
                           </SelectContent>
                         </Select>
+                      </td>
+                      <td className="px-3 py-3 text-center">
+                        {candidate && (
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 accent-amber-600"
+                            checked={!!(candidate as any).leadCallbackNeeded}
+                            onChange={(e) => updateLeadTracking.mutate({ candidateId: candidate.id, field: "leadCallbackNeeded", value: e.target.checked })}
+                          />
+                        )}
+                      </td>
+                      <td className="px-3 py-3">
+                        {candidate && (
+                          <button
+                            type="button"
+                            className="line-clamp-2 w-full rounded-lg px-2 py-1.5 text-left leading-relaxed text-slate-600 hover:bg-slate-100"
+                            onClick={() => setFieldNoteTarget({ candidate, field: "leadCallbackNotes", title: "Tekrar Arama Notu", description: "tekrar arama notları" })}
+                          >
+                            {(candidate as any).leadCallbackNotes || <span className="text-slate-400">Not ekle...</span>}
+                          </button>
+                        )}
+                      </td>
+                      <td className="bg-emerald-50/20 px-3 py-3 text-center">
+                        {candidate && (
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 accent-emerald-600"
+                            checked={!!(candidate as any).leadJoinedCompany}
+                            onChange={(e) => updateLeadTracking.mutate({ candidateId: candidate.id, field: "leadJoinedCompany", value: e.target.checked })}
+                          />
+                        )}
+                      </td>
+                      <td className="px-3 py-3">
+                        {candidate && (
+                          <button
+                            type="button"
+                            className="line-clamp-2 w-full rounded-lg px-2 py-1.5 text-left leading-relaxed text-slate-600 hover:bg-slate-100"
+                            onClick={() => setFieldNoteTarget({ candidate, field: "leadSecondNote", title: "İkinci Not", description: "ikinci ekip notu" })}
+                          >
+                            {(candidate as any).leadSecondNote || <span className="text-slate-400">Not ekle...</span>}
+                          </button>
+                        )}
+                      </td>
+                      <td className="px-3 py-3 text-center">
+                        {candidate && (
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 accent-blue-600"
+                            checked={!!(candidate as any).leadSecondNoteRead}
+                            onChange={(e) => updateLeadTracking.mutate({ candidateId: candidate.id, field: "leadSecondNoteRead", value: e.target.checked })}
+                          />
+                        )}
                       </td>
                       <td className="bg-emerald-50/20 px-3 py-3">
                         <button
@@ -743,6 +945,15 @@ export default function LeadTrackingBoard() {
         application={noteTarget}
         open={!!noteTarget}
         onOpenChange={(open) => { if (!open) setNoteTarget(null); }}
+      />
+      <LeadNoteDialog
+        candidate={fieldNoteTarget?.candidate ?? null}
+        field={fieldNoteTarget?.field ?? "leadCallNotes"}
+        title={fieldNoteTarget?.title ?? ""}
+        description={fieldNoteTarget?.description ?? ""}
+        open={!!fieldNoteTarget}
+        onOpenChange={(open) => { if (!open) setFieldNoteTarget(null); }}
+        onSave={(candidateId, field, value) => updateLeadTracking.mutate({ candidateId, field, value })}
       />
     </Layout>
   );

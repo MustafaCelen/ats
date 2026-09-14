@@ -396,6 +396,13 @@ export class DatabaseStorage implements IStorage {
       .where(eq(jobAssignments.jobId, jobId));
     return rows.map((r) => toPublicUser(r.user));
   }
+  async getAllJobAssignments(): Promise<{ jobId: number; userId: number; userName: string }[]> {
+    const rows = await db
+      .select({ jobId: jobAssignments.jobId, userId: jobAssignments.userId, userName: users.name })
+      .from(jobAssignments)
+      .innerJoin(users, eq(jobAssignments.userId, users.id));
+    return rows;
+  }
   async assignJob(jobId: number, userId: number): Promise<void> {
     const [existing] = await db.select().from(jobAssignments)
       .where(and(eq(jobAssignments.jobId, jobId), eq(jobAssignments.userId, userId)));
