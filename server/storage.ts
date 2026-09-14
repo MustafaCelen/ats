@@ -166,6 +166,7 @@ export interface IStorage {
   getApplication(id: number): Promise<ApplicationWithRelations | undefined>;
   createApplication(application: InsertApplication): Promise<Application>;
   updateApplicationStatus(id: number, status: string): Promise<Application | undefined>;
+  updateApplicationJob(id: number, jobId: number): Promise<Application | undefined>;
   updateApplicationScore(id: number, score: number): Promise<Application | undefined>;
   addStageHistory(data: { applicationId: number; candidateId: number; jobId: number; fromStatus: string | null; toStatus: string; enteredAt?: Date }): Promise<StageHistory>;
   getCandidateHistory(candidateId: number): Promise<(StageHistory & { jobTitle: string | null })[]>;
@@ -584,6 +585,10 @@ export class DatabaseStorage implements IStorage {
   }
   async updateApplicationStatus(id: number, status: string): Promise<Application | undefined> {
     const [application] = await db.update(applications).set({ status }).where(eq(applications.id, id)).returning();
+    return application;
+  }
+  async updateApplicationJob(id: number, jobId: number): Promise<Application | undefined> {
+    const [application] = await db.update(applications).set({ jobId }).where(eq(applications.id, id)).returning();
     return application;
   }
   async updateApplicationScore(id: number, score: number): Promise<Application | undefined> {

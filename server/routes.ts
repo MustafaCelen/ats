@@ -1682,6 +1682,29 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  app.patch("/api/applications/:id/job", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
+    try {
+      const applicationId = Number(req.params.id);
+      const jobId = Number(req.body?.jobId);
+      if (!Number.isInteger(applicationId) || !Number.isInteger(jobId)) {
+        return res.status(400).json({ message: "Geçerli applicationId ve jobId gerekli" });
+      }
+
+      const [application, job] = await Promise.all([
+        storage.getApplication(applicationId),
+        storage.getJob(jobId),
+      ]);
+      if (!application) return res.status(404).json({ message: "Başvuru bulunamadı" });
+      if (!job) return res.status(404).json({ message: "Üretim bandı bulunamadı" });
+
+      const updated = await storage.updateApplicationJob(applicationId, jobId);
+      res.json(updated);
+    } catch (err) {
+      console.error("[PATCH /api/applications/:id/job]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   app.patch("/api/applications/:id/score", requireAuth, async (req, res) => {
     const { score } = req.body;
     if (typeof score !== "number") return res.status(400).json({ message: "Score must be a number" });

@@ -1,445 +1,683 @@
-import { useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
+import { Link } from "wouter";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { Application, Candidate, Interview, Job } from "@shared/schema";
+import { STAGE_LABELS } from "@shared/schema";
 import { Layout } from "@/components/Layout";
-import { useApplications, useUpdateApplicationStatus, type ApplicationWithRelations } from "@/hooks/use-applications";
-import { useCompleteHiring } from "@/hooks/use-employees";
+import { useApplications, type ApplicationWithRelations } from "@/hooks/use-applications";
 import { useCandidates } from "@/hooks/use-candidates";
 import { useAllJobs } from "@/hooks/use-jobs";
-import { STAGE_LABELS, APPLICATION_STAGES, type Candidate } from "@shared/schema";
+import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import {
-  DndContext, DragEndEvent, DragStartEvent, DragOverlay,
-  PointerSensor, useSensor, useSensors,
-} from "@dnd-kit/core";
-import { useDroppable, useDraggable } from "@dnd-kit/core";
-import { motion, AnimatePresence } from "framer-motion";
-import { Target, GripVertical, CalendarDays, CheckCircle2, ExternalLink, Megaphone, UserPlus } from "lucide-react";
-import { format } from "date-fns";
-import { Link } from "wouter";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel,
-  AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
-  AlertDialogHeader, AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+  CalendarPlus,
+  CalendarRange,
+  CheckCircle2,
+  Clock3,
+  ExternalLink,
+  FileText,
+  MessageCircle,
+  Phone,
+  Search,
+  Target,
+  UserPlus,
+  UserRound,
+  UsersRound,
+  XCircle,
+} from "lucide-react";
 
-// Onboarding Panosu'nun aynı sürükle-bırak altyapısı, iki farkla: (1) sadece kampanyadan
-// gelen (candidate.campaignId dolu) lead'leri gösterir, (2) sadece "sözleşme önerildi"den
-// değil, TÜM aşamalardan (başvuru dahil) itibaren tek ekranda süreci izlettirir.
-const BOARD_STAGES = APPLICATION_STAGES;
-
-const COLUMN_META: Record<string, { color: string; bg: string; dot: string; border: string }> = {
-  applied:       { color: "text-slate-700",  bg: "bg-slate-50",   dot: "bg-slate-500",   border: "border-slate-200"   },
-  screening:     { color: "text-sky-700",    bg: "bg-sky-50",     dot: "bg-sky-500",     border: "border-sky-200"     },
-  interview:     { color: "text-blue-700",   bg: "bg-blue-50",    dot: "bg-blue-500",    border: "border-blue-200"    },
-  offer:         { color: "text-amber-700",  bg: "bg-amber-50",   dot: "bg-amber-500",   border: "border-amber-200"   },
-  hired:         { color: "text-emerald-700",bg: "bg-emerald-50", dot: "bg-emerald-500", border: "border-emerald-200" },
-  myk_training:  { color: "text-cyan-700",   bg: "bg-cyan-50",    dot: "bg-cyan-500",    border: "border-cyan-200"    },
-  account_setup: { color: "text-indigo-700", bg: "bg-indigo-50",  dot: "bg-indigo-500",  border: "border-indigo-200"  },
-  documents:     { color: "text-violet-700", bg: "bg-violet-50",  dot: "bg-violet-500",  border: "border-violet-200"  },
-  rejected:      { color: "text-rose-700",   bg: "bg-rose-50",    dot: "bg-rose-500",    border: "border-rose-200"    },
+type InterviewWithRelations = Interview & {
+  candidate?: Candidate;
+  job?: Job;
+  application?: Application;
 };
 
-function DroppableColumn({
-  stage,
-  apps,
-  isDraggingActive,
-  completingHiring,
-  onCompleteHiring,
-}: {
-  stage: string;
-  apps: ApplicationWithRelations[];
-  isDraggingActive: boolean;
-  completingHiring: boolean;
-  onCompleteHiring: (app: ApplicationWithRelations) => void;
-}) {
-  const { setNodeRef, isOver } = useDroppable({ id: stage });
-  const meta = COLUMN_META[stage];
+const TIME_SLOTS = Array.from({ length: 64 }, (_, i) => {
+  const minutes = 8 * 60 + i * 15;
+  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+});
 
-  return (
-    <div
-      ref={setNodeRef}
-      className={`flex flex-col rounded-xl border-2 transition-all duration-150 min-w-[220px] flex-1 ${
-        isOver
-          ? "border-primary/60 bg-primary/5 shadow-inner"
-          : `${meta.border} bg-muted/20`
-      }`}
-      style={{ maxHeight: "calc(100vh - 260px)", minHeight: 220 }}
-    >
-      <div className={`flex items-center justify-between px-3 py-2.5 border-b ${meta.border} sticky top-0 ${meta.bg} rounded-t-xl z-10`}>
-        <div className="flex items-center gap-2">
-          <span className={`h-2 w-2 rounded-full ${meta.dot}`} />
-          <span className={`text-xs font-semibold ${meta.color}`}>{STAGE_LABELS[stage] ?? stage}</span>
-        </div>
-        <span className="text-xs font-bold bg-background border border-border px-1.5 py-0.5 rounded-full text-muted-foreground">
-          {apps.length}
-        </span>
-      </div>
+const INTERVIEW_STATUS: Record<string, { label: string; className: string }> = {
+  scheduled: { label: "Planlandı", className: "border-blue-200 bg-blue-50 text-blue-700" },
+  completed: { label: "Tamamlandı", className: "border-emerald-200 bg-emerald-50 text-emerald-700" },
+  cancelled: { label: "İptal", className: "border-rose-200 bg-rose-50 text-rose-700" },
+};
 
-      <div className="p-2 space-y-2 overflow-y-auto flex-1">
-        <AnimatePresence>
-          {apps.length === 0 && !isDraggingActive && (
-            <motion.p
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="text-xs text-muted-foreground text-center py-8 select-none"
-            >
-              Bu aşamada lead yok
-            </motion.p>
-          )}
-          {apps.map((app) => (
-            <DraggableCard
-              key={app.id}
-              app={app}
-              stage={stage}
-              completingHiring={completingHiring}
-              onCompleteHiring={() => onCompleteHiring(app)}
-            />
-          ))}
-        </AnimatePresence>
-      </div>
-    </div>
-  );
+const STAGE_COLORS: Record<string, string> = {
+  applied: "border-slate-200 bg-slate-50 text-slate-700",
+  screening: "border-sky-200 bg-sky-50 text-sky-700",
+  interview: "border-blue-200 bg-blue-50 text-blue-700",
+  offer: "border-amber-200 bg-amber-50 text-amber-700",
+  hired: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  myk_training: "border-cyan-200 bg-cyan-50 text-cyan-700",
+  account_setup: "border-indigo-200 bg-indigo-50 text-indigo-700",
+  documents: "border-violet-200 bg-violet-50 text-violet-700",
+  rejected: "border-rose-200 bg-rose-50 text-rose-700",
+};
+
+function formatDateTime(value?: Date | string | null) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat("tr-TR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
 }
 
-function DraggableCard({
-  app,
-  stage,
-  completingHiring,
-  onCompleteHiring,
+function formatDate(value?: Date | string | null) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat("tr-TR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(date);
+}
+
+function whatsappNumber(phone?: string | null) {
+  const digits = (phone ?? "").replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.startsWith("90")) return digits;
+  if (digits.startsWith("0")) return `90${digits.slice(1)}`;
+  return `90${digits}`;
+}
+
+function useInterviews() {
+  return useQuery<InterviewWithRelations[]>({
+    queryKey: ["/api/interviews"],
+    queryFn: async () => {
+      const response = await fetch("/api/interviews", { credentials: "include" });
+      if (!response.ok) throw new Error("Randevular alınamadı");
+      const data = await response.json();
+      return Array.isArray(data) ? data : [];
+    },
+  });
+}
+
+function AppointmentDialog({
+  application,
+  open,
+  onOpenChange,
 }: {
-  app: ApplicationWithRelations;
-  stage: string;
-  completingHiring: boolean;
-  onCompleteHiring: () => void;
+  application: ApplicationWithRelations | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }) {
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
-    id: app.id,
-    data: { app, stage },
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [form, setForm] = useState({
+    date: "",
+    startTime: "10:00",
+    endTime: "10:30",
+    location: "",
+  });
+
+  useEffect(() => {
+    if (open) {
+      setForm({ date: "", startTime: "10:00", endTime: "10:30", location: "" });
+    }
+  }, [open, application?.id]);
+
+  const createAppointment = useMutation({
+    mutationFn: async () => {
+      if (!application) throw new Error("Başvuru seçilmedi");
+      const startTime = `${form.date}T${form.startTime}:00+03:00`;
+      const endTime = `${form.date}T${form.endTime}:00+03:00`;
+      const response = await apiRequest("POST", "/api/interviews", {
+        applicationId: application.id,
+        jobId: application.jobId,
+        candidateId: application.candidateId,
+        title: "Randevu",
+        startTime,
+        endTime,
+        location: form.location || null,
+        notes: null,
+        status: "scheduled",
+      });
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/interviews"] });
+      toast({
+        title: "Randevu oluşturuldu",
+        description: `${application?.candidate?.name ?? "Lead"} için randevu kaydedildi.`,
+      });
+      onOpenChange(false);
+    },
+    onError: (error: Error) => {
+      toast({ title: "Randevu oluşturulamadı", description: error.message, variant: "destructive" });
+    },
   });
 
   return (
-    <motion.div
-      ref={setNodeRef}
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: isDragging ? 0.25 : 1, y: 0 }}
-      exit={{ opacity: 0, y: -6 }}
-      transition={{ duration: 0.15 }}
-      className="bg-card border border-border rounded-lg shadow-sm hover:shadow-md transition-shadow"
-      data-testid={`lead-card-${app.id}`}
-    >
-      <div className="p-3">
-        <div className="flex items-start gap-2">
-          <div
-            {...listeners}
-            {...attributes}
-            className="text-muted-foreground/40 hover:text-muted-foreground mt-0.5 shrink-0 touch-none cursor-grab active:cursor-grabbing"
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md" aria-describedby="lead-appointment-description">
+        <DialogHeader>
+          <DialogTitle>Randevu Oluştur</DialogTitle>
+          <p id="lead-appointment-description" className="text-sm text-muted-foreground">
+            {application?.candidate?.name} için yeni randevu planlayın.
+          </p>
+        </DialogHeader>
+        <div className="space-y-4 pt-2">
+          <div>
+            <Label className="mb-1.5 block text-xs">Tarih *</Label>
+            <Input
+              type="date"
+              value={form.date}
+              onChange={(event) => setForm((current) => ({ ...current, date: event.target.value }))}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label className="mb-1.5 block text-xs">Başlangıç *</Label>
+              <Select value={form.startTime} onValueChange={(value) => setForm((current) => ({ ...current, startTime: value }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {TIME_SLOTS.map((time) => <SelectItem key={time} value={time}>{time}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="mb-1.5 block text-xs">Bitiş *</Label>
+              <Select value={form.endTime} onValueChange={(value) => setForm((current) => ({ ...current, endTime: value }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {TIME_SLOTS.map((time) => <SelectItem key={time} value={time}>{time}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div>
+            <Label className="mb-1.5 block text-xs">Konum / görüşme linki</Label>
+            <Input
+              value={form.location}
+              onChange={(event) => setForm((current) => ({ ...current, location: event.target.value }))}
+              placeholder="Ofis, Zoom veya Google Meet"
+            />
+          </div>
+          <Button
+            className="w-full"
+            disabled={!form.date || !form.startTime || !form.endTime || createAppointment.isPending}
+            onClick={() => createAppointment.mutate()}
           >
-            <GripVertical className="h-3.5 w-3.5" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <Link
-              href={`/candidates/${app.candidateId}`}
-              className="group inline-flex items-center gap-1 hover:underline"
-              data-testid={`link-lead-profile-${app.id}`}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <span className="text-sm font-semibold text-foreground truncate group-hover:text-primary transition-colors">
-                {app.candidate?.name ?? "—"}
-              </span>
-              <ExternalLink className="h-3 w-3 text-muted-foreground/60 group-hover:text-primary shrink-0 transition-colors" />
-            </Link>
-            {app.job && (
-              <div className="flex items-center gap-1 mt-1">
-                <Megaphone className="h-3 w-3 text-muted-foreground shrink-0" />
-                <span className="text-xs text-muted-foreground truncate">{app.job.title}</span>
-              </div>
-            )}
-            {app.appliedAt && (
-              <div className="flex items-center gap-1 mt-1">
-                <CalendarDays className="h-3 w-3 text-muted-foreground shrink-0" />
-                <span className="text-xs text-muted-foreground">
-                  {format(new Date(app.appliedAt), "dd MMM yyyy")}
-                </span>
-              </div>
-            )}
-          </div>
+            <CalendarPlus className="mr-2 h-4 w-4" />
+            {createAppointment.isPending ? "Kaydediliyor..." : "Randevu Oluştur"}
+          </Button>
         </div>
-
-        {stage === "documents" && (
-          <button
-            className="mt-2.5 w-full flex items-center justify-center gap-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700 text-xs font-semibold py-1.5 transition-colors disabled:opacity-50"
-            disabled={completingHiring}
-            data-testid={`btn-complete-hiring-lead-${app.id}`}
-            onClick={onCompleteHiring}
-          >
-            <CheckCircle2 className="h-3.5 w-3.5" />
-            İşe Alımı Tamamla
-          </button>
-        )}
-      </div>
-    </motion.div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
-function OverlayCard({ app }: { app: ApplicationWithRelations }) {
-  return (
-    <div className="bg-card border border-primary/40 rounded-lg shadow-xl p-3 w-56 rotate-2 opacity-95">
-      <p className="text-sm font-semibold text-foreground truncate">{app.candidate?.name ?? "—"}</p>
-      {app.job && <p className="text-xs text-muted-foreground truncate mt-0.5">{app.job.title}</p>}
-    </div>
-  );
-}
-
-// "Yeni Lead" sütunu: henüz hiçbir ilana başvurusu (application) olmayan, sadece candidates
-// tablosunda duran lead'ler. Sürükle-bırak değil — hangi ilana atanacağı bilgisi gerektiği için
-// bir Select + buton ile "Başvuru Aç" (POST /api/applications) yapılır; başarılı olunca aday
-// otomatik olarak "Başvuru" sütununa geçer (artık bir application'ı olduğu için).
-function NewLeadCard({ candidate, jobs }: { candidate: Candidate; jobs: { id: number; title: string; status: string }[] }) {
+function NoteDialog({
+  application,
+  open,
+  onOpenChange,
+}: {
+  application: ApplicationWithRelations | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const queryClient = useQueryClient();
   const { toast } = useToast();
-  const qc = useQueryClient();
-  const [jobId, setJobId] = useState<string>("");
-  const [submitting, setSubmitting] = useState(false);
-  const openJobs = jobs.filter((j) => j.status === "open");
+  const [content, setContent] = useState("");
 
-  const handleAssign = async () => {
-    if (!jobId) return;
-    setSubmitting(true);
-    try {
-      const res = await fetch("/api/applications", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ candidateId: candidate.id, jobId: Number(jobId), status: "applied" }),
-      });
-      const body = await res.json().catch(() => null);
-      if (!res.ok) {
-        toast({ title: "Hata", description: body?.message ?? "Başvuru açılamadı.", variant: "destructive" });
-        return;
-      }
-      toast({ title: `${candidate.name} için başvuru açıldı` });
-      qc.invalidateQueries({ queryKey: ["/api/applications"] });
-    } catch {
-      toast({ title: "Hata", description: "Başvuru açılamadı.", variant: "destructive" });
-    } finally {
-      setSubmitting(false);
-    }
-  };
+  useEffect(() => {
+    if (open) setContent("");
+  }, [open, application?.id]);
+
+  const addNote = useMutation({
+    mutationFn: async () => {
+      if (!application) throw new Error("Aday seçilmedi");
+      const response = await apiRequest("POST", `/api/candidates/${application.candidateId}/notes`, { content });
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/applications"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/candidates", application?.candidateId, "notes"] });
+      toast({ title: "Not kaydedildi", description: "Not aday profilinde de görüntülenecek." });
+      onOpenChange(false);
+    },
+    onError: (error: Error) => {
+      toast({ title: "Not kaydedilemedi", description: error.message, variant: "destructive" });
+    },
+  });
 
   return (
-    <div className="bg-card border border-border rounded-lg shadow-sm p-3 space-y-2">
-      <Link
-        href={`/candidates/${candidate.id}`}
-        className="group inline-flex items-center gap-1 hover:underline"
-        data-testid={`link-new-lead-${candidate.id}`}
-      >
-        <span className="text-sm font-semibold text-foreground truncate group-hover:text-primary transition-colors">
-          {candidate.name}
-        </span>
-        <ExternalLink className="h-3 w-3 text-muted-foreground/60 group-hover:text-primary shrink-0 transition-colors" />
-      </Link>
-      <Select value={jobId} onValueChange={setJobId}>
-        <SelectTrigger className="h-8 text-xs" data-testid={`select-assign-job-${candidate.id}`}>
-          <SelectValue placeholder="İlan seçin…" />
-        </SelectTrigger>
-        <SelectContent>
-          {openJobs.map((j) => (
-            <SelectItem key={j.id} value={String(j.id)}>{j.title}</SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <Button
-        size="sm"
-        className="w-full h-7 text-xs gap-1.5"
-        disabled={!jobId || submitting}
-        onClick={handleAssign}
-        data-testid={`btn-assign-job-${candidate.id}`}
-      >
-        <UserPlus className="h-3.5 w-3.5" /> Başvuru Aç
-      </Button>
-    </div>
-  );
-}
-
-function NewLeadColumn({ candidates, jobs }: { candidates: Candidate[]; jobs: { id: number; title: string; status: string }[] }) {
-  const meta = { color: "text-orange-700", bg: "bg-orange-50", dot: "bg-orange-500", border: "border-orange-200" };
-  return (
-    <div className={`flex flex-col rounded-xl border-2 min-w-[240px] flex-1 ${meta.border} bg-muted/20`} style={{ maxHeight: "calc(100vh - 260px)", minHeight: 220 }}>
-      <div className={`flex items-center justify-between px-3 py-2.5 border-b ${meta.border} sticky top-0 ${meta.bg} rounded-t-xl z-10`}>
-        <div className="flex items-center gap-2">
-          <span className={`h-2 w-2 rounded-full ${meta.dot}`} />
-          <span className={`text-xs font-semibold ${meta.color}`}>Yeni Lead (İlana Atanmamış)</span>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg" aria-describedby="lead-note-description">
+        <DialogHeader>
+          <DialogTitle>Ekip Notu Ekle</DialogTitle>
+          <p id="lead-note-description" className="text-sm text-muted-foreground">
+            {application?.candidate?.name} için eklenen not aday profilindeki Notlar bölümüne kaydedilir.
+          </p>
+        </DialogHeader>
+        <div className="space-y-4 pt-2">
+          {application?.latestNote && (
+            <div className="rounded-lg border border-violet-100 bg-violet-50/70 p-3">
+              <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-violet-700">Son not</p>
+              <p className="text-sm text-slate-700">{application.latestNote}</p>
+            </div>
+          )}
+          <Textarea
+            value={content}
+            onChange={(event) => setContent(event.target.value)}
+            placeholder="Yeni notunuzu yazın..."
+            rows={4}
+          />
+          <Button className="w-full" disabled={!content.trim() || addNote.isPending} onClick={() => addNote.mutate()}>
+            <FileText className="mr-2 h-4 w-4" />
+            {addNote.isPending ? "Kaydediliyor..." : "Notu Kaydet"}
+          </Button>
         </div>
-        <span className="text-xs font-bold bg-background border border-border px-1.5 py-0.5 rounded-full text-muted-foreground">
-          {candidates.length}
-        </span>
-      </div>
-      <div className="p-2 space-y-2 overflow-y-auto flex-1">
-        {candidates.length === 0 ? (
-          <p className="text-xs text-muted-foreground text-center py-8 select-none">Atanmamış lead yok</p>
-        ) : (
-          candidates.map((c) => <NewLeadCard key={c.id} candidate={c} jobs={jobs} />)
-        )}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
 export default function LeadTrackingBoard() {
-  const { data: allApplications, isLoading } = useApplications();
-  const { data: allCandidates = [] } = useCandidates();
-  const { data: allJobs = [] } = useAllJobs();
-  const { mutate: updateStatus } = useUpdateApplicationStatus();
-  const { mutate: completeHiring, isPending: completingHiring } = useCompleteHiring();
+  const { data: allApplications, isLoading: applicationsLoading } = useApplications();
+  const { data: allCandidates, isLoading: candidatesLoading } = useCandidates();
+  const { data: interviews, isLoading: interviewsLoading } = useInterviews();
+  const { data: allJobs } = useAllJobs();
+  const queryClient = useQueryClient();
   const { toast } = useToast();
-  const [activeApp, setActiveApp] = useState<ApplicationWithRelations | null>(null);
-  const [pendingHireApp, setPendingHireApp] = useState<ApplicationWithRelations | null>(null);
+  const [search, setSearch] = useState("");
+  const [newLeadJobIds, setNewLeadJobIds] = useState<Record<number, string>>({});
+  const [appointmentTarget, setAppointmentTarget] = useState<ApplicationWithRelations | null>(null);
+  const [noteTarget, setNoteTarget] = useState<ApplicationWithRelations | null>(null);
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
-  );
+  const productionJobs = useMemo(() => {
+    const openJobs = (allJobs ?? []).filter((job) => job.status === "open");
+    const production = openJobs.filter((job) => job.title.toLocaleLowerCase("tr-TR").includes("üretim bandı"));
+    return production.length > 0 ? production : openJobs;
+  }, [allJobs]);
 
-  // Sadece kampanyadan (Meta/Google Form) gelen, candidate.campaignId dolu lead'ler.
-  const boardApps = (allApplications ?? []).filter(
-    (a) => (a.candidate as any)?.campaignId != null
-  );
+  const boardApps = useMemo(() => {
+    const query = search.trim().toLocaleLowerCase("tr-TR");
+    return (allApplications ?? [])
+      .filter((application) => application.candidate?.campaignId != null)
+      .filter((application) => {
+        if (!query) return true;
+        return [
+          application.candidate?.name,
+          application.candidate?.phone,
+          application.candidate?.city,
+          application.job?.title,
+          application.latestNote,
+        ].some((value) => value?.toLocaleLowerCase("tr-TR").includes(query));
+      })
+      .sort((a, b) => new Date(b.appliedAt ?? 0).getTime() - new Date(a.appliedAt ?? 0).getTime());
+  }, [allApplications, search]);
 
-  // Kampanyadan gelen ama henüz hiçbir ilana başvurusu (application) açılmamış lead'ler —
-  // bunlar boardApps'te hiç görünmez çünkü application'ları yok, "Yeni Lead" sütununda ayrı gösterilir.
-  const assignedCandidateIds = new Set((allApplications ?? []).map((a) => a.candidateId));
-  const unassignedLeads = allCandidates.filter(
-    (c) => (c as any).campaignId != null && !assignedCandidateIds.has(c.id)
-  );
+  const unassignedLeads = useMemo(() => {
+    const assignedCandidateIds = new Set((allApplications ?? []).map((application) => application.candidateId));
+    const query = search.trim().toLocaleLowerCase("tr-TR");
+    return (allCandidates ?? [])
+      .filter((candidate) => candidate.campaignId != null && !assignedCandidateIds.has(candidate.id))
+      .filter((candidate) => {
+        if (!query) return true;
+        return [candidate.name, candidate.phone, candidate.city]
+          .some((value) => value?.toLocaleLowerCase("tr-TR").includes(query));
+      })
+      .sort((a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime());
+  }, [allApplications, allCandidates, search]);
 
-  const byStage = Object.fromEntries(
-    BOARD_STAGES.map((s) => [s, boardApps.filter((a) => a.status === s)])
-  );
-
-  const onDragStart = ({ active }: DragStartEvent) => {
-    setActiveApp(active.data.current?.app ?? null);
-  };
-
-  const onDragEnd = ({ active, over }: DragEndEvent) => {
-    const { app, stage } = active.data.current as { app: ApplicationWithRelations; stage: string };
-    if (over && over.id !== stage) {
-      const newStage = over.id as string;
-      updateStatus(
-        { id: app.id, status: newStage },
-        {
-          onSuccess: () => {
-            toast({
-              title: "Aşama güncellendi",
-              description: `${app.candidate?.name ?? "Lead"} → ${STAGE_LABELS[newStage] ?? newStage}`,
-            });
-          },
-          onError: () => {
-            toast({ title: "Hata", description: "Aşama güncellenemedi.", variant: "destructive" });
-          },
-        }
-      );
+  const interviewByApplication = useMemo(() => {
+    const grouped = new Map<number, InterviewWithRelations[]>();
+    for (const interview of interviews ?? []) {
+      const current = grouped.get(interview.applicationId) ?? [];
+      current.push(interview);
+      grouped.set(interview.applicationId, current);
     }
-    setActiveApp(null);
-  };
 
-  const handleCompleteHiring = () => {
-    if (!pendingHireApp) return;
-    completeHiring(
-      {
-        candidateId: pendingHireApp.candidateId,
-        jobId: pendingHireApp.jobId,
-        applicationId: pendingHireApp.id,
-        title: pendingHireApp.job?.title ?? undefined,
-      },
-      {
-        onSuccess: () => {
-          toast({
-            title: "İşe alım tamamlandı! 🎉",
-            description: `${pendingHireApp.candidate?.name} çalışan listesine eklendi.`,
-          });
-          setPendingHireApp(null);
-        },
-        onError: (err: any) => {
-          const msg = err?.message ?? "";
-          toast({
-            title: msg.includes("already") ? "Zaten çalışan listesinde" : "Hata oluştu",
-            variant: "destructive",
-            description: msg.includes("already")
-              ? "Bu aday zaten çalışan olarak kayıtlı."
-              : "Lütfen tekrar deneyin.",
-          });
-          setPendingHireApp(null);
-        },
-      }
-    );
-  };
+    const selected = new Map<number, InterviewWithRelations>();
+    const now = Date.now();
+    grouped.forEach((rows, applicationId) => {
+      const upcoming = rows
+        .filter((row) => row.status === "scheduled" && new Date(row.startTime).getTime() >= now)
+        .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())[0];
+      const latest = [...rows].sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime())[0];
+      if (upcoming ?? latest) selected.set(applicationId, upcoming ?? latest);
+    });
+    return selected;
+  }, [interviews]);
+
+  const updateProductionBand = useMutation({
+    mutationFn: async ({ applicationId, jobId }: { applicationId: number; jobId: number }) => {
+      const response = await apiRequest("PATCH", `/api/applications/${applicationId}/job`, { jobId });
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/applications"] });
+      toast({ title: "Üretim bandı güncellendi" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Atama güncellenemedi", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const createApplication = useMutation({
+    mutationFn: async ({ candidateId, jobId }: { candidateId: number; jobId: number }) => {
+      const response = await apiRequest("POST", "/api/applications", {
+        candidateId,
+        jobId,
+        status: "applied",
+      });
+      return response.json();
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/applications"] });
+      setNewLeadJobIds((current) => {
+        const next = { ...current };
+        delete next[variables.candidateId];
+        return next;
+      });
+      toast({ title: "Lead üretim bandına atandı", description: "Başvuru kaydı oluşturuldu." });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Başvuru oluşturulamadı", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const scheduledCount = (interviews ?? []).filter(
+    (interview) => interview.status === "scheduled" && boardApps.some((application) => application.id === interview.applicationId)
+  ).length;
+  const completedCount = (interviews ?? []).filter(
+    (interview) => interview.status === "completed" && boardApps.some((application) => application.id === interview.applicationId)
+  ).length;
+  const isLoading = applicationsLoading || candidatesLoading || interviewsLoading;
 
   return (
     <Layout>
-      <div className="flex flex-col h-full gap-4">
-        <div>
-          <h1 className="text-2xl font-display font-bold text-foreground">Lead Takip Panosu</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Kampanyadan (Meta/Google Form) gelen lead'lerin başvurudan itibaren tüm sürecini tek ekrandan izleyin
-          </p>
+      <div className="space-y-5">
+        <div className="overflow-hidden rounded-2xl border border-violet-100 bg-gradient-to-r from-violet-50 via-white to-emerald-50 shadow-sm">
+          <div className="flex flex-col gap-4 px-5 py-5 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-violet-600 text-white shadow-sm">
+                <Target className="h-5 w-5" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-display font-bold text-slate-900">Lead Takip Sistemi</h1>
+                <p className="text-sm text-slate-500">Randevu, üretim bandı ve ekip notlarını tek ekrandan takip edin</p>
+              </div>
+            </div>
+            <div className="relative w-full lg:w-80">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <Input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Lead, telefon, şehir veya not ara..."
+                className="border-white/80 bg-white pl-9 shadow-sm"
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-3 border-t border-violet-100/80 bg-white/65">
+            <div className="px-5 py-3">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400">Toplam lead</p>
+              <p className="mt-0.5 text-xl font-bold text-slate-800">{boardApps.length + unassignedLeads.length}</p>
+            </div>
+            <div className="border-x border-violet-100/80 px-5 py-3">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400">Planlı randevu</p>
+              <p className="mt-0.5 text-xl font-bold text-blue-600">{scheduledCount}</p>
+            </div>
+            <div className="px-5 py-3">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400">Tamamlanan</p>
+              <p className="mt-0.5 text-xl font-bold text-emerald-600">{completedCount}</p>
+            </div>
+          </div>
         </div>
 
-        {isLoading ? (
-          <div className="flex gap-4 overflow-x-auto pb-4">
-            {BOARD_STAGES.map((s) => (
-              <div key={s} className="min-w-[220px] flex-1 rounded-xl bg-muted/30 border border-border h-64 animate-pulse" />
-            ))}
-          </div>
-        ) : boardApps.length === 0 && unassignedLeads.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-64 text-muted-foreground gap-2">
-            <Target className="h-10 w-10 opacity-30" />
-            <p className="text-sm">Henüz kampanyadan gelen lead yok</p>
-          </div>
-        ) : (
-          <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
-            <div className="flex gap-3 overflow-x-auto pb-4">
-              <NewLeadColumn candidates={unassignedLeads} jobs={allJobs} />
-              {BOARD_STAGES.map((stage) => (
-                <DroppableColumn
-                  key={stage}
-                  stage={stage}
-                  apps={byStage[stage] ?? []}
-                  isDraggingActive={!!activeApp}
-                  completingHiring={completingHiring}
-                  onCompleteHiring={setPendingHireApp}
-                />
-              ))}
+        {unassignedLeads.length > 0 && (
+          <div className="overflow-hidden rounded-2xl border border-orange-200 bg-card shadow-sm">
+            <div className="flex items-center justify-between border-b border-orange-100 bg-orange-50 px-4 py-3">
+              <div>
+                <h2 className="flex items-center gap-2 text-sm font-semibold text-orange-800">
+                  <UserPlus className="h-4 w-4" /> Atanmamış Lead'ler
+                </h2>
+                <p className="mt-0.5 text-xs text-orange-700/70">Üretim bandı seçildiğinde lead için başvuru kaydı oluşturulur.</p>
+              </div>
+              <Badge variant="outline" className="border-orange-200 bg-white text-orange-700">{unassignedLeads.length}</Badge>
             </div>
-            <DragOverlay>
-              {activeApp ? <OverlayCard app={activeApp} /> : null}
-            </DragOverlay>
-          </DndContext>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[760px] border-collapse text-xs">
+                <thead>
+                  <tr className="border-b border-orange-100 bg-orange-50/40 text-slate-600">
+                    <th className="px-4 py-2.5 text-left font-semibold">Lead</th>
+                    <th className="px-3 py-2.5 text-left font-semibold">Telefon</th>
+                    <th className="px-3 py-2.5 text-left font-semibold">Geliş Tarihi</th>
+                    <th className="w-[280px] px-3 py-2.5 text-left font-semibold">Üretim Bandı</th>
+                    <th className="w-[150px] px-3 py-2.5 text-left font-semibold">Aksiyon</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-orange-100">
+                  {unassignedLeads.map((candidate) => (
+                    <tr key={candidate.id} className="hover:bg-orange-50/30">
+                      <td className="px-4 py-3">
+                        <Link href={`/candidates/${candidate.id}`} className="font-semibold text-slate-900 hover:text-orange-700 hover:underline">
+                          {candidate.name}
+                        </Link>
+                        <p className="mt-0.5 text-[11px] text-slate-500">{candidate.city || "Şehir belirtilmemiş"}</p>
+                      </td>
+                      <td className="px-3 py-3 text-slate-600">{candidate.phone || "—"}</td>
+                      <td className="px-3 py-3 text-slate-600">{formatDate(candidate.createdAt)}</td>
+                      <td className="px-3 py-3">
+                        <Select
+                          value={newLeadJobIds[candidate.id] ?? ""}
+                          onValueChange={(value) => setNewLeadJobIds((current) => ({ ...current, [candidate.id]: value }))}
+                        >
+                          <SelectTrigger className="h-9 border-orange-200 bg-white text-xs">
+                            <SelectValue placeholder="Üretim bandı seçin" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {productionJobs.map((job) => (
+                              <SelectItem key={job.id} value={String(job.id)}>{job.title}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </td>
+                      <td className="px-3 py-3">
+                        <Button
+                          size="sm"
+                          className="h-8 bg-orange-600 text-xs text-white hover:bg-orange-700"
+                          disabled={!newLeadJobIds[candidate.id] || createApplication.isPending}
+                          onClick={() => createApplication.mutate({
+                            candidateId: candidate.id,
+                            jobId: Number(newLeadJobIds[candidate.id]),
+                          })}
+                        >
+                          <UserPlus className="mr-1.5 h-3.5 w-3.5" /> Başvuru Aç
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         )}
+
+        <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="min-w-[1450px] w-full border-collapse text-xs">
+              <thead>
+                <tr className="border-b border-border bg-slate-50 text-slate-600">
+                  <th className="sticky left-0 z-20 min-w-[190px] bg-slate-50 px-4 py-3 text-left font-semibold">
+                    <span className="inline-flex items-center gap-1.5"><UsersRound className="h-4 w-4" /> Lead</span>
+                  </th>
+                  <th className="min-w-[125px] px-3 py-3 text-left font-semibold">İletişim</th>
+                  <th className="min-w-[135px] px-3 py-3 text-left font-semibold">Aşama</th>
+                  <th className="min-w-[135px] bg-blue-50/70 px-3 py-3 text-left font-semibold text-blue-700">Randevu Durumu</th>
+                  <th className="min-w-[165px] bg-blue-50/70 px-3 py-3 text-left font-semibold text-blue-700">Randevu Tarihi</th>
+                  <th className="min-w-[145px] bg-blue-50/70 px-3 py-3 text-left font-semibold text-blue-700">Randevu Lideri</th>
+                  <th className="min-w-[220px] bg-violet-50/70 px-3 py-3 text-left font-semibold text-violet-700">Üretim Bandı</th>
+                  <th className="min-w-[280px] bg-emerald-50/70 px-3 py-3 text-left font-semibold text-emerald-700">Ekip Notları</th>
+                  <th className="min-w-[150px] px-3 py-3 text-left font-semibold">Aksiyon</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {isLoading && (
+                  <tr>
+                    <td colSpan={9} className="py-14 text-center text-muted-foreground">Lead bilgileri yükleniyor...</td>
+                  </tr>
+                )}
+                {!isLoading && boardApps.length === 0 && (
+                  <tr>
+                    <td colSpan={9} className="py-14 text-center">
+                      <Target className="mx-auto mb-2 h-8 w-8 text-muted-foreground/30" />
+                      <p className="text-sm text-muted-foreground">Aramanızla eşleşen kampanya lead'i bulunamadı.</p>
+                    </td>
+                  </tr>
+                )}
+                {!isLoading && boardApps.map((application) => {
+                  const candidate = application.candidate;
+                  const interview = interviewByApplication.get(application.id);
+                  const status = interview ? INTERVIEW_STATUS[interview.status] : null;
+                  const whatsapp = whatsappNumber(candidate?.phone);
+
+                  return (
+                    <tr key={application.id} className="group bg-white transition-colors hover:bg-slate-50/70">
+                      <td className="sticky left-0 z-10 bg-white px-4 py-3 group-hover:bg-slate-50">
+                        <Link href={`/candidates/${application.candidateId}`} className="flex items-center gap-2.5">
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-violet-100 font-semibold text-violet-700">
+                            {(candidate?.name ?? "?").split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toLocaleUpperCase("tr-TR")}
+                          </span>
+                          <span className="min-w-0">
+                            <span className="flex items-center gap-1 font-semibold text-slate-900 hover:text-violet-700">
+                              <span className="truncate">{candidate?.name ?? "—"}</span>
+                              <ExternalLink className="h-3 w-3 shrink-0 text-slate-400" />
+                            </span>
+                            <span className="mt-0.5 block text-[11px] text-slate-500">
+                              {[candidate?.city, formatDate(application.appliedAt)].filter(Boolean).join(" · ")}
+                            </span>
+                          </span>
+                        </Link>
+                      </td>
+                      <td className="px-3 py-3">
+                        <div className="flex items-center gap-1.5">
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            className="h-8 w-8 border-emerald-200 text-emerald-600 hover:bg-emerald-50"
+                            disabled={!whatsapp}
+                            onClick={() => window.open(`https://wa.me/${whatsapp}`, "_blank", "noopener,noreferrer")}
+                            title="WhatsApp"
+                          >
+                            <MessageCircle className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            className="h-8 w-8 border-blue-200 text-blue-600 hover:bg-blue-50"
+                            disabled={!candidate?.phone}
+                            onClick={() => { window.location.href = `tel:${candidate?.phone}`; }}
+                            title={candidate?.phone ?? "Telefon yok"}
+                          >
+                            <Phone className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </td>
+                      <td className="px-3 py-3">
+                        <Badge variant="outline" className={STAGE_COLORS[application.status] ?? ""}>
+                          {STAGE_LABELS[application.status] ?? application.status}
+                        </Badge>
+                      </td>
+                      <td className="bg-blue-50/25 px-3 py-3">
+                        {status ? (
+                          <Badge variant="outline" className={status.className}>{status.label}</Badge>
+                        ) : (
+                          <span className="text-slate-400">Randevu yok</span>
+                        )}
+                      </td>
+                      <td className="bg-blue-50/25 px-3 py-3">
+                        <div className="flex items-center gap-1.5 text-slate-700">
+                          <CalendarRange className="h-3.5 w-3.5 text-blue-500" />
+                          <span>{formatDateTime(interview?.startTime)}</span>
+                        </div>
+                      </td>
+                      <td className="bg-blue-50/25 px-3 py-3">
+                        <div className="flex items-center gap-1.5 text-slate-700">
+                          <UserRound className="h-3.5 w-3.5 text-blue-500" />
+                          <span>{interview?.interviewerName || "—"}</span>
+                        </div>
+                      </td>
+                      <td className="bg-violet-50/25 px-3 py-3">
+                        <Select
+                          value={String(application.jobId)}
+                          disabled={updateProductionBand.isPending}
+                          onValueChange={(value) => updateProductionBand.mutate({
+                            applicationId: application.id,
+                            jobId: Number(value),
+                          })}
+                        >
+                          <SelectTrigger className="h-9 border-violet-200 bg-white text-xs">
+                            <SelectValue placeholder="Üretim bandı seçin" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {productionJobs.map((job) => (
+                              <SelectItem key={job.id} value={String(job.id)}>{job.title}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </td>
+                      <td className="bg-emerald-50/20 px-3 py-3">
+                        <button
+                          type="button"
+                          className="flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-emerald-50"
+                          onClick={() => setNoteTarget(application)}
+                        >
+                          <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                          <span className="line-clamp-2 leading-relaxed text-slate-600">
+                            {application.latestNote || "Not eklemek için tıklayın"}
+                          </span>
+                        </button>
+                      </td>
+                      <td className="px-3 py-3">
+                        <Button
+                          size="sm"
+                          className="h-8 bg-violet-600 text-xs text-white hover:bg-violet-700"
+                          onClick={() => setAppointmentTarget(application)}
+                        >
+                          <CalendarPlus className="mr-1.5 h-3.5 w-3.5" />
+                          Randevu Oluştur
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-border bg-slate-50 px-4 py-2.5 text-[11px] text-slate-500">
+            <span className="inline-flex items-center gap-1.5"><Clock3 className="h-3.5 w-3.5 text-blue-500" /> Randevu bilgileri Randevular modülünden otomatik gelir.</span>
+            <span className="inline-flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" /> Notlar aday profiliyle ortaktır.</span>
+            <span className="inline-flex items-center gap-1.5"><XCircle className="h-3.5 w-3.5 text-slate-400" /> Bu ekranda yalnızca üretim bandı düzenlenebilir.</span>
+          </div>
+        </div>
       </div>
 
-      {/* Complete Hiring Confirmation Dialog */}
-      <AlertDialog open={!!pendingHireApp} onOpenChange={(open) => !open && setPendingHireApp(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>İşe Alımı Tamamla</AlertDialogTitle>
-            <AlertDialogDescription>
-              <strong>{pendingHireApp?.candidate?.name}</strong> adayı çalışan listesine eklenecek
-              ve başvurusu tamamlandı olarak işaretlenecek. Bu işlemi onaylıyor musunuz?
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>İptal</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-emerald-600 hover:bg-emerald-700 text-white"
-              onClick={handleCompleteHiring}
-            >
-              Evet, Tamamla
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <AppointmentDialog
+        application={appointmentTarget}
+        open={!!appointmentTarget}
+        onOpenChange={(open) => { if (!open) setAppointmentTarget(null); }}
+      />
+      <NoteDialog
+        application={noteTarget}
+        open={!!noteTarget}
+        onOpenChange={(open) => { if (!open) setNoteTarget(null); }}
+      />
     </Layout>
   );
 }
