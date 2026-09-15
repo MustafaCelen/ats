@@ -1996,7 +1996,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // Tekil danışman karnesi (Cap + yıllık/çeyreklik BHB-işlem + portföy) — eski
   // "DANIŞMAN KARNESİ" Excel şablonunun canlı hâli.
-  app.get("/api/employees/:id/personal-scorecard", requireAuth, requireFinancialsAccess, async (req, res) => {
+  app.get("/api/employees/:id/personal-scorecard", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
     try {
       const employeeId = parseInt(req.params.id);
       if (isNaN(employeeId)) return res.status(400).json({ message: "Geçersiz danışman id" });

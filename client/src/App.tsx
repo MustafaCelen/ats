@@ -97,7 +97,7 @@ function Router() {
       <Route path="/agent-health" component={() => <ProtectedRoute noAssistant><AgentHealth /></ProtectedRoute>} />
       <Route path="/financial-reports" component={() => <ProtectedRoute financialsOnly><FinancialReports /></ProtectedRoute>} />
       <Route path="/advisor-scorecard" component={() => <ProtectedRoute financialsOnly><AdvisorScorecard /></ProtectedRoute>} />
-      <Route path="/advisor-personal-scorecard" component={() => <ProtectedRoute financialsOnly><AdvisorPersonalScorecard /></ProtectedRoute>} />
+      <Route path="/advisor-personal-scorecard" component={() => <ProtectedRoute noAssistant><AdvisorPersonalScorecard /></ProtectedRoute>} />
       <Route path="/cap-report" component={() => <ProtectedRoute adminOnly><CapReport /></ProtectedRoute>} />
       <Route path="/coaching" component={() => <ProtectedRoute noAssistant><Coaching /></ProtectedRoute>} />
       <Route path="/expenses" component={() => <ProtectedRoute adminOnly><Expenses /></ProtectedRoute>} />
