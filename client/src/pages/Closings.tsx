@@ -2678,12 +2678,12 @@ export default function Closings() {
                 </tr>
                 <tr className="border-b border-border/50">
                   <td className="py-2.5 px-4 text-xs font-medium text-sky-700">
-                    Yaklaşık Projeksiyon <span className="text-muted-foreground font-normal">(Bekleyenin %80'i)</span>
+                    Yaklaşık Projeksiyon <span className="text-muted-foreground font-normal">(Tamamlanan + Bekleyenin %80'i)</span>
                   </td>
-                  <td className="py-2.5 px-4 text-right text-sky-700 font-semibold">{Math.round(expectedSides * 0.8)}</td>
-                  <td className="py-2.5 px-4 text-right text-sky-700 font-semibold">{fmtTRY(expectedVolume * 0.8)}</td>
-                  <td className="py-2.5 px-4 text-right text-sky-700 font-semibold">{fmtTRY(expectedBHB * 0.8)}</td>
-                  <td className="py-2.5 px-4 text-right text-sky-700 font-semibold">{fmtTRY(expectedBM * 0.8)}</td>
+                  <td className="py-2.5 px-4 text-right text-sky-700 font-semibold">{Math.round(completedSides + expectedSides * 0.8)}</td>
+                  <td className="py-2.5 px-4 text-right text-sky-700 font-semibold">{fmtTRY(completedVolume + expectedVolume * 0.8)}</td>
+                  <td className="py-2.5 px-4 text-right text-sky-700 font-semibold">{fmtTRY(completedBHB + expectedBHB * 0.8)}</td>
+                  <td className="py-2.5 px-4 text-right text-sky-700 font-semibold">{fmtTRY(completedBM + expectedBM * 0.8)}</td>
                 </tr>
                 <tr className="bg-muted/30">
                   <td className="py-2.5 px-4 text-xs font-semibold">En İyi Senaryo</td>
