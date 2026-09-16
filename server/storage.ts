@@ -5234,6 +5234,55 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
+  // Genel (ÜK filtresiz) giriş/çıkış listesi — Finansal Raporlar Dönem Karşılaştırma'sı için.
+  async getGeneralEntryExitReport(startDate: Date, endDate: Date): Promise<{
+    entries: { employeeId: number; name: string; kwuid: string | null; startDate: string | null; office: string | null }[];
+    exits: { employeeId: number; name: string; kwuid: string | null; passiveAt: string | null; office: string | null }[];
+  }> {
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999);
+
+    const [entryRows, exitRows] = await Promise.all([
+      db.select({
+        id: employees.id, kwuid: employees.kwuid, startDate: employees.startDate,
+        name: candidates.name, office: candidates.office,
+      })
+        .from(employees)
+        .leftJoin(candidates, eq(employees.candidateId, candidates.id))
+        .where(and(
+          isNotNull(employees.startDate),
+          gte(employees.startDate, startDate),
+          lte(employees.startDate, end),
+        ))
+        .orderBy(employees.startDate),
+      db.select({
+        id: employees.id, kwuid: employees.kwuid, passiveAt: employees.passiveAt,
+        name: candidates.name, office: candidates.office,
+      })
+        .from(employees)
+        .leftJoin(candidates, eq(employees.candidateId, candidates.id))
+        .where(and(
+          isNotNull(employees.passiveAt),
+          gte(employees.passiveAt, startDate),
+          lte(employees.passiveAt, end),
+        ))
+        .orderBy(employees.passiveAt),
+    ]);
+
+    return {
+      entries: entryRows.map((r) => ({
+        employeeId: r.id, name: r.name ?? "—", kwuid: r.kwuid ?? null,
+        startDate: r.startDate ? new Date(r.startDate).toISOString().slice(0, 10) : null,
+        office: r.office ?? null,
+      })),
+      exits: exitRows.map((r) => ({
+        employeeId: r.id, name: r.name ?? "—", kwuid: r.kwuid ?? null,
+        passiveAt: r.passiveAt ? new Date(r.passiveAt).toISOString().slice(0, 10) : null,
+        office: r.office ?? null,
+      })),
+    };
+  }
+
   async getCoachingStats(startDate: Date, endDate: Date, coachUserId?: number, includePassive = false) {
     const end = new Date(endDate);
     end.setHours(23, 59, 59, 999);

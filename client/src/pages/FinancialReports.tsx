@@ -399,15 +399,15 @@ interface PeriodRow {
   net: number; bhb: number; companyTl: number;
 }
 
-// ── Dönem içi Giriş / Çıkış (ÜK) isim listesi ───────────────────────────────
-function useUkEntryExit(startDate: string, endDate: string) {
+// ── Dönem içi Giriş / Çıkış (genel, tüm danışmanlar) isim listesi ───────────
+function useEntryExit(startDate: string, endDate: string) {
   return useQuery<{
     entries: { employeeId: number; name: string; startDate: string | null; office: string | null }[];
-    exits: { employeeId: number; name: string; ukEndDate: string; office: string | null }[];
+    exits: { employeeId: number; name: string; passiveAt: string | null; office: string | null }[];
   }>({
-    queryKey: ["/api/coaching/uk-entry-exit", startDate, endDate],
+    queryKey: ["/api/reports/entry-exit", startDate, endDate],
     queryFn: async () => {
-      const res = await fetch(`/api/coaching/uk-entry-exit?startDate=${startDate}&endDate=${endDate}`, { credentials: "include" });
+      const res = await fetch(`/api/reports/entry-exit?startDate=${startDate}&endDate=${endDate}`, { credentials: "include" });
       if (!res.ok) throw new Error("Failed");
       return res.json();
     },
@@ -415,8 +415,8 @@ function useUkEntryExit(startDate: string, endDate: string) {
   });
 }
 
-function UkEntryExitList({ startDate, endDate, office }: { startDate: string; endDate: string; office?: string }) {
-  const { data } = useUkEntryExit(startDate, endDate);
+function EntryExitList({ startDate, endDate, office }: { startDate: string; endDate: string; office?: string }) {
+  const { data } = useEntryExit(startDate, endDate);
   const entries = (data?.entries ?? []).filter(e => !office || e.office === office);
   const exits   = (data?.exits ?? []).filter(e => !office || e.office === office);
 
@@ -428,9 +428,6 @@ function UkEntryExitList({ startDate, endDate, office }: { startDate: string; en
         {office && (
           <span className="text-xs font-medium bg-primary/10 text-primary px-2 py-0.5 rounded-full">{office}</span>
         )}
-        <span className="text-xs text-muted-foreground ml-1 italic">
-          Giriş listesi sadece Üretkenlik Koçluğu'na dahil danışmanları kapsar
-        </span>
       </div>
       <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
@@ -457,7 +454,7 @@ function UkEntryExitList({ startDate, endDate, office }: { startDate: string; en
               {exits.map(e => (
                 <li key={e.employeeId} className="flex items-center justify-between text-xs">
                   <span className="truncate">{e.name}</span>
-                  <span className="text-muted-foreground shrink-0 ml-2">{e.ukEndDate?.slice(0, 10)}</span>
+                  <span className="text-muted-foreground shrink-0 ml-2">{e.passiveAt?.slice(0, 10)}</span>
                 </li>
               ))}
             </ul>
@@ -1065,7 +1062,7 @@ export default function FinancialReports() {
           useCustomRange={useCustomRange} fromDate={fromDate} toDate={toDate} viewDate={viewDate}
           showForecast={showReelTarget} showReForecast={showYuksekTarget}
         />
-        <UkEntryExitList startDate={computedStart} endDate={computedEnd} office={officeFilter} />
+        <EntryExitList startDate={computedStart} endDate={computedEnd} office={officeFilter} />
 
         {/* ── Randevu Hedef Takibi ── */}
         <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">

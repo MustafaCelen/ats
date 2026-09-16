@@ -3324,6 +3324,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // Seçilen tarih aralığında TÜM danışmanların şirkete giriş (start_date) ve çıkış
+  // (passive_at) tarihleri — ÜK/Üretkenlik Koçluğu filtresi yok, Finansal Raporlar'daki
+  // genel giriş/çıkış listesi için kullanılır.
+  app.get("/api/reports/entry-exit", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
+      if (!startDate || !endDate) return res.status(400).json({ message: "startDate ve endDate gerekli" });
+      res.json(await storage.getGeneralEntryExitReport(new Date(startDate), new Date(endDate)));
+    } catch (err) {
+      console.error("[GET /api/reports/entry-exit]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   app.get("/api/coaching/stats", requireAuth, async (req: Request, res: Response) => {
     try {
       const user = req.user!;
