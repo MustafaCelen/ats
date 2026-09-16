@@ -2687,10 +2687,10 @@ export default function Closings() {
                 </tr>
                 <tr className="bg-muted/30">
                   <td className="py-2.5 px-4 text-xs font-semibold">En İyi Senaryo</td>
-                  <td className="py-2.5 px-4 text-right font-bold">{Math.round(completedSides + expectedSides * 0.8)}</td>
-                  <td className="py-2.5 px-4 text-right font-bold">{fmtTRY(completedVolume + expectedVolume * 0.8)}</td>
-                  <td className="py-2.5 px-4 text-right font-bold">{fmtTRY(completedBHB + expectedBHB * 0.8)}</td>
-                  <td className="py-2.5 px-4 text-right font-bold text-blue-700">{fmtTRY(completedBM + expectedBM * 0.8)}</td>
+                  <td className="py-2.5 px-4 text-right font-bold">{Math.round(completedSides + expectedSides)}</td>
+                  <td className="py-2.5 px-4 text-right font-bold">{fmtTRY(completedVolume + expectedVolume)}</td>
+                  <td className="py-2.5 px-4 text-right font-bold">{fmtTRY(completedBHB + expectedBHB)}</td>
+                  <td className="py-2.5 px-4 text-right font-bold text-blue-700">{fmtTRY(completedBM + expectedBM)}</td>
                 </tr>
                 {targetsSummary.hasAny && (
                   <tr className="border-t border-border/50">
