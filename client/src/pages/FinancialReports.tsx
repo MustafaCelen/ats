@@ -692,6 +692,36 @@ export default function FinancialReports() {
     staleTime: 5 * 60 * 1000,
   });
   // Interview targets are stored per office PER MONTH; "Özel Aralık" can span several
+  // months, so we fetch every (yıl, ay) in [computedStart, computedEnd] and sum them —
+  // otherwise a multi-month gerçekleşen total was being compared against a single ay'ın
+  // hedefi (vy/vm), making the numbers look wildly off.
+  const targetMonths = useMemo(() => monthsInRange(computedStart, computedEnd), [computedStart, computedEnd]);
+  const { data: apptTargetsAk = [] } = useQuery<any[]>({
+    queryKey: ["/api/interview-targets", targetMonths, "Akatlar"],
+    queryFn: async () => {
+      const rows = await Promise.all(targetMonths.map(({ year, month }) =>
+        fetch(`/api/interview-targets?year=${year}&month=${month}&office=Akatlar`, { credentials: "include" }).then(r => r.ok ? r.json() : [])
+      ));
+      return rows.flat();
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+  const { data: apptTargetsZk = [] } = useQuery<any[]>({
+    queryKey: ["/api/interview-targets", targetMonths, "Zekeriyaköy"],
+    queryFn: async () => {
+      const rows = await Promise.all(targetMonths.map(({ year, month }) =>
+        fetch(`/api/interview-targets?year=${year}&month=${month}&office=${encodeURIComponent("Zekeriyaköy")}`, { credentials: "include" }).then(r => r.ok ? r.json() : [])
+      ));
+      return rows.flat();
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+  const apptTargets = useMemo(
+    () => !officeFilter ? [...apptTargetsAk, ...apptTargetsZk]
+        : officeFilter === "Akatlar" ? apptTargetsAk : apptTargetsZk,
+    [officeFilter, apptTargetsAk, apptTargetsZk]
+  );
+
   const APPT_CATS = ["K0", "K1", "K2"] as const;
 
   const apptActuals = useMemo(() => {
@@ -708,6 +738,14 @@ export default function FinancialReports() {
     }
     return counts;
   }, [allInterviews, computedStart, computedEnd, officeFilter]);
+
+  const apptTargetTotals = useMemo(() => {
+    const totals: Record<string, number> = { K0: 0, K1: 0, K2: 0 };
+    for (const t of apptTargets) {
+      if (t.category in totals) totals[t.category] += t.target ?? 0;
+    }
+    return totals;
+  }, [apptTargets]);
 
   const targetFetchYear = useCustomRange ? parseInt(fromDate.substring(0, 4)) : vy;
   const yearStart = formatYMD(new Date(targetFetchYear, 0, 1));
@@ -1081,17 +1119,35 @@ export default function FinancialReports() {
               const actual = cat === "Toplam"
                 ? APPT_CATS.reduce((s, c) => s + apptActuals[c], 0)
                 : apptActuals[cat] ?? 0;
-              const styles: Record<string, { badge: string; text: string }> = {
-                K0:     { badge: "bg-blue-100 text-blue-700",    text: "text-blue-600" },
-                K1:     { badge: "bg-amber-100 text-amber-700",  text: "text-amber-600" },
-                K2:     { badge: "bg-emerald-100 text-emerald-700", text: "text-emerald-600" },
-                Toplam: { badge: "bg-purple-100 text-purple-700", text: "text-purple-600" },
+              const target = cat === "Toplam"
+                ? APPT_CATS.reduce((s, c) => s + apptTargetTotals[c], 0)
+                : apptTargetTotals[cat] ?? 0;
+              const pct = target > 0 ? Math.round((actual / target) * 100) : null;
+              const done = target > 0 && actual >= target;
+              const styles: Record<string, { badge: string; text: string; bar: string }> = {
+                K0:     { badge: "bg-blue-100 text-blue-700",    text: "text-blue-600",    bar: "#3b82f6" },
+                K1:     { badge: "bg-amber-100 text-amber-700",  text: "text-amber-600",   bar: "#f59e0b" },
+                K2:     { badge: "bg-emerald-100 text-emerald-700", text: "text-emerald-600", bar: "#10b981" },
+                Toplam: { badge: "bg-purple-100 text-purple-700", text: "text-purple-600", bar: "#8b5cf6" },
               };
               const s = styles[cat];
               return (
                 <div key={cat} className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-2">
-                  <span className={`rounded-md px-2 py-0.5 text-xs font-bold ${s.badge}`}>{cat}</span>
+                  <div className="flex items-center justify-between">
+                    <span className={`rounded-md px-2 py-0.5 text-xs font-bold ${s.badge}`}>{cat}</span>
+                    {done && <span className="text-[10px] text-emerald-600 font-medium">✓ Hedef tamam</span>}
+                  </div>
                   <div className={`text-3xl font-bold ${s.text}`}>{actual}</div>
+                  {target > 0 && (
+                    <>
+                      <div className="h-2 rounded-full bg-muted overflow-hidden">
+                        <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(100, pct ?? 0)}%`, backgroundColor: s.bar }} />
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        %{pct}{done && <span className="text-emerald-600 font-semibold"> · ✓ hedefe ulaşıldı</span>}
+                      </p>
+                    </>
+                  )}
                 </div>
               );
             })}
