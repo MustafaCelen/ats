@@ -1824,7 +1824,7 @@ function NewClosingDialog({
 }
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
-type Tab = "closings" | "cap" | "loss-projection" | "remaining-to-target";
+type Tab = "closings" | "cap";
 
 export default function Closings() {
   const { toast } = useToast();
@@ -2628,22 +2628,6 @@ export default function Closings() {
           >
             Cap Yönetimi
           </button>
-          <button
-            onClick={() => setTab("loss-projection")}
-            className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
-              tab === "loss-projection" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            Kayıp Yaklaşık Projeksiyon
-          </button>
-          <button
-            onClick={() => setTab("remaining-to-target")}
-            className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
-              tab === "remaining-to-target" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            Hedefe Kalan
-          </button>
         </div>
 
         {/* ── Closings tab ── */}
@@ -2652,70 +2636,6 @@ export default function Closings() {
             <CapSettingsPanel />
             <EmployeeCapStatusPanel employees={employees} capStatuses={capStatuses} />
           </div>
-        )}
-
-        {tab === "loss-projection" && (
-          <Card>
-            <CardContent className="p-4 space-y-4">
-              <p className="text-xs text-muted-foreground">
-                Bekleyen (GBHB) işlemlerin %20'sinin kaybedileceği varsayımıyla yaklaşık kayıp projeksiyonu.
-              </p>
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-1">
-                  <span className="text-xs text-muted-foreground">İşlem</span>
-                  <div className="text-2xl font-bold text-red-600">{Math.round(expectedSides * 0.2)}</div>
-                </div>
-                <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-1">
-                  <span className="text-xs text-muted-foreground">İşlem Hacmi</span>
-                  <div className="text-2xl font-bold text-red-600">{fmtTRY(expectedVolume * 0.2)}</div>
-                </div>
-                <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-1">
-                  <span className="text-xs text-muted-foreground">BHB</span>
-                  <div className="text-2xl font-bold text-red-600">{fmtTRY(expectedBHB * 0.2)}</div>
-                </div>
-                <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-1">
-                  <span className="text-xs text-muted-foreground">BM Payı</span>
-                  <div className="text-2xl font-bold text-red-600">{fmtTRY(expectedBM * 0.2)}</div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {tab === "remaining-to-target" && (
-          <Card>
-            <CardContent className="p-4 space-y-4">
-              {!targetsSummary.hasAny ? (
-                <p className="text-xs text-muted-foreground/50 italic">
-                  {targetYear} yılı için BHB hedefi tanımlanmamış.
-                </p>
-              ) : (
-                <>
-                  <p className="text-xs text-muted-foreground">
-                    BHB Hedefi ({targetYear}) − Tamamlanan = Hedefe Kalan
-                  </p>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-1">
-                      <span className="text-xs text-muted-foreground">BHB Hedefi</span>
-                      <div className="text-2xl font-bold">{fmtTRY(targetsSummary.bhb)}</div>
-                    </div>
-                    <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-1">
-                      <span className="text-xs text-muted-foreground">Tamamlanan</span>
-                      <div className="text-2xl font-bold text-emerald-700">{fmtTRY(completedBHB)}</div>
-                    </div>
-                    <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-1">
-                      <span className="text-xs text-muted-foreground">Hedefe Kalan</span>
-                      {targetsSummary.bhb - completedBHB <= 0 ? (
-                        <div className="text-2xl font-bold text-emerald-600">Hedef aşıldı</div>
-                      ) : (
-                        <div className="text-2xl font-bold text-orange-600">{fmtTRY(targetsSummary.bhb - completedBHB)}</div>
-                      )}
-                    </div>
-                  </div>
-                </>
-              )}
-            </CardContent>
-          </Card>
         )}
 
         {tab === "closings" && <>
@@ -2756,6 +2676,15 @@ export default function Closings() {
                   <td className="py-2.5 px-4 text-right text-amber-600 font-semibold">{fmtTRY(expectedBHB)}</td>
                   <td className="py-2.5 px-4 text-right text-amber-600 font-semibold">{fmtTRY(expectedBM)}</td>
                 </tr>
+                <tr className="border-b border-border/50">
+                  <td className="py-2.5 px-4 text-xs font-medium text-sky-700">
+                    Yaklaşık Projeksiyon <span className="text-muted-foreground font-normal">(Bekleyenin %80'i)</span>
+                  </td>
+                  <td className="py-2.5 px-4 text-right text-sky-700 font-semibold">{Math.round(expectedSides * 0.8)}</td>
+                  <td className="py-2.5 px-4 text-right text-sky-700 font-semibold">{fmtTRY(expectedVolume * 0.8)}</td>
+                  <td className="py-2.5 px-4 text-right text-sky-700 font-semibold">{fmtTRY(expectedBHB * 0.8)}</td>
+                  <td className="py-2.5 px-4 text-right text-sky-700 font-semibold">{fmtTRY(expectedBM * 0.8)}</td>
+                </tr>
                 <tr className="bg-muted/30">
                   <td className="py-2.5 px-4 text-xs font-semibold">En İyi Senaryo</td>
                   <td className="py-2.5 px-4 text-right font-bold">{Math.round(completedSides + expectedSides * 0.8)}</td>
@@ -2763,6 +2692,21 @@ export default function Closings() {
                   <td className="py-2.5 px-4 text-right font-bold">{fmtTRY(completedBHB + expectedBHB * 0.8)}</td>
                   <td className="py-2.5 px-4 text-right font-bold text-blue-700">{fmtTRY(completedBM + expectedBM * 0.8)}</td>
                 </tr>
+                {targetsSummary.hasAny && (
+                  <tr className="border-t border-border/50">
+                    <td className="py-2.5 px-4 text-xs font-medium text-muted-foreground">Hedefe Kalan</td>
+                    <td className="py-2.5 px-4 text-right text-muted-foreground">—</td>
+                    <td className="py-2.5 px-4 text-right text-muted-foreground">—</td>
+                    <td className="py-2.5 px-4 text-right font-semibold">
+                      {targetsSummary.bhb - completedBHB <= 0 ? (
+                        <span className="text-emerald-600">Hedef aşıldı</span>
+                      ) : (
+                        <span className="text-orange-600">{fmtTRY(targetsSummary.bhb - completedBHB)}</span>
+                      )}
+                    </td>
+                    <td className="py-2.5 px-4 text-right text-muted-foreground">—</td>
+                  </tr>
+                )}
                 {targetsSummary.hasAny && (
                   <tr className="border-t border-border/50">
                     <td className="py-2.5 px-4 text-xs font-medium text-orange-600">
