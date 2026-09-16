@@ -32,6 +32,34 @@ function fmtTRY(amount: number): string {
   return new Intl.NumberFormat("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount) + " ₺";
 }
 
+// ── BHB Hedefi (Reforecast / Hedefe Kalan tabları için) ─────────────────────────
+function useFinancialTargets(year: number, office: string) {
+  return useQuery<any[]>({
+    queryKey: ["/api/financial-targets", year, office],
+    queryFn: async () => {
+      const res = await fetch(`/api/financial-targets?year=${year}&office=${encodeURIComponent(office)}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** yearFilter/monthFilter'a göre ay aralığındaki bhbTarget/bhbHighTarget/bmTarget/bmHighTarget toplamı. */
+function sumTargets(rows: any[], year: number, monthFilter: string) {
+  let bhb = 0, bhbHigh = 0, bm = 0, bmHigh = 0, count = 0;
+  for (const t of rows) {
+    if (t.year !== year) continue;
+    if (monthFilter !== "all" && String(t.month).padStart(2, "0") !== monthFilter) continue;
+    bhb     += parseFloat(t.bhbTarget     ?? "0");
+    bhbHigh += parseFloat(t.bhbHighTarget ?? "0");
+    bm      += parseFloat(t.bmTarget      ?? "0");
+    bmHigh  += parseFloat(t.bmHighTarget  ?? "0");
+    count++;
+  }
+  return { bhb, bhbHigh, bm, bmHigh, hasAny: count > 0 };
+}
+
 /** İşlem adedi oranı: bhbShare / per-side BHB.
  *  Satış/Yönlendirme: per-side BHB = saleValue × commissionRate / 100
  *  Kiralık: per-side BHB = saleValue / 2 (her taraftan kira bedelinin yarısı)
@@ -1796,7 +1824,7 @@ function NewClosingDialog({
 }
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
-type Tab = "closings" | "cap";
+type Tab = "closings" | "cap" | "loss-projection" | "remaining-to-target";
 
 export default function Closings() {
   const { toast } = useToast();
@@ -1979,6 +2007,44 @@ export default function Closings() {
   const expectedBHB  = sumBHBAgents(expectedAgentRows);
   const completedBM  = sumBMAgents(completedAgentRows);
   const expectedBM   = sumBMAgents(expectedAgentRows);
+
+  // Geçen yıl aynı dönem (yearFilter bir yıl seçiliyken) — Özet tablosundaki referans satırı
+  const prevYearAgentRows = useMemo(() => {
+    if (yearFilter === "all") return null;
+    const prevYear = String(parseInt(yearFilter) - 1);
+    let rows = agentRowsAll.filter(r => {
+      const dRef = r.effectiveStatus === "expected"
+        ? (r.effectiveDate ?? ((r.closing as any).createdAt ? new Date((r.closing as any).createdAt).toISOString().split("T")[0] : null))
+        : r.effectiveDate;
+      if (!dRef) return false;
+      const matchYear = dRef.slice(0, 4) === prevYear;
+      const matchMonth = monthFilter === "all" || dRef.slice(5, 7) === monthFilter;
+      return matchYear && matchMonth;
+    });
+    if (officeFilter !== "all") {
+      rows = rows.filter(r => ((r.agent as any).officeSnapshot ?? employeeOfficeMap[(r.agent as any).employeeId]) === officeFilter);
+    }
+    if (advisorFilter) {
+      const q = advisorFilter.toLowerCase();
+      rows = rows.filter(r => {
+        const name: string = (r.agent as any).candidateName ?? (r.agent as any).employeeName ?? "";
+        return name.toLowerCase().includes(q);
+      });
+    }
+    return rows;
+  }, [agentRowsAll, yearFilter, monthFilter, officeFilter, advisorFilter, employeeOfficeMap]);
+
+  const prevYearSides  = prevYearAgentRows ? sumIslemAdetAgents(prevYearAgentRows) : null;
+  const prevYearVolume = prevYearAgentRows ? sumVolumeAgents(prevYearAgentRows) : null;
+  const prevYearBHB    = prevYearAgentRows ? sumBHBAgents(prevYearAgentRows) : null;
+  const prevYearBM     = prevYearAgentRows ? sumBMAgents(prevYearAgentRows) : null;
+
+  // BHB Hedefi (Reforecast + Hedefe Kalan tabları) — yearFilter="all" ise şu anki takvim yılı kullanılır
+  const targetYear = yearFilter === "all" ? new Date().getFullYear() : parseInt(yearFilter);
+  const { data: targetsAk = [] } = useFinancialTargets(targetYear, "Akatlar");
+  const { data: targetsZk = [] } = useFinancialTargets(targetYear, "Zekeriyaköy");
+  const targetsCombined = officeFilter === "all" ? [...targetsAk, ...targetsZk] : officeFilter === "Akatlar" ? targetsAk : targetsZk;
+  const targetsSummary = useMemo(() => sumTargets(targetsCombined, targetYear, monthFilter), [targetsCombined, targetYear, monthFilter]);
 
   // Flatten closings into one row per agent per side
   type FlatRow = {
@@ -2562,6 +2628,22 @@ export default function Closings() {
           >
             Cap Yönetimi
           </button>
+          <button
+            onClick={() => setTab("loss-projection")}
+            className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
+              tab === "loss-projection" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Kayıp Yaklaşık Projeksiyon
+          </button>
+          <button
+            onClick={() => setTab("remaining-to-target")}
+            className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
+              tab === "remaining-to-target" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Hedefe Kalan
+          </button>
         </div>
 
         {/* ── Closings tab ── */}
@@ -2570,6 +2652,70 @@ export default function Closings() {
             <CapSettingsPanel />
             <EmployeeCapStatusPanel employees={employees} capStatuses={capStatuses} />
           </div>
+        )}
+
+        {tab === "loss-projection" && (
+          <Card>
+            <CardContent className="p-4 space-y-4">
+              <p className="text-xs text-muted-foreground">
+                Bekleyen (GBHB) işlemlerin %20'sinin kaybedileceği varsayımıyla yaklaşık kayıp projeksiyonu.
+              </p>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-1">
+                  <span className="text-xs text-muted-foreground">İşlem</span>
+                  <div className="text-2xl font-bold text-red-600">{Math.round(expectedSides * 0.2)}</div>
+                </div>
+                <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-1">
+                  <span className="text-xs text-muted-foreground">İşlem Hacmi</span>
+                  <div className="text-2xl font-bold text-red-600">{fmtTRY(expectedVolume * 0.2)}</div>
+                </div>
+                <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-1">
+                  <span className="text-xs text-muted-foreground">BHB</span>
+                  <div className="text-2xl font-bold text-red-600">{fmtTRY(expectedBHB * 0.2)}</div>
+                </div>
+                <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-1">
+                  <span className="text-xs text-muted-foreground">BM Payı</span>
+                  <div className="text-2xl font-bold text-red-600">{fmtTRY(expectedBM * 0.2)}</div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {tab === "remaining-to-target" && (
+          <Card>
+            <CardContent className="p-4 space-y-4">
+              {!targetsSummary.hasAny ? (
+                <p className="text-xs text-muted-foreground/50 italic">
+                  {targetYear} yılı için BHB hedefi tanımlanmamış.
+                </p>
+              ) : (
+                <>
+                  <p className="text-xs text-muted-foreground">
+                    BHB Hedefi ({targetYear}) − Tamamlanan = Hedefe Kalan
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-1">
+                      <span className="text-xs text-muted-foreground">BHB Hedefi</span>
+                      <div className="text-2xl font-bold">{fmtTRY(targetsSummary.bhb)}</div>
+                    </div>
+                    <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-1">
+                      <span className="text-xs text-muted-foreground">Tamamlanan</span>
+                      <div className="text-2xl font-bold text-emerald-700">{fmtTRY(completedBHB)}</div>
+                    </div>
+                    <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-1">
+                      <span className="text-xs text-muted-foreground">Hedefe Kalan</span>
+                      {targetsSummary.bhb - completedBHB <= 0 ? (
+                        <div className="text-2xl font-bold text-emerald-600">Hedef aşıldı</div>
+                      ) : (
+                        <div className="text-2xl font-bold text-orange-600">{fmtTRY(targetsSummary.bhb - completedBHB)}</div>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
         )}
 
         {tab === "closings" && <>
@@ -2597,26 +2743,46 @@ export default function Closings() {
               </thead>
               <tbody>
                 <tr className="border-b border-border/50">
-                  <td className="py-2.5 px-4 text-xs font-medium text-emerald-700">Tamamlanan</td>
+                  <td className="py-2.5 px-4 text-xs font-medium text-emerald-700">İşlem Kapanışı</td>
                   <td className="py-2.5 px-4 text-right font-semibold">{Math.round(completedSides)}</td>
                   <td className="py-2.5 px-4 text-right font-semibold">{fmtTRY(completedVolume)}</td>
                   <td className="py-2.5 px-4 text-right font-semibold">{fmtTRY(completedBHB)}</td>
                   <td className="py-2.5 px-4 text-right font-semibold text-blue-700">{fmtTRY(completedBM)}</td>
                 </tr>
                 <tr className="border-b border-border/50">
-                  <td className="py-2.5 px-4 text-xs font-medium text-amber-600">Beklenen</td>
+                  <td className="py-2.5 px-4 text-xs font-medium text-amber-600">GBHB / Bekleyen</td>
                   <td className="py-2.5 px-4 text-right text-amber-600 font-semibold">{Math.round(expectedSides)}</td>
                   <td className="py-2.5 px-4 text-right text-amber-600 font-semibold">{fmtTRY(expectedVolume)}</td>
                   <td className="py-2.5 px-4 text-right text-amber-600 font-semibold">{fmtTRY(expectedBHB)}</td>
                   <td className="py-2.5 px-4 text-right text-amber-600 font-semibold">{fmtTRY(expectedBM)}</td>
                 </tr>
                 <tr className="bg-muted/30">
-                  <td className="py-2.5 px-4 text-xs font-semibold">Toplam</td>
-                  <td className="py-2.5 px-4 text-right font-bold">{Math.round(completedSides + expectedSides)}</td>
-                  <td className="py-2.5 px-4 text-right font-bold">{fmtTRY(completedVolume + expectedVolume)}</td>
-                  <td className="py-2.5 px-4 text-right font-bold">{fmtTRY(completedBHB + expectedBHB)}</td>
-                  <td className="py-2.5 px-4 text-right font-bold text-blue-700">{fmtTRY(completedBM + expectedBM)}</td>
+                  <td className="py-2.5 px-4 text-xs font-semibold">En İyi Senaryo</td>
+                  <td className="py-2.5 px-4 text-right font-bold">{Math.round(completedSides + expectedSides * 0.8)}</td>
+                  <td className="py-2.5 px-4 text-right font-bold">{fmtTRY(completedVolume + expectedVolume * 0.8)}</td>
+                  <td className="py-2.5 px-4 text-right font-bold">{fmtTRY(completedBHB + expectedBHB * 0.8)}</td>
+                  <td className="py-2.5 px-4 text-right font-bold text-blue-700">{fmtTRY(completedBM + expectedBM * 0.8)}</td>
                 </tr>
+                {targetsSummary.hasAny && (
+                  <tr className="border-t border-border/50">
+                    <td className="py-2.5 px-4 text-xs font-medium text-orange-600">
+                      Reforecast Hedefi <span className="text-muted-foreground font-normal">({targetYear})</span>
+                    </td>
+                    <td className="py-2.5 px-4 text-right text-muted-foreground">—</td>
+                    <td className="py-2.5 px-4 text-right text-muted-foreground">—</td>
+                    <td className="py-2.5 px-4 text-right font-semibold text-orange-600">{fmtTRY(targetsSummary.bhbHigh)}</td>
+                    <td className="py-2.5 px-4 text-right font-semibold text-orange-600">{fmtTRY(targetsSummary.bmHigh)}</td>
+                  </tr>
+                )}
+                {prevYearAgentRows && (
+                  <tr className="border-t border-border/50">
+                    <td className="py-2.5 px-4 text-xs font-medium text-muted-foreground">Geçen Yıl (Aynı Dönem)</td>
+                    <td className="py-2.5 px-4 text-right text-muted-foreground">{Math.round(prevYearSides ?? 0)}</td>
+                    <td className="py-2.5 px-4 text-right text-muted-foreground">{fmtTRY(prevYearVolume ?? 0)}</td>
+                    <td className="py-2.5 px-4 text-right text-muted-foreground">{fmtTRY(prevYearBHB ?? 0)}</td>
+                    <td className="py-2.5 px-4 text-right text-muted-foreground">{fmtTRY(prevYearBM ?? 0)}</td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </CardContent>

@@ -248,163 +248,6 @@ function useFinancialTargets(year: number, office: string) {
   });
 }
 
-function TargetProgressCard({ label, actual, reelTarget, highTarget, color, format: fmt, showForecast, showReForecast }: {
-  label: string; actual: number; reelTarget: number; highTarget: number; color: string;
-  format: (n: number) => string; showForecast: boolean; showReForecast: boolean;
-}) {
-  const showBoth = !showForecast && !showReForecast;
-  const effReel = (showForecast || showBoth) ? reelTarget : 0;
-  const effHigh = (showReForecast || showBoth) ? highTarget : 0;
-
-  const maxT = Math.max(effReel, effHigh, 0);
-  const meetsHigh = effHigh > 0 && actual >= effHigh;
-  const meetsReel = effReel > 0 && actual >= effReel;
-  const barFill  = maxT > 0 ? Math.min(100, (actual / maxT) * 100) : 0;
-  const reelMark = maxT > 0 && effHigh > effReel && effReel > 0
-    ? (effReel / maxT) * 100 : null;
-  const barColor = meetsHigh ? "#f59e0b" : meetsReel ? "#10b981" : color;
-
-  const badge = (pct: number, over: boolean, lbl: string) => (
-    <span className={`text-sm font-bold px-2.5 py-1 rounded-full ${over ? (lbl === "RF" ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700") : "bg-muted text-muted-foreground"}`}>
-      {lbl} %{Math.round(Math.min(100, pct))}
-    </span>
-  );
-
-  return (
-    <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-2">
-      <div className="flex items-start justify-between gap-2">
-        <span className="text-sm font-medium text-muted-foreground">{label}</span>
-        <div className="flex flex-col items-end gap-1 shrink-0">
-          {effReel > 0 && badge(actual / effReel * 100, meetsReel, "F")}
-          {effHigh > 0 && badge(actual / effHigh * 100, meetsHigh, "RF")}
-        </div>
-      </div>
-      {maxT > 0 ? (
-        <>
-          {/* Gerçekleşen büyük gösterim */}
-          <div className="text-3xl font-bold text-foreground leading-tight">{fmt(actual)}</div>
-          <div className="text-xs text-muted-foreground">Hedef: {fmt(maxT)}</div>
-          <div className="relative h-2 rounded-full bg-muted overflow-hidden">
-            {reelMark !== null && (
-              <div className="absolute top-0 bottom-0 w-px bg-white/80 z-10" style={{ left: `${reelMark}%` }} />
-            )}
-            <div className="h-full rounded-full transition-all" style={{ width: `${barFill}%`, backgroundColor: barColor }} />
-          </div>
-          {effReel > 0 && effHigh > 0 && (
-            <div className="text-xs text-muted-foreground">
-              Forecast: <span className="font-medium text-foreground">{fmt(effReel)}</span>
-            </div>
-          )}
-          {meetsHigh && <p className="text-xs text-amber-600 font-semibold">Re-Forecast aşıldı!</p>}
-          {!meetsHigh && meetsReel && <p className="text-xs text-emerald-600 font-semibold">Forecast aşıldı!</p>}
-        </>
-      ) : (
-        <>
-          <div className="text-3xl font-bold text-foreground leading-tight">{fmt(actual)}</div>
-          <div className="text-xs text-muted-foreground/50 italic">Hedef belirlenmedi</div>
-        </>
-      )}
-    </div>
-  );
-}
-
-// ── Brüt / Net Büyüme ────────────────────────────────────────────────────
-function GrowthSection({ viewDate, isAdmin, useCustomRange, fromDate, toDate, ukOnly, office }: {
-  viewDate: Date; isAdmin: boolean; useCustomRange: boolean; fromDate: string; toDate: string; ukOnly: boolean; office?: string;
-}) {
-  const y = useCustomRange ? parseInt(fromDate.substring(0, 4)) : viewDate.getFullYear();
-  const m = useCustomRange ? null : (viewDate.getMonth() + 1);
-  const paramMonth = m ?? 0;
-
-  const { data: growth } = useQuery<{
-    brut: number; left: number; net: number; brutTarget: number; netTarget: number;
-    targetsByUser: { userId: number | null; userName: string; brutTarget: number; netTarget: number }[];
-  }>({
-    queryKey: ["/api/growth/stats", y, paramMonth, ukOnly, office ?? null],
-    queryFn: () => {
-      const p = new URLSearchParams({ year: String(y) });
-      if (m) p.set("month", String(m));
-      if (ukOnly) p.set("ukOnly", "true");
-      if (office) p.set("office", office);
-      return fetch(`/api/growth/stats?${p}`, { credentials: "include" }).then(r => r.json());
-    },
-  });
-
-  const brut = growth?.brut ?? 0;
-  const net = growth?.net ?? 0;
-  const brutT = growth?.brutTarget ?? 0;
-  const targetsByUser = growth?.targetsByUser ?? [];
-
-  const GrowthCard = ({ label, actual, target, sub, color }: {
-    label: string; actual: number; target: number; sub?: string; color: string;
-  }) => {
-    const pct = target > 0 ? Math.round((actual / target) * 100) : 0;
-    const good = target > 0 && actual >= target;
-    return (
-      <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-2">
-        <span className="text-sm font-medium text-muted-foreground">{label}</span>
-        <div className="text-3xl font-bold" style={{ color }}>{actual}</div>
-        {target > 0 ? (
-          <>
-            <div className="text-xs text-muted-foreground">Hedef: {target}</div>
-            <div className="h-2 rounded-full bg-muted overflow-hidden">
-              <div className={`h-full rounded-full transition-all ${good ? "bg-emerald-500" : ""}`}
-                   style={{ width: `${Math.min(100, pct)}%`, backgroundColor: good ? undefined : color }} />
-            </div>
-            <p className="text-xs text-muted-foreground">
-              %{pct} {good && <span className="text-emerald-600 font-semibold">· ✓ hedefe ulaşıldı</span>}
-            </p>
-          </>
-        ) : (
-          <div className="text-xs text-muted-foreground/50 italic">Hedef belirlenmedi</div>
-        )}
-        {sub && <p className="text-xs text-muted-foreground">{sub}</p>}
-      </div>
-    );
-  };
-
-  return (
-    <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-      <div className="px-5 py-3 border-b border-border flex items-center gap-2">
-        <TrendingUp className="h-4 w-4 text-primary" />
-        <h2 className="text-base font-semibold">Danışman Büyüme Hedefleri</h2>
-        {office && (
-          <span className="text-xs font-medium bg-primary/10 text-primary px-2 py-0.5 rounded-full">{office}</span>
-        )}
-        <span className="text-xs text-muted-foreground ml-1">
-          {useCustomRange ? `${fromDate} – ${toDate}` : format(viewDate, "MMMM yyyy", { locale: tr })}
-        </span>
-        <span className="text-xs text-muted-foreground ml-auto italic">Her HM kendi hedefini Dashboard'dan girer</span>
-      </div>
-      <div className={`p-4 grid grid-cols-1 ${isAdmin && targetsByUser.length > 0 ? "md:grid-cols-4" : "md:grid-cols-3"} gap-4`}>
-        <GrowthCard label="Brüt Büyüme" actual={brut} target={brutT} sub="Danışmana dönüşmüş adaylar" color="#10b981" />
-        <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-2">
-          <span className="text-sm font-medium text-muted-foreground">Net Büyüme</span>
-          <div className="text-3xl font-bold" style={{ color: "#3b82f6" }}>{net}</div>
-          <p className="text-xs text-muted-foreground">{`Brüt (${brut}) − Çıkan (${growth?.left ?? 0})`}</p>
-        </div>
-        <div className="rounded-xl border border-border bg-muted/20 p-4 shadow-sm space-y-2">
-          <span className="text-sm font-medium text-muted-foreground">Çıkış Yapan</span>
-          <div className="text-3xl font-bold text-red-600">{growth?.left ?? 0}</div>
-          <p className="text-xs text-muted-foreground">Bu dönemde pasife çekilen danışman sayısı</p>
-        </div>
-        {isAdmin && targetsByUser.length > 0 && (
-          <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-2">
-            <span className="text-sm font-medium text-muted-foreground">HM Bazında (Brüt)</span>
-            <div className="space-y-1.5 max-h-[88px] overflow-y-auto pr-1">
-              {targetsByUser.map((t) => (
-                <div key={t.userId ?? "legacy"} className="flex items-center justify-between gap-2 text-xs">
-                  <span className="text-muted-foreground truncate">{t.userName}</span>
-                  <span className="font-semibold text-foreground shrink-0">{t.brutTarget}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
 
 function ChartCard({ title, children, extra }: {
   title: string;
@@ -554,6 +397,75 @@ interface PeriodRow {
   randevuToplam: number; randevuK0: number; randevuK1: number; randevuK2: number;
   brutToplam: number; brutK0: number; brutK1: number; brutK2: number;
   net: number; bhb: number; companyTl: number;
+}
+
+// ── Dönem içi Giriş / Çıkış (ÜK) isim listesi ───────────────────────────────
+function useUkEntryExit(startDate: string, endDate: string) {
+  return useQuery<{
+    entries: { employeeId: number; name: string; startDate: string | null; office: string | null }[];
+    exits: { employeeId: number; name: string; ukEndDate: string; office: string | null }[];
+  }>({
+    queryKey: ["/api/coaching/uk-entry-exit", startDate, endDate],
+    queryFn: async () => {
+      const res = await fetch(`/api/coaching/uk-entry-exit?startDate=${startDate}&endDate=${endDate}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+function UkEntryExitList({ startDate, endDate, office }: { startDate: string; endDate: string; office?: string }) {
+  const { data } = useUkEntryExit(startDate, endDate);
+  const entries = (data?.entries ?? []).filter(e => !office || e.office === office);
+  const exits   = (data?.exits ?? []).filter(e => !office || e.office === office);
+
+  return (
+    <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+      <div className="px-5 py-3 border-b border-border flex items-center gap-2">
+        <Users className="h-4 w-4 text-primary" />
+        <h2 className="text-base font-semibold">Dönem İçi Giriş / Çıkış</h2>
+        {office && (
+          <span className="text-xs font-medium bg-primary/10 text-primary px-2 py-0.5 rounded-full">{office}</span>
+        )}
+        <span className="text-xs text-muted-foreground ml-1 italic">
+          Giriş listesi sadece Üretkenlik Koçluğu'na dahil danışmanları kapsar
+        </span>
+      </div>
+      <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <p className="text-xs font-semibold text-emerald-700 mb-2">Giriş ({entries.length})</p>
+          {entries.length === 0 ? (
+            <p className="text-xs text-muted-foreground/50 italic">Bu dönemde giriş yok</p>
+          ) : (
+            <ul className="space-y-1">
+              {entries.map(e => (
+                <li key={e.employeeId} className="flex items-center justify-between text-xs">
+                  <span className="truncate">{e.name}</span>
+                  <span className="text-muted-foreground shrink-0 ml-2">{e.startDate?.slice(0, 10)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <div>
+          <p className="text-xs font-semibold text-red-600 mb-2">Çıkış ({exits.length})</p>
+          {exits.length === 0 ? (
+            <p className="text-xs text-muted-foreground/50 italic">Bu dönemde çıkış yok</p>
+          ) : (
+            <ul className="space-y-1">
+              {exits.map(e => (
+                <li key={e.employeeId} className="flex items-center justify-between text-xs">
+                  <span className="truncate">{e.name}</span>
+                  <span className="text-muted-foreground shrink-0 ml-2">{e.ukEndDate?.slice(0, 10)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function PeriodComparisonTable({ computedStart, computedEnd, office, useCustomRange, fromDate, toDate, viewDate, showForecast, showReForecast }: {
@@ -783,36 +695,6 @@ export default function FinancialReports() {
     staleTime: 5 * 60 * 1000,
   });
   // Interview targets are stored per office PER MONTH; "Özel Aralık" can span several
-  // months, so we fetch every (yıl, ay) in [computedStart, computedEnd] and sum them —
-  // otherwise a multi-month gerçekleşen total was being compared against a single ay'ın
-  // hedefi (vy/vm), making the numbers look wildly off.
-  const targetMonths = useMemo(() => monthsInRange(computedStart, computedEnd), [computedStart, computedEnd]);
-  const { data: apptTargetsAk = [] } = useQuery<any[]>({
-    queryKey: ["/api/interview-targets", targetMonths, "Akatlar"],
-    queryFn: async () => {
-      const rows = await Promise.all(targetMonths.map(({ year, month }) =>
-        fetch(`/api/interview-targets?year=${year}&month=${month}&office=Akatlar`, { credentials: "include" }).then(r => r.ok ? r.json() : [])
-      ));
-      return rows.flat();
-    },
-    staleTime: 5 * 60 * 1000,
-  });
-  const { data: apptTargetsZk = [] } = useQuery<any[]>({
-    queryKey: ["/api/interview-targets", targetMonths, "Zekeriyaköy"],
-    queryFn: async () => {
-      const rows = await Promise.all(targetMonths.map(({ year, month }) =>
-        fetch(`/api/interview-targets?year=${year}&month=${month}&office=${encodeURIComponent("Zekeriyaköy")}`, { credentials: "include" }).then(r => r.ok ? r.json() : [])
-      ));
-      return rows.flat();
-    },
-    staleTime: 5 * 60 * 1000,
-  });
-  const apptTargets = useMemo(
-    () => !officeFilter ? [...apptTargetsAk, ...apptTargetsZk]
-        : officeFilter === "Akatlar" ? apptTargetsAk : apptTargetsZk,
-    [officeFilter, apptTargetsAk, apptTargetsZk]
-  );
-
   const APPT_CATS = ["K0", "K1", "K2"] as const;
 
   const apptActuals = useMemo(() => {
@@ -830,15 +712,10 @@ export default function FinancialReports() {
     return counts;
   }, [allInterviews, computedStart, computedEnd, officeFilter]);
 
-  const apptTargetTotals = useMemo(() => {
-    const totals: Record<string, number> = { K0: 0, K1: 0, K2: 0 };
-    for (const t of apptTargets) {
-      if (t.category in totals) totals[t.category] += t.target ?? 0;
-    }
-    return totals;
-  }, [apptTargets]);
-
   const targetFetchYear = useCustomRange ? parseInt(fromDate.substring(0, 4)) : vy;
+  const yearStart = formatYMD(new Date(targetFetchYear, 0, 1));
+  const yearEnd   = formatYMD(new Date(targetFetchYear, 11, 31));
+  const { data: yearStats } = useClosingStats(yearStart, yearEnd, officeFilter, categoryFilter, dealTypeFilter, ukEmployeeIds);
   const { data: targetsAk = [] } = useFinancialTargets(targetFetchYear, "Akatlar");
   const { data: targetsZk = [] } = useFinancialTargets(targetFetchYear, "Zekeriyaköy");
   const targets = useMemo(
@@ -1002,33 +879,6 @@ export default function FinancialReports() {
     [monthlyData, targetsByMonthKey]
   );
 
-  const periodTargets = useMemo(() => {
-    const tMap = new Map((targets as any[]).map(t => [t.month as number, t]));
-    const start = new Date(computedStart + "T00:00:00");
-    const end   = new Date(computedEnd   + "T00:00:00");
-    let bhb = 0, bhbHigh = 0, bm = 0, bmHigh = 0;
-    let satilik = 0, satilikHigh = 0, kiralik = 0, kiralikHigh = 0, count = 0;
-    const cur = new Date(start.getFullYear(), start.getMonth(), 1);
-    const endD = new Date(end.getFullYear(), end.getMonth(), 1);
-    while (cur <= endD) {
-      if (cur.getFullYear() === targetFetchYear) {
-        const t = tMap.get(cur.getMonth() + 1) as any;
-        if (t) {
-          bhb     += parseFloat(t.bhbTarget     ?? "0");
-          bhbHigh += parseFloat(t.bhbHighTarget ?? "0");
-          bm      += parseFloat(t.bmTarget      ?? "0");
-          bmHigh  += parseFloat(t.bmHighTarget  ?? "0");
-          satilik     += t.satilikAdetTarget     ?? 0;
-          satilikHigh += t.satilikAdetHighTarget ?? 0;
-          kiralik     += t.kiralikAdetTarget     ?? 0;
-          kiralikHigh += t.kiralikAdetHighTarget ?? 0;
-          count++;
-        }
-      }
-      cur.setMonth(cur.getMonth() + 1);
-    }
-    return { bhb, bhbHigh, bm, bmHigh, satilik, satilikHigh, kiralik, kiralikHigh, hasAny: count > 0 };
-  }, [targets, computedStart, computedEnd, targetFetchYear]);
   const mergedMonthlyData = useMemo(() => {
     const prevByM = new Map(prevMonthlyData.map((r: any) => [parseInt(r.monthKey.split("-")[1]), r]));
     const currByM = new Map(monthlyDataWithTargets.map((r: any) => [parseInt(r.monthKey.split("-")[1]), r]));
@@ -1215,6 +1065,7 @@ export default function FinancialReports() {
           useCustomRange={useCustomRange} fromDate={fromDate} toDate={toDate} viewDate={viewDate}
           showForecast={showReelTarget} showReForecast={showYuksekTarget}
         />
+        <UkEntryExitList startDate={computedStart} endDate={computedEnd} office={officeFilter} />
 
         {/* ── Randevu Hedef Takibi ── */}
         <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
@@ -1233,78 +1084,68 @@ export default function FinancialReports() {
               const actual = cat === "Toplam"
                 ? APPT_CATS.reduce((s, c) => s + apptActuals[c], 0)
                 : apptActuals[cat] ?? 0;
-              const target = cat === "Toplam"
-                ? APPT_CATS.reduce((s, c) => s + apptTargetTotals[c], 0)
-                : apptTargetTotals[cat] ?? 0;
-              const pct = target > 0 ? Math.round((actual / target) * 100) : null;
-              const done = target > 0 && actual >= target;
-              const styles: Record<string, { badge: string; text: string; bar: string }> = {
-                K0:     { badge: "bg-blue-100 text-blue-700",    text: "text-blue-600",    bar: "#3b82f6" },
-                K1:     { badge: "bg-amber-100 text-amber-700",  text: "text-amber-600",   bar: "#f59e0b" },
-                K2:     { badge: "bg-emerald-100 text-emerald-700", text: "text-emerald-600", bar: "#10b981" },
-                Toplam: { badge: "bg-purple-100 text-purple-700", text: "text-purple-600", bar: "#8b5cf6" },
+              const styles: Record<string, { badge: string; text: string }> = {
+                K0:     { badge: "bg-blue-100 text-blue-700",    text: "text-blue-600" },
+                K1:     { badge: "bg-amber-100 text-amber-700",  text: "text-amber-600" },
+                K2:     { badge: "bg-emerald-100 text-emerald-700", text: "text-emerald-600" },
+                Toplam: { badge: "bg-purple-100 text-purple-700", text: "text-purple-600" },
               };
               const s = styles[cat];
               return (
                 <div key={cat} className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className={`rounded-md px-2 py-0.5 text-xs font-bold ${s.badge}`}>{cat}</span>
-                    {done && <span className="text-[10px] text-emerald-600 font-medium">✓ Hedef tamam</span>}
-                  </div>
+                  <span className={`rounded-md px-2 py-0.5 text-xs font-bold ${s.badge}`}>{cat}</span>
                   <div className={`text-3xl font-bold ${s.text}`}>{actual}</div>
-                  {target > 0 ? (
-                    <>
-                      <div className="text-xs text-muted-foreground">Hedef: {target}</div>
-                      <div className="h-2 rounded-full bg-muted overflow-hidden">
-                        <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(100, pct ?? 0)}%`, backgroundColor: s.bar }} />
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        %{pct}{done && <span className="text-emerald-600 font-semibold"> · ✓ hedefe ulaşıldı</span>}
-                      </p>
-                    </>
-                  ) : (
-                    <div className="text-xs text-muted-foreground/50 italic">Hedef belirlenmedi</div>
-                  )}
                 </div>
               );
             })}
           </div>
         </div>
 
-        {/* ── Brüt/Net Büyüme ── */}
-        <GrowthSection viewDate={viewDate} isAdmin={isAdmin} useCustomRange={useCustomRange} fromDate={fromDate} toDate={toDate} ukOnly={ukOnly} office={officeFilter} />
 
-        {/* ── Target Progress ── */}
-        {(periodTargets.hasAny || isAdmin) && (
-          <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-            <div className="px-5 py-3 border-b border-border flex items-center gap-2">
-              <Target className="h-4 w-4 text-primary" />
-              <h2 className="text-base font-semibold">Hedef Takibi</h2>
-              {officeFilter && (
-                <span className="text-xs font-medium bg-primary/10 text-primary px-2 py-0.5 rounded-full">{officeFilter}</span>
-              )}
-              <span className="text-xs text-muted-foreground ml-1">
-                {useCustomRange ? `${fromDate} – ${toDate}` : format(viewDate, "MMMM yyyy", { locale: tr })}
-              </span>
-              {isAdmin && (
-                <Button
-                  size="sm" variant="ghost"
-                  className="ml-auto h-7 text-xs gap-1"
-                  onClick={() => setShowEditor(v => !v)}
-                >
-                  <Save className="h-3.5 w-3.5" />
-                  Hedef Düzenle
-                </Button>
-              )}
-            </div>
-            <div className="p-4 grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <TargetProgressCard label="BHB Hedefi" actual={stats?.completedBHB ?? 0} reelTarget={periodTargets.bhb} highTarget={periodTargets.bhbHigh} color="#10b981" format={fmtTRY} showForecast={showReelTarget} showReForecast={showYuksekTarget} />
-              <TargetProgressCard label="BM Payı Hedefi" actual={stats?.completedBM ?? 0} reelTarget={periodTargets.bm} highTarget={periodTargets.bmHigh} color="#8b5cf6" format={fmtTRY} showForecast={showReelTarget} showReForecast={showYuksekTarget} />
-              <TargetProgressCard label="Satılık Adet Hedefi" actual={stats?.completedSatilikCount ?? 0} reelTarget={periodTargets.satilik} highTarget={periodTargets.satilikHigh} color="#3b82f6" format={(n) => String(Math.round(n))} showForecast={showReelTarget} showReForecast={showYuksekTarget} />
-              <TargetProgressCard label="Kiralık Adet Hedefi" actual={stats?.completedKiralikCount ?? 0} reelTarget={periodTargets.kiralik} highTarget={periodTargets.kiralikHigh} color="#f97316" format={(n) => String(Math.round(n))} showForecast={showReelTarget} showReForecast={showYuksekTarget} />
-            </div>
+        {/* ── Özet (aylık BHB / BM Payı) ── */}
+        <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+          <div className="px-5 py-3 border-b border-border flex items-center gap-2">
+            <Target className="h-4 w-4 text-primary" />
+            <h2 className="text-base font-semibold">Özet</h2>
+            {officeFilter && (
+              <span className="text-xs font-medium bg-primary/10 text-primary px-2 py-0.5 rounded-full">{officeFilter}</span>
+            )}
+            <span className="text-xs text-muted-foreground ml-1">{targetFetchYear}</span>
+            {isAdmin && (
+              <Button
+                size="sm" variant="ghost"
+                className="ml-auto h-7 text-xs gap-1"
+                onClick={() => setShowEditor(v => !v)}
+              >
+                <Save className="h-3.5 w-3.5" />
+                Hedef Düzenle
+              </Button>
+            )}
           </div>
-        )}
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border bg-muted/40">
+                <th className="text-left text-xs font-medium text-muted-foreground py-2 px-4">Ay</th>
+                <th className="text-right text-xs font-medium text-muted-foreground py-2 px-4">BHB</th>
+                <th className="text-right text-xs font-medium text-muted-foreground py-2 px-4">BM Payı</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(yearStats?.monthlyTrend ?? []).map((m: { month: string; bhb: number; bm: number }) => (
+                <tr key={m.month} className="border-b border-border/50">
+                  <td className="py-2 px-4 text-xs font-medium">
+                    {format(new Date(m.month + "-01T00:00:00"), "MMMM yyyy", { locale: tr })}
+                  </td>
+                  <td className="py-2 px-4 text-right font-semibold">{fmtTRY(m.bhb)}</td>
+                  <td className="py-2 px-4 text-right font-semibold text-blue-700">{fmtTRY(m.bm)}</td>
+                </tr>
+              ))}
+              {(!yearStats?.monthlyTrend || yearStats.monthlyTrend.length === 0) && (
+                <tr><td colSpan={3} className="py-4 px-4 text-center text-xs text-muted-foreground">Bu yıl için veri yok</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
 
         {/* ── Metric Cards ── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
