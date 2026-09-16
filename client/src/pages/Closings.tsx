@@ -2008,18 +2008,38 @@ export default function Closings() {
   const completedBM  = sumBMAgents(completedAgentRows);
   const expectedBM   = sumBMAgents(expectedAgentRows);
 
-  // Geçen yıl aynı dönem (yearFilter bir yıl seçiliyken) — Özet tablosundaki referans satırı
+  // Geçen yıl aynı dönem — Özet tablosundaki referans satırı.
+  // yearFilter="all" ise "şu anki yıl" baz alınır. monthFilter="all" ise (tüm aylar) ve baz
+  // yıl henüz tamamlanmamışsa (şu anki gerçek yıl) karşılaştırma 1 Ocak - bugünün ay/günü
+  // aralığına kırpılır — aksi halde tamamlanmış bir önceki yıl, henüz bitmemiş bu yılla
+  // haksız kıyaslanır (12 ay vs. örn. 8.5 ay).
   const prevYearAgentRows = useMemo(() => {
-    if (yearFilter === "all") return null;
-    const prevYear = String(parseInt(yearFilter) - 1);
+    const now = new Date();
+    const realCurrentYear = now.getFullYear();
+    const baseYear = yearFilter === "all" ? realCurrentYear : parseInt(yearFilter);
+    const prevYear = baseYear - 1;
+
+    let rangeStart: string;
+    let rangeEnd: string;
+    if (monthFilter !== "all") {
+      const m = parseInt(monthFilter);
+      const lastDay = new Date(prevYear, m, 0).getDate();
+      rangeStart = `${prevYear}-${monthFilter}-01`;
+      rangeEnd   = `${prevYear}-${monthFilter}-${String(lastDay).padStart(2, "0")}`;
+    } else if (baseYear === realCurrentYear) {
+      rangeStart = `${prevYear}-01-01`;
+      rangeEnd   = `${prevYear}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    } else {
+      rangeStart = `${prevYear}-01-01`;
+      rangeEnd   = `${prevYear}-12-31`;
+    }
+
     let rows = agentRowsAll.filter(r => {
       const dRef = r.effectiveStatus === "expected"
         ? (r.effectiveDate ?? ((r.closing as any).createdAt ? new Date((r.closing as any).createdAt).toISOString().split("T")[0] : null))
         : r.effectiveDate;
       if (!dRef) return false;
-      const matchYear = dRef.slice(0, 4) === prevYear;
-      const matchMonth = monthFilter === "all" || dRef.slice(5, 7) === monthFilter;
-      return matchYear && matchMonth;
+      return dRef >= rangeStart && dRef <= rangeEnd;
     });
     if (officeFilter !== "all") {
       rows = rows.filter(r => ((r.agent as any).officeSnapshot ?? employeeOfficeMap[(r.agent as any).employeeId]) === officeFilter);
@@ -2034,10 +2054,10 @@ export default function Closings() {
     return rows;
   }, [agentRowsAll, yearFilter, monthFilter, officeFilter, advisorFilter, employeeOfficeMap]);
 
-  const prevYearSides  = prevYearAgentRows ? sumIslemAdetAgents(prevYearAgentRows) : null;
-  const prevYearVolume = prevYearAgentRows ? sumVolumeAgents(prevYearAgentRows) : null;
-  const prevYearBHB    = prevYearAgentRows ? sumBHBAgents(prevYearAgentRows) : null;
-  const prevYearBM     = prevYearAgentRows ? sumBMAgents(prevYearAgentRows) : null;
+  const prevYearSides  = sumIslemAdetAgents(prevYearAgentRows);
+  const prevYearVolume = sumVolumeAgents(prevYearAgentRows);
+  const prevYearBHB    = sumBHBAgents(prevYearAgentRows);
+  const prevYearBM     = sumBMAgents(prevYearAgentRows);
 
   // BHB Hedefi (Reforecast + Hedefe Kalan tabları) — yearFilter="all" ise şu anki takvim yılı kullanılır
   const targetYear = yearFilter === "all" ? new Date().getFullYear() : parseInt(yearFilter);
@@ -2718,15 +2738,13 @@ export default function Closings() {
                     <td className="py-2.5 px-4 text-right font-semibold text-orange-600">{fmtTRY(targetsSummary.bmHigh)}</td>
                   </tr>
                 )}
-                {prevYearAgentRows && (
-                  <tr className="border-t border-border/50">
-                    <td className="py-2.5 px-4 text-xs font-medium text-muted-foreground">Geçen Yıl (Aynı Dönem)</td>
-                    <td className="py-2.5 px-4 text-right text-muted-foreground">{Math.round(prevYearSides ?? 0)}</td>
-                    <td className="py-2.5 px-4 text-right text-muted-foreground">{fmtTRY(prevYearVolume ?? 0)}</td>
-                    <td className="py-2.5 px-4 text-right text-muted-foreground">{fmtTRY(prevYearBHB ?? 0)}</td>
-                    <td className="py-2.5 px-4 text-right text-muted-foreground">{fmtTRY(prevYearBM ?? 0)}</td>
-                  </tr>
-                )}
+                <tr className="border-t border-border/50">
+                  <td className="py-2.5 px-4 text-xs font-medium text-muted-foreground">Geçen Yıl (Aynı Dönem)</td>
+                  <td className="py-2.5 px-4 text-right text-muted-foreground">{Math.round(prevYearSides)}</td>
+                  <td className="py-2.5 px-4 text-right text-muted-foreground">{fmtTRY(prevYearVolume)}</td>
+                  <td className="py-2.5 px-4 text-right text-muted-foreground">{fmtTRY(prevYearBHB)}</td>
+                  <td className="py-2.5 px-4 text-right text-muted-foreground">{fmtTRY(prevYearBM)}</td>
+                </tr>
               </tbody>
             </table>
           </CardContent>
