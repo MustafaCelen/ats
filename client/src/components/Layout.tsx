@@ -57,42 +57,79 @@ const reportsGroupAdmin: NavGroup = {
   ],
 };
 
-const hiringManagerNavItems: NavEntry[] = [
-  { icon: LayoutDashboard, label: "Dashboard",    href: "/dashboard"  },
-  { icon: Briefcase,       label: "Üretim Bandı", href: "/jobs"       },
-  { icon: Users,           label: "Adaylar",      href: "/candidates" },
-  { icon: UserCheck,       label: "Danışmanlar",  href: "/employees"  },
-  { icon: Calendar,        label: "Randevular",   href: "/interviews" },
-  { icon: KanbanSquare,    label: "Onboarding",   href: "/onboarding" },
-  { icon: Target,          label: "Lead Takibi",  href: "/lead-tracking" },
-  { icon: UserPlus,        label: "ÜK Giriş/Çıkış", href: "/uk-entry-exit" },
-  { icon: ClipboardList,   label: "Görevler",     href: "/tasks"      },
-  { icon: Megaphone,       label: "Kampanyalar",  href: "/campaigns"  },
-  reportsGroupHM,
-];
+// İşe Alım: HM ve Admin'de aynı (rekrutman pipeline'ı)
+const recruitingGroup: NavGroup = {
+  icon: Briefcase,
+  label: "İşe Alım",
+  children: [
+    { icon: Briefcase,     label: "Üretim Bandı", href: "/jobs"       },
+    { icon: Users,         label: "Adaylar",      href: "/candidates" },
+    { icon: Calendar,      label: "Randevular",   href: "/interviews" },
+    { icon: KanbanSquare,  label: "Onboarding",   href: "/onboarding" },
+    { icon: ClipboardList, label: "Görevler",     href: "/tasks"      },
+  ],
+};
+
+const marketingGroupHM: NavGroup = {
+  icon: Megaphone,
+  label: "Marketing",
+  children: [
+    { icon: Megaphone, label: "Kampanyalar", href: "/campaigns"     },
+    { icon: Target,    label: "Lead Takibi", href: "/lead-tracking" },
+  ],
+};
+
+const marketingGroupAdmin: NavGroup = {
+  icon: Megaphone,
+  label: "Marketing",
+  children: [
+    { icon: Megaphone,     label: "Kampanyalar",          href: "/campaigns"     },
+    { icon: Target,        label: "Lead Takibi",          href: "/lead-tracking" },
+    { icon: MessageCircle, label: "WhatsApp Toplu Mesaj", href: "/whatsapp-bulk" },
+  ],
+};
+
+const advisorsGroupHM: NavGroup = {
+  icon: UserCheck,
+  label: "Danışmanlar",
+  children: [
+    { icon: UserCheck, label: "Danışmanlar",    href: "/employees"     },
+    { icon: UserPlus,  label: "ÜK Giriş/Çıkış", href: "/uk-entry-exit" },
+  ],
+};
+
+const advisorsGroupAdmin: NavGroup = {
+  icon: UserCheck,
+  label: "Danışmanlar",
+  children: [
+    { icon: UserCheck, label: "Danışmanlar",       href: "/employees"          },
+    { icon: UserPlus,  label: "ÜK Giriş/Çıkış",    href: "/uk-entry-exit"      },
+    { icon: Users2,    label: "Takımlar",          href: "/teams"              },
+    { icon: Copy,      label: "Danışman Birleştir", href: "/duplicate-merge"   },
+  ],
+};
+
+const financeGroup: NavGroup = {
+  icon: DollarSign,
+  label: "İşlemler & Finans",
+  children: [
+    { icon: DollarSign, label: "İşlem Kapanış",           href: "/closings"          },
+    { icon: Copy,        label: "Duplike Kapanışlar",      href: "/duplicate-closings" },
+    { icon: Receipt,     label: "Masraflar & Ek Gelirler", href: "/expenses"           },
+    { icon: BarChart3,   label: "Masraf Raporları",        href: "/expense-reports"    },
+    { icon: Puzzle,      label: "Fonzip",                  href: "/fonzip"             },
+  ],
+};
 
 const adminNavItems: NavEntry[] = [
-  { icon: LayoutDashboard, label: "Dashboard",      href: "/dashboard"  },
-  { icon: Briefcase,       label: "Üretim Bandı",   href: "/jobs"       },
-  { icon: Users,           label: "Adaylar",        href: "/candidates" },
-  { icon: UserCheck,       label: "Danışmanlar",    href: "/employees"  },
-  { icon: Calendar,        label: "Randevular",     href: "/interviews" },
-  { icon: KanbanSquare,    label: "Onboarding",     href: "/onboarding" },
-  { icon: Target,          label: "Lead Takibi",    href: "/lead-tracking" },
-  { icon: UserPlus,        label: "ÜK Giriş/Çıkış", href: "/uk-entry-exit" },
-  { icon: ClipboardList,   label: "Görevler",       href: "/tasks"      },
-  { icon: Megaphone,       label: "Kampanyalar",    href: "/campaigns"  },
-  { icon: DollarSign,      label: "İşlem Kapanış",  href: "/closings"   },
-  { icon: Building2,       label: "Portal İlanları", href: "/listings"   },
-  { icon: Receipt,         label: "Masraflar & Ek Gelirler", href: "/expenses"   },
-  { icon: BarChart3,       label: "Masraf Raporları",         href: "/expense-reports" },
+  { icon: LayoutDashboard, label: "Dashboard",       href: "/dashboard" },
+  recruitingGroup,
+  marketingGroupAdmin,
+  advisorsGroupAdmin,
+  financeGroup,
+  { icon: Building2,       label: "Portal İlanları", href: "/listings"  },
   reportsGroupAdmin,
-  { icon: Users2,          label: "Takımlar",       href: "/teams"      },
-  { icon: Copy,            label: "Danışman Birleştir", href: "/duplicate-merge" },
-  { icon: Copy,            label: "Duplike Kapanışlar", href: "/duplicate-closings" },
-  { icon: MessageCircle,   label: "WhatsApp Toplu Mesaj", href: "/whatsapp-bulk" },
-  { icon: Puzzle,          label: "Fonzip",         href: "/fonzip"     },
-  { icon: Shield,          label: "Kullanıcılar",   href: "/users"      },
+  { icon: Shield,          label: "Kullanıcılar",    href: "/users"     },
 ];
 
 const assistantNavItems: NavEntry[] = [
@@ -133,15 +170,10 @@ export function Layout({ children }: LayoutProps) {
   const isAssistant = user?.role === "assistant";
 
   const hmNavItems: NavEntry[] = [
-    { icon: LayoutDashboard, label: "Dashboard",    href: "/dashboard"  },
-    { icon: Briefcase,       label: "Üretim Bandı", href: "/jobs"       },
-    { icon: Users,           label: "Adaylar",      href: "/candidates" },
-    { icon: UserCheck,       label: "Danışmanlar",  href: "/employees"  },
-    { icon: Calendar,        label: "Randevular",   href: "/interviews" },
-    { icon: KanbanSquare,    label: "Onboarding",   href: "/onboarding" },
-    { icon: Target,          label: "Lead Takibi",  href: "/lead-tracking" },
-    { icon: UserPlus,        label: "ÜK Giriş/Çıkış", href: "/uk-entry-exit" },
-    { icon: ClipboardList,   label: "Görevler",     href: "/tasks"      },
+    { icon: LayoutDashboard, label: "Dashboard", href: "/dashboard" },
+    recruitingGroup,
+    marketingGroupHM,
+    advisorsGroupHM,
     user?.canViewFinancials ? reportsGroupAdmin : reportsGroupHM,
   ];
 
