@@ -1519,7 +1519,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   const LEAD_TRACKING_TEXT_FIELDS = [
     "profession", "leadCallNotes", "leadCallbackNotes",
   ] as const;
-  app.patch("/api/candidates/:id/lead-tracking", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
+  app.patch("/api/candidates/:id/lead-tracking", requireAuth, async (req, res) => {
     try {
       const id = Number(req.params.id);
       const update: Record<string, boolean | string | null> = {};
@@ -1571,7 +1571,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json(await storage.getCandidateNotes(Number(req.params.id)));
   });
 
-  app.post("/api/candidates/:id/notes", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
+  app.post("/api/candidates/:id/notes", requireAuth, async (req, res) => {
     try {
       const { content, authorName } = req.body;
       if (!content) return res.status(400).json({ message: "Content is required" });
