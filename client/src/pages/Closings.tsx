@@ -3168,7 +3168,7 @@ export default function Closings() {
 
 function AgentCollectionDialog({ agentId, row, onClose }: {
   agentId: number | null;
-  row: { employeeName: string; employeeNet: string } | null;
+  row: { employeeName: string; kasa: string } | null;
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -3187,7 +3187,7 @@ function AgentCollectionDialog({ agentId, row, onClose }: {
     enabled: agentId !== null,
   });
 
-  const receivable = parseFloat(row?.employeeNet ?? "0");
+  const receivable = parseFloat(row?.kasa ?? "0");
   const collected = items.reduce((s, i) => s + parseFloat(i.amount), 0);
 
   const addItem = async () => {
@@ -3217,13 +3217,13 @@ function AgentCollectionDialog({ agentId, row, onClose }: {
         <DialogHeader>
           <DialogTitle>Tahsilat — {row?.employeeName ?? ""}</DialogTitle>
           <p id="agent-collection-desc" className="text-sm text-muted-foreground">
-            Bu danışmanın kalem kalem tahsilatı. Toplam Danışman Net Hakedişine ulaşınca ödeme durumu otomatik "Tahsil Edildi" olur.
-            Buradaki "Kasa/Banka" tahsilat yöntemidir — tablodaki "Kasa" sütunuyla (ofis payı dağılımı) karıştırmayın.
+            BM'nin bu danışmandan tahsil edeceği tutar (KWTR+KDV, BM payı, BM KDV, ÜK payı toplamı).
+            Toplam tahsilat bu tutara ulaşınca ödeme durumu otomatik "Tahsil Edildi" olur.
           </p>
         </DialogHeader>
         <div className="space-y-3 pt-2">
           <p className="text-xs text-muted-foreground">
-            Danışman Net Hakedişi: <span className="font-semibold text-foreground">{fmtTRY(receivable)}</span>
+            BM Alacağı: <span className="font-semibold text-foreground">{fmtTRY(receivable)}</span>
             {" · "}Tahsil Edilen: <span className={`font-semibold ${receivable > 0 && collected >= receivable ? "text-emerald-600" : "text-foreground"}`}>{fmtTRY(collected)}</span>
           </p>
 

@@ -2626,14 +2626,16 @@ export class DatabaseStorage implements IStorage {
     await this.autoMarkAgentPaymentCollected(row.closingAgentId);
   }
 
-  // Tahsilat kalemlerinin toplamı danışmanın alacağına (employeeNet) ulaşınca/geçince
-  // paymentCollected otomatik true olur; altına düşerse (kalem silinirse) tekrar false olur.
+  // Tahsilat kalemlerinin toplamı BM'nin danışmandan tahsil edeceği tutara (kwtrKdv +
+  // marketCenterActual + bmKdv + ukShare — closingAgents.kasa alanında saklanan toplam)
+  // ulaşınca/geçince paymentCollected otomatik true olur; altına düşerse (kalem silinirse)
+  // tekrar false olur. Danışmanın kendi net hakedişiyle (employeeNet) ilgisi yoktur.
   async autoMarkAgentPaymentCollected(closingAgentId: number): Promise<void> {
     const [agent] = await db.select().from(closingAgents).where(eq(closingAgents.id, closingAgentId));
     if (!agent) return;
     const items = await this.getClosingAgentCollections(closingAgentId);
     const collected = items.reduce((s, i) => s + parseFloat(i.amount), 0);
-    const receivable = parseFloat(agent.employeeNet ?? "0");
+    const receivable = parseFloat(agent.kasa ?? "0");
     const shouldBeCollected = receivable > 0 && collected >= receivable;
     if (shouldBeCollected !== agent.paymentCollected) {
       await this.updateClosingAgent(closingAgentId, { paymentCollected: shouldBeCollected });
