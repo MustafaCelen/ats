@@ -71,6 +71,7 @@ async function sendClosingNotifications(_closingId: number, _agentIdFilter?: num
         `BM Payı (Uygulanan): ₺${fmt(agent.marketCenterActual)}`,
         `BM KDV: ₺${fmt(agent.bmKdv)}`,
         ...(Number(agent.ukShare) > 0 ? [`ÜK Payı: ₺${fmt(agent.ukShare)}`] : []),
+        ...(Number(agent.ukKdv) > 0 ? [`ÜK KDV: ₺${fmt(agent.ukKdv)}`] : []),
         `Net Geliriniz: ₺${fmt(agent.employeeNet)}`,
         ...(paymentLines.length > 0 ? ["", "Ödeme Detayı:", ...paymentLines] : []),
       ].join("\n");

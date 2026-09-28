@@ -541,6 +541,7 @@ export const closingAgents = pgTable("closing_agents", {
   marketCenterActual: numeric("market_center_actual", { precision: 15, scale: 2 }).notNull(),
   bmKdv: numeric("bm_kdv", { precision: 15, scale: 2 }).notNull().default("0"),
   ukShare: numeric("uk_share", { precision: 15, scale: 2 }).notNull().default("0"),
+  ukKdv: numeric("uk_kdv", { precision: 15, scale: 2 }).notNull().default("0"),
   employeeNet: numeric("employee_net", { precision: 15, scale: 2 }).notNull(),
   kasa: numeric("kasa", { precision: 15, scale: 2 }).default("0"),
   nakit: numeric("nakit", { precision: 15, scale: 2 }).default("0"),

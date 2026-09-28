@@ -233,7 +233,7 @@ export interface IStorage {
   updateClosingAgent(id: number, data: Partial<{
     splitPercentage: string; bhbShare: string; mainBranchShare: string;
     kwtrKdv: string; marketCenterActual: string; bmKdv: string;
-    ukShare: string; employeeNet: string; kasa: string; nakit: string; banka: string;
+    ukShare: string; ukKdv: string; employeeNet: string; kasa: string; nakit: string; banka: string;
     closingDate: Date | null; status: string | null; paymentCollected: boolean;
   }>): Promise<void>;
   updateClosingSide(id: number, data: Partial<{ kasa: string; nakit: string; banka: string }>): Promise<void>;
@@ -286,6 +286,7 @@ export interface IStorage {
         marketCenterActual?: string;
         bmKdv?: string;
         ukShare?: string;
+        ukKdv?: string;
         employeeNet?: string;
         closingDate?: Date | null;
         status?: string | null;
@@ -305,6 +306,7 @@ export interface IStorage {
       marketCenterActual?: string;
       bmKdv?: string;
       ukShare?: string;
+      ukKdv?: string;
       employeeNet?: string;
       closingDate?: Date | null;
       status?: string | null;
@@ -2645,7 +2647,7 @@ export class DatabaseStorage implements IStorage {
   async updateClosingAgent(id: number, data: Partial<{
     splitPercentage: string; bhbShare: string; mainBranchShare: string;
     kwtrKdv: string; marketCenterActual: string; bmKdv: string;
-    ukShare: string; employeeNet: string; kasa: string; nakit: string; banka: string;
+    ukShare: string; ukKdv: string; employeeNet: string; kasa: string; nakit: string; banka: string;
     closingDate: Date | null; status: string | null; paymentCollected: boolean;
     ilgiliAy: string | null;
   }>): Promise<void> {
@@ -3310,6 +3312,7 @@ export class DatabaseStorage implements IStorage {
         marketCenterActual?: string;
         bmKdv?: string;
         ukShare?: string;
+        ukKdv?: string;
         employeeNet?: string;
         kasa?: string;
         nakit?: string;
@@ -3407,6 +3410,7 @@ export class DatabaseStorage implements IStorage {
           let marketCenterActual: number;
           let bmKdv: number;
           let ukShare: number;
+          let ukKdv: number;
           let ukRateSnapshot = 0;
           let employeeNet: number;
 
@@ -3428,6 +3432,7 @@ export class DatabaseStorage implements IStorage {
                 : (capAmount === null ? marketCenterDue : Math.min(marketCenterDue, Math.max(0, capAmount - capUsedSoFar))));
             bmKdv = parseFloat(agentInput.bmKdv ?? "0");
             ukShare = parseFloat(agentInput.ukShare ?? "0");
+            ukKdv = parseFloat(agentInput.ukKdv ?? "0");
             employeeNet = parseFloat(agentInput.employeeNet ?? "0");
             if (emp.uretkenlikKoclugu && emp.uretkenlikKocluguOran) {
               ukRateSnapshot = parseInt(emp.uretkenlikKocluguOran.replace(/[^0-9]/g, "")) || 5;
@@ -3446,11 +3451,12 @@ export class DatabaseStorage implements IStorage {
               : Math.min(marketCenterDue, Math.max(0, capAmount - capUsedSoFar));
             bmKdv = marketCenterActual > 0 ? bhbShare * 0.004 : 0; // BHB × %2 × %20, yalnızca BM payı > 0 ise
             ukShare = 0;
+            ukKdv = 0;
             if (emp.uretkenlikKoclugu && emp.uretkenlikKocluguOran) {
               ukRateSnapshot = parseInt(emp.uretkenlikKocluguOran.replace(/[^0-9]/g, "")) || 5;
               ukShare = bhbShare * (ukRateSnapshot / 100);
             }
-            employeeNet = bhbShare - kwtrKdv - marketCenterActual - bmKdv - ukShare;
+            employeeNet = bhbShare - kwtrKdv - marketCenterActual - bmKdv - ukShare - ukKdv;
           }
 
           // Update running cap regardless of which path was taken
@@ -3467,6 +3473,7 @@ export class DatabaseStorage implements IStorage {
             marketCenterActual: String(marketCenterActual),
             bmKdv: String(bmKdv),
             ukShare: String(ukShare),
+            ukKdv: String(ukKdv),
             employeeNet: String(employeeNet),
             kasa: agentInput.kasa ?? "0",
             nakit: agentInput.nakit ?? "0",
@@ -3608,6 +3615,7 @@ export class DatabaseStorage implements IStorage {
       marketCenterActual?: string;
       bmKdv?: string;
       ukShare?: string;
+      ukKdv?: string;
       employeeNet?: string;
       kasa?: string;
       nakit?: string;
@@ -3670,7 +3678,7 @@ export class DatabaseStorage implements IStorage {
 
           let bhbShare: number, mainBranchShare: number, kwtrKdv: number;
           let marketCenterDue: number, marketCenterActual: number, bmKdv: number;
-          let ukShare: number, ukRateSnapshot = 0, employeeNet: number;
+          let ukShare: number, ukKdv: number, ukRateSnapshot = 0, employeeNet: number;
 
           const bmRate2 = contractType === "50/50" ? null : 0.30;
 
@@ -3684,6 +3692,7 @@ export class DatabaseStorage implements IStorage {
             marketCenterActual = parseFloat(agentInput.marketCenterActual ?? "0");
             bmKdv = parseFloat(agentInput.bmKdv ?? "0");
             ukShare = parseFloat(agentInput.ukShare ?? "0");
+            ukKdv = parseFloat(agentInput.ukKdv ?? "0");
             employeeNet = parseFloat(agentInput.employeeNet ?? "0");
             if (emp.uretkenlikKoclugu && emp.uretkenlikKocluguOran) {
               ukRateSnapshot = parseInt(emp.uretkenlikKocluguOran.replace(/[^0-9]/g, "")) || 5;
@@ -3700,11 +3709,12 @@ export class DatabaseStorage implements IStorage {
               : Math.min(marketCenterDue, Math.max(0, capAmount - capUsedSoFar));
             bmKdv = marketCenterActual > 0 ? bhbShare * 0.004 : 0; // BHB × %2 × %20, yalnızca BM payı > 0 ise
             ukShare = 0;
+            ukKdv = 0;
             if (emp.uretkenlikKoclugu && emp.uretkenlikKocluguOran) {
               ukRateSnapshot = parseInt(emp.uretkenlikKocluguOran.replace(/[^0-9]/g, "")) || 5;
               ukShare = bhbShare * (ukRateSnapshot / 100);
             }
-            employeeNet = bhbShare - kwtrKdv - marketCenterActual - bmKdv - ukShare;
+            employeeNet = bhbShare - kwtrKdv - marketCenterActual - bmKdv - ukShare - ukKdv;
           }
 
           runningCapUsed[agentInput.employeeId] = capUsedSoFar + marketCenterActual;
@@ -3720,6 +3730,7 @@ export class DatabaseStorage implements IStorage {
             marketCenterActual: String(marketCenterActual),
             bmKdv: String(bmKdv),
             ukShare: String(ukShare),
+            ukKdv: String(ukKdv),
             employeeNet: String(employeeNet),
             kasa: agentInput.kasa ?? "0",
             nakit: agentInput.nakit ?? "0",

@@ -322,6 +322,10 @@ export async function ensureSchema(): Promise<void> {
     -- Danışman pasife alınırken çıkış sebebi.
     ALTER TABLE employees ADD COLUMN IF NOT EXISTS exit_reason TEXT;
 
+    -- ÜK payı için ayrı KDV kalemi (BM KDV ile aynı mantık, BM'nin danışmandan
+    -- tahsil edeceği tutara dahil).
+    ALTER TABLE closing_agents ADD COLUMN IF NOT EXISTS uk_kdv NUMERIC(15,2) NOT NULL DEFAULT 0;
+
     -- Danışman bazlı tahsilat kalemleri (kasa/banka, kalem kalem).
     CREATE TABLE IF NOT EXISTS closing_agent_collections (
       id SERIAL PRIMARY KEY,

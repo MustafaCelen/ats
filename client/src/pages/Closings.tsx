@@ -91,11 +91,16 @@ interface AgentBreakdown {
   marketCenterActual: number;
   bmKdv: number;
   ukShare: number;
+  ukKdv: number;
   employeeNet: number;
   capRemaining: number | null; // null = unlimited
   capAmount: number | null;    // null = unlimited
   capUsedAfter: number;
 }
+
+// KDV'li fatura oranı (BM/ÜK KDV oranları bu standart oranın ana paraya
+// oranlanmış halidir — bkz. deriveKasaNakitBanka).
+const STANDARD_VAT_RATE = 0.20;
 
 // ── Inline editable cell components ──────────────────────────────────────────
 const MONTHS_TR = [
@@ -224,6 +229,7 @@ function calcAgentBreakdown(
   commissionRatePct: number = 2, // e.g. 2 → 2%
   bmKdvRatePct: number = 0, // % of BM payı, e.g. 20 → 20%
   overrideSideBHB?: number, // if set, skips saleValue × rate calculation
+  ukKdvRatePct: number = 0, // % of ÜK payı, e.g. 20 → 20%
 ): AgentBreakdown {
   const sideBHB = overrideSideBHB !== undefined ? overrideSideBHB : saleValue * (commissionRatePct / 100);
   const bhbShare = sideBHB * (splitPct / 100);
@@ -249,7 +255,9 @@ function calcAgentBreakdown(
     ukShare = bhbShare * ukRate;
   }
 
-  const employeeNet = bhbShare - kwtrKdv - marketCenterActual - bmKdv - ukShare;
+  const ukKdv = ukShare > 0 ? ukShare * (ukKdvRatePct / 100) : 0;
+
+  const employeeNet = bhbShare - kwtrKdv - marketCenterActual - bmKdv - ukShare - ukKdv;
 
   return {
     bhbShare,
@@ -259,6 +267,7 @@ function calcAgentBreakdown(
     marketCenterActual,
     bmKdv,
     ukShare,
+    ukKdv,
     employeeNet,
     capRemaining: capAmount === null ? null : Math.max(0, capAmount - capUsedAfter),
     capAmount,
@@ -385,6 +394,8 @@ interface AgentInputRow {
   bmKdv: string;
   bmKdvRatePct: string; // BM KDV rate as % of BHB, e.g. "0.40" = 0.40%
   ukShare: string;
+  ukKdv: string;
+  ukKdvRatePct: string; // ÜK KDV rate as % of ÜK payı, e.g. "0" = 0%
   employeeNet: string;
   closingDate: string; // per-agent transaction date (YYYY-MM-DD); "" = inherit from parent closing
   status: string;       // "completed" | "expected" | "" (inherit)
@@ -415,6 +426,8 @@ function newAgent(): AgentInputRow {
     bmKdv: "",
     bmKdvRatePct: "0",
     ukShare: "",
+    ukKdv: "",
+    ukKdvRatePct: "0",
     employeeNet: "",
     closingDate: "",
     status: "",
@@ -425,11 +438,29 @@ function newAgent(): AgentInputRow {
   };
 }
 
+// KDV'li (faturalı) tutarın ana para karşılığı: KDV tutarı standart %20 oranına
+// bölünerek, o KDV'nin hangi ana para kısmına ait olduğu bulunur.
+// Örnek: BM payı 5000, KDV oranı %2 girilmişse → bmKdv = 5000×%2 = 100.
+// Faturalı kısım = 100 / %20 = 500. Banka'ya 500+100=600, Nakit'e kalan 4500 gider.
+function deriveKasaNakitBanka(a: AgentInputRow): { kasa: string; nakit: string; banka: string } {
+  const kwtrKdv = parseFloat(a.kwtrKdv || "0");
+  const bm = parseFloat(a.marketCenterActual || "0");
+  const bmKdv = parseFloat(a.bmKdv || "0");
+  const uk = parseFloat(a.ukShare || "0");
+  const ukKdv = parseFloat(a.ukKdv || "0");
+
+  const bmInvoiced = bmKdv > 0 ? bmKdv / STANDARD_VAT_RATE : 0;
+  const ukInvoiced = ukKdv > 0 ? ukKdv / STANDARD_VAT_RATE : 0;
+
+  const banka = kwtrKdv + bmInvoiced + bmKdv + ukInvoiced + ukKdv;
+  const nakit = (bm - bmInvoiced) + (uk - ukInvoiced);
+  const kasa = nakit + banka;
+
+  return { kasa: kasa.toFixed(2), nakit: nakit.toFixed(2), banka: banka.toFixed(2) };
+}
+
 function applyBreakdown(agent: AgentInputRow, bd: AgentBreakdown): AgentInputRow {
-  const kasa = bd.kwtrKdv + bd.marketCenterActual + bd.bmKdv + bd.ukShare;
-  const nakit = bd.marketCenterActual > 0 ? bd.marketCenterActual + bd.ukShare - bd.bhbShare * 0.02 : 0;
-  const banka = kasa - nakit;
-  return {
+  const updated: AgentInputRow = {
     ...agent,
     bhbShare: bd.bhbShare.toFixed(2),
     mainBranchShare: bd.mainBranchShare.toFixed(2),
@@ -437,24 +468,15 @@ function applyBreakdown(agent: AgentInputRow, bd: AgentBreakdown): AgentInputRow
     marketCenterActual: bd.marketCenterActual.toFixed(2),
     bmKdv: bd.bmKdv.toFixed(2),
     ukShare: bd.ukShare.toFixed(2),
+    ukKdv: bd.ukKdv.toFixed(2),
     employeeNet: bd.employeeNet.toFixed(2),
-    kasa: kasa.toFixed(2),
-    nakit: nakit.toFixed(2),
-    banka: banka.toFixed(2),
     isManuallyEdited: false,
   };
-}
-
-function deriveKasaNakitBanka(a: AgentInputRow): { kasa: string; nakit: string; banka: string } {
-  const kwtrKdv = parseFloat(a.kwtrKdv || "0");
-  const bm = parseFloat(a.marketCenterActual || "0");
-  const bmKdv = parseFloat(a.bmKdv || "0");
-  const uk = parseFloat(a.ukShare || "0");
-  const bhb = parseFloat(a.bhbShare || "0");
-  const kasa = kwtrKdv + bm + bmKdv + uk;
-  const nakit = bm > 0 ? bm + uk - bhb * 0.02 : 0;
-  const banka = kasa - nakit;
-  return { kasa: kasa.toFixed(2), nakit: nakit.toFixed(2), banka: banka.toFixed(2) };
+  const dk = deriveKasaNakitBanka(updated);
+  updated.kasa = dk.kasa;
+  updated.nakit = dk.nakit;
+  updated.banka = dk.banka;
+  return updated;
 }
 
 /** Recompute employeeNet from the stored deduction fields */
@@ -464,7 +486,8 @@ function deriveNet(a: AgentInputRow): string {
   const bm = parseFloat(a.marketCenterActual || "0");
   const bmKdv = parseFloat(a.bmKdv || "0");
   const uk = parseFloat(a.ukShare || "0");
-  return (bhb - kwtrKdv - bm - bmKdv - uk).toFixed(2);
+  const ukKdv = parseFloat(a.ukKdv || "0");
+  return (bhb - kwtrKdv - bm - bmKdv - uk - ukKdv).toFixed(2);
 }
 
 // ── Cap badge ─────────────────────────────────────────────────────────────────
@@ -656,16 +679,17 @@ function SideSection({
               : parseFloat(agent.splitPercentage || "0");
 
             const bmKdvRate = parseFloat(agent.bmKdvRatePct || "0.40");
+            const ukKdvRate = parseFloat(agent.ukKdvRatePct || "0");
 
             const recalc = () => {
               if (!emp) return;
               if (bhbMode === "manual") {
                 if (agentManualBhbNum <= 0) return;
-                const bd = calcAgentBreakdown(saleValue, 100, emp, capUsedSoFar, capAmount, commissionRatePct, bmKdvRate, agentManualBhbNum);
+                const bd = calcAgentBreakdown(saleValue, 100, emp, capUsedSoFar, capAmount, commissionRatePct, bmKdvRate, agentManualBhbNum, ukKdvRate);
                 updateAgent(agent.id, applyBreakdown(agent, bd));
               } else {
                 if (saleValue <= 0 || splitPct <= 0) return;
-                const bd = calcAgentBreakdown(saleValue, splitPct, emp, capUsedSoFar, capAmount, commissionRatePct, bmKdvRate);
+                const bd = calcAgentBreakdown(saleValue, splitPct, emp, capUsedSoFar, capAmount, commissionRatePct, bmKdvRate, undefined, ukKdvRate);
                 updateAgent(agent.id, applyBreakdown(agent, bd));
               }
             };
@@ -674,10 +698,10 @@ function SideSection({
             const showBreakdown = !!emp && (bhbMode === "manual" ? agentManualBhbNum > 0 : (saleValue > 0 && splitPct > 0));
             if (showBreakdown && !agent.isManuallyEdited && agent.bhbShare === "") {
               if (bhbMode === "manual") {
-                const bd = calcAgentBreakdown(saleValue, 100, emp, capUsedSoFar, capAmount, commissionRatePct, bmKdvRate, agentManualBhbNum);
+                const bd = calcAgentBreakdown(saleValue, 100, emp, capUsedSoFar, capAmount, commissionRatePct, bmKdvRate, agentManualBhbNum, ukKdvRate);
                 setTimeout(() => updateAgent(agent.id, applyBreakdown(agent, bd)), 0);
               } else {
-                const bd = calcAgentBreakdown(saleValue, splitPct, emp, capUsedSoFar, capAmount, commissionRatePct, bmKdvRate);
+                const bd = calcAgentBreakdown(saleValue, splitPct, emp, capUsedSoFar, capAmount, commissionRatePct, bmKdvRate, undefined, ukKdvRate);
                 setTimeout(() => updateAgent(agent.id, applyBreakdown(agent, bd)), 0);
               }
             }
@@ -694,6 +718,17 @@ function SideSection({
                 updateAgent(agent.id, updated);
                 return;
               }
+              if (field === "ukKdvRatePct") {
+                const rate = parseFloat(val) || 0;
+                const uk = parseFloat(agent.ukShare || "0");
+                const updated = { ...agent, ukKdvRatePct: val, isManuallyEdited: true };
+                updated.ukKdv = uk > 0 ? (uk * rate / 100).toFixed(2) : "0";
+                updated.employeeNet = deriveNet(updated);
+                const dk = deriveKasaNakitBanka(updated);
+                updated.kasa = dk.kasa; updated.nakit = dk.nakit; updated.banka = dk.banka;
+                updateAgent(agent.id, updated);
+                return;
+              }
               const updated = { ...agent, [field]: val, isManuallyEdited: true };
               // BM payı sıfırlanınca BM KDV de sıfırlanmalı
               if (field === "marketCenterActual") {
@@ -702,6 +737,15 @@ function SideSection({
                 else {
                   const rate = parseFloat(agent.bmKdvRatePct || "0");
                   updated.bmKdv = (bm * rate / 100).toFixed(2);
+                }
+              }
+              // ÜK payı sıfırlanınca/değişince ÜK KDV de yeniden hesaplanmalı
+              if (field === "ukShare") {
+                const uk = parseFloat(val || "0");
+                if (uk === 0) updated.ukKdv = "0";
+                else {
+                  const rate = parseFloat(agent.ukKdvRatePct || "0");
+                  updated.ukKdv = (uk * rate / 100).toFixed(2);
                 }
               }
               if (field !== "employeeNet") {
@@ -884,6 +928,22 @@ function SideSection({
                     </div>
                     <BreakdownField label="BM KDV" prefix="−" value={agent.bmKdv} onChange={(v) => updateField("bmKdv", v)} />
                     <BreakdownField label="Üretkenlik Koçluğu" prefix="−" value={agent.ukShare} onChange={(v) => updateField("ukShare", v)} />
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-muted-foreground">ÜK KDV Oranı (% ÜK)</span>
+                      <div className="flex items-center gap-1">
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          max="100"
+                          value={agent.ukKdvRatePct}
+                          onChange={(e) => updateField("ukKdvRatePct", e.target.value)}
+                          className="h-6 w-20 text-xs text-right px-1.5 py-0"
+                        />
+                        <span className="text-muted-foreground">%</span>
+                      </div>
+                    </div>
+                    <BreakdownField label="ÜK + KDV" prefix="−" value={agent.ukKdv} onChange={(v) => updateField("ukKdv", v)} />
                     <BreakdownField label="Kasa" value={agent.kasa} onChange={(v) => updateField("kasa", v)} highlight />
                     <BreakdownField label="Nakit" value={agent.nakit} onChange={(v) => updateField("nakit", v)} />
                     <BreakdownField label="Banka" value={agent.banka} onChange={(v) => updateField("banka", v)} />
@@ -1492,6 +1552,13 @@ function NewClosingDialog({
             return "0.40";
           })(),
           ukShare: a.ukShare ?? "",
+          ukKdv: a.ukKdv ?? "",
+          ukKdvRatePct: (() => {
+            const uk = parseFloat(a.ukShare ?? "0");
+            const kdv = parseFloat(a.ukKdv ?? "0");
+            if (uk > 0 && kdv > 0) return (kdv / uk * 100).toFixed(4).replace(/\.?0+$/, "") || "0";
+            return "0";
+          })(),
           employeeNet: a.employeeNet ?? "",
           closingDate: a.closingDate ? new Date(a.closingDate).toISOString().split("T")[0] : "",
           status: a.status ?? "",
@@ -1552,6 +1619,7 @@ function NewClosingDialog({
         marketCenterActual: a.marketCenterActual || "0",
         bmKdv: a.bmKdv || "0",
         ukShare: a.ukShare || "0",
+        ukKdv: a.ukKdv || "0",
         employeeNet: a.employeeNet || "0",
         kasa: a.kasa || "0",
         nakit: a.nakit || "0",
