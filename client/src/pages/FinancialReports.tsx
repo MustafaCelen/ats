@@ -1,4 +1,5 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo } from "react";
+import { Link } from "wouter";
 import { Layout } from "@/components/Layout";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -620,11 +621,6 @@ export default function FinancialReports() {
   const [categoryFilter, setCategoryFilter] = useState<string | undefined>(undefined);
   const [dealTypeFilter, setDealTypeFilter] = useState<string | undefined>(undefined);
   const [agentSort, setAgentSort] = useState<{ key: string; dir: "asc" | "desc" }>({ key: "bhb", dir: "desc" });
-  const [showEditor, setShowEditor] = useState(false);
-  const [editorYear, setEditorYear] = useState(() => new Date().getFullYear());
-  const [editorOffice, setEditorOffice] = useState<string>("Akatlar");
-  const [draftTargets, setDraftTargets] = useState<Record<number, { bhb: string; bhbHigh: string; bm: string; bmHigh: string; satilik: string; satilikHigh: string; kiralik: string; kiralikHigh: string }>>({});
-  const [savingMonth, setSavingMonth] = useState<number | null>(null);
   const [showReelTarget,   setShowReelTarget]   = useState(true);
   const [showYuksekTarget, setShowYuksekTarget] = useState(true);
   const [showPrevYear, setShowPrevYear] = useState(true);
@@ -758,53 +754,6 @@ export default function FinancialReports() {
         : officeFilter === "Akatlar" ? targetsAk : targetsZk,
     [officeFilter, targetsAk, targetsZk]
   );
-  const { data: editorTargetsRaw = [] } = useFinancialTargets(editorYear, editorOffice);
-
-  // Sync editor draft whenever server data or editorYear changes
-  useEffect(() => {
-    const rows: typeof draftTargets = {};
-    const p = (v: any) => v != null ? String(parseFloat(v)) : "";
-    const i = (v: any) => v != null ? String(v) : "";
-    for (let m = 1; m <= 12; m++) {
-      const t = editorTargetsRaw.find((x: any) => x.month === m);
-      rows[m] = {
-        bhb: p(t?.bhbTarget), bhbHigh: p(t?.bhbHighTarget),
-        bm: p(t?.bmTarget), bmHigh: p(t?.bmHighTarget),
-        satilik: i(t?.satilikAdetTarget), satilikHigh: i(t?.satilikAdetHighTarget),
-        kiralik: i(t?.kiralikAdetTarget), kiralikHigh: i(t?.kiralikAdetHighTarget),
-      };
-    }
-    setDraftTargets(rows);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editorTargetsRaw, editorYear]);
-
-  const saveTarget = async (month: number) => {
-    const row = draftTargets[month];
-    if (!row) return;
-    setSavingMonth(month);
-    try {
-      await fetch(`/api/financial-targets/${editorYear}/${month}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({
-          office: editorOffice,
-          bhbTarget:             row.bhb         !== "" ? parseFloat(row.bhb)         || null : null,
-          bhbHighTarget:         row.bhbHigh     !== "" ? parseFloat(row.bhbHigh)     || null : null,
-          bmTarget:              row.bm          !== "" ? parseFloat(row.bm)          || null : null,
-          bmHighTarget:          row.bmHigh      !== "" ? parseFloat(row.bmHigh)      || null : null,
-          satilikAdetTarget:     row.satilik     !== "" ? parseInt(row.satilik)       || null : null,
-          satilikAdetHighTarget: row.satilikHigh !== "" ? parseInt(row.satilikHigh)   || null : null,
-          kiralikAdetTarget:     row.kiralik     !== "" ? parseInt(row.kiralik)       || null : null,
-          kiralikAdetHighTarget: row.kiralikHigh !== "" ? parseInt(row.kiralikHigh)   || null : null,
-        }),
-      });
-      qc.invalidateQueries({ queryKey: ["/api/financial-targets", editorYear, editorOffice] });
-    } finally {
-      setSavingMonth(null);
-    }
-  };
-
   const sortedAgents = useMemo(() => {
     const rows = [...(stats?.byAgent ?? [])];
     const { key, dir } = agentSort;
@@ -1165,13 +1114,11 @@ export default function FinancialReports() {
             )}
             <span className="text-xs text-muted-foreground ml-1">{targetFetchYear}</span>
             {isAdmin && (
-              <Button
-                size="sm" variant="ghost"
-                className="ml-auto h-7 text-xs gap-1"
-                onClick={() => setShowEditor(v => !v)}
-              >
-                <Save className="h-3.5 w-3.5" />
-                Hedef Düzenle
+              <Button size="sm" variant="ghost" className="ml-auto h-7 text-xs gap-1" asChild>
+                <Link href="/hedef-giris">
+                  <Save className="h-3.5 w-3.5" />
+                  Hedef Giriş Modülü
+                </Link>
               </Button>
             )}
           </div>
@@ -1904,91 +1851,6 @@ export default function FinancialReports() {
             )}
           </div>
         </div>
-
-        {/* ── Admin Target Editor ── */}
-        {isAdmin && showEditor && (() => {
-          const MONTH_LABELS = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"];
-          return (
-            <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-              <div className="px-5 py-4 border-b border-border flex items-center gap-3 flex-wrap">
-                <Target className="h-4 w-4 text-primary shrink-0" />
-                <h2 className="text-base font-semibold">Aylık Hedef Yönetimi</h2>
-                {/* Office selector */}
-                <div className="flex items-center gap-1 rounded-lg border border-border bg-muted/30 p-0.5">
-                  {(["Akatlar", "Zekeriyaköy"] as const).map(o => (
-                    <Button key={o} size="sm" variant={editorOffice === o ? "default" : "ghost"} className="h-6 text-xs px-3" onClick={() => setEditorOffice(o)}>
-                      {o}
-                    </Button>
-                  ))}
-                </div>
-                {/* Year selector */}
-                <div className="flex items-center gap-1 ml-auto">
-                  {[new Date().getFullYear() - 1, new Date().getFullYear(), new Date().getFullYear() + 1].map(y => (
-                    <Button key={y} size="sm" variant={editorYear === y ? "default" : "outline"} className="h-7 text-xs px-3" onClick={() => setEditorYear(y)}>
-                      {y}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[700px] text-sm">
-                  <thead>
-                    <tr className="bg-muted/40 border-b border-border">
-                      <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-left w-20" rowSpan={2}>Ay</th>
-                      <th colSpan={2} className="text-xs font-medium text-muted-foreground py-1 px-2 text-center border-l border-border">BHB (₺)</th>
-                      <th colSpan={2} className="text-xs font-medium text-muted-foreground py-1 px-2 text-center border-l border-border">BM Payı (₺)</th>
-                      <th colSpan={2} className="text-xs font-medium text-muted-foreground py-1 px-2 text-center border-l border-border">Satılık Adet</th>
-                      <th colSpan={2} className="text-xs font-medium text-muted-foreground py-1 px-2 text-center border-l border-border">Kiralık Adet</th>
-                      <th className="w-8" rowSpan={2}></th>
-                    </tr>
-                    <tr className="bg-muted/30 border-b border-border">
-                      {["Forecast","Re-Forecast","Forecast","Re-Forecast","Forecast","Re-Forecast","Forecast","Re-Forecast"].map((lbl, i) => (
-                        <th key={i} className={`text-[10px] font-medium text-muted-foreground py-1 px-2 text-right ${i % 2 === 0 ? "border-l border-border" : ""}`}>{lbl}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {Array.from({ length: 12 }, (_, i) => i + 1).map((month) => {
-                      const empty = { bhb: "", bhbHigh: "", bm: "", bmHigh: "", satilik: "", satilikHigh: "", kiralik: "", kiralikHigh: "" };
-                      const row = draftTargets[month] ?? empty;
-                      const isSaving = savingMonth === month;
-                      const setRow = (field: string, val: string) =>
-                        setDraftTargets(prev => ({ ...prev, [month]: { ...(prev[month] ?? empty), [field]: val } }));
-                      const inp = (field: keyof typeof empty, wide?: boolean) => (
-                        <td key={field} className={`py-1 px-1.5 ${["bhb","bm","satilik","kiralik"].includes(field) ? "border-l border-border/40" : ""}`}>
-                          <Input
-                            type="number"
-                            value={row[field] ?? ""}
-                            onChange={e => setRow(field, e.target.value)}
-                            onBlur={() => saveTarget(month)}
-                            placeholder="—"
-                            className={`h-6 text-xs text-right tabular-nums ${wide ? "w-28" : "w-20"}`}
-                            disabled={isSaving}
-                          />
-                        </td>
-                      );
-                      return (
-                        <tr key={month} className="border-b border-border/50 hover:bg-muted/20">
-                          <td className="py-1.5 px-4 font-medium text-xs">{MONTH_LABELS[month - 1]}</td>
-                          {inp("bhb", true)}{inp("bhbHigh", true)}
-                          {inp("bm", true)}{inp("bmHigh", true)}
-                          {inp("satilik")}{inp("satilikHigh")}
-                          {inp("kiralik")}{inp("kiralikHigh")}
-                          <td className="py-1 px-1 text-center text-xs text-muted-foreground">
-                            {isSaving ? "…" : ""}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-              <div className="px-5 py-3 border-t border-border bg-muted/20 text-xs text-muted-foreground">
-                Alandan çıktığınızda (blur) otomatik kaydedilir.
-              </div>
-            </div>
-          );
-        })()}
 
       </div>
     </Layout>

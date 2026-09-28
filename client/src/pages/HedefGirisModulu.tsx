@@ -14,10 +14,6 @@ import {
 import { Target, DollarSign, Receipt, TrendingUp, UserCheck, ExternalLink, Calendar } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
-function fmtTRY(n: number) {
-  return new Intl.NumberFormat("tr-TR", { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n) + " ₺";
-}
-
 const MONTHS = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"];
 const OFFICES = ["Akatlar", "Zekeriyaköy"] as const;
 const APPT_CATS = ["K0", "K1", "K2"] as const;
@@ -34,47 +30,123 @@ function useFinancialTargetsYear(year: number, office: string) {
   });
 }
 
-// ── Bölüm 1: Finansal Hedefler (BHB/BM/Satılık/Kiralık) — yıllık toplam özet ──
-function FinansalHedeflerOzet({ year }: { year: number }) {
-  const { data: ak = [] } = useFinancialTargetsYear(year, "Akatlar");
-  const { data: zk = [] } = useFinancialTargetsYear(year, "Zekeriyaköy");
-  const totals = useMemo(() => {
-    const all = [...ak, ...zk];
-    return all.reduce((acc, t) => ({
-      bhb: acc.bhb + parseFloat(t.bhbTarget ?? "0"),
-      bm: acc.bm + parseFloat(t.bmTarget ?? "0"),
-      satilik: acc.satilik + (t.satilikAdetTarget ?? 0),
-      kiralik: acc.kiralik + (t.kiralikAdetTarget ?? 0),
-    }), { bhb: 0, bm: 0, satilik: 0, kiralik: 0 });
-  }, [ak, zk]);
+// ── Bölüm 1: Finansal Hedefler (BHB/BM/Satılık/Kiralık) — ofis × ay bazlı doğrudan giriş ──
+type FinancialTargetDraft = {
+  bhb: string; bhbHigh: string; bm: string; bmHigh: string;
+  satilik: string; satilikHigh: string; kiralik: string; kiralikHigh: string;
+};
+const emptyFinancialDraft: FinancialTargetDraft = {
+  bhb: "", bhbHigh: "", bm: "", bmHigh: "", satilik: "", satilikHigh: "", kiralik: "", kiralikHigh: "",
+};
+
+function FinansalHedefEditor({ year }: { year: number }) {
+  const qc = useQueryClient();
+  const [office, setOffice] = useState<string>("Akatlar");
+  const { data: rawTargets = [] } = useFinancialTargetsYear(year, office);
+  const [draft, setDraft] = useState<Record<number, FinancialTargetDraft>>({});
+  const [savingMonth, setSavingMonth] = useState<number | null>(null);
+
+  const rowFor = (month: number): FinancialTargetDraft => {
+    if (draft[month]) return draft[month];
+    const t = rawTargets.find((x: any) => x.month === month);
+    const p = (v: any) => (v != null ? String(parseFloat(v)) : "");
+    const i = (v: any) => (v != null ? String(v) : "");
+    return {
+      bhb: p(t?.bhbTarget), bhbHigh: p(t?.bhbHighTarget),
+      bm: p(t?.bmTarget), bmHigh: p(t?.bmHighTarget),
+      satilik: i(t?.satilikAdetTarget), satilikHigh: i(t?.satilikAdetHighTarget),
+      kiralik: i(t?.kiralikAdetTarget), kiralikHigh: i(t?.kiralikAdetHighTarget),
+    };
+  };
+  const setField = (month: number, field: keyof FinancialTargetDraft, value: string) =>
+    setDraft((prev) => ({ ...prev, [month]: { ...rowFor(month), [field]: value } }));
+
+  const saveMonth = async (month: number) => {
+    const row = rowFor(month);
+    setSavingMonth(month);
+    try {
+      await fetch(`/api/financial-targets/${year}/${month}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          office,
+          bhbTarget: row.bhb !== "" ? parseFloat(row.bhb) || null : null,
+          bhbHighTarget: row.bhbHigh !== "" ? parseFloat(row.bhbHigh) || null : null,
+          bmTarget: row.bm !== "" ? parseFloat(row.bm) || null : null,
+          bmHighTarget: row.bmHigh !== "" ? parseFloat(row.bmHigh) || null : null,
+          satilikAdetTarget: row.satilik !== "" ? parseInt(row.satilik) || null : null,
+          satilikAdetHighTarget: row.satilikHigh !== "" ? parseInt(row.satilikHigh) || null : null,
+          kiralikAdetTarget: row.kiralik !== "" ? parseInt(row.kiralik) || null : null,
+          kiralikAdetHighTarget: row.kiralikHigh !== "" ? parseInt(row.kiralikHigh) || null : null,
+        }),
+      });
+      qc.invalidateQueries({ queryKey: ["/api/financial-targets", year, office] });
+    } finally {
+      setSavingMonth(null);
+    }
+  };
+
+  const inp = (month: number, field: keyof FinancialTargetDraft, wide?: boolean) => (
+    <td key={field} className={`py-1 px-1.5 ${["bhb", "bm", "satilik", "kiralik"].includes(field) ? "border-l border-border/40" : ""}`}>
+      <Input
+        type="number"
+        value={rowFor(month)[field]}
+        onChange={(e) => setField(month, field, e.target.value)}
+        onBlur={() => saveMonth(month)}
+        placeholder="—"
+        disabled={savingMonth === month}
+        className={`h-7 text-xs text-right tabular-nums ${wide ? "w-24" : "w-16"}`}
+      />
+    </td>
+  );
 
   return (
     <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-      <div className="px-5 py-3 border-b border-border flex items-center gap-2">
+      <div className="px-5 py-3 border-b border-border flex items-center gap-2 flex-wrap">
         <DollarSign className="h-4 w-4 text-primary" />
         <h2 className="text-base font-semibold">Finansal Hedefler</h2>
-        <span className="text-xs text-muted-foreground ml-1">{year} — her iki ofis toplamı</span>
-        <Button size="sm" variant="ghost" className="ml-auto h-7 text-xs gap-1" asChild>
-          <Link href="/financial-reports"><ExternalLink className="h-3.5 w-3.5" /> Aylık Detaya Git</Link>
-        </Button>
+        <span className="text-xs text-muted-foreground ml-1">BHB / BM / Satılık / Kiralık — aylık, ofis bazlı</span>
+        <Select value={office} onValueChange={setOffice}>
+          <SelectTrigger className="w-32 ml-auto h-8"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {OFFICES.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+          </SelectContent>
+        </Select>
       </div>
-      <div className="p-4 grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-1">
-          <span className="text-xs text-muted-foreground">BHB Hedefi</span>
-          <div className="text-xl font-bold">{fmtTRY(totals.bhb)}</div>
-        </div>
-        <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-1">
-          <span className="text-xs text-muted-foreground">BM Payı Hedefi</span>
-          <div className="text-xl font-bold">{fmtTRY(totals.bm)}</div>
-        </div>
-        <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-1">
-          <span className="text-xs text-muted-foreground">Satılık Adet Hedefi</span>
-          <div className="text-xl font-bold">{Math.round(totals.satilik)}</div>
-        </div>
-        <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-1">
-          <span className="text-xs text-muted-foreground">Kiralık Adet Hedefi</span>
-          <div className="text-xl font-bold">{Math.round(totals.kiralik)}</div>
-        </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[720px] text-sm">
+          <thead>
+            <tr className="bg-muted/40 border-b border-border">
+              <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-left w-16" rowSpan={2}>Ay</th>
+              <th colSpan={2} className="text-xs font-medium text-muted-foreground py-1 px-2 text-center border-l border-border">BHB (₺)</th>
+              <th colSpan={2} className="text-xs font-medium text-muted-foreground py-1 px-2 text-center border-l border-border">BM Payı (₺)</th>
+              <th colSpan={2} className="text-xs font-medium text-muted-foreground py-1 px-2 text-center border-l border-border">Satılık Adet</th>
+              <th colSpan={2} className="text-xs font-medium text-muted-foreground py-1 px-2 text-center border-l border-border">Kiralık Adet</th>
+              <th className="w-6" rowSpan={2}></th>
+            </tr>
+            <tr className="bg-muted/30 border-b border-border">
+              {["Forecast", "Re-Forecast", "Forecast", "Re-Forecast", "Forecast", "Re-Forecast", "Forecast", "Re-Forecast"].map((lbl, i) => (
+                <th key={i} className={`text-[10px] font-medium text-muted-foreground py-1 px-2 text-right ${i % 2 === 0 ? "border-l border-border" : ""}`}>{lbl}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {Array.from({ length: 12 }, (_, i) => i + 1).map((month) => (
+              <tr key={month} className="border-b border-border/50 hover:bg-muted/20">
+                <td className="py-1.5 px-4 font-medium text-xs">{MONTHS[month - 1]}</td>
+                {inp(month, "bhb", true)}{inp(month, "bhbHigh", true)}
+                {inp(month, "bm", true)}{inp(month, "bmHigh", true)}
+                {inp(month, "satilik")}{inp(month, "satilikHigh")}
+                {inp(month, "kiralik")}{inp(month, "kiralikHigh")}
+                <td className="py-1 px-1 text-center text-xs text-muted-foreground">{savingMonth === month ? "…" : ""}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="px-5 py-2.5 border-t border-border bg-muted/20 text-xs text-muted-foreground">
+        Alandan çıktığınızda (blur) otomatik kaydedilir.
       </div>
     </div>
   );
@@ -393,36 +465,68 @@ function AdvisorBhbHedefEditor({ year }: { year: number }) {
   );
 }
 
-// ── Bölüm 5: Masraf Hedefleri — yıllık özet + link ──
-function MasrafHedefleriOzet({ year }: { year: number }) {
-  const { data = [] } = useQuery<any[]>({
-    queryKey: ["/api/expense-targets", year],
-    queryFn: () => fetch(`/api/expense-targets?year=${year}`, { credentials: "include" }).then((r) => r.json()),
+// ── Bölüm 5: Masraf Hedefleri — aylık toplam gelir/gider hedefi, doğrudan giriş ──
+function MasrafHedefEditor({ year, month }: { year: number; month: number }) {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const { data: targets = [] } = useQuery<any[]>({
+    queryKey: ["/api/expense-targets", year, month],
+    queryFn: () => fetch(`/api/expense-targets?year=${year}&month=${month}`, { credentials: "include" }).then((r) => r.json()),
   });
-  const totals = useMemo(() => data.reduce((acc: any, t: any) => {
-    const amt = parseFloat(t.amount ?? "0");
-    if (t.type === "income") acc.income += amt; else acc.expense += amt;
-    return acc;
-  }, { income: 0, expense: 0 }), [data]);
+  const currentIncome = targets.find((t: any) => t.type === "income" && t.category === "_TOTAL_");
+  const currentExpense = targets.find((t: any) => t.type === "expense" && t.category === "_TOTAL_");
+  const [incomeDraft, setIncomeDraft] = useState<string | null>(null);
+  const [expenseDraft, setExpenseDraft] = useState<string | null>(null);
+  const incomeValue = incomeDraft ?? currentIncome?.amount ?? "";
+  const expenseValue = expenseDraft ?? currentExpense?.amount ?? "";
+
+  const save = async (type: "income" | "expense", amount: string) => {
+    const n = parseFloat(String(amount).replace(",", "."));
+    if (isNaN(n) || n < 0) return;
+    await fetch("/api/expense-targets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ year, month, category: "_TOTAL_", type, amount: n }),
+    });
+    qc.invalidateQueries({ queryKey: ["/api/expense-targets"] });
+    toast({ title: "Hedef kaydedildi" });
+  };
 
   return (
     <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
       <div className="px-5 py-3 border-b border-border flex items-center gap-2">
         <Receipt className="h-4 w-4 text-primary" />
         <h2 className="text-base font-semibold">Masraf Hedefleri</h2>
-        <span className="text-xs text-muted-foreground ml-1">{year} yılı toplamı</span>
+        <span className="text-xs text-muted-foreground ml-1">{MONTHS[month - 1]} {year} — aylık toplam</span>
         <Button size="sm" variant="ghost" className="ml-auto h-7 text-xs gap-1" asChild>
           <Link href="/expense-reports"><ExternalLink className="h-3.5 w-3.5" /> Kategori Detayına Git</Link>
         </Button>
       </div>
-      <div className="p-4 grid grid-cols-2 gap-4">
-        <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-1">
-          <span className="text-xs text-muted-foreground">Gelir Hedefi</span>
-          <div className="text-xl font-bold text-emerald-600">{fmtTRY(totals.income)}</div>
+      <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <span className="text-xs text-muted-foreground">Aylık Toplam Gelir Hedefi (₺, KDV dahil)</span>
+          <Input
+            type="text"
+            inputMode="decimal"
+            value={incomeValue}
+            onChange={(e) => setIncomeDraft(e.target.value)}
+            onBlur={() => incomeDraft !== null && save("income", incomeDraft)}
+            placeholder="ör. 500000"
+            className="h-9 text-emerald-700 font-semibold"
+          />
         </div>
-        <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-1">
-          <span className="text-xs text-muted-foreground">Masraf Hedefi</span>
-          <div className="text-xl font-bold text-red-600">{fmtTRY(totals.expense)}</div>
+        <div className="space-y-1.5">
+          <span className="text-xs text-muted-foreground">Aylık Toplam Gider Hedefi (₺, KDV dahil)</span>
+          <Input
+            type="text"
+            inputMode="decimal"
+            value={expenseValue}
+            onChange={(e) => setExpenseDraft(e.target.value)}
+            onBlur={() => expenseDraft !== null && save("expense", expenseDraft)}
+            placeholder="ör. 350000"
+            className="h-9 text-red-700 font-semibold"
+          />
         </div>
       </div>
     </div>
@@ -462,11 +566,11 @@ export default function HedefGirisModulu() {
           </div>
         </div>
 
-        {/* Makro: yıllık toplam özetler */}
-        <FinansalHedeflerOzet year={year} />
-        <MasrafHedefleriOzet year={year} />
+        {/* Makro: yıllık/aylık hedefler — hepsi doğrudan bu modülde girilir */}
+        <FinansalHedefEditor year={year} />
+        <MasrafHedefEditor year={year} month={month} />
 
-        {/* Mikro: doğrudan giriş noktaları — hepsi bu modülde */}
+        {/* Mikro: diğer giriş noktaları */}
         <RandevuHedefEditor year={year} />
         <BuyumeHedefEditor year={year} month={month} />
         <AdvisorBhbHedefEditor year={year} />

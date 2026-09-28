@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Link } from "wouter";
+import { useQuery } from "@tanstack/react-query";
 import { Layout } from "@/components/Layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -7,14 +8,12 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { BarChart3, Filter, Receipt, TrendingUp, Target, Pencil } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid,
   LineChart, Line,
 } from "recharts";
 import { EXPENSE_CATEGORY_GROUPS, EXPENSE_CATEGORIES, INCOME_CATEGORIES, OFFICES } from "@shared/schema";
-import { useToast } from "@/hooks/use-toast";
 
 interface BreakdownRow {
   month: string;
@@ -93,8 +92,6 @@ interface ExpenseTarget {
 
 export default function ExpenseReports() {
   const today = currentYM();
-  const { toast } = useToast();
-  const qc = useQueryClient();
   const [startMonth, setStartMonth] = useState(shiftYM(today, -4));
   const [endMonth, setEndMonth] = useState(today);
   const [type, setType] = useState<"expense" | "income" | "all">("expense");
@@ -102,7 +99,6 @@ export default function ExpenseReports() {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [excludeVat, setExcludeVat] = useState(false);
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
-  const [targetDialogOpen, setTargetDialogOpen] = useState(false);
 
   const adj = (n: number) => excludeVat ? n / (1 + VAT_RATE) : n;
 
@@ -112,22 +108,6 @@ export default function ExpenseReports() {
   const { data: targets = [] } = useQuery<ExpenseTarget[]>({
     queryKey: ["/api/expense-targets", targetY, targetM],
     queryFn: () => fetch(`/api/expense-targets?year=${targetY}&month=${targetM}`, { credentials: "include" }).then(r => r.json()),
-  });
-
-  const saveTargetMutation = useMutation({
-    mutationFn: async (payload: { category: string; type: "income" | "expense"; amount: number }) => {
-      const res = await fetch("/api/expense-targets", {
-        method: "POST", credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ year: targetY, month: targetM, ...payload }),
-      });
-      if (!res.ok) throw new Error("Kayıt başarısız");
-      return res.json();
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/expense-targets"] });
-    },
-    onError: () => toast({ title: "Kaydedilemedi", variant: "destructive" }),
   });
 
   const { data: rawBreakdown = [], isLoading } = useQuery<BreakdownRow[]>({
@@ -504,12 +484,9 @@ export default function ExpenseReports() {
             <CardTitle className="text-sm font-medium flex items-center gap-2">
               <Target className="h-4 w-4 text-primary" />
               Aylık Toplam Hedefler — {targetM.toString().padStart(2, "0")}/{targetY}
-              <button
-                onClick={() => setTargetDialogOpen(true)}
-                className="ml-auto inline-flex items-center gap-1 text-xs text-primary hover:underline"
-              >
-                <Pencil className="h-3 w-3" /> Hedef Düzenle
-              </button>
+              <Link href="/hedef-giris" className="ml-auto inline-flex items-center gap-1 text-xs text-primary hover:underline">
+                <Pencil className="h-3 w-3" /> Hedef Giriş Modülü
+              </Link>
             </CardTitle>
             <p className="text-xs text-muted-foreground">
               Aylık toplam gelir ve gider hedefleri, gerçekleşen ile karşılaştırma
@@ -657,97 +634,6 @@ export default function ExpenseReports() {
         </Card>
       </div>
 
-      {targetDialogOpen && (
-        <TargetEditor
-          open={targetDialogOpen}
-          onOpenChange={setTargetDialogOpen}
-          year={targetY}
-          month={targetM}
-          existingTargets={targets}
-          onSave={(payload) => saveTargetMutation.mutate(payload)}
-        />
-      )}
     </Layout>
-  );
-}
-
-// ── Hedef Düzenle Dialog (aylık toplam hedef) ────────────────────────────
-function TargetEditor({
-  open, onOpenChange, year, month, existingTargets, onSave,
-}: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-  year: number;
-  month: number;
-  existingTargets: ExpenseTarget[];
-  onSave: (p: { category: string; type: "income" | "expense"; amount: number }) => void;
-}) {
-  const currentIncome = existingTargets.find(t => t.type === "income" && t.category === "_TOTAL_");
-  const currentExpense = existingTargets.find(t => t.type === "expense" && t.category === "_TOTAL_");
-
-  const [incomeAmount, setIncomeAmount] = useState(currentIncome?.amount ?? "");
-  const [expenseAmount, setExpenseAmount] = useState(currentExpense?.amount ?? "");
-
-  const handleSave = () => {
-    const inc = parseFloat(String(incomeAmount).replace(",", "."));
-    const exp = parseFloat(String(expenseAmount).replace(",", "."));
-    if (!isNaN(inc) && inc >= 0) onSave({ category: "_TOTAL_", type: "income", amount: inc });
-    if (!isNaN(exp) && exp >= 0) onSave({ category: "_TOTAL_", type: "expense", amount: exp });
-    onOpenChange(false);
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>
-            Aylık Hedef — {String(month).padStart(2, "0")}/{year}
-          </DialogTitle>
-        </DialogHeader>
-
-        <div className="space-y-4 py-2">
-          <p className="text-xs text-muted-foreground">
-            Aylık toplam hedefler (KDV dahil tutar girin). Boş bırakırsan mevcut değer korunur.
-          </p>
-
-          <div>
-            <Label className="text-xs">Aylık Toplam Gelir Hedefi (₺)</Label>
-            <Input
-              type="text" inputMode="decimal"
-              value={incomeAmount}
-              onChange={(e) => setIncomeAmount(e.target.value)}
-              placeholder="ör. 500000"
-              className="mt-1"
-            />
-            {currentIncome && (
-              <p className="text-[10px] text-muted-foreground mt-1">
-                Mevcut: {new Intl.NumberFormat("tr-TR", { maximumFractionDigits: 0 }).format(parseFloat(currentIncome.amount))} ₺
-              </p>
-            )}
-          </div>
-
-          <div>
-            <Label className="text-xs">Aylık Toplam Gider Hedefi (₺)</Label>
-            <Input
-              type="text" inputMode="decimal"
-              value={expenseAmount}
-              onChange={(e) => setExpenseAmount(e.target.value)}
-              placeholder="ör. 350000"
-              className="mt-1"
-            />
-            {currentExpense && (
-              <p className="text-[10px] text-muted-foreground mt-1">
-                Mevcut: {new Intl.NumberFormat("tr-TR", { maximumFractionDigits: 0 }).format(parseFloat(currentExpense.amount))} ₺
-              </p>
-            )}
-          </div>
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>İptal</Button>
-          <Button onClick={handleSave}>Kaydet</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }
