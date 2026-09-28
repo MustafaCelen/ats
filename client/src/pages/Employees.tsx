@@ -60,10 +60,10 @@ function CategoryBadge({ category }: { category?: string }) {
 }
 
 // Danışmanın koçluk türü (ÜK > PK > DUA — birden fazlası işaretliyse öncelik sırası)
-// ve o koçluğa atanmış hiring manager. Hiçbiri yoksa hiçbir şey göstermez.
+// ve o koçluğa atanmış hiring manager. Hiçbiri yoksa "—" gösterir.
 function CoachingBadge({ emp, hiringManagers }: { emp: any; hiringManagers: PublicUser[] }) {
   const type = emp.uretkenlikKoclugu ? "uk" : emp.performansKariyerKoclugu ? "pk" : emp.dua ? "dua" : null;
-  if (!type) return null;
+  if (!type) return <span className="text-xs text-muted-foreground/50">—</span>;
   const managerId = type === "uk" ? emp.uretkenlikKocluguManagerId
     : type === "pk" ? emp.performansKariyerKocluguManagerId
     : emp.duaManagerId;
@@ -75,12 +75,14 @@ function CoachingBadge({ emp, hiringManagers }: { emp: any; hiringManagers: Publ
   };
   const label: Record<string, string> = { uk: "ÜK", pk: "PK", dua: "DUA" };
   return (
-    <span
-      className={`inline-flex items-center text-[10px] font-bold px-1.5 py-0.5 rounded-full ring-1 ${colors[type]}`}
-      title={coachName ? `Koç: ${coachName}` : "Koç atanmamış"}
-    >
-      {label[type]}{coachName ? ` · ${coachName}` : ""}
-    </span>
+    <div className="flex items-center gap-1.5 min-w-0">
+      <span className={`inline-flex items-center shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full ring-1 ${colors[type]}`}>
+        {label[type]}
+      </span>
+      <span className="text-xs text-muted-foreground truncate" title={coachName ?? "Koç atanmamış"}>
+        {coachName ?? "Koç atanmamış"}
+      </span>
+    </div>
   );
 }
 
@@ -479,11 +481,12 @@ export default function Employees() {
         {!isLoading && filtered.length > 0 && (
           <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
             {/* Table header */}
-            <div className="grid grid-cols-[2fr_2fr_1.5fr_1fr_1fr_1fr_1fr_1fr_auto] gap-4 px-4 py-2.5 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            <div className="grid grid-cols-[2fr_2fr_1.5fr_1fr_1.2fr_1fr_1fr_1fr_1fr_auto] gap-4 px-4 py-2.5 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               <div>Çalışan</div>
               <div>İletişim</div>
               <div>Üretim Bandı</div>
               <div>Kategori</div>
+              <div>Koçluk</div>
               <div>Ofis</div>
               <div>KWUID</div>
               <div>Başlangıç</div>
@@ -501,7 +504,7 @@ export default function Employees() {
                 return (
                   <div
                     key={emp.id}
-                    className="grid grid-cols-[2fr_2fr_1.5fr_1fr_1fr_1fr_1fr_1fr_auto] gap-4 px-4 py-3 items-center hover:bg-muted/20 transition-colors group"
+                    className="grid grid-cols-[2fr_2fr_1.5fr_1fr_1.2fr_1fr_1fr_1fr_1fr_auto] gap-4 px-4 py-3 items-center hover:bg-muted/20 transition-colors group"
                     data-testid={`row-employee-${emp.id}`}
                   >
                     {/* Name + avatar */}
@@ -561,6 +564,10 @@ export default function Employees() {
                           <Award className="h-3.5 w-3.5 text-teal-600" />
                         </span>
                       )}
+                    </div>
+
+                    {/* Koçluk */}
+                    <div className="min-w-0">
                       <CoachingBadge emp={emp} hiringManagers={hiringManagers} />
                     </div>
 
