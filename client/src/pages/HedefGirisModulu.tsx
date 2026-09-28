@@ -13,7 +13,6 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Target, DollarSign, Receipt, TrendingUp, UserCheck, ExternalLink, Calendar } from "lucide-react";
-import { useToast } from "@/hooks/use-toast";
 import { EXPENSE_CATEGORY_GROUPS, INCOME_CATEGORIES } from "@shared/schema";
 
 function fmtTRY(n: number) {
@@ -159,94 +158,97 @@ function FinansalHedefEditor({ year }: { year: number }) {
 }
 
 // ── Bölüm 2: Randevu (Randevu/İnterview) Hedefleri — ilan bazlı ──
-function RandevuHedefEditor({ year }: { year: number }) {
-  const { data: jobs = [] } = useAllJobs();
+function useSaveInterviewTarget() {
   const qc = useQueryClient();
-  const { toast } = useToast();
-  const [jobId, setJobId] = useState<string>("");
-  const [month, setMonth] = useState(String(new Date().getMonth() + 1));
-  const [office, setOffice] = useState<string>("Akatlar");
-  const [saving, setSaving] = useState(false);
-
-  const { data: targets = [] } = useQuery<any[]>({
-    queryKey: ["/api/interview-targets", year, month, jobId, office],
-    queryFn: async () => {
-      const res = await fetch(`/api/interview-targets?year=${year}&month=${month}&office=${encodeURIComponent(office)}`, { credentials: "include" });
-      if (!res.ok) throw new Error("Failed");
-      const all = await res.json();
-      return jobId ? all.filter((t: any) => String(t.jobId) === jobId) : all;
-    },
-    enabled: !!jobId,
-  });
-
-  const [draft, setDraft] = useState<Record<string, string>>({});
-  const valueFor = (cat: string) => draft[cat] ?? String(targets.find((t: any) => t.category === cat)?.target ?? "");
-
-  const save = async (category: string) => {
-    if (!jobId) { toast({ title: "Önce bir ilan seçin", variant: "destructive" }); return; }
-    setSaving(true);
-    try {
-      await fetch("/api/interview-targets", {
+  return useMutation({
+    mutationFn: async (data: { jobId: number; year: number; month: number; category: string; office: string; target: number }) => {
+      const res = await fetch("/api/interview-targets", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ jobId: Number(jobId), year, month: Number(month), category, office, target: Number(draft[category] ?? 0) }),
+        body: JSON.stringify(data),
       });
-      qc.invalidateQueries({ queryKey: ["/api/interview-targets"] });
-      toast({ title: `${category} hedefi kaydedildi` });
-    } finally {
-      setSaving(false);
+      if (!res.ok) throw new Error(await res.text());
+    },
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: ["/api/interview-targets", vars.year, vars.month, vars.office] });
+    },
+  });
+}
+
+function RandevuHedefEditor({ year, month }: { year: number; month: number }) {
+  const { data: jobs = [] } = useAllJobs();
+  const [office, setOffice] = useState<string>("Akatlar");
+
+  const { data: targets = [] } = useQuery<any[]>({
+    queryKey: ["/api/interview-targets", year, month, office],
+    queryFn: async () => {
+      const res = await fetch(`/api/interview-targets?year=${year}&month=${month}&office=${encodeURIComponent(office)}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+  });
+  const saveTarget = useSaveInterviewTarget();
+
+  const byJob = useMemo(() => {
+    const map = new Map<number, Record<string, number>>();
+    for (const t of targets) {
+      if (!map.has(t.jobId)) map.set(t.jobId, { K0: 0, K1: 0, K2: 0 });
+      map.get(t.jobId)![t.category] = t.target;
     }
-  };
+    return map;
+  }, [targets]);
 
   return (
     <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-      <div className="px-5 py-3 border-b border-border flex items-center gap-2">
+      <div className="px-5 py-3 border-b border-border flex items-center gap-2 flex-wrap">
         <Calendar className="h-4 w-4 text-primary" />
         <h2 className="text-base font-semibold">Randevu Hedefleri</h2>
-        <span className="text-xs text-muted-foreground ml-1">İlan bazlı, aylık — K0/K1/K2</span>
+        <span className="text-xs text-muted-foreground ml-1">İlan bazlı, aylık — {MONTHS[month - 1]} {year}</span>
+        <Select value={office} onValueChange={setOffice}>
+          <SelectTrigger className="w-32 ml-auto h-8"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {OFFICES.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+          </SelectContent>
+        </Select>
       </div>
-      <div className="p-4 space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <Select value={jobId} onValueChange={setJobId}>
-            <SelectTrigger><SelectValue placeholder="İlan seçin" /></SelectTrigger>
-            <SelectContent>
-              {jobs.map((j: any) => <SelectItem key={j.id} value={String(j.id)}>{j.title}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <Select value={office} onValueChange={setOffice}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {OFFICES.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <Select value={month} onValueChange={setMonth}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {MONTHS.map((m, i) => <SelectItem key={i} value={String(i + 1)}>{m}</SelectItem>)}
-            </SelectContent>
-          </Select>
+      {jobs.length === 0 ? (
+        <p className="text-sm text-muted-foreground p-6 text-center">İlan bulunamadı</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border bg-muted/30">
+                <th className="text-left font-medium text-muted-foreground py-2.5 px-4">İlan</th>
+                {APPT_CATS.map((cat) => (
+                  <th key={cat} className="text-center font-semibold py-2.5 px-4">{cat}</th>
+                ))}
+                <th className="text-center font-medium text-muted-foreground py-2.5 px-4">Toplam</th>
+              </tr>
+            </thead>
+            <tbody>
+              {jobs.map((j: any) => {
+                const t = byJob.get(j.id) ?? { K0: 0, K1: 0, K2: 0 };
+                const total = APPT_CATS.reduce((s, cat) => s + (t[cat] ?? 0), 0);
+                return (
+                  <tr key={j.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
+                    <td className="py-3 px-4 font-medium text-sm text-foreground">{j.title}</td>
+                    {APPT_CATS.map((cat) => (
+                      <td key={cat} className="py-3 px-4 text-center">
+                        <GrowthTargetCell
+                          value={t[cat] ?? 0}
+                          onSave={(v) => saveTarget.mutate({ jobId: j.id, year, month, category: cat, office, target: v })}
+                        />
+                      </td>
+                    ))}
+                    <td className="py-3 px-4 text-center font-medium">{total}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
-        {!jobId ? (
-          <p className="text-sm text-muted-foreground/60 italic">Hedef girmek için bir ilan seçin.</p>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {APPT_CATS.map((cat) => (
-              <div key={cat} className="flex items-center gap-2">
-                <span className="text-sm font-medium w-8">{cat}</span>
-                <Input
-                  type="number"
-                  value={valueFor(cat)}
-                  onChange={(e) => setDraft((d) => ({ ...d, [cat]: e.target.value }))}
-                  onBlur={() => draft[cat] !== undefined && save(cat)}
-                  disabled={saving}
-                  className="h-9"
-                />
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 }
@@ -702,7 +704,7 @@ export default function HedefGirisModulu() {
         <MasrafHedefEditor year={year} />
 
         {/* Mikro: diğer giriş noktaları */}
-        <RandevuHedefEditor year={year} />
+        <RandevuHedefEditor year={year} month={month} />
         <BuyumeHedefEditor year={year} month={month} />
         <AdvisorBhbHedefEditor year={year} />
       </div>
