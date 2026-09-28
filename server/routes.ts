@@ -3073,7 +3073,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         propertyAddress, il, ilce, mahalle, propertyDetails,
         dealCategory, dealType, saleValue, commissionRate, openingPrice,
         durationDays, customerSource, referralInfo, contractStartDate, contractEndDate,
-        closingDate, buyerName, sellerName, notes, sides, kasa, nakit, banka,
+        closingDate, buyerName, sellerName, notes, sides,
       } = req.body;
       if (!saleValue || !sides) {
         return res.status(400).json({ message: "saleValue and sides are required" });
@@ -3112,13 +3112,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         buyerName: buyerName ?? null,
         sellerName: sellerName ?? null,
         notes: notes ?? null,
-        kasa: kasa != null ? String(kasa) : "0",
-        nakit: nakit != null ? String(nakit) : "0",
-        banka: banka != null ? String(banka) : "0",
         createdByUserId: req.user!.id,
         sides: normalizedSides,
       });
-      await storage.autoCompleteClosingIfCollected(closing.id);
       res.status(201).json(closing);
 
       // Fire WhatsApp per agent whose effective status is "completed".
@@ -3196,7 +3192,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         }));
         await storage.replaceClosingSides(Number(req.params.id), String(rest.saleValue ?? "0"), String(rest.commissionRate ?? "2"), normalizedSides);
       }
-      await storage.autoCompleteClosingIfCollected(Number(req.params.id));
       res.status(204).send();
     } catch {
       res.status(500).json({ message: "Internal server error" });
@@ -3252,6 +3247,48 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         })();
       }
     } catch {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Danışman bazlı tahsilat (kalem kalem, kasa/banka) ──────────────────────
+  app.get("/api/closing-agents/:id/collections", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const rows = await storage.getClosingAgentCollections(Number(req.params.id));
+      res.json(rows);
+    } catch (err) {
+      console.error("[GET /api/closing-agents/:id/collections]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.post("/api/closing-agents/:id/collections", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const { method, amount, note, collectedAt } = req.body;
+      if (!method || !["kasa", "banka"].includes(method) || amount == null) {
+        return res.status(400).json({ message: "method (kasa|banka) and amount are required" });
+      }
+      const row = await storage.addClosingAgentCollection({
+        closingAgentId: Number(req.params.id),
+        method,
+        amount: String(amount),
+        note: note ?? null,
+        collectedAt: collectedAt ? new Date(collectedAt) : undefined,
+        createdByUserId: req.user!.id,
+      });
+      res.status(201).json(row);
+    } catch (err) {
+      console.error("[POST /api/closing-agents/:id/collections]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.delete("/api/closing-agent-collections/:id", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      await storage.deleteClosingAgentCollection(Number(req.params.id));
+      res.status(204).send();
+    } catch (err) {
+      console.error("[DELETE /api/closing-agent-collections/:id]", err);
       res.status(500).json({ message: "Internal server error" });
     }
   });

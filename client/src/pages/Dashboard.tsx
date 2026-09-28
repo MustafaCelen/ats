@@ -1,7 +1,7 @@
-import { useState, useMemo, useCallback, Fragment } from "react";
+import { useState, useMemo, Fragment } from "react";
 import { Link } from "wouter";
 import { Layout } from "@/components/Layout";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { format, getDaysInMonth, isToday, isFuture, startOfDay } from "date-fns";
 import { tr } from "date-fns/locale";
 import { ChevronLeft, ChevronRight, Calendar, Users, Target } from "lucide-react";
@@ -42,23 +42,6 @@ function useTargets(year: number, month: number, office: string) {
   });
 }
 
-function useSaveTarget() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (data: { jobId: number; year: number; month: number; category: string; office: string; target: number }) => {
-      const res = await fetch("/api/interview-targets", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(data),
-      });
-      if (!res.ok) throw new Error(await res.text());
-    },
-    onSuccess: (_d, vars) => {
-      qc.invalidateQueries({ queryKey: ["/api/interview-targets", vars.year, vars.month, vars.office] });
-    },
-  });
-}
 
 interface GrowthTargetValue { brutTargetK0: number; brutTargetK1: number; brutTargetK2: number; netTarget: number; }
 
@@ -76,26 +59,6 @@ function useMyGrowthTarget(year: number, month: number, office: string | undefin
       const res = await fetch(`/api/growth/my-target?${p}`, { credentials: "include" });
       if (!res.ok) throw new Error("Failed");
       return res.json();
-    },
-  });
-}
-
-function useSaveMyGrowthTarget() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (data: GrowthTargetValue & { year: number; month: number; office: string; userId?: number | null }) => {
-      const res = await fetch("/api/growth/my-target", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(data),
-      });
-      if (!res.ok) throw new Error(await res.text());
-    },
-    onSuccess: (_d, vars) => {
-      qc.invalidateQueries({ queryKey: ["/api/growth/my-target", vars.year, vars.month] });
-      qc.invalidateQueries({ queryKey: ["/api/growth/targets-by-office", vars.year, vars.month] });
-      qc.invalidateQueries({ queryKey: ["/api/growth/stats", vars.year, vars.month] });
     },
   });
 }
@@ -208,7 +171,6 @@ export default function Dashboard() {
   const isAllOffices = officeFilter === "all";
   const { data: targetsAkatlar = [] } = useTargets(viewYear, apiMonth, "Akatlar");
   const { data: targetsZekeriyakoy = [] } = useTargets(viewYear, apiMonth, "Zekeriyaköy");
-  const saveTarget = useSaveTarget();
 
   // Büyüme hedefi sadece hiring manager'lar için var olabilir. Admin, randevu hedef
   // tablosuyla birebir aynı yapıda (satır × tıkla-düzenle hücre) tüm HM'leri tek
@@ -231,7 +193,6 @@ export default function Dashboard() {
   }, [growthTargetsRows]);
 
   const { data: myGrowthTarget } = useMyGrowthTarget(viewYear, apiMonth, growthOffice, isAdmin ? null : user?.id ?? null);
-  const saveMyGrowthTarget = useSaveMyGrowthTarget();
 
   const prevMonth = () => setViewDate(new Date(viewYear, viewMonth - 1, 1));
   const nextMonth = () => setViewDate(new Date(viewYear, viewMonth + 1, 1));
@@ -267,11 +228,6 @@ export default function Dashboard() {
     else add(targetsZekeriyakoy);
     return map;
   }, [isAllOffices, officeFilter, targetsAkatlar, targetsZekeriyakoy]);
-
-  const handleSaveTarget = useCallback((jobId: number, category: string, target: number) => {
-    if (isAllOffices) return; // editing disabled in the combined view
-    saveTarget.mutate({ jobId, year: viewYear, month: apiMonth, category, office: officeFilter, target });
-  }, [saveTarget, viewYear, apiMonth, officeFilter, isAllOffices]);
 
   // Daily matrix per job (completed only)
   const dailyMatrixByJob = useMemo(() => {
@@ -401,14 +357,17 @@ export default function Dashboard() {
           })}
         </div>
 
-        {/* Büyüme hedefi — randevu hedef tablosuyla birebir aynı yapı (satır × tıkla-düzenle hücre) */}
+        {/* Büyüme hedefi — salt okunur özet; giriş artık Hedef Giriş Modülü'nde */}
         <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
           <div className="flex items-center gap-2 px-5 py-3 border-b border-border">
             <Target className="h-4 w-4 text-muted-foreground" />
             <h2 className="text-sm font-semibold text-foreground">Aylık Büyüme Hedefleri</h2>
             <span className="text-xs text-muted-foreground ml-1">
-              {isAllOffices ? "(Tümü = Akatlar + Zekeriyaköy toplamı — düzenlemek için ofis seçin)" : "(hedef rakamına tıklayarak düzenleyin)"}
+              {isAllOffices ? "(Tümü = Akatlar + Zekeriyaköy toplamı)" : "(salt okunur)"}
             </span>
+            <Link href="/hedef-giris" className="ml-auto text-xs text-primary hover:underline">
+              Hedef girişi için Hedef Giriş Modülü →
+            </Link>
           </div>
 
           {(() => {
@@ -428,25 +387,17 @@ export default function Dashboard() {
               </tr>
             );
 
-            const Row = ({ name, t, onSave }: { name: string; t: GrowthTargetValue; onSave: (patch: Partial<GrowthTargetValue>) => void }) => (
+            const Row = ({ name, t }: { name: string; t: GrowthTargetValue }) => (
               <tr className="border-b border-border/50 hover:bg-muted/20 transition-colors">
                 <td className="py-3 px-4 font-medium text-sm text-foreground">{name}</td>
                 {K0K1K2.map((cat) => (
                   <td key={cat} className="py-3 px-4 text-center">
-                    <TargetCell
-                      value={t[catKey[cat]]}
-                      onSave={(v) => onSave({ [catKey[cat]]: v } as Partial<GrowthTargetValue>)}
-                      readOnly={isAllOffices}
-                    />
+                    <TargetCell value={t[catKey[cat]]} onSave={() => {}} readOnly />
                   </td>
                 ))}
                 <td className="py-3 px-4 text-center font-medium">{brutTotal(t)}</td>
                 <td className="py-3 px-4 text-center">
-                  <TargetCell
-                    value={t.netTarget}
-                    onSave={(v) => onSave({ netTarget: v })}
-                    readOnly={isAllOffices}
-                  />
+                  <TargetCell value={t.netTarget} onSave={() => {}} readOnly />
                 </td>
               </tr>
             );
@@ -463,14 +414,7 @@ export default function Dashboard() {
                     <tbody>
                       {hiringManagers.map((hm) => {
                         const t = targetsByUserMap.get(hm.id) ?? emptyTarget;
-                        return (
-                          <Row
-                            key={hm.id}
-                            name={hm.name}
-                            t={t}
-                            onSave={(patch) => saveMyGrowthTarget.mutate({ ...t, ...patch, year: viewYear, month: apiMonth, office: growthOffice ?? "", userId: hm.id })}
-                          />
-                        );
+                        return <Row key={hm.id} name={hm.name} t={t} />;
                       })}
                       <tr className="bg-muted/20 font-semibold">
                         <td className="py-2.5 px-4">Toplam</td>
@@ -493,11 +437,7 @@ export default function Dashboard() {
               <table className="w-full text-sm">
                 <thead><HeaderRow /></thead>
                 <tbody>
-                  <Row
-                    name={user?.name ?? "Siz"}
-                    t={mine}
-                    onSave={(patch) => saveMyGrowthTarget.mutate({ ...mine, ...patch, year: viewYear, month: apiMonth, office: growthOffice ?? "" })}
-                  />
+                  <Row name={user?.name ?? "Siz"} t={mine} />
                 </tbody>
               </table>
             );
@@ -513,8 +453,11 @@ export default function Dashboard() {
               <Target className="h-4 w-4 text-muted-foreground" />
               <h2 className="text-sm font-semibold text-foreground">Hedefler</h2>
               <span className="text-xs text-muted-foreground ml-1">
-                {isAllOffices ? "(Tümü = Akatlar + Zekeriyaköy toplamı — düzenlemek için ofis seçin)" : "(hedef rakamına tıklayarak düzenleyin)"}
+                {isAllOffices ? "(Tümü = Akatlar + Zekeriyaköy toplamı)" : "(salt okunur)"}
               </span>
+              <Link href="/hedef-giris" className="ml-auto text-xs text-primary hover:underline">
+                Hedef girişi için Hedef Giriş Modülü →
+              </Link>
             </div>
 
             {isLoading ? (
@@ -556,11 +499,7 @@ export default function Dashboard() {
                                 <Progress actual={actuals[cat]} target={tgts[cat]} />
                                 <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
                                   <span>Hedef:</span>
-                                  <TargetCell
-                                    value={tgts[cat]}
-                                    onSave={(v) => handleSaveTarget(job.id, cat, v)}
-                                    readOnly={isAllOffices}
-                                  />
+                                  <TargetCell value={tgts[cat]} onSave={() => {}} readOnly />
                                 </div>
                               </div>
                             </td>

@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { Layout } from "@/components/Layout";
 import { User, ChevronDown, Check, Wallet, CalendarClock, Target, Award, Timer, PieChartIcon, MessageSquare, Send, Trash2, CalendarPlus, CalendarCheck, Plus, Eye, EyeOff, Home, Building2 } from "lucide-react";
@@ -20,7 +21,7 @@ import { useEmployees } from "@/hooks/use-employees";
 import { useAuth } from "@/hooks/use-auth";
 import { formatDistanceToNow } from "date-fns";
 import {
-  useAdvisorBhbTargets, useUpsertAdvisorBhbTarget,
+  useAdvisorBhbTargets,
   useAdvisorNotes, useCreateAdvisorNote, useDeleteAdvisorNote,
   useAdvisorAppointments, useCreateAdvisorAppointment, useUpdateAdvisorAppointmentStatus,
   useDeleteAdvisorAppointment, useSyncAdvisorAppointmentCalendar,
@@ -275,15 +276,13 @@ function BhbTargetCard({ employeeId, data, mode }: { employeeId: number; data: P
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [quarter, setQuarter] = useState(currentQuarter(now.getMonth()));
-  const [targetInput, setTargetInput] = useState("");
 
   const effectiveQuarter = mode === "annual" ? 0 : quarter;
 
   const { data: targets = [] } = useAdvisorBhbTargets(employeeId);
-  const { mutate: upsertTarget, isPending: isSaving } = useUpsertAdvisorBhbTarget(employeeId);
 
   const currentTarget = targets.find((t) => t.year === year && t.quarter === effectiveQuarter);
-  const targetValue = targetInput !== "" ? Number(targetInput) || 0 : Number(currentTarget?.bhbTarget ?? 0);
+  const targetValue = Number(currentTarget?.bhbTarget ?? 0);
 
   const realized = useMemo(() => {
     if (mode === "annual") return data.bhbByYear[year]?.total ?? 0;
@@ -299,15 +298,14 @@ function BhbTargetCard({ employeeId, data, mode }: { employeeId: number; data: P
   ];
   const pct = targetValue > 0 ? Math.min(Math.round((realized / targetValue) * 100), 999) : null;
 
-  const handleSave = () => {
-    upsertTarget({ year, quarter: effectiveQuarter, bhbTarget: targetValue }, { onSuccess: () => setTargetInput("") });
-  };
-
   return (
     <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
       <div className="px-4 py-2.5 border-b border-border flex items-center gap-1.5">
         <PieChartIcon className="h-4 w-4 text-primary" />
         <h3 className="text-sm font-semibold">BHB Hedefi ({mode === "annual" ? "Yıllık" : "Çeyreklik"})</h3>
+        <Link href="/hedef-giris" className="ml-auto text-[11px] text-primary hover:underline">
+          Hedef Giriş Modülü →
+        </Link>
       </div>
       <div className="p-4 grid grid-cols-1 gap-4">
         <div className="space-y-3">
@@ -326,16 +324,6 @@ function BhbTargetCard({ employeeId, data, mode }: { employeeId: number; data: P
                 {data.years.map((y) => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}
               </SelectContent>
             </Select>
-          </div>
-          <div className="flex items-center gap-2">
-            <Input
-              type="number"
-              placeholder="Hedef BHB (₺)"
-              value={targetInput !== "" ? targetInput : (currentTarget?.bhbTarget ?? "")}
-              onChange={(e) => setTargetInput(e.target.value)}
-              className="max-w-[180px]"
-            />
-            <Button size="sm" onClick={handleSave} disabled={isSaving}>{isSaving ? "Kaydediliyor…" : "Kaydet"}</Button>
           </div>
           <div className="text-xs text-muted-foreground space-y-1 pt-1">
             <p>Gerçekleşen: <span className="font-semibold text-foreground">{fmtTRY(realized)}</span></p>

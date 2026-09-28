@@ -371,6 +371,7 @@ function useDeleteCapSetting() {
 // ── Agent row inside side ─────────────────────────────────────────────────────
 interface AgentInputRow {
   id: string;
+  realAgentId?: number; // gerçek closing_agents.id — sadece düzenlenen (kaydedilmiş) danışmanlarda var
   employeeId: number | null;
   splitPercentage: string;
   kasa: string;
@@ -839,6 +840,7 @@ function SideSection({
                     {agent.paymentCollected ? "💰 Tahsil Edildi" : "💸 Bekliyor"}
                   </button>
                 </div>
+                {agent.realAgentId != null && <AgentCollectionsInline agentId={agent.realAgentId} />}
                 {/* Editable breakdown */}
                 {showBreakdown && agent.bhbShare !== "" && (
                   <div className="ml-5 p-2 bg-muted/50 rounded space-y-1.5">
@@ -1240,6 +1242,38 @@ function EmployeeCapStatusPanel({
   );
 }
 
+// Kaydedilmiş bir danışman satırı için tahsilat kalemlerini alt alta gösterir (salt okunur özet).
+// Girmek/silmek için tablo görünümündeki 🏦 Tahsilat butonu (AgentCollectionDialog) kullanılır.
+function AgentCollectionsInline({ agentId }: { agentId: number }) {
+  const { data: items = [] } = useQuery<any[]>({
+    queryKey: ["/api/closing-agents", agentId, "collections"],
+    queryFn: async () => {
+      const res = await fetch(`/api/closing-agents/${agentId}/collections`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+  });
+  if (items.length === 0) return null;
+  const total = items.reduce((s, i) => s + parseFloat(i.amount), 0);
+  return (
+    <div className="ml-5 space-y-1">
+      <span className="text-[11px] text-muted-foreground">Tahsilatlar (toplam {fmtTRY(total)}):</span>
+      <div className="space-y-0.5">
+        {items.map((it: any) => (
+          <div key={it.id} className="flex items-center gap-2 text-[11px] text-muted-foreground pl-2">
+            <span className={it.method === "kasa" ? "text-blue-600" : "text-purple-600"}>
+              {it.method === "kasa" ? "Kasa" : "Banka"}
+            </span>
+            <span className="font-medium text-foreground">{fmtTRY(parseFloat(it.amount))}</span>
+            {it.note && <span className="truncate">— {it.note}</span>}
+            <span className="ml-auto">{it.collectedAt ? new Date(it.collectedAt).toLocaleDateString("tr-TR") : ""}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── New Closing Dialog ────────────────────────────────────────────────────────
 function NewClosingDialog({
   open,
@@ -1440,6 +1474,7 @@ function NewClosingDialog({
         enabled: true,
         agents: s.agents.map((a: any) => ({
           id: Math.random().toString(36).slice(2),
+          realAgentId: a.id,
           employeeId: a.employeeId,
           splitPercentage: a.splitPercentage ?? "100",
           kasa: a.kasa ?? "",
@@ -2262,30 +2297,12 @@ export default function Closings() {
     } catch { /* silent */ }
   }, [queryClient]);
 
-  // Tahsilat: kasa/nakit/banka toplamı alacağa (saleValue × commissionRate/100) ulaşınca
-  // işlem sunucu tarafında otomatik "completed" olur (autoCompleteClosingIfCollected).
-  const [collectionClosingId, setCollectionClosingId] = useState<number | null>(null);
-  const [collectionKasa, setCollectionKasa] = useState("");
-  const [collectionNakit, setCollectionNakit] = useState("");
-  const [collectionBanka, setCollectionBanka] = useState("");
-  const openCollectionDialog = useCallback((closingId: number) => {
-    const c = closings.find((x) => x.id === closingId) as any;
-    setCollectionKasa(c?.kasa ?? "0");
-    setCollectionNakit(c?.nakit ?? "0");
-    setCollectionBanka(c?.banka ?? "0");
-    setCollectionClosingId(closingId);
-  }, [closings]);
-  const saveCollection = useCallback(async () => {
-    if (!collectionClosingId) return;
-    await fetch(`/api/closings/${collectionClosingId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ kasa: collectionKasa || "0", nakit: collectionNakit || "0", banka: collectionBanka || "0" }),
-    });
-    queryClient.invalidateQueries({ queryKey: ["/api/closings"] });
-    setCollectionClosingId(null);
-  }, [collectionClosingId, collectionKasa, collectionNakit, collectionBanka, queryClient]);
+  // Tahsilat: danışman bazlı, kalem kalem (kasa/banka). Her agent'ın toplam tahsilatı
+  // kendi alacağına (employeeNet) ulaşınca sunucu tarafında paymentCollected otomatik true olur.
+  const [collectionAgentId, setCollectionAgentId] = useState<number | null>(null);
+  const openCollectionDialog = useCallback((agentId: number) => {
+    setCollectionAgentId(agentId);
+  }, []);
 
   // Save an agent-level field on blur
   const saveAgentField = useCallback(async (agentId: number, field: string, value: string) => {
@@ -3036,15 +3053,13 @@ export default function Closings() {
                                 <Pencil className="h-3.5 w-3.5" />
                               </button>
                             )}
-                            {row.isFirstOfClosing && (
-                              <button
-                                onClick={() => openCollectionDialog(row.closingId)}
-                                className="text-muted-foreground hover:text-emerald-600 transition-colors p-1 rounded"
-                                title="Tahsilat gir (kasa/nakit/banka)"
-                              >
-                                <Landmark className="h-3.5 w-3.5" />
-                              </button>
-                            )}
+                            <button
+                              onClick={() => openCollectionDialog(row.agentId)}
+                              className={`transition-colors p-1 rounded ${row.paymentCollected ? "text-emerald-600" : "text-muted-foreground hover:text-emerald-600"}`}
+                              title="Tahsilat gir (danışman bazlı, kasa/banka)"
+                            >
+                              <Landmark className="h-3.5 w-3.5" />
+                            </button>
                           </div>
                         </td>
                         <td className="px-2 py-1 whitespace-nowrap font-medium text-xs">
@@ -3141,47 +3156,125 @@ export default function Closings() {
         editingClosing={editingClosing}
       />
 
-      {/* Tahsilat girişi — kasa+nakit+banka toplamı alacağa ulaşınca işlem otomatik tamamlanır */}
-      <Dialog open={collectionClosingId !== null} onOpenChange={(v) => { if (!v) setCollectionClosingId(null); }}>
-        <DialogContent className="max-w-sm" aria-describedby="collection-desc">
-          <DialogHeader>
-            <DialogTitle>Tahsilat Gir</DialogTitle>
-            <p id="collection-desc" className="text-sm text-muted-foreground">
-              Kasa + Nakit + Banka toplamı alacağa (satış bedeli × komisyon oranı) ulaşınca işlem otomatik "Tamamlanan" olur.
-            </p>
-          </DialogHeader>
-          <div className="space-y-3 pt-2">
-            {(() => {
-              const c = closings.find((x) => x.id === collectionClosingId) as any;
-              if (!c) return null;
-              const receivable = parseFloat(c.saleValue ?? "0") * parseFloat(c.commissionRate ?? "0") / 100;
-              const collected = (parseFloat(collectionKasa) || 0) + (parseFloat(collectionNakit) || 0) + (parseFloat(collectionBanka) || 0);
-              return (
-                <p className="text-xs text-muted-foreground">
-                  Alacak: <span className="font-semibold text-foreground">{fmtTRY(receivable)}</span>
-                  {" · "}Girilen: <span className={`font-semibold ${collected >= receivable ? "text-emerald-600" : "text-foreground"}`}>{fmtTRY(collected)}</span>
-                </p>
-              );
-            })()}
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">Kasa</label>
-              <Input type="number" value={collectionKasa} onChange={(e) => setCollectionKasa(e.target.value)} />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">Nakit</label>
-              <Input type="number" value={collectionNakit} onChange={(e) => setCollectionNakit(e.target.value)} />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">Banka</label>
-              <Input type="number" value={collectionBanka} onChange={(e) => setCollectionBanka(e.target.value)} />
-            </div>
-            <div className="flex gap-2 pt-1">
-              <Button variant="outline" className="flex-1" onClick={() => setCollectionClosingId(null)}>İptal</Button>
-              <Button className="flex-1" onClick={saveCollection}>Kaydet</Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* Tahsilat girişi — danışman bazlı, kalem kalem (kasa/banka) */}
+      <AgentCollectionDialog
+        agentId={collectionAgentId}
+        row={flatRows.find((r) => r.agentId === collectionAgentId) ?? null}
+        onClose={() => setCollectionAgentId(null)}
+      />
     </Layout>
+  );
+}
+
+function AgentCollectionDialog({ agentId, row, onClose }: {
+  agentId: number | null;
+  row: { employeeName: string; employeeNet: string } | null;
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [method, setMethod] = useState<"kasa" | "banka">("kasa");
+  const [amount, setAmount] = useState("");
+  const [note, setNote] = useState("");
+
+  const { data: items = [] } = useQuery<any[]>({
+    queryKey: ["/api/closing-agents", agentId, "collections"],
+    queryFn: async () => {
+      const res = await fetch(`/api/closing-agents/${agentId}/collections`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+    enabled: agentId !== null,
+  });
+
+  const receivable = parseFloat(row?.employeeNet ?? "0");
+  const collected = items.reduce((s, i) => s + parseFloat(i.amount), 0);
+
+  const addItem = async () => {
+    if (!agentId || !amount) return;
+    await fetch(`/api/closing-agents/${agentId}/collections`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ method, amount, note: note || undefined }),
+    });
+    setAmount("");
+    setNote("");
+    queryClient.invalidateQueries({ queryKey: ["/api/closing-agents", agentId, "collections"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/closings"] });
+    toast({ title: "Tahsilat kaydedildi" });
+  };
+
+  const deleteItem = async (id: number) => {
+    await fetch(`/api/closing-agent-collections/${id}`, { method: "DELETE", credentials: "include" });
+    queryClient.invalidateQueries({ queryKey: ["/api/closing-agents", agentId, "collections"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/closings"] });
+  };
+
+  return (
+    <Dialog open={agentId !== null} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-md" aria-describedby="agent-collection-desc">
+        <DialogHeader>
+          <DialogTitle>Tahsilat — {row?.employeeName ?? ""}</DialogTitle>
+          <p id="agent-collection-desc" className="text-sm text-muted-foreground">
+            Bu danışmanın kalem kalem tahsilatı. Toplam alacağına (net hakediş) ulaşınca ödeme durumu otomatik "Tahsil Edildi" olur.
+          </p>
+        </DialogHeader>
+        <div className="space-y-3 pt-2">
+          <p className="text-xs text-muted-foreground">
+            Alacak: <span className="font-semibold text-foreground">{fmtTRY(receivable)}</span>
+            {" · "}Tahsil Edilen: <span className={`font-semibold ${receivable > 0 && collected >= receivable ? "text-emerald-600" : "text-foreground"}`}>{fmtTRY(collected)}</span>
+          </p>
+
+          <div className="rounded-lg border border-border divide-y divide-border max-h-56 overflow-y-auto">
+            {items.length === 0 ? (
+              <p className="text-xs text-muted-foreground p-3 text-center">Henüz tahsilat girilmemiş.</p>
+            ) : (
+              items.map((it: any) => (
+                <div key={it.id} className="flex items-center gap-2 px-3 py-2 text-sm">
+                  <Badge variant={it.method === "kasa" ? "secondary" : "outline"} className="text-[10px] shrink-0">
+                    {it.method === "kasa" ? "Kasa" : "Banka"}
+                  </Badge>
+                  <span className="font-medium">{fmtTRY(parseFloat(it.amount))}</span>
+                  {it.note && <span className="text-xs text-muted-foreground truncate">{it.note}</span>}
+                  <span className="ml-auto text-[11px] text-muted-foreground shrink-0">
+                    {it.collectedAt ? new Date(it.collectedAt).toLocaleDateString("tr-TR") : ""}
+                  </span>
+                  <button onClick={() => deleteItem(it.id)} className="text-muted-foreground hover:text-red-600 shrink-0" title="Sil">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="flex items-end gap-2">
+            <div className="space-y-1.5 w-24">
+              <label className="text-xs font-medium">Yöntem</label>
+              <Select value={method} onValueChange={(v) => setMethod(v as "kasa" | "banka")}>
+                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="kasa">Kasa</SelectItem>
+                  <SelectItem value="banka">Banka</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5 flex-1">
+              <label className="text-xs font-medium">Tutar</label>
+              <Input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} className="h-9" />
+            </div>
+            <div className="space-y-1.5 flex-1">
+              <label className="text-xs font-medium">Not (opsiyonel)</label>
+              <Input value={note} onChange={(e) => setNote(e.target.value)} className="h-9" />
+            </div>
+            <Button size="sm" className="h-9 shrink-0" onClick={addItem} disabled={!amount}>Ekle</Button>
+          </div>
+
+          <div className="flex justify-end pt-1">
+            <Button variant="outline" onClick={onClose}>Kapat</Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

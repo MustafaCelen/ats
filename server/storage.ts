@@ -2,7 +2,7 @@ import { db, pool } from "./db";
 import {
   jobs, candidates, applications, stageHistory, interviews, offers, candidateNotes,
   users, jobAssignments, applicationDocuments, tasks, employees,
-  capSettings, closings, closingSides, closingAgents, interviewTargets,
+  capSettings, closings, closingSides, closingAgents, closingAgentCollections, interviewTargets,
   officeExpenses, listings, financialTargets, listingAgreementFiles,
   teams, teamMembers, fonzipSyncedDebts, whatsappBulkSends,
   advisorBhbTargets, advisorNotes, advisorAppointments,
@@ -18,7 +18,7 @@ import {
   type ApplicationDocuments,
   type Task, type InsertTask,
   type Employee, type InsertEmployee, type EmployeeWithRelations,
-  type CapSetting, type Closing, type ClosingSide, type ClosingAgent,
+  type CapSetting, type Closing, type ClosingSide, type ClosingAgent, type ClosingAgentCollection,
   type CapStatus, type ClosingWithDetails, type InterviewTarget,
   type OfficeExpense, type InsertOfficeExpense,
   type Listing, type ListingWithEmployee,
@@ -269,9 +269,6 @@ export interface IStorage {
     referralInfo?: string | null;
     contractStartDate?: Date | null;
     contractEndDate?: Date | null;
-    kasa?: string | null;
-    nakit?: string | null;
-    banka?: string | null;
     closingDate?: Date | null;
     status?: string;
     buyerName?: string | null;
@@ -2583,7 +2580,6 @@ export class DatabaseStorage implements IStorage {
     commissionRate: string; closingDate: Date | null; status: string;
     ilgiliAy: string | null;
     buyerName: string | null; sellerName: string | null; notes: string | null;
-    kasa: string; nakit: string; banka: string;
   }>): Promise<void> {
     if (Object.keys(data).length === 0) return;
     await db.update(closings).set(data as any).where(eq(closings.id, id));
@@ -2600,15 +2596,47 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  // Tahsilat mantığı: kasa+nakit+banka toplamı alacağa (saleValue × commissionRate/100)
-  // ulaşınca/geçince işlem otomatik "completed" olur. Zaten tamamlanmışsa dokunmaz.
-  async autoCompleteClosingIfCollected(id: number): Promise<void> {
-    const [row] = await db.select().from(closings).where(eq(closings.id, id));
-    if (!row || row.status === "completed") return;
-    const receivable = parseFloat(row.saleValue ?? "0") * parseFloat(row.commissionRate ?? "0") / 100;
-    const collected = parseFloat(row.kasa ?? "0") + parseFloat(row.nakit ?? "0") + parseFloat(row.banka ?? "0");
-    if (receivable > 0 && collected >= receivable) {
-      await this.updateClosing(id, { status: "completed" });
+  // ── Danışman bazlı tahsilat (kalem kalem) ───────────────────────────────
+  async getClosingAgentCollections(closingAgentId: number): Promise<ClosingAgentCollection[]> {
+    return db.select().from(closingAgentCollections)
+      .where(eq(closingAgentCollections.closingAgentId, closingAgentId))
+      .orderBy(desc(closingAgentCollections.collectedAt));
+  }
+
+  async addClosingAgentCollection(data: {
+    closingAgentId: number; method: string; amount: string; note?: string | null;
+    collectedAt?: Date; createdByUserId?: number | null;
+  }): Promise<ClosingAgentCollection> {
+    const [row] = await db.insert(closingAgentCollections).values({
+      closingAgentId: data.closingAgentId,
+      method: data.method,
+      amount: data.amount,
+      note: data.note ?? null,
+      collectedAt: data.collectedAt ?? new Date(),
+      createdByUserId: data.createdByUserId ?? null,
+    }).returning();
+    await this.autoMarkAgentPaymentCollected(data.closingAgentId);
+    return row;
+  }
+
+  async deleteClosingAgentCollection(id: number): Promise<void> {
+    const [row] = await db.select().from(closingAgentCollections).where(eq(closingAgentCollections.id, id));
+    if (!row) return;
+    await db.delete(closingAgentCollections).where(eq(closingAgentCollections.id, id));
+    await this.autoMarkAgentPaymentCollected(row.closingAgentId);
+  }
+
+  // Tahsilat kalemlerinin toplamı danışmanın alacağına (employeeNet) ulaşınca/geçince
+  // paymentCollected otomatik true olur; altına düşerse (kalem silinirse) tekrar false olur.
+  async autoMarkAgentPaymentCollected(closingAgentId: number): Promise<void> {
+    const [agent] = await db.select().from(closingAgents).where(eq(closingAgents.id, closingAgentId));
+    if (!agent) return;
+    const items = await this.getClosingAgentCollections(closingAgentId);
+    const collected = items.reduce((s, i) => s + parseFloat(i.amount), 0);
+    const receivable = parseFloat(agent.employeeNet ?? "0");
+    const shouldBeCollected = receivable > 0 && collected >= receivable;
+    if (shouldBeCollected !== agent.paymentCollected) {
+      await this.updateClosingAgent(closingAgentId, { paymentCollected: shouldBeCollected });
     }
   }
 
@@ -3266,7 +3294,6 @@ export class DatabaseStorage implements IStorage {
     buyerName?: string | null;
     sellerName?: string | null;
     notes?: string | null;
-    kasa?: string; nakit?: string; banka?: string;
     createdByUserId?: number | null;
     disableCap?: boolean; // true during CSV import — skips cap restriction in fallback calculation
     skipSheetSync?: boolean; // true during CSV import — Sheets satırı burada yazılmaz, import sonunda toplu yazılır
@@ -3341,9 +3368,6 @@ export class DatabaseStorage implements IStorage {
         buyerName: data.buyerName ?? null,
         sellerName: data.sellerName ?? null,
         notes: data.notes ?? null,
-        kasa: data.kasa ?? "0",
-        nakit: data.nakit ?? "0",
-        banka: data.banka ?? "0",
         createdByUserId: data.createdByUserId ?? null,
       }).returning();
 

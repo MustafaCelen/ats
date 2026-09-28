@@ -570,6 +570,24 @@ export const closingAgents = pgTable("closing_agents", {
 
 export type ClosingAgent = typeof closingAgents.$inferSelect;
 
+// Danışman bazlı tahsilat kalemleri — her agent'ın alacağı (employeeNet) karşılığında
+// ayrı ayrı kasa/banka tahsilat girişleri. Toplam employeeNet'e ulaşınca
+// closingAgents.paymentCollected otomatik true olur (bkz. autoMarkAgentPaymentCollected).
+export const closingAgentCollections = pgTable("closing_agent_collections", {
+  id: serial("id").primaryKey(),
+  closingAgentId: integer("closing_agent_id").notNull(),
+  method: text("method").notNull(), // "kasa" | "banka"
+  amount: numeric("amount", { precision: 15, scale: 2 }).notNull(),
+  note: text("note"),
+  collectedAt: timestamp("collected_at").defaultNow(),
+  createdByUserId: integer("created_by_user_id"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (t) => ({
+  agentIdIdx: index("closing_agent_collections_agent_id_idx").on(t.closingAgentId),
+}));
+
+export type ClosingAgentCollection = typeof closingAgentCollections.$inferSelect;
+
 export interface CapStatus {
   employeeId: number;
   /** null = no cap configured for this year (unlimited) */
