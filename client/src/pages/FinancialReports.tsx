@@ -1470,7 +1470,6 @@ export default function FinancialReports() {
             { key: "count",label: "Kapanış",      align: "right" },
             { key: "bhb",  label: "BHB",          align: "right" },
             { key: "bm",   label: "BM Payı",      align: "right" },
-            { key: "net",  label: "Danışman Net", align: "right" },
             { key: "bhbpc",label: "BHB/Kapanış",  align: "right" },
           ];
           const handleAgentSort = (key: string) => {
@@ -1511,13 +1510,11 @@ export default function FinancialReports() {
                           <div><span className="text-muted-foreground">Ort. BHB: </span>{a.count > 0 ? fmtTRY(a.bhb / a.count) : "—"}</div>
                           <div><span className="text-muted-foreground">BHB: </span><span className="font-medium">{fmtTRY(a.bhb)}</span></div>
                           <div><span className="text-muted-foreground">BM: </span><span className="text-blue-700">{fmtTRY(a.bm)}</span></div>
-                          <div className="col-span-2"><span className="text-muted-foreground">Net: </span><span className="font-semibold text-emerald-700">{fmtTRY(a.net)}</span></div>
                         </div>
                       </div>
                     ))}
                     <div className="p-4 bg-muted/30 text-xs font-semibold grid grid-cols-2 gap-x-4 gap-y-1">
                       <div>Toplam kapanış: {(stats?.byAgent ?? []).reduce((s: number, a: any) => s + a.count, 0)}</div>
-                      <div>Net: <span className="text-emerald-700">{fmtTRY((stats?.byAgent ?? []).reduce((s: number, a: any) => s + a.net, 0))}</span></div>
                       <div>BHB: {fmtTRY((stats?.byAgent ?? []).reduce((s: number, a: any) => s + a.bhb, 0))}</div>
                       <div>BM: <span className="text-blue-700">{fmtTRY((stats?.byAgent ?? []).reduce((s: number, a: any) => s + a.bm, 0))}</span></div>
                     </div>
@@ -1548,7 +1545,6 @@ export default function FinancialReports() {
                             <td className="py-2 px-4 text-right">{a.count}</td>
                             <td className="py-2 px-4 text-right font-medium">{fmtTRY(a.bhb)}</td>
                             <td className="py-2 px-4 text-right text-blue-700">{fmtTRY(a.bm)}</td>
-                            <td className="py-2 px-4 text-right font-semibold text-emerald-700">{fmtTRY(a.net)}</td>
                             <td className="py-2 px-4 text-right text-muted-foreground">{a.count > 0 ? fmtTRY(a.bhb / a.count) : "—"}</td>
                           </tr>
                         ))}
@@ -1559,7 +1555,6 @@ export default function FinancialReports() {
                           <td className="py-2.5 px-4 text-right">{(stats?.byAgent ?? []).reduce((s: number, a: any) => s + a.count, 0)}</td>
                           <td className="py-2.5 px-4 text-right">{fmtTRY((stats?.byAgent ?? []).reduce((s: number, a: any) => s + a.bhb, 0))}</td>
                           <td className="py-2.5 px-4 text-right text-blue-700">{fmtTRY((stats?.byAgent ?? []).reduce((s: number, a: any) => s + a.bm, 0))}</td>
-                          <td className="py-2.5 px-4 text-right text-emerald-700">{fmtTRY((stats?.byAgent ?? []).reduce((s: number, a: any) => s + a.net, 0))}</td>
                           <td />
                         </tr>
                       </tfoot>

@@ -2480,7 +2480,7 @@ export default function Closings() {
       "No", "",
       "Danışman", "KWUID", "İlgili Ay", "İşlem", "İşlem Tipi", "Taraf", "CAP", "ÜK",
       "İşlem Tarihi", "İşlem Değeri", "BHB", "KWTR", "KWTR (+KDV)", "PlatinKarma", "PlatinKarma\n(KDV)",
-      "ÜK", "Danışman", "Kasa", "Nakit", "Banka",
+      "ÜK", "Kasa", "Nakit", "Banka",
       "BHB Oranı", "İşlem Hacmi", "İşlem\nOranı \n(Taraf Sayısı)",
       "İl", "İlçe", "Semt/Mahalle", "Adres", "Mülkle İlgili Detay Bilgiler",
       "Açılış Rakamı", "Kapanış Rakamı", "İndirim \nOranı", "Süre/Gün",
@@ -2521,7 +2521,6 @@ export default function Closings() {
         r.marketCenterActual,           // PlatinKarma
         r.bmKdv,                        // PlatinKarma (KDV)
         r.ukShare,                      // ÜK (tutar)
-        r.employeeNet,                  // Danışman
         r.kasa,                         // Kasa
         r.nakit,                        // Nakit
         r.banka,                        // Banka
@@ -2956,7 +2955,6 @@ export default function Closings() {
                       { label: "KWTR (+KDV)",         sk: "kwtrKdv" },
                       { label: "PlatinKarma",         sk: "marketCenterActual" },
                       { label: "PlatinKarma (KDV)",   sk: "bmKdv" },
-                      { label: "Danışman Net",        sk: "employeeNet" },
                       { label: "Kasa",                sk: "kasa" },
                       { label: "Nakit",               sk: "nakit" },
                       { label: "Banka",               sk: "banka" },
@@ -3093,7 +3091,6 @@ export default function Closings() {
                           </div>
                         </td>
                         <td className="px-2 py-1 min-w-[70px] text-amber-600"><InlineCell value={row.bmKdv} type="number" onSave={sa("bmKdv")} /></td>
-                        <td className="px-2 py-1 min-w-[80px] font-semibold text-emerald-700"><InlineCell value={row.employeeNet} type="number" onSave={sa("employeeNet")} /></td>
                         <td className="px-2 py-1 min-w-[80px]"><InlineCell value={row.kasa} type="number" onSave={sa("kasa")} /></td>
                         <td className="px-2 py-1 min-w-[80px]"><InlineCell value={row.nakit} type="number" onSave={sa("nakit")} /></td>
                         <td className="px-2 py-1 min-w-[80px]"><InlineCell value={row.banka} type="number" onSave={sa("banka")} /></td>
