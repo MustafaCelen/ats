@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, Fragment } from "react";
 import { Link } from "wouter";
 import { Layout } from "@/components/Layout";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -471,11 +471,10 @@ function AdvisorBhbHedefEditor({ year }: { year: number }) {
   );
 }
 
-// ── Bölüm 5: Masraf Hedefleri — kategori bazlı, aylık, tablı (grup + toplam) ──
-const MASRAF_TABS: { key: string; label: string; type: "income" | "expense"; categories: readonly string[] }[] = [
-  { key: "_toplam_", label: "Genel Toplam", type: "expense", categories: ["_TOTAL_"] },
-  { key: "_gelir_", label: "Gelir", type: "income", categories: INCOME_CATEGORIES },
-  ...EXPENSE_CATEGORY_GROUPS.map((g) => ({ key: g.group, label: g.group, type: "expense" as const, categories: g.items })),
+// ── Bölüm 5: Masraf Hedefleri — kategori bazlı, aylık, 2 sekme (Gelir / Gider) ──
+const MASRAF_TABS: { key: string; label: string; type: "income" | "expense"; groups: { group: string; items: readonly string[] }[] }[] = [
+  { key: "income", label: "Gelir", type: "income", groups: [{ group: "", items: INCOME_CATEGORIES }] },
+  { key: "expense", label: "Gider", type: "expense", groups: EXPENSE_CATEGORY_GROUPS },
 ];
 
 function useExpenseTargetsYear(year: number) {
@@ -500,16 +499,9 @@ function MasrafHedefEditor({ year }: { year: number }) {
     let income = 0, expense = 0;
     for (const t of allTargets) {
       const amt = parseFloat(t.amount ?? "0");
-      if (t.category === "_TOTAL_") continue; // toplam satırı kategori toplamına karışmasın
       if (t.type === "income") income += amt; else expense += amt;
     }
-    // Genel Toplam sekmesi manuel girilen tek satırdır — kategori toplamı sıfırsa onu kullan.
-    const manualIncome = allTargets.find((t: any) => t.type === "income" && t.category === "_TOTAL_");
-    const manualExpense = allTargets.find((t: any) => t.type === "expense" && t.category === "_TOTAL_");
-    return {
-      income: income || parseFloat(manualIncome?.amount ?? "0"),
-      expense: expense || parseFloat(manualExpense?.amount ?? "0"),
-    };
+    return { income, expense };
   }, [allTargets]);
 
   const valueFor = (type: string, category: string, month: number) => {
@@ -539,17 +531,28 @@ function MasrafHedefEditor({ year }: { year: number }) {
   };
 
   const tab = MASRAF_TABS.find((t) => t.key === activeTab) ?? MASRAF_TABS[0];
-  const tabTotals = useMemo(() => {
-    const perMonth = Array(12).fill(0);
-    for (const cat of tab.categories) {
-      for (let m = 1; m <= 12; m++) {
-        const v = parseFloat(valueFor(tab.type, cat, m) || "0");
-        if (!isNaN(v)) perMonth[m - 1] += v;
+  const groupTotals = useMemo(() => {
+    const map = new Map<string, number[]>();
+    for (const g of tab.groups) {
+      const perMonth = Array(12).fill(0);
+      for (const cat of g.items) {
+        for (let m = 1; m <= 12; m++) {
+          const v = parseFloat(valueFor(tab.type, cat, m) || "0");
+          if (!isNaN(v)) perMonth[m - 1] += v;
+        }
       }
+      map.set(g.group, perMonth);
     }
-    return perMonth;
+    return map;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, allTargets, draft]);
+  const grandTotal = useMemo(() => {
+    const perMonth = Array(12).fill(0);
+    for (const perGroup of Array.from(groupTotals.values())) {
+      for (let m = 0; m < 12; m++) perMonth[m] += perGroup[m];
+    }
+    return perMonth;
+  }, [groupTotals]);
 
   return (
     <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
@@ -567,13 +570,13 @@ function MasrafHedefEditor({ year }: { year: number }) {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <div className="px-5 pt-3 overflow-x-auto">
-          <TabsList className="h-auto flex-wrap justify-start gap-1 bg-transparent p-0">
+        <div className="px-5 pt-3">
+          <TabsList className="h-9 bg-muted/50">
             {MASRAF_TABS.map((t) => (
               <TabsTrigger
                 key={t.key}
                 value={t.key}
-                className="text-xs h-7 px-3 rounded-full border border-border data-[state=active]:border-primary data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"
+                className={`text-sm px-5 ${t.type === "income" ? "data-[state=active]:text-emerald-700" : "data-[state=active]:text-red-700"}`}
               >
                 {t.label}
               </TabsTrigger>
@@ -587,49 +590,66 @@ function MasrafHedefEditor({ year }: { year: number }) {
               <table className="w-full min-w-[900px] text-sm">
                 <thead>
                   <tr className="bg-muted/40 border-b border-border">
-                    <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-left sticky left-0 bg-muted/40 min-w-[220px]">
-                      {t.key === "_toplam_" ? "" : "Kategori"}
-                    </th>
+                    <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-left sticky left-0 bg-muted/40 min-w-[220px]">Kategori</th>
                     {MONTHS.map((m) => (
                       <th key={m} className="text-[10px] font-medium text-muted-foreground py-2 px-1.5 text-right min-w-[68px]">{m.slice(0, 3)}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {t.categories.map((cat) => (
-                    <tr key={cat} className="border-b border-border/50 hover:bg-muted/20">
-                      <td className="py-1.5 px-4 text-xs font-medium sticky left-0 bg-card">
-                        {cat === "_TOTAL_" ? "Aylık Toplam Hedef" : cat}
-                      </td>
-                      {MONTHS.map((_, i) => {
-                        const month = i + 1;
-                        const k = `${t.type}|${cat}|${month}`;
-                        return (
-                          <td key={month} className="py-1 px-1">
-                            <Input
-                              type="number"
-                              value={valueFor(t.type, cat, month)}
-                              onChange={(e) => setDraft((d) => ({ ...d, [k]: e.target.value }))}
-                              onBlur={() => save(t.type, cat, month)}
-                              disabled={saving === k}
-                              placeholder="—"
-                              className={`h-7 text-xs text-right tabular-nums w-full ${t.type === "income" ? "focus-visible:ring-emerald-500" : "focus-visible:ring-red-500"}`}
-                            />
+                  {t.groups.map((g) => (
+                    <Fragment key={g.group || "_"}>
+                      {g.group && (
+                        <tr className="bg-muted/20">
+                          <td colSpan={13} className="py-1.5 px-4 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide sticky left-0 bg-muted/20">
+                            {g.group}
                           </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
-                  {t.categories.length > 1 && (
-                    <tr className="bg-muted/30 font-semibold">
-                      <td className="py-2 px-4 text-xs sticky left-0 bg-muted/30">Sekme Toplamı</td>
-                      {tabTotals.map((v, i) => (
-                        <td key={i} className={`py-2 px-1.5 text-right text-xs tabular-nums ${t.type === "income" ? "text-emerald-700" : "text-red-700"}`}>
-                          {v > 0 ? fmtTRY(v) : "—"}
-                        </td>
+                        </tr>
+                      )}
+                      {g.items.map((cat) => (
+                        <tr key={cat} className="border-b border-border/50 hover:bg-muted/20">
+                          <td className="py-1.5 px-4 text-xs sticky left-0 bg-card">{cat}</td>
+                          {MONTHS.map((_, i) => {
+                            const month = i + 1;
+                            const k = `${t.type}|${cat}|${month}`;
+                            return (
+                              <td key={month} className="py-1 px-1">
+                                <Input
+                                  type="number"
+                                  value={valueFor(t.type, cat, month)}
+                                  onChange={(e) => setDraft((d) => ({ ...d, [k]: e.target.value }))}
+                                  onBlur={() => save(t.type, cat, month)}
+                                  disabled={saving === k}
+                                  placeholder="—"
+                                  className={`h-7 text-xs text-right tabular-nums w-full ${t.type === "income" ? "focus-visible:ring-emerald-500" : "focus-visible:ring-red-500"}`}
+                                />
+                              </td>
+                            );
+                          })}
+                        </tr>
                       ))}
-                    </tr>
-                  )}
+                      {t.groups.length > 1 && (
+                        <tr className="bg-muted/10 font-medium">
+                          <td className="py-1.5 px-4 text-[11px] text-muted-foreground sticky left-0 bg-muted/10">{g.group} toplamı</td>
+                          {(groupTotals.get(g.group) ?? Array(12).fill(0)).map((v, i) => (
+                            <td key={i} className="py-1.5 px-1.5 text-right text-[11px] text-muted-foreground tabular-nums">
+                              {v > 0 ? fmtTRY(v) : "—"}
+                            </td>
+                          ))}
+                        </tr>
+                      )}
+                    </Fragment>
+                  ))}
+                  <tr className={`font-semibold ${t.type === "income" ? "bg-emerald-50" : "bg-red-50"}`}>
+                    <td className="py-2 px-4 text-xs sticky left-0 bg-inherit">
+                      Toplam {t.label} Hedefi
+                    </td>
+                    {grandTotal.map((v, i) => (
+                      <td key={i} className={`py-2 px-1.5 text-right text-xs tabular-nums ${t.type === "income" ? "text-emerald-700" : "text-red-700"}`}>
+                        {v > 0 ? fmtTRY(v) : "—"}
+                      </td>
+                    ))}
+                  </tr>
                 </tbody>
               </table>
             </div>
