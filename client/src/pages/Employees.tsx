@@ -59,6 +59,31 @@ function CategoryBadge({ category }: { category?: string }) {
   );
 }
 
+// Danışmanın koçluk türü (ÜK > PK > DUA — birden fazlası işaretliyse öncelik sırası)
+// ve o koçluğa atanmış hiring manager. Hiçbiri yoksa hiçbir şey göstermez.
+function CoachingBadge({ emp, hiringManagers }: { emp: any; hiringManagers: PublicUser[] }) {
+  const type = emp.uretkenlikKoclugu ? "uk" : emp.performansKariyerKoclugu ? "pk" : emp.dua ? "dua" : null;
+  if (!type) return null;
+  const managerId = type === "uk" ? emp.uretkenlikKocluguManagerId
+    : type === "pk" ? emp.performansKariyerKocluguManagerId
+    : emp.duaManagerId;
+  const coachName = managerId ? hiringManagers.find((m) => m.id === managerId)?.name : null;
+  const colors: Record<string, string> = {
+    uk: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+    pk: "bg-sky-50 text-sky-700 ring-sky-200",
+    dua: "bg-rose-50 text-rose-700 ring-rose-200",
+  };
+  const label: Record<string, string> = { uk: "ÜK", pk: "PK", dua: "DUA" };
+  return (
+    <span
+      className={`inline-flex items-center text-[10px] font-bold px-1.5 py-0.5 rounded-full ring-1 ${colors[type]}`}
+      title={coachName ? `Koç: ${coachName}` : "Koç atanmamış"}
+    >
+      {label[type]}{coachName ? ` · ${coachName}` : ""}
+    </span>
+  );
+}
+
 // Salt-okunur ofis transfer ge\u00e7mi\u015fi (Ge\u00e7mi\u015f sekmesi i\u00e7in \u2014 ekleme/silme burada yok, o D\u00fczenle'de)
 function EmployeeOfficeHistoryReadOnly({ employeeId }: { employeeId: number }) {
   const { data: history = [] } = useQuery<Array<{ id: number; office: string; effective_from: string; notes: string | null }>>({
@@ -529,13 +554,14 @@ export default function Employees() {
                     </div>
 
                     {/* Category */}
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
                       <CategoryBadge category={cand?.category} />
                       {cand?.licenseStatus === "licensed" && (
                         <span title="Lisanslı">
                           <Award className="h-3.5 w-3.5 text-teal-600" />
                         </span>
                       )}
+                      <CoachingBadge emp={emp} hiringManagers={hiringManagers} />
                     </div>
 
                     {/* Office */}
