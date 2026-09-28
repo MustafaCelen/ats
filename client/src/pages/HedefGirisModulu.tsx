@@ -11,8 +11,14 @@ import { Input } from "@/components/ui/input";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Target, DollarSign, Receipt, TrendingUp, UserCheck, ExternalLink, Calendar } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { EXPENSE_CATEGORY_GROUPS, INCOME_CATEGORIES } from "@shared/schema";
+
+function fmtTRY(n: number) {
+  return new Intl.NumberFormat("tr-TR", { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n) + " ₺";
+}
 
 const MONTHS = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"];
 const OFFICES = ["Akatlar", "Zekeriyaköy"] as const;
@@ -465,69 +471,174 @@ function AdvisorBhbHedefEditor({ year }: { year: number }) {
   );
 }
 
-// ── Bölüm 5: Masraf Hedefleri — aylık toplam gelir/gider hedefi, doğrudan giriş ──
-function MasrafHedefEditor({ year, month }: { year: number; month: number }) {
-  const qc = useQueryClient();
-  const { toast } = useToast();
-  const { data: targets = [] } = useQuery<any[]>({
-    queryKey: ["/api/expense-targets", year, month],
-    queryFn: () => fetch(`/api/expense-targets?year=${year}&month=${month}`, { credentials: "include" }).then((r) => r.json()),
-  });
-  const currentIncome = targets.find((t: any) => t.type === "income" && t.category === "_TOTAL_");
-  const currentExpense = targets.find((t: any) => t.type === "expense" && t.category === "_TOTAL_");
-  const [incomeDraft, setIncomeDraft] = useState<string | null>(null);
-  const [expenseDraft, setExpenseDraft] = useState<string | null>(null);
-  const incomeValue = incomeDraft ?? currentIncome?.amount ?? "";
-  const expenseValue = expenseDraft ?? currentExpense?.amount ?? "";
+// ── Bölüm 5: Masraf Hedefleri — kategori bazlı, aylık, tablı (grup + toplam) ──
+const MASRAF_TABS: { key: string; label: string; type: "income" | "expense"; categories: readonly string[] }[] = [
+  { key: "_toplam_", label: "Genel Toplam", type: "expense", categories: ["_TOTAL_"] },
+  { key: "_gelir_", label: "Gelir", type: "income", categories: INCOME_CATEGORIES },
+  ...EXPENSE_CATEGORY_GROUPS.map((g) => ({ key: g.group, label: g.group, type: "expense" as const, categories: g.items })),
+];
 
-  const save = async (type: "income" | "expense", amount: string) => {
-    const n = parseFloat(String(amount).replace(",", "."));
-    if (isNaN(n) || n < 0) return;
-    await fetch("/api/expense-targets", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ year, month, category: "_TOTAL_", type, amount: n }),
-    });
-    qc.invalidateQueries({ queryKey: ["/api/expense-targets"] });
-    toast({ title: "Hedef kaydedildi" });
+function useExpenseTargetsYear(year: number) {
+  return useQuery<any[]>({
+    queryKey: ["/api/expense-targets", year],
+    queryFn: async () => {
+      const res = await fetch(`/api/expense-targets?year=${year}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+  });
+}
+
+function MasrafHedefEditor({ year }: { year: number }) {
+  const qc = useQueryClient();
+  const { data: allTargets = [] } = useExpenseTargetsYear(year);
+  const [activeTab, setActiveTab] = useState(MASRAF_TABS[0].key);
+  const [draft, setDraft] = useState<Record<string, string>>({}); // key: `${type}|${category}|${month}`
+  const [saving, setSaving] = useState<string | null>(null);
+
+  const yearTotals = useMemo(() => {
+    let income = 0, expense = 0;
+    for (const t of allTargets) {
+      const amt = parseFloat(t.amount ?? "0");
+      if (t.category === "_TOTAL_") continue; // toplam satırı kategori toplamına karışmasın
+      if (t.type === "income") income += amt; else expense += amt;
+    }
+    // Genel Toplam sekmesi manuel girilen tek satırdır — kategori toplamı sıfırsa onu kullan.
+    const manualIncome = allTargets.find((t: any) => t.type === "income" && t.category === "_TOTAL_");
+    const manualExpense = allTargets.find((t: any) => t.type === "expense" && t.category === "_TOTAL_");
+    return {
+      income: income || parseFloat(manualIncome?.amount ?? "0"),
+      expense: expense || parseFloat(manualExpense?.amount ?? "0"),
+    };
+  }, [allTargets]);
+
+  const valueFor = (type: string, category: string, month: number) => {
+    const k = `${type}|${category}|${month}`;
+    if (draft[k] !== undefined) return draft[k];
+    const t = allTargets.find((x: any) => x.type === type && x.category === category && x.month === month);
+    return t ? String(parseFloat(t.amount)) : "";
   };
+
+  const save = async (type: string, category: string, month: number) => {
+    const k = `${type}|${category}|${month}`;
+    const raw = draft[k];
+    if (raw === undefined) return;
+    const n = parseFloat(raw.replace(",", "."));
+    setSaving(k);
+    try {
+      await fetch("/api/expense-targets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ year, month, category, type, amount: isNaN(n) ? 0 : n }),
+      });
+      qc.invalidateQueries({ queryKey: ["/api/expense-targets", year] });
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const tab = MASRAF_TABS.find((t) => t.key === activeTab) ?? MASRAF_TABS[0];
+  const tabTotals = useMemo(() => {
+    const perMonth = Array(12).fill(0);
+    for (const cat of tab.categories) {
+      for (let m = 1; m <= 12; m++) {
+        const v = parseFloat(valueFor(tab.type, cat, m) || "0");
+        if (!isNaN(v)) perMonth[m - 1] += v;
+      }
+    }
+    return perMonth;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, allTargets, draft]);
 
   return (
     <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-      <div className="px-5 py-3 border-b border-border flex items-center gap-2">
+      <div className="px-5 py-3 border-b border-border flex items-center gap-2 flex-wrap">
         <Receipt className="h-4 w-4 text-primary" />
         <h2 className="text-base font-semibold">Masraf Hedefleri</h2>
-        <span className="text-xs text-muted-foreground ml-1">{MONTHS[month - 1]} {year} — aylık toplam</span>
-        <Button size="sm" variant="ghost" className="ml-auto h-7 text-xs gap-1" asChild>
-          <Link href="/expense-reports"><ExternalLink className="h-3.5 w-3.5" /> Kategori Detayına Git</Link>
-        </Button>
+        <span className="text-xs text-muted-foreground ml-1">{year} — kategori bazlı, aylık</span>
+        <div className="ml-auto flex items-center gap-3 text-xs">
+          <span className="text-emerald-600 font-semibold">Gelir: {fmtTRY(yearTotals.income)}</span>
+          <span className="text-red-600 font-semibold">Gider: {fmtTRY(yearTotals.expense)}</span>
+          <Button size="sm" variant="ghost" className="h-7 text-xs gap-1" asChild>
+            <Link href="/expense-reports"><ExternalLink className="h-3.5 w-3.5" /> Rapor Detayına Git</Link>
+          </Button>
+        </div>
       </div>
-      <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div className="space-y-1.5">
-          <span className="text-xs text-muted-foreground">Aylık Toplam Gelir Hedefi (₺, KDV dahil)</span>
-          <Input
-            type="text"
-            inputMode="decimal"
-            value={incomeValue}
-            onChange={(e) => setIncomeDraft(e.target.value)}
-            onBlur={() => incomeDraft !== null && save("income", incomeDraft)}
-            placeholder="ör. 500000"
-            className="h-9 text-emerald-700 font-semibold"
-          />
+
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <div className="px-5 pt-3 overflow-x-auto">
+          <TabsList className="h-auto flex-wrap justify-start gap-1 bg-transparent p-0">
+            {MASRAF_TABS.map((t) => (
+              <TabsTrigger
+                key={t.key}
+                value={t.key}
+                className="text-xs h-7 px-3 rounded-full border border-border data-[state=active]:border-primary data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"
+              >
+                {t.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
         </div>
-        <div className="space-y-1.5">
-          <span className="text-xs text-muted-foreground">Aylık Toplam Gider Hedefi (₺, KDV dahil)</span>
-          <Input
-            type="text"
-            inputMode="decimal"
-            value={expenseValue}
-            onChange={(e) => setExpenseDraft(e.target.value)}
-            onBlur={() => expenseDraft !== null && save("expense", expenseDraft)}
-            placeholder="ör. 350000"
-            className="h-9 text-red-700 font-semibold"
-          />
-        </div>
+
+        {MASRAF_TABS.map((t) => (
+          <TabsContent key={t.key} value={t.key} className="mt-0">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[900px] text-sm">
+                <thead>
+                  <tr className="bg-muted/40 border-b border-border">
+                    <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-left sticky left-0 bg-muted/40 min-w-[220px]">
+                      {t.key === "_toplam_" ? "" : "Kategori"}
+                    </th>
+                    {MONTHS.map((m) => (
+                      <th key={m} className="text-[10px] font-medium text-muted-foreground py-2 px-1.5 text-right min-w-[68px]">{m.slice(0, 3)}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {t.categories.map((cat) => (
+                    <tr key={cat} className="border-b border-border/50 hover:bg-muted/20">
+                      <td className="py-1.5 px-4 text-xs font-medium sticky left-0 bg-card">
+                        {cat === "_TOTAL_" ? "Aylık Toplam Hedef" : cat}
+                      </td>
+                      {MONTHS.map((_, i) => {
+                        const month = i + 1;
+                        const k = `${t.type}|${cat}|${month}`;
+                        return (
+                          <td key={month} className="py-1 px-1">
+                            <Input
+                              type="number"
+                              value={valueFor(t.type, cat, month)}
+                              onChange={(e) => setDraft((d) => ({ ...d, [k]: e.target.value }))}
+                              onBlur={() => save(t.type, cat, month)}
+                              disabled={saving === k}
+                              placeholder="—"
+                              className={`h-7 text-xs text-right tabular-nums w-full ${t.type === "income" ? "focus-visible:ring-emerald-500" : "focus-visible:ring-red-500"}`}
+                            />
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                  {t.categories.length > 1 && (
+                    <tr className="bg-muted/30 font-semibold">
+                      <td className="py-2 px-4 text-xs sticky left-0 bg-muted/30">Sekme Toplamı</td>
+                      {tabTotals.map((v, i) => (
+                        <td key={i} className={`py-2 px-1.5 text-right text-xs tabular-nums ${t.type === "income" ? "text-emerald-700" : "text-red-700"}`}>
+                          {v > 0 ? fmtTRY(v) : "—"}
+                        </td>
+                      ))}
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </TabsContent>
+        ))}
+      </Tabs>
+
+      <div className="px-5 py-2.5 border-t border-border bg-muted/20 text-xs text-muted-foreground">
+        Alandan çıktığınızda (blur) otomatik kaydedilir. Kategoriler Masraf Raporları sayfasındaki gruplarla birebir aynıdır.
       </div>
     </div>
   );
@@ -568,7 +679,7 @@ export default function HedefGirisModulu() {
 
         {/* Makro: yıllık/aylık hedefler — hepsi doğrudan bu modülde girilir */}
         <FinansalHedefEditor year={year} />
-        <MasrafHedefEditor year={year} month={month} />
+        <MasrafHedefEditor year={year} />
 
         {/* Mikro: diğer giriş noktaları */}
         <RandevuHedefEditor year={year} />
