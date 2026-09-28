@@ -3217,12 +3217,13 @@ function AgentCollectionDialog({ agentId, row, onClose }: {
         <DialogHeader>
           <DialogTitle>Tahsilat — {row?.employeeName ?? ""}</DialogTitle>
           <p id="agent-collection-desc" className="text-sm text-muted-foreground">
-            Bu danışmanın kalem kalem tahsilatı. Toplam alacağına (net hakediş) ulaşınca ödeme durumu otomatik "Tahsil Edildi" olur.
+            Bu danışmanın kalem kalem tahsilatı. Toplam Danışman Net Hakedişine ulaşınca ödeme durumu otomatik "Tahsil Edildi" olur.
+            Buradaki "Kasa/Banka" tahsilat yöntemidir — tablodaki "Kasa" sütunuyla (ofis payı dağılımı) karıştırmayın.
           </p>
         </DialogHeader>
         <div className="space-y-3 pt-2">
           <p className="text-xs text-muted-foreground">
-            Alacak: <span className="font-semibold text-foreground">{fmtTRY(receivable)}</span>
+            Danışman Net Hakedişi: <span className="font-semibold text-foreground">{fmtTRY(receivable)}</span>
             {" · "}Tahsil Edilen: <span className={`font-semibold ${receivable > 0 && collected >= receivable ? "text-emerald-600" : "text-foreground"}`}>{fmtTRY(collected)}</span>
           </p>
 
