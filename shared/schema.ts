@@ -287,6 +287,7 @@ export const employees = pgTable("employees", {
   taxId: text("tax_id"),                      // Vergi / TCK No
   birthDate: text("birth_date"),              // Doğum Tarihi
   passiveAt: timestamp("passive_at"),
+  exitReason: text("exit_reason"),            // Çıkış sebebi (pasife alınırken girilir)
   advisorToken: text("advisor_token").unique(),
   advisorLastNotifiedAt: timestamp("advisor_last_notified_at"),
   advisorNotifyMsgId: text("advisor_notify_msg_id"),

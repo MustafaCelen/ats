@@ -21,7 +21,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Handshake, Plus, Trash2, TrendingUp, DollarSign, Users,
   AlertCircle, CheckCircle2, Settings, Pencil,
-  Download, Upload, MessageCircle, ChevronUp, ChevronDown,
+  Download, Upload, MessageCircle, ChevronUp, ChevronDown, Landmark,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { DEAL_TYPES, DEAL_CATEGORIES, type DealCategory, type CapStatus, type ClosingWithDetails } from "@shared/schema";
@@ -2262,6 +2262,31 @@ export default function Closings() {
     } catch { /* silent */ }
   }, [queryClient]);
 
+  // Tahsilat: kasa/nakit/banka toplamı alacağa (saleValue × commissionRate/100) ulaşınca
+  // işlem sunucu tarafında otomatik "completed" olur (autoCompleteClosingIfCollected).
+  const [collectionClosingId, setCollectionClosingId] = useState<number | null>(null);
+  const [collectionKasa, setCollectionKasa] = useState("");
+  const [collectionNakit, setCollectionNakit] = useState("");
+  const [collectionBanka, setCollectionBanka] = useState("");
+  const openCollectionDialog = useCallback((closingId: number) => {
+    const c = closings.find((x) => x.id === closingId) as any;
+    setCollectionKasa(c?.kasa ?? "0");
+    setCollectionNakit(c?.nakit ?? "0");
+    setCollectionBanka(c?.banka ?? "0");
+    setCollectionClosingId(closingId);
+  }, [closings]);
+  const saveCollection = useCallback(async () => {
+    if (!collectionClosingId) return;
+    await fetch(`/api/closings/${collectionClosingId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ kasa: collectionKasa || "0", nakit: collectionNakit || "0", banka: collectionBanka || "0" }),
+    });
+    queryClient.invalidateQueries({ queryKey: ["/api/closings"] });
+    setCollectionClosingId(null);
+  }, [collectionClosingId, collectionKasa, collectionNakit, collectionBanka, queryClient]);
+
   // Save an agent-level field on blur
   const saveAgentField = useCallback(async (agentId: number, field: string, value: string) => {
     try {
@@ -3011,6 +3036,15 @@ export default function Closings() {
                                 <Pencil className="h-3.5 w-3.5" />
                               </button>
                             )}
+                            {row.isFirstOfClosing && (
+                              <button
+                                onClick={() => openCollectionDialog(row.closingId)}
+                                className="text-muted-foreground hover:text-emerald-600 transition-colors p-1 rounded"
+                                title="Tahsilat gir (kasa/nakit/banka)"
+                              >
+                                <Landmark className="h-3.5 w-3.5" />
+                              </button>
+                            )}
                           </div>
                         </td>
                         <td className="px-2 py-1 whitespace-nowrap font-medium text-xs">
@@ -3106,6 +3140,48 @@ export default function Closings() {
         capStatuses={capStatuses}
         editingClosing={editingClosing}
       />
+
+      {/* Tahsilat girişi — kasa+nakit+banka toplamı alacağa ulaşınca işlem otomatik tamamlanır */}
+      <Dialog open={collectionClosingId !== null} onOpenChange={(v) => { if (!v) setCollectionClosingId(null); }}>
+        <DialogContent className="max-w-sm" aria-describedby="collection-desc">
+          <DialogHeader>
+            <DialogTitle>Tahsilat Gir</DialogTitle>
+            <p id="collection-desc" className="text-sm text-muted-foreground">
+              Kasa + Nakit + Banka toplamı alacağa (satış bedeli × komisyon oranı) ulaşınca işlem otomatik "Tamamlanan" olur.
+            </p>
+          </DialogHeader>
+          <div className="space-y-3 pt-2">
+            {(() => {
+              const c = closings.find((x) => x.id === collectionClosingId) as any;
+              if (!c) return null;
+              const receivable = parseFloat(c.saleValue ?? "0") * parseFloat(c.commissionRate ?? "0") / 100;
+              const collected = (parseFloat(collectionKasa) || 0) + (parseFloat(collectionNakit) || 0) + (parseFloat(collectionBanka) || 0);
+              return (
+                <p className="text-xs text-muted-foreground">
+                  Alacak: <span className="font-semibold text-foreground">{fmtTRY(receivable)}</span>
+                  {" · "}Girilen: <span className={`font-semibold ${collected >= receivable ? "text-emerald-600" : "text-foreground"}`}>{fmtTRY(collected)}</span>
+                </p>
+              );
+            })()}
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Kasa</label>
+              <Input type="number" value={collectionKasa} onChange={(e) => setCollectionKasa(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Nakit</label>
+              <Input type="number" value={collectionNakit} onChange={(e) => setCollectionNakit(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Banka</label>
+              <Input type="number" value={collectionBanka} onChange={(e) => setCollectionBanka(e.target.value)} />
+            </div>
+            <div className="flex gap-2 pt-1">
+              <Button variant="outline" className="flex-1" onClick={() => setCollectionClosingId(null)}>İptal</Button>
+              <Button className="flex-1" onClick={saveCollection}>Kaydet</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </Layout>
   );
 }

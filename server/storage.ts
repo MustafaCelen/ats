@@ -2583,6 +2583,7 @@ export class DatabaseStorage implements IStorage {
     commissionRate: string; closingDate: Date | null; status: string;
     ilgiliAy: string | null;
     buyerName: string | null; sellerName: string | null; notes: string | null;
+    kasa: string; nakit: string; banka: string;
   }>): Promise<void> {
     if (Object.keys(data).length === 0) return;
     await db.update(closings).set(data as any).where(eq(closings.id, id));
@@ -2596,6 +2597,18 @@ export class DatabaseStorage implements IStorage {
       for (const a of agents.rows as any[]) {
         await this.syncClosingAgentUkIncome(a.id);
       }
+    }
+  }
+
+  // Tahsilat mantığı: kasa+nakit+banka toplamı alacağa (saleValue × commissionRate/100)
+  // ulaşınca/geçince işlem otomatik "completed" olur. Zaten tamamlanmışsa dokunmaz.
+  async autoCompleteClosingIfCollected(id: number): Promise<void> {
+    const [row] = await db.select().from(closings).where(eq(closings.id, id));
+    if (!row || row.status === "completed") return;
+    const receivable = parseFloat(row.saleValue ?? "0") * parseFloat(row.commissionRate ?? "0") / 100;
+    const collected = parseFloat(row.kasa ?? "0") + parseFloat(row.nakit ?? "0") + parseFloat(row.banka ?? "0");
+    if (receivable > 0 && collected >= receivable) {
+      await this.updateClosing(id, { status: "completed" });
     }
   }
 
@@ -3253,6 +3266,7 @@ export class DatabaseStorage implements IStorage {
     buyerName?: string | null;
     sellerName?: string | null;
     notes?: string | null;
+    kasa?: string; nakit?: string; banka?: string;
     createdByUserId?: number | null;
     disableCap?: boolean; // true during CSV import — skips cap restriction in fallback calculation
     skipSheetSync?: boolean; // true during CSV import — Sheets satırı burada yazılmaz, import sonunda toplu yazılır
@@ -3327,6 +3341,9 @@ export class DatabaseStorage implements IStorage {
         buyerName: data.buyerName ?? null,
         sellerName: data.sellerName ?? null,
         notes: data.notes ?? null,
+        kasa: data.kasa ?? "0",
+        nakit: data.nakit ?? "0",
+        banka: data.banka ?? "0",
         createdByUserId: data.createdByUserId ?? null,
       }).returning();
 

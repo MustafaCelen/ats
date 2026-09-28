@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Users, Briefcase, BarChart2, ChevronRight, Menu, X,
   Calendar, Shield, LogOut, ClipboardList, UserCheck, KanbanSquare, DollarSign, GraduationCap,
   Receipt, TrendingUp, Building2, Trophy, ShieldAlert, Users2, Puzzle, BarChart3, Copy, Megaphone,
-  MessageCircle, MapPin, Target, UserPlus,
+  MessageCircle, MapPin, Target, UserPlus, AlertCircle,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { useState } from "react";
@@ -106,6 +106,7 @@ const advisorsGroupAdmin: NavGroup = {
     { icon: UserPlus,  label: "ÜK Giriş/Çıkış",    href: "/uk-entry-exit"      },
     { icon: Users2,    label: "Takımlar",          href: "/teams"              },
     { icon: Copy,      label: "Danışman Birleştir", href: "/duplicate-merge"   },
+    { icon: AlertCircle, label: "Borçlular Raporu", href: "/borclular-raporu"  },
   ],
 };
 
@@ -128,6 +129,7 @@ const adminNavItems: NavEntry[] = [
   advisorsGroupAdmin,
   financeGroup,
   { icon: Building2,       label: "Portal İlanları", href: "/listings"  },
+  { icon: Target,          label: "Hedef Giriş Modülü", href: "/hedef-giris" },
   reportsGroupAdmin,
   { icon: Shield,          label: "Kullanıcılar",    href: "/users"     },
 ];

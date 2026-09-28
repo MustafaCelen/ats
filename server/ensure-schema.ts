@@ -318,6 +318,9 @@ export async function ensureSchema(): Promise<void> {
       created_at TIMESTAMP DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS google_form_leads_candidate_idx ON google_form_leads(candidate_id);
+
+    -- Danışman pasife alınırken çıkış sebebi.
+    ALTER TABLE employees ADD COLUMN IF NOT EXISTS exit_reason TEXT;
   `;
   try {
     await pool.query(sql);

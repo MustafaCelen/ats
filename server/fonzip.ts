@@ -891,3 +891,26 @@ export async function getFonzipUserFinancialsReport(): Promise<any[]> {
   `);
   return res.rows;
 }
+
+// Danışman Profili + Pasife Alma uyarısı için tek bir çalışanın Fonzip borç özeti.
+export async function getEmployeeFonzipDebt(employeeId: number): Promise<{
+  totalFinancial: number;
+  pendingDebts: { amount: number; details: string | null; period: string | null; operationDate: string | null }[];
+}> {
+  const { pool } = await import("./db");
+  const finRes = await pool.query(
+    `SELECT total_financial FROM fonzip_user_financials WHERE employee_id = $1 LIMIT 1`,
+    [employeeId]
+  );
+  const debtRes = await pool.query(
+    `SELECT amount, details, period, operation_date FROM fonzip_synced_debts
+     WHERE employee_id = $1 AND status = 8 ORDER BY operation_date DESC NULLS LAST`,
+    [employeeId]
+  );
+  return {
+    totalFinancial: finRes.rows[0] ? parseFloat(finRes.rows[0].total_financial) : 0,
+    pendingDebts: debtRes.rows.map((r: any) => ({
+      amount: parseFloat(r.amount), details: r.details, period: r.period, operationDate: r.operation_date,
+    })),
+  };
+}

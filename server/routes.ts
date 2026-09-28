@@ -12,7 +12,7 @@ import { getAuthUrl, createOAuth2Client, createCalendarEvent, updateCalendarEven
 import { sendWhatsApp, sendWhatsAppTemplate, checkWhatsAppStatus, publicBaseUrl, listWhatsAppTemplates } from "./whatsapp";
 import { startBulkSendBatch, getActiveBatchForUser, getLastBatchForUser, getBatch, requestStop, type BulkSendItem } from "./whatsapp-bulk-runner";
 import { sendEmail } from "./email";
-import { isFonzipConfigured, fetchFonzipPreview, fetchFonzipUsers, fetchFonzipDebts, fetchFonzipDonations, syncFonzipDebts, syncFonzipUsersFinancials, getFonzipUserFinancialsReport, importFonzipExcel, syncFonzipRecentDebts } from "./fonzip";
+import { isFonzipConfigured, fetchFonzipPreview, fetchFonzipUsers, fetchFonzipDebts, fetchFonzipDonations, syncFonzipDebts, syncFonzipUsersFinancials, getFonzipUserFinancialsReport, importFonzipExcel, syncFonzipRecentDebts, getEmployeeFonzipDebt } from "./fonzip";
 import { isMetaConfigured, isMetaWebhookConfigured, metaConfig, syncMetaCampaigns, fetchMetaLead, mapLeadToCandidate, verifyWebhookSignature, listLeadForms, backfillLeadsFromMeta } from "./meta";
 import { isGoogleFormsConfigured, syncGoogleFormLeads, getGoogleFormsSpreadsheetId } from "./google-forms";
 
@@ -2393,10 +2393,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.patch("/api/employees/:id", requireAuth, async (req, res) => {
     try {
       const id = Number(req.params.id);
-      const { status, passiveAt, title, notes, startDate, kwuid, kwMail, contractType, uretkenlikKoclugu, uretkenlikKocluguManagerId, uretkenlikKocluguOran, dua, duaManagerId, performansKariyerKoclugu, performansKariyerKocluguManagerId, ukStartDate, ukEndDate, capMonth, capValue, billingName, billingAddress, billingDistrict, billingCity, billingCountry, taxOffice, taxId, birthDate } = req.body;
+      const { status, passiveAt, exitReason, title, notes, startDate, kwuid, kwMail, contractType, uretkenlikKoclugu, uretkenlikKocluguManagerId, uretkenlikKocluguOran, dua, duaManagerId, performansKariyerKoclugu, performansKariyerKocluguManagerId, ukStartDate, ukEndDate, capMonth, capValue, billingName, billingAddress, billingDistrict, billingCity, billingCountry, taxOffice, taxId, birthDate } = req.body;
       const update: any = {};
       if (status !== undefined) update.status = status;
       if (passiveAt !== undefined) update.passiveAt = passiveAt ? new Date(passiveAt) : null;
+      if (exitReason !== undefined) update.exitReason = exitReason || null;
       if (title !== undefined) update.title = title;
       if (notes !== undefined) update.notes = notes;
       if (startDate !== undefined) update.startDate = new Date(startDate);
@@ -3072,7 +3073,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         propertyAddress, il, ilce, mahalle, propertyDetails,
         dealCategory, dealType, saleValue, commissionRate, openingPrice,
         durationDays, customerSource, referralInfo, contractStartDate, contractEndDate,
-        closingDate, buyerName, sellerName, notes, sides,
+        closingDate, buyerName, sellerName, notes, sides, kasa, nakit, banka,
       } = req.body;
       if (!saleValue || !sides) {
         return res.status(400).json({ message: "saleValue and sides are required" });
@@ -3111,9 +3112,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         buyerName: buyerName ?? null,
         sellerName: sellerName ?? null,
         notes: notes ?? null,
+        kasa: kasa != null ? String(kasa) : "0",
+        nakit: nakit != null ? String(nakit) : "0",
+        banka: banka != null ? String(banka) : "0",
         createdByUserId: req.user!.id,
         sides: normalizedSides,
       });
+      await storage.autoCompleteClosingIfCollected(closing.id);
       res.status(201).json(closing);
 
       // Fire WhatsApp per agent whose effective status is "completed".
@@ -3191,6 +3196,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         }));
         await storage.replaceClosingSides(Number(req.params.id), String(rest.saleValue ?? "0"), String(rest.commissionRate ?? "2"), normalizedSides);
       }
+      await storage.autoCompleteClosingIfCollected(Number(req.params.id));
       res.status(204).send();
     } catch {
       res.status(500).json({ message: "Internal server error" });
@@ -4286,6 +4292,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.get("/api/fonzip/sync-users/status", requireAuth, requireAdmin, (_req, res) => {
     res.json({ running: usersFinancialsSyncRunning, lastResult: lastUsersFinancialsResult });
+  });
+
+  app.get("/api/employees/:id/fonzip-debt", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const debt = await getEmployeeFonzipDebt(Number(req.params.id));
+      res.json(debt);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   app.get("/api/fonzip/user-financials", requireAuth, requireAdmin, async (_req, res) => {

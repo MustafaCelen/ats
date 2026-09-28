@@ -25,6 +25,10 @@ import { EmployeeEditDialog, AuditLogSection } from "@/components/EmployeeEditDi
 import { useAuth } from "@/hooks/use-auth";
 
 
+function fmtTRY(n: number) {
+  return new Intl.NumberFormat("tr-TR", { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n) + " ₺";
+}
+
 function StatusPill({ status }: { status: string }) {
   if (status === "active") {
     return (
@@ -179,6 +183,7 @@ export default function Employees() {
   const [editEmployee, setEditEmployee] = useState<any | null>(null);
   const [pendingPassiveEmp, setPendingPassiveEmp] = useState<any | null>(null);
   const [passiveDateInput, setPassiveDateInput] = useState("");
+  const [exitReasonInput, setExitReasonInput] = useState("");
   const [reEnrollEmp, setReEnrollEmp] = useState<any | null>(null);
   const [reEnrollJobId, setReEnrollJobId] = useState<number | null>(null);
 
@@ -239,6 +244,7 @@ export default function Employees() {
   const handleToggleStatus = (emp: any) => {
     if (emp.status === "active") {
       setPassiveDateInput(new Date().toISOString().slice(0, 10));
+      setExitReasonInput("");
       setPendingPassiveEmp(emp);
     } else {
       updateEmployee({ id: emp.id, status: "active", passiveAt: null }, {
@@ -250,18 +256,31 @@ export default function Employees() {
   const confirmPassive = () => {
     if (!pendingPassiveEmp) return;
     updateEmployee(
-      { id: pendingPassiveEmp.id, status: "inactive", passiveAt: passiveDateInput || undefined },
+      { id: pendingPassiveEmp.id, status: "inactive", passiveAt: passiveDateInput || undefined, exitReason: exitReasonInput || undefined },
       {
         onSuccess: () => {
           toast({ title: `${pendingPassiveEmp.candidate?.name} — Pasif yapıldı` });
           if (detailEmployee?.id === pendingPassiveEmp.id) {
-            setDetailEmployee((prev: any) => prev ? { ...prev, status: "inactive" } : null);
+            setDetailEmployee((prev: any) => prev ? { ...prev, status: "inactive", exitReason: exitReasonInput || undefined } : null);
           }
           setPendingPassiveEmp(null);
         },
       }
     );
   };
+
+  // Fonzip borcu — pasife alma uyarısı + profil kartı (admin-only)
+  const isAdminUser = authUser?.role === "admin";
+  const { data: pendingPassiveDebt } = useQuery<{ totalFinancial: number; pendingDebts: any[] }>({
+    queryKey: ["/api/employees", pendingPassiveEmp?.id, "fonzip-debt"],
+    queryFn: () => fetch(`/api/employees/${pendingPassiveEmp!.id}/fonzip-debt`).then((r) => r.json()),
+    enabled: !!pendingPassiveEmp && isAdminUser,
+  });
+  const { data: detailFonzipDebt } = useQuery<{ totalFinancial: number; pendingDebts: any[] }>({
+    queryKey: ["/api/employees", detailEmployee?.id, "fonzip-debt"],
+    queryFn: () => fetch(`/api/employees/${detailEmployee!.id}/fonzip-debt`).then((r) => r.json()),
+    enabled: !!detailEmployee && isAdminUser,
+  });
 
   const handleDelete = (emp: any) => {
     if (!confirm(`${emp.candidate?.name} çalışan listesinden çıkarılsın mı?`)) return;
@@ -823,6 +842,27 @@ export default function Employees() {
                   <p className="text-sm text-foreground bg-muted/40 rounded-lg p-2">{detailEmployee.notes}</p>
                 </div>
               )}
+              {detailEmployee.status === "inactive" && detailEmployee.exitReason && (
+                <div>
+                  <p className="text-xs text-muted-foreground font-medium mb-0.5">Çıkış Sebebi</p>
+                  <p className="text-sm text-foreground bg-muted/40 rounded-lg p-2">{detailEmployee.exitReason}</p>
+                </div>
+              )}
+              {isAdminUser && detailFonzipDebt && detailFonzipDebt.totalFinancial > 0 && (
+                <div className="rounded-lg bg-red-50 ring-1 ring-red-200 p-3 space-y-1">
+                  <div className="flex items-center gap-1.5 text-red-700">
+                    <AlertCircle className="h-4 w-4 shrink-0" />
+                    <p className="text-sm font-semibold">Fonzip Borcu: {fmtTRY(detailFonzipDebt.totalFinancial)}</p>
+                  </div>
+                  {detailFonzipDebt.pendingDebts.length > 0 && (
+                    <ul className="text-xs text-red-600/90 space-y-0.5 pl-5 list-disc">
+                      {detailFonzipDebt.pendingDebts.slice(0, 5).map((d: any, i: number) => (
+                        <li key={i}>{fmtTRY(d.amount)}{d.details ? ` — ${d.details}` : ""}{d.operationDate ? ` (${d.operationDate})` : ""}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
               <div className="flex gap-2 pt-2">
                 {detailEmployee.candidate?.id && (
                   <Button variant="outline" size="sm" asChild className="flex-1">
@@ -995,6 +1035,15 @@ export default function Employees() {
             <p id="passive-date-desc" className="text-sm text-muted-foreground">Çalışanın pasife alınma tarihini seçin.</p>
           </DialogHeader>
           <div className="space-y-4 pt-2">
+            {isAdminUser && pendingPassiveDebt && pendingPassiveDebt.totalFinancial > 0 && (
+              <div className="flex items-start gap-2 rounded-lg bg-red-50 ring-1 ring-red-200 px-3 py-2.5">
+                <AlertCircle className="h-4 w-4 text-red-600 shrink-0 mt-0.5" />
+                <p className="text-sm text-red-700">
+                  <span className="font-semibold">Bu danışmanın Fonzip'te {fmtTRY(pendingPassiveDebt.totalFinancial)} borcu var.</span>
+                  {" "}Pasife almadan önce tahsilat durumunu kontrol edin.
+                </p>
+              </div>
+            )}
             <div className="space-y-1.5">
               <label className="text-sm font-medium">Pasife Alınma Tarihi</label>
               <input
@@ -1002,6 +1051,16 @@ export default function Employees() {
                 value={passiveDateInput}
                 onChange={(e) => setPassiveDateInput(e.target.value)}
                 className="w-full border border-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Çıkış Sebebi</label>
+              <textarea
+                value={exitReasonInput}
+                onChange={(e) => setExitReasonInput(e.target.value)}
+                rows={2}
+                placeholder="Opsiyonel"
+                className="w-full border border-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none"
               />
             </div>
             <div className="flex gap-2">
