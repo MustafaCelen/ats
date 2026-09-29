@@ -3344,6 +3344,37 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // Otomatik K0/K1/K2 kategori önerisi — önizleme (uygulamaz)
+  app.get("/api/employees/auto-category-preview", requireAuth, requireAdmin, async (_req, res) => {
+    try {
+      res.json(await storage.getAutoCategoryAssignments());
+    } catch (err) {
+      console.error("[GET /api/employees/auto-category-preview] error:", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Otomatik K0/K1/K2 kategori önerisini uygula — sadece body'de gönderilen
+  // (admin'in onayladığı) candidateId'ler güncellenir.
+  app.post("/api/employees/auto-category-apply", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const { assignments } = req.body as { assignments?: { candidateId: number; category: string }[] };
+      if (!Array.isArray(assignments) || assignments.length === 0) {
+        return res.status(400).json({ message: "assignments gerekli" });
+      }
+      let updated = 0;
+      for (const a of assignments) {
+        if (!a.candidateId || !["K0", "K1", "K2"].includes(a.category)) continue;
+        await storage.updateCandidate(a.candidateId, { category: a.category });
+        updated++;
+      }
+      res.json({ updated });
+    } catch (err) {
+      console.error("[POST /api/employees/auto-category-apply] error:", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   app.get("/api/employees/cap-achievement", requireAuth, requireAdmin, async (_req, res) => {
     try {
       res.json(await storage.getCapAchievementReport());

@@ -16,6 +16,7 @@ import {
   Users, Search, Phone, Mail, MapPin, Award, Building2,
   MoreHorizontal, ExternalLink, CheckCircle2, XCircle, Briefcase, CalendarDays,
   Upload, Download, Pencil, Key, AtSign, AlertCircle, FileText, UserCheck, HandCoins, RotateCcw, History,
+  Sparkles,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { type PublicUser } from "@shared/schema";
@@ -213,6 +214,7 @@ export default function Employees() {
   const [exitReasonInput, setExitReasonInput] = useState("");
   const [reEnrollEmp, setReEnrollEmp] = useState<any | null>(null);
   const [reEnrollJobId, setReEnrollJobId] = useState<number | null>(null);
+  const [autoCategoryOpen, setAutoCategoryOpen] = useState(false);
 
   const { data: openJobs = [] } = useQuery<any[]>({
     queryKey: ["/api/jobs", "all"],
@@ -374,6 +376,11 @@ export default function Employees() {
               <Upload className="h-3.5 w-3.5" />
               {importing ? "Aktarılıyor..." : "İçe Aktar"}
             </Button>
+            {isAdminUser && (
+              <Button size="sm" variant="outline" onClick={() => setAutoCategoryOpen(true)} className="gap-1.5">
+                <Sparkles className="h-3.5 w-3.5" /> Otomatik Kategori Ata
+              </Button>
+            )}
             <input
               ref={fileInputRef}
               type="file"
@@ -1153,6 +1160,150 @@ export default function Employees() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <AutoCategoryDialog open={autoCategoryOpen} onClose={() => setAutoCategoryOpen(false)} />
     </Layout>
+  );
+}
+
+interface AutoCategoryRow {
+  employeeId: number; candidateId: number; name: string; kwuid: string;
+  currentCategory: string; suggestedCategory: string;
+  capUsed: number | null; isCapper: boolean; hasProduction: boolean; isUk: boolean;
+}
+
+// Otomatik K0/K1/K2 kategori önerisi: önizleme + onaylanan satırları uygula.
+// Kural: K2 = capper (capUsed >= capAmount) VEYA kendi cap döngüsünde capUsed'a göre
+// top %20; K1 = ÜK olmayan + son 12 ayda üretimi olan (K2 değilse); K0 = geri kalan.
+function AutoCategoryDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [excluded, setExcluded] = useState<Set<number>>(new Set());
+
+  const { data: rows = [], isLoading } = useQuery<AutoCategoryRow[]>({
+    queryKey: ["/api/employees/auto-category-preview"],
+    queryFn: () => fetch("/api/employees/auto-category-preview", { credentials: "include" }).then((r) => r.json()),
+    enabled: open,
+  });
+
+  const changed = rows.filter((r) => r.suggestedCategory !== r.currentCategory);
+
+  const { mutate: apply, isPending: applying } = useMutation({
+    mutationFn: async (assignments: { candidateId: number; category: string }[]) => {
+      const res = await fetch("/api/employees/auto-category-apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ assignments }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/employees"] });
+      toast({ title: `${data.updated} danışmanın kategorisi güncellendi` });
+      setExcluded(new Set());
+      onClose();
+    },
+    onError: () => toast({ title: "Uygulanamadı", variant: "destructive" }),
+  });
+
+  const toggleExclude = (employeeId: number) => {
+    setExcluded((prev) => {
+      const next = new Set(prev);
+      if (next.has(employeeId)) next.delete(employeeId); else next.add(employeeId);
+      return next;
+    });
+  };
+
+  const handleApply = () => {
+    const toApply = changed
+      .filter((r) => !excluded.has(r.employeeId))
+      .map((r) => ({ candidateId: r.candidateId, category: r.suggestedCategory }));
+    if (toApply.length === 0) return;
+    apply(toApply);
+  };
+
+  const catColor: Record<string, string> = {
+    K0: "bg-blue-50 text-blue-700 ring-blue-200",
+    K1: "bg-amber-50 text-amber-700 ring-amber-200",
+    K2: "bg-purple-50 text-purple-700 ring-purple-200",
+  };
+  const reason = (r: AutoCategoryRow) => {
+    if (r.suggestedCategory === "K2") return r.isCapper ? "Capper" : "Top %20 (capUsed)";
+    if (r.suggestedCategory === "K1") return "ÜK değil + üretimi var";
+    return "—";
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col" aria-describedby="auto-category-desc">
+        <DialogHeader>
+          <DialogTitle>Otomatik Kategori Ata</DialogTitle>
+          <p id="auto-category-desc" className="text-sm text-muted-foreground">
+            K2: capper veya kendi cap döngüsünde top %20 · K1: ÜK olmayan + son 12 ayda üretimi olan · K0: geri kalan.
+            Sadece değişecek satırlar listelenir, işaretini kaldırdığınız satırlar uygulanmaz.
+          </p>
+        </DialogHeader>
+        {isLoading ? (
+          <div className="py-10 text-center text-sm text-muted-foreground">Yükleniyor…</div>
+        ) : changed.length === 0 ? (
+          <div className="py-10 text-center text-sm text-muted-foreground">Önerilen değişiklik yok — tüm kategoriler zaten güncel.</div>
+        ) : (
+          <div className="overflow-y-auto flex-1 -mx-6 px-6">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-card">
+                <tr className="border-b border-border text-xs text-muted-foreground">
+                  <th className="text-left py-2 pr-2 w-8"></th>
+                  <th className="text-left py-2 pr-2">Danışman</th>
+                  <th className="text-center py-2 px-2">Mevcut</th>
+                  <th className="text-center py-2 px-2">Önerilen</th>
+                  <th className="text-left py-2 pl-2">Gerekçe</th>
+                </tr>
+              </thead>
+              <tbody>
+                {changed.map((r) => (
+                  <tr key={r.employeeId} className={`border-b border-border/50 ${excluded.has(r.employeeId) ? "opacity-40" : ""}`}>
+                    <td className="py-2 pr-2">
+                      <input
+                        type="checkbox"
+                        checked={!excluded.has(r.employeeId)}
+                        onChange={() => toggleExclude(r.employeeId)}
+                        className="h-4 w-4"
+                      />
+                    </td>
+                    <td className="py-2 pr-2">
+                      <p className="font-medium text-foreground">{r.name}</p>
+                      <p className="text-xs text-muted-foreground">{r.kwuid || "—"}</p>
+                    </td>
+                    <td className="py-2 px-2 text-center">
+                      <span className={`inline-flex items-center text-xs font-bold px-2 py-0.5 rounded-full ring-1 ${catColor[r.currentCategory] ?? catColor.K0}`}>
+                        {r.currentCategory}
+                      </span>
+                    </td>
+                    <td className="py-2 px-2 text-center">
+                      <span className={`inline-flex items-center text-xs font-bold px-2 py-0.5 rounded-full ring-1 ${catColor[r.suggestedCategory] ?? catColor.K0}`}>
+                        {r.suggestedCategory}
+                      </span>
+                    </td>
+                    <td className="py-2 pl-2 text-xs text-muted-foreground">{reason(r)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <div className="flex gap-2 pt-3 border-t border-border">
+          <Button variant="outline" className="flex-1" onClick={onClose}>İptal</Button>
+          <Button
+            className="flex-1"
+            onClick={handleApply}
+            disabled={applying || changed.length === 0 || changed.every((r) => excluded.has(r.employeeId))}
+          >
+            {applying ? "Uygulanıyor…" : `${changed.length - excluded.size} Değişikliği Uygula`}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

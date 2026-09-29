@@ -2318,6 +2318,80 @@ export class DatabaseStorage implements IStorage {
     return record;
   }
 
+  // Otomatik K0/K1/K2 kategori önerisi:
+  // K2 = kendi cap döngüsünde capper (capUsed >= capAmount) OLUŞTUR kendi cap döngüsündeki
+  //      capUsed'a göre (yalnızca capMonth girilmiş danışmanlar arasında) en üst %20.
+  // K1 = ÜK (uretkenlikKoclugu) olmayan VE son 12 ayda en az bir tamamlanmış (BHB>0) işlemi
+  //      olan, K2'ye girmemiş danışmanlar.
+  // K0 = geri kalan herkes.
+  // capMonth girilmemiş danışmanlar K2 sıralamasına giremez (kendi cap döngüleri yok);
+  // yine de K1 kriterini karşılayabilirler.
+  async getAutoCategoryAssignments(): Promise<{
+    employeeId: number; candidateId: number; name: string; kwuid: string;
+    currentCategory: string; suggestedCategory: string;
+    capUsed: number | null; isCapper: boolean; hasProduction: boolean; isUk: boolean;
+  }[]> {
+    const allEmployees = await this.getEmployees();
+    const active = allEmployees.filter((e) => e.status === "active" && (e as any).candidateId);
+
+    const capStatuses = await Promise.all(active.map((e) => this.getEmployeeCapStatus(e.id)));
+
+    const twelveMonthsAgo = new Date();
+    twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12);
+    const effDate = sql<Date>`COALESCE(${closingAgents.closingDate}, ${closings.closingDate})`;
+    const productionRows = await db
+      .select({ employeeId: closingAgents.employeeId, bhbShare: closingAgents.bhbShare })
+      .from(closingAgents)
+      .innerJoin(closingSides, eq(closingAgents.closingSideId, closingSides.id))
+      .innerJoin(closings, eq(closingSides.closingId, closings.id))
+      .where(
+        and(
+          sql`COALESCE(${closingAgents.status}, ${closings.status}) = 'completed'`,
+          sql`${effDate} IS NOT NULL`,
+          sql`${effDate} >= ${twelveMonthsAgo}`,
+        )
+      );
+    const producedEmployeeIds = new Set<number>();
+    for (const r of productionRows) {
+      if (parseFloat(r.bhbShare ?? "0") > 0) producedEmployeeIds.add(r.employeeId);
+    }
+
+    // K2 ranking: yalnızca capMonth girilmiş (capUsed hesaplanabilen) danışmanlar arasında top %20.
+    const ranked = active
+      .map((e, i) => ({ employeeId: e.id, capUsed: capStatuses[i]?.capUsed ?? null }))
+      .filter((r) => r.capUsed !== null) as { employeeId: number; capUsed: number }[];
+    ranked.sort((a, b) => b.capUsed - a.capUsed);
+    const top20Count = Math.ceil(ranked.length * 0.2);
+    const top20Ids = new Set(ranked.slice(0, top20Count).map((r) => r.employeeId));
+
+    return active.map((e, i) => {
+      const emp = e as any;
+      const status = capStatuses[i];
+      const isCapper = !!(status && status.capAmount !== null && status.capUsed >= status.capAmount);
+      const isTop20 = top20Ids.has(e.id);
+      const isUk = !!emp.uretkenlikKoclugu;
+      const hasProduction = producedEmployeeIds.has(e.id);
+
+      let suggestedCategory: string;
+      if (isCapper || isTop20) suggestedCategory = "K2";
+      else if (!isUk && hasProduction) suggestedCategory = "K1";
+      else suggestedCategory = "K0";
+
+      return {
+        employeeId: e.id,
+        candidateId: emp.candidateId,
+        name: emp.candidate?.name ?? `#${e.id}`,
+        kwuid: emp.kwuid ?? "",
+        currentCategory: emp.candidate?.category ?? "K0",
+        suggestedCategory,
+        capUsed: status?.capUsed ?? null,
+        isCapper,
+        hasProduction,
+        isUk,
+      };
+    });
+  }
+
   private async buildClosingWithDetails(closing: Closing): Promise<ClosingWithDetails> {
     const sides = await db.select().from(closingSides).where(eq(closingSides.closingId, closing.id));
     const sidesWithAgents = await Promise.all(
