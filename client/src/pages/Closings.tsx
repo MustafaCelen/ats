@@ -21,7 +21,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Handshake, Plus, Trash2, TrendingUp, DollarSign, Users,
   AlertCircle, CheckCircle2, Settings, Pencil,
-  Download, Upload, MessageCircle, ChevronUp, ChevronDown, Landmark,
+  Download, Upload, MessageCircle, ChevronUp, ChevronDown, Landmark, Receipt,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { DEAL_TYPES, DEAL_CATEGORIES, type DealCategory, type CapStatus, type ClosingWithDetails } from "@shared/schema";
@@ -1933,6 +1933,9 @@ export default function Closings() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [invoiceDialogOpen, setInvoiceDialogOpen] = useState(false);
+  const [invoiceFrom, setInvoiceFrom] = useState("");
+  const [invoiceTo, setInvoiceTo] = useState("");
   const [editingClosing, setEditingClosing] = useState<ClosingWithDetails | null>(null);
   const [tab, setTab] = useState<Tab>("closings");
   const [search, setSearch] = useState("");
@@ -2185,7 +2188,7 @@ export default function Closings() {
     employeeId: number; employeeName: string; officeSnapshot: string | null;
     splitPercentage: string; bhbShare: string; mainBranchShare: string;
     kwtrKdv: string; marketCenterActual: string; marketCenterDue: string;
-    bmKdv: string; ukShare: string; employeeNet: string;
+    bmKdv: string; ukShare: string; ukKdv: string; employeeNet: string;
     paymentCollected: boolean;
     ilgiliAy: string;
     isFirstOfClosing: boolean;
@@ -2243,6 +2246,7 @@ export default function Closings() {
             marketCenterDue: agent.marketCenterDue ?? "0",
             bmKdv: agent.bmKdv ?? "0",
             ukShare: agent.ukShare ?? "0",
+            ukKdv: (agent as any).ukKdv ?? "0",
             employeeNet: agent.employeeNet ?? "0",
             paymentCollected: !!(agent as any).paymentCollected,
             ilgiliAy: (c as any).ilgiliAy ?? (
@@ -2626,6 +2630,75 @@ export default function Closings() {
     URL.revokeObjectURL(url);
   };
 
+  // Faturalaşma için: seçili tarih aralığındaki tamamlanan işlemlerde, her danışman
+  // satırı için sadece resmi (KDV'li/faturalı) tutarı içeren fatura kalemi excel'i.
+  // Resmi tutar = Banka alanı (KWTR+KDV + BM'nin faturalı kısmı+KDV + ÜK'nin faturalı
+  // kısmı+KDV — bkz. deriveKasaNakitBanka). KDV toplamı = bmKdv + ukKdv.
+  const handleExportInvoice = () => {
+    if (!invoiceFrom || !invoiceTo) {
+      toast({ title: "Hata", description: "Başlangıç ve bitiş tarihi seçin.", variant: "destructive" });
+      return;
+    }
+    const empMap = new Map<number, any>();
+    for (const e of employees) empMap.set(e.id, e);
+
+    const rows = flatRows.filter((r) => {
+      if (r.status !== "completed") return false;
+      const d = r.closingDate;
+      return !!d && d >= invoiceFrom && d <= invoiceTo;
+    });
+
+    const headers = [
+      "Danışman", "KWUID", "Fatura Ünvanı", "Vergi Dairesi", "Vergi/TCK No",
+      "Fatura Adresi", "İlçe", "İl", "Ülke",
+      "İşlem Tarihi", "Mülk Adresi",
+      "KDV Hariç Tutar", "KDV Tutarı", "KDV Dahil Tutar (Fatura Edilecek)",
+    ];
+
+    const rowsData = rows.map((r) => {
+      const emp = empMap.get(r.employeeId);
+      const kdvTotal = (parseFloat(r.bmKdv || "0") + parseFloat(r.ukKdv || "0"));
+      const kdvDahil = parseFloat(r.banka || "0");
+      const kdvHaric = kdvDahil - kdvTotal;
+      return [
+        r.employeeName,
+        emp?.kwuid ?? "",
+        emp?.billingName ?? "",
+        emp?.taxOffice ?? "",
+        emp?.taxId ?? "",
+        emp?.billingAddress ?? "",
+        emp?.billingDistrict ?? "",
+        emp?.billingCity ?? "",
+        emp?.billingCountry ?? "",
+        r.closingDate,
+        r.propertyAddress,
+        kdvHaric.toFixed(2),
+        kdvTotal.toFixed(2),
+        kdvDahil.toFixed(2),
+      ];
+    });
+
+    const totalRow = [
+      "", "", "", "", "", "", "", "", "", "", "TOPLAM",
+      rowsData.reduce((s, r) => s + parseFloat(String(r[11])), 0).toFixed(2), // KDV Hariç
+      rowsData.reduce((s, r) => s + parseFloat(String(r[12])), 0).toFixed(2), // KDV Tutarı
+      rowsData.reduce((s, r) => s + parseFloat(String(r[13])), 0).toFixed(2), // KDV Dahil
+    ];
+
+    const csv = [headers, ...rowsData, totalRow]
+      .map((row) => row.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `fatura_${invoiceFrom}_${invoiceTo}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setInvoiceDialogOpen(false);
+    toast({ title: "İndirildi", description: `${rows.length} fatura kalemi hazırlandı.` });
+  };
+
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -2723,6 +2796,10 @@ export default function Closings() {
               <Button variant="outline" size="sm" onClick={handleExport} className="gap-1.5 text-xs h-8">
                 <Download className="h-3.5 w-3.5" />
                 Dışa Aktar
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setInvoiceDialogOpen(true)} className="gap-1.5 text-xs h-8">
+                <Receipt className="h-3.5 w-3.5" />
+                Fatura Excel İndir
               </Button>
               <label className="cursor-pointer">
                 <input type="file" accept=".csv" className="hidden" onChange={handleImport} />
@@ -3227,6 +3304,37 @@ export default function Closings() {
         row={flatRows.find((r) => r.agentId === collectionAgentId) ?? null}
         onClose={() => setCollectionAgentId(null)}
       />
+
+      {/* Faturalaşma için veri hazırlığı — tarih aralığındaki tamamlanan işlemlerin
+          resmi (KDV'li) tutarlarını danışman bazlı fatura kalemi olarak excel'e indirir */}
+      <Dialog open={invoiceDialogOpen} onOpenChange={setInvoiceDialogOpen}>
+        <DialogContent className="max-w-sm" aria-describedby="invoice-export-desc">
+          <DialogHeader>
+            <DialogTitle>Fatura Excel İndir</DialogTitle>
+            <p id="invoice-export-desc" className="text-sm text-muted-foreground">
+              Seçili tarih aralığındaki tamamlanan işlemlerde, danışman başına sadece resmi
+              (KDV'li/faturalı) tutar fatura kalemi olarak hazırlanır.
+            </p>
+          </DialogHeader>
+          <div className="space-y-3 pt-2">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Başlangıç Tarihi</label>
+              <Input type="date" value={invoiceFrom} onChange={(e) => setInvoiceFrom(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Bitiş Tarihi</label>
+              <Input type="date" value={invoiceTo} onChange={(e) => setInvoiceTo(e.target.value)} />
+            </div>
+            <div className="flex gap-2 pt-1">
+              <Button variant="outline" className="flex-1" onClick={() => setInvoiceDialogOpen(false)}>İptal</Button>
+              <Button className="flex-1 gap-1.5" onClick={handleExportInvoice}>
+                <Download className="h-3.5 w-3.5" />
+                İndir
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </Layout>
   );
 }
