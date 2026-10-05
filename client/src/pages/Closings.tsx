@@ -668,7 +668,10 @@ function SideSection({
       {side.enabled && (
         <div className="space-y-3">
           {side.agents.map((agent, idx) => {
-            const emp = activeEmployees.find((e) => e.id === agent.employeeId);
+            // Kayıtlı kapanışlarda danışman pasife alınmış olabilir — hesaplama/breakdown
+            // için tüm employees içinde ara, yoksa emp undefined kalıp breakdown hiç
+            // render edilmiyor (dip toplamlar görünüp payların dağılımı boş kalıyordu).
+            const emp = employees.find((e) => e.id === agent.employeeId);
             const capStatus = agent.employeeId ? capStatuses[agent.employeeId] : null;
             const capAmount = capStatus?.capAmount ?? null;
             const capUsedSoFar = agent.employeeId ? (runningCapUsed[agent.employeeId] ?? capStatus?.capUsed ?? 0) : 0;
@@ -767,7 +770,11 @@ function SideSection({
                   <span className="text-xs font-medium text-muted-foreground w-5">{idx + 1}.</span>
                   <div className="flex-1">
                     <EmployeePicker
-                      employees={activeEmployees.map((e) => ({
+                      employees={(
+                        // Yeni atama için aktifler listelenir; mevcut kayıttaki danışman
+                        // pasife alınmışsa seçici boş görünmesin diye o da eklenir.
+                        emp && emp.status !== "active" ? [...activeEmployees, emp] : activeEmployees
+                      ).map((e) => ({
                         id: e.id,
                         name: e.candidate?.name ?? `Çalışan #${e.id}`,
                         kwuid: e.kwuid,
