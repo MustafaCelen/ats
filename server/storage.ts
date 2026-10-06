@@ -3523,7 +3523,9 @@ export class DatabaseStorage implements IStorage {
             marketCenterActual = (data.disableCap || capAmount === null)
               ? marketCenterDue
               : Math.min(marketCenterDue, Math.max(0, capAmount - capUsedSoFar));
-            bmKdv = marketCenterActual > 0 ? bhbShare * 0.004 : 0; // BHB × %2 × %20, yalnızca BM payı > 0 ise
+            // BM KDV otomatik üretilmez — oran BM payı tabanlı ve bilinçli girilmeli
+            // (eskiden BHB × %0,4 ile otomatik atanıyordu, BHB tabanlı mantığın kalıntısıydı).
+            bmKdv = 0;
             ukShare = 0;
             ukKdv = 0;
             if (emp.uretkenlikKoclugu && emp.uretkenlikKocluguOran) {
@@ -3781,7 +3783,9 @@ export class DatabaseStorage implements IStorage {
             marketCenterActual = capAmount === null
               ? marketCenterDue
               : Math.min(marketCenterDue, Math.max(0, capAmount - capUsedSoFar));
-            bmKdv = marketCenterActual > 0 ? bhbShare * 0.004 : 0; // BHB × %2 × %20, yalnızca BM payı > 0 ise
+            // BM KDV otomatik üretilmez — oran BM payı tabanlı ve bilinçli girilmeli
+            // (eskiden BHB × %0,4 ile otomatik atanıyordu, BHB tabanlı mantığın kalıntısıydı).
+            bmKdv = 0;
             ukShare = 0;
             ukKdv = 0;
             if (emp.uretkenlikKoclugu && emp.uretkenlikKocluguOran) {

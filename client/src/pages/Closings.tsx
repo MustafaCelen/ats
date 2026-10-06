@@ -392,7 +392,7 @@ interface AgentInputRow {
   kwtrKdv: string;
   marketCenterActual: string;
   bmKdv: string;
-  bmKdvRatePct: string; // BM KDV rate as % of BHB, e.g. "0.40" = 0.40%
+  bmKdvRatePct: string; // BM KDV rate as % of BM payı (marketCenterActual), e.g. "20" = 20%
   ukShare: string;
   ukKdv: string;
   ukKdvRatePct: string; // ÜK KDV rate as % of ÜK payı, e.g. "0" = 0%
@@ -681,7 +681,7 @@ function SideSection({
               ? (rateBHB > 0 ? (agentManualBhbNum / rateBHB) * 100 : 0)
               : parseFloat(agent.splitPercentage || "0");
 
-            const bmKdvRate = parseFloat(agent.bmKdvRatePct || "0.40");
+            const bmKdvRate = parseFloat(agent.bmKdvRatePct || "0");
             const ukKdvRate = parseFloat(agent.ukKdvRatePct || "0");
 
             const recalc = () => {
@@ -1386,7 +1386,13 @@ function NewClosingDialog({
   const [referralSide, setReferralSide] = useState<SideState>({ enabled: false, agents: [newAgent()] });
 
   const saleValueNum = parseFloat(saleValue || "0");
-  const commissionRatePct = Math.max(0, parseFloat(commissionRate || (dealCategory === "Kiralık" ? "50" : "2")));
+  // "0.00" JS'de truthy olduğu için `commissionRate || "2"` fallback'i devreye girmiyordu:
+  // parseFloat("0.00") = 0 → rateBHB = 0 → işlem detayında tüm kalemler 0 görünüyordu.
+  // Bu yüzden sayıya çevirip geçerliliğe (>0) göre karar veriyoruz.
+  const commissionRateParsed = parseFloat(commissionRate);
+  const commissionRatePct = Number.isFinite(commissionRateParsed) && commissionRateParsed > 0
+    ? commissionRateParsed
+    : (dealCategory === "Kiralık" ? 50 : 2);
   const sideBHBPreview = saleValueNum > 0 ? saleValueNum * (commissionRatePct / 100) : 0;
   const saleValueLabel = dealCategory === "Kiralık" ? "Aylık Kira Bedeli (₺) *" : "Satış Bedeli (₺) *";
   const anyManualBHB =
@@ -1519,7 +1525,27 @@ function NewClosingDialog({
     setDealCategory((e.dealCategory ?? "Satış") as DealCategory);
     setDealType(e.dealType ?? "Konut");
     setSaleValue(e.saleValue ?? "");
-    setCommissionRate(e.commissionRate ?? "2");
+    // Komisyon oranı eksik/sıfır kaydedilmişse (import edilmiş eski kayıtlarda oluyor),
+    // kayıtlı taraf BHB toplamından geri türet ki işlem detayı 0 göstermesin.
+    // Türetilemezse işlem türüne göre varsayılana düş.
+    setCommissionRate((() => {
+      const kayitli = parseFloat(e.commissionRate);
+      if (Number.isFinite(kayitli) && kayitli > 0) return e.commissionRate;
+      const sv = parseFloat(e.saleValue ?? "0");
+      if (sv > 0) {
+        // Bir tarafın BHB toplamı = saleValue × oran/100 → oran = bhbToplam / saleValue × 100
+        const sideBhbTotals = (e.sides ?? []).map((s: any) =>
+          (s.agents ?? []).reduce((sum: number, a: any) => sum + parseFloat(a.bhbShare ?? "0"), 0)
+        ).filter((t: number) => t > 0);
+        if (sideBhbTotals.length > 0) {
+          const turetilen = (Math.max(...sideBhbTotals) / sv) * 100;
+          if (Number.isFinite(turetilen) && turetilen > 0) {
+            return turetilen.toFixed(4).replace(/\.?0+$/, "");
+          }
+        }
+      }
+      return (e.dealCategory ?? "Satış") === "Kiralık" ? "50" : "2";
+    })());
     setOpeningPrice(e.openingPrice ?? "");
     setDurationDays(e.durationDays != null ? String(e.durationDays) : "");
     setCustomerSource(e.customerSource ?? "");
@@ -1539,6 +1565,12 @@ function NewClosingDialog({
       const s = matching[0];
       return {
         enabled: true,
+        // Kayıtlı kapanışlar oran ("rate") modunda açılmalı: değerler zaten DB'de
+        // hesaplanmış ve splitPercentage dolu geliyor. bhbMode set edilmezse
+        // SideSection'daki "?? manual" devreye girip manuel moda düşüyordu; manuel
+        // modda showBreakdown agentManualBhb > 0 şartına baktığı ve o alan kayıttan
+        // doldurulmadığı için breakdown (payların dağılımı/KDV'ler) hiç görünmüyordu.
+        bhbMode: "rate",
         agents: s.agents.map((a: any) => ({
           id: Math.random().toString(36).slice(2),
           realAgentId: a.id,
@@ -1553,20 +1585,29 @@ function NewClosingDialog({
           marketCenterActual: a.marketCenterActual ?? "",
           bmKdv: a.bmKdv ?? "",
           bmKdvRatePct: (() => {
-            const bhb = parseFloat(a.bhbShare ?? "0");
+            // Oran BM payı tabanlı olmalı: ileri hesaplama (calcAgentBreakdown /
+            // updateField) bmKdv = marketCenterActual × oran/100 şeklinde çalışıyor.
+            // Önceden BHB'ye bölünüyordu; o oran BM ile çarpıldığında kayıtlı KDV
+            // tutarını bozuyordu (ör. BM tabanlı %20 yerine BHB tabanlı %5,4 türetip
+            // 5.940 TL'lik KDV'yi 1.604 TL'ye düşürüyordu).
+            const bm = parseFloat(a.marketCenterActual ?? "0");
             const kdv = parseFloat(a.bmKdv ?? "0");
-            if (bhb > 0 && kdv > 0) return (kdv / bhb * 100).toFixed(4).replace(/\.?0+$/, "") || "0.40";
-            return "0.40";
+            // 10 hane: %1,481481… gibi yuvarlak olmayan oranlarda toFixed(4) kırpması
+            // geri çarpımda kuruş sapması yaratıp kayıtlı KDV'yi bozuyordu.
+            if (bm > 0 && kdv > 0) return (kdv / bm * 100).toFixed(10).replace(/\.?0+$/, "") || "0";
+            return "0";
           })(),
           ukShare: a.ukShare ?? "",
           ukKdv: a.ukKdv ?? "",
           ukKdvRatePct: (() => {
             const uk = parseFloat(a.ukShare ?? "0");
             const kdv = parseFloat(a.ukKdv ?? "0");
-            if (uk > 0 && kdv > 0) return (kdv / uk * 100).toFixed(4).replace(/\.?0+$/, "") || "0";
+            if (uk > 0 && kdv > 0) return (kdv / uk * 100).toFixed(10).replace(/\.?0+$/, "") || "0";
             return "0";
           })(),
           employeeNet: a.employeeNet ?? "",
+          // Manuel moda geçilirse BHB payı kaybolmasın
+          agentManualBhb: a.bhbShare ?? "",
           closingDate: a.closingDate ? new Date(a.closingDate).toISOString().split("T")[0] : "",
           status: a.status ?? "",
           paymentCollected: !!a.paymentCollected,
