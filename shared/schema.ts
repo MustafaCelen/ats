@@ -577,7 +577,7 @@ export type ClosingAgent = typeof closingAgents.$inferSelect;
 export const closingAgentCollections = pgTable("closing_agent_collections", {
   id: serial("id").primaryKey(),
   closingAgentId: integer("closing_agent_id").notNull(),
-  method: text("method").notNull(), // "kasa" | "banka"
+  method: text("method").notNull(), // "banka" | "nakit" — her biri kendi hedefine (closingAgents.banka / .nakit) sayılır
   amount: numeric("amount", { precision: 15, scale: 2 }).notNull(),
   note: text("note"),
   collectedAt: timestamp("collected_at").defaultNow(),

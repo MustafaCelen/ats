@@ -3266,8 +3266,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post("/api/closing-agents/:id/collections", requireAuth, requireAdmin, async (req, res) => {
     try {
       const { method, amount, note, collectedAt } = req.body;
-      if (!method || !["kasa", "banka"].includes(method) || amount == null) {
-        return res.status(400).json({ message: "method (kasa|banka) and amount are required" });
+      if (!method || !["banka", "nakit"].includes(method) || amount == null) {
+        return res.status(400).json({ message: "method (banka|nakit) and amount are required" });
       }
       const row = await storage.addClosingAgentCollection({
         closingAgentId: Number(req.params.id),

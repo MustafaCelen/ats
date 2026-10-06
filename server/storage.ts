@@ -2702,17 +2702,33 @@ export class DatabaseStorage implements IStorage {
     await this.autoMarkAgentPaymentCollected(row.closingAgentId);
   }
 
-  // Tahsilat kalemlerinin toplamı BM'nin danışmandan tahsil edeceği tutara (kwtrKdv +
-  // marketCenterActual + bmKdv + ukShare — closingAgents.kasa alanında saklanan toplam)
-  // ulaşınca/geçince paymentCollected otomatik true olur; altına düşerse (kalem silinirse)
-  // tekrar false olur. Danışmanın kendi net hakedişiyle (employeeNet) ilgisi yoktur.
+  // Tahsilat, Kasa'nın iki alt kalemi üzerinden ayrı ayrı izlenir:
+  //   banka tahsilatı → hedefi closingAgents.banka
+  //   nakit tahsilatı → hedefi closingAgents.nakit
+  // (banka + nakit = kasa, yani BM'nin danışmandan tahsil edeceği toplam.)
+  // Her iki kalem de kendi hedefine ulaşınca paymentCollected true olur; biri altına
+  // düşerse (kalem silinirse) tekrar false olur. Hedefi 0 olan kalem baştan tamam sayılır.
+  // Danışmanın kendi net hakedişiyle (employeeNet) ilgisi yoktur.
   async autoMarkAgentPaymentCollected(closingAgentId: number): Promise<void> {
     const [agent] = await db.select().from(closingAgents).where(eq(closingAgents.id, closingAgentId));
     if (!agent) return;
     const items = await this.getClosingAgentCollections(closingAgentId);
-    const collected = items.reduce((s, i) => s + parseFloat(i.amount), 0);
-    const receivable = parseFloat(agent.kasa ?? "0");
-    const shouldBeCollected = receivable > 0 && collected >= receivable;
+
+    const sumBy = (m: string) =>
+      items.filter((i) => i.method === m).reduce((s, i) => s + parseFloat(i.amount), 0);
+    const bankaCollected = sumBy("banka");
+    const nakitCollected = sumBy("nakit");
+
+    const bankaTarget = parseFloat(agent.banka ?? "0");
+    const nakitTarget = parseFloat(agent.nakit ?? "0");
+
+    // Hedefi 0 ise o kalem zaten tamam; aksi halde tahsilat hedefe ulaşmalı.
+    const bankaDone = bankaTarget <= 0 || bankaCollected >= bankaTarget;
+    const nakitDone = nakitTarget <= 0 || nakitCollected >= nakitTarget;
+    // Her iki hedef de 0 ise tahsil edilecek bir şey yok — otomatik onay verilmez.
+    const hasTarget = bankaTarget > 0 || nakitTarget > 0;
+
+    const shouldBeCollected = hasTarget && bankaDone && nakitDone;
     if (shouldBeCollected !== agent.paymentCollected) {
       await this.updateClosingAgent(closingAgentId, { paymentCollected: shouldBeCollected });
     }

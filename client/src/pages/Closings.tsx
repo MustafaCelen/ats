@@ -1328,8 +1328,8 @@ function AgentCollectionsInline({ agentId }: { agentId: number }) {
       <div className="space-y-0.5">
         {items.map((it: any) => (
           <div key={it.id} className="flex items-center gap-2 text-[11px] text-muted-foreground pl-2">
-            <span className={it.method === "kasa" ? "text-blue-600" : "text-purple-600"}>
-              {it.method === "kasa" ? "Kasa" : "Banka"}
+            <span className={it.method === "banka" ? "text-purple-600" : "text-blue-600"}>
+              {it.method === "banka" ? "Banka" : "Nakit"}
             </span>
             <span className="font-medium text-foreground">{fmtTRY(parseFloat(it.amount))}</span>
             {it.note && <span className="truncate">— {it.note}</span>}
@@ -2417,8 +2417,8 @@ export default function Closings() {
     } catch { /* silent */ }
   }, [queryClient]);
 
-  // Tahsilat: danışman bazlı, kalem kalem (kasa/banka). Her agent'ın toplam tahsilatı
-  // kendi alacağına (employeeNet) ulaşınca sunucu tarafında paymentCollected otomatik true olur.
+  // Tahsilat: danışman bazlı, Kasa'nın alt kalemleri (banka/nakit) ayrı ayrı izlenir.
+  // Her iki kalem de kendi hedefine ulaşınca sunucu tarafında paymentCollected otomatik true olur.
   const [collectionAgentId, setCollectionAgentId] = useState<number | null>(null);
   const openCollectionDialog = useCallback((agentId: number) => {
     setCollectionAgentId(agentId);
@@ -3247,7 +3247,7 @@ export default function Closings() {
                             <button
                               onClick={() => openCollectionDialog(row.agentId)}
                               className={`transition-colors p-1 rounded ${row.paymentCollected ? "text-emerald-600" : "text-muted-foreground hover:text-emerald-600"}`}
-                              title="Tahsilat gir (danışman bazlı, kasa/banka)"
+                              title="Tahsilat gir (danışman bazlı, banka/nakit)"
                             >
                               <Landmark className="h-3.5 w-3.5" />
                             </button>
@@ -3346,7 +3346,7 @@ export default function Closings() {
         editingClosing={editingClosing}
       />
 
-      {/* Tahsilat girişi — danışman bazlı, kalem kalem (kasa/banka) */}
+      {/* Tahsilat girişi — danışman bazlı, Kasa'nın alt kalemleri (banka/nakit) ayrı ayrı */}
       <AgentCollectionDialog
         agentId={collectionAgentId}
         row={flatRows.find((r) => r.agentId === collectionAgentId) ?? null}
@@ -3389,12 +3389,12 @@ export default function Closings() {
 
 function AgentCollectionDialog({ agentId, row, onClose }: {
   agentId: number | null;
-  row: { employeeName: string; kasa: string } | null;
+  row: { employeeName: string; kasa: string; nakit: string; banka: string } | null;
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const [method, setMethod] = useState<"kasa" | "banka">("kasa");
+  const [method, setMethod] = useState<"banka" | "nakit">("banka");
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
 
@@ -3408,8 +3408,19 @@ function AgentCollectionDialog({ agentId, row, onClose }: {
     enabled: agentId !== null,
   });
 
+  // Tahsilat Kasa'nın iki alt kalemi üzerinden ayrı ayrı izlenir:
+  // banka tahsilatı → banka hedefi, nakit tahsilatı → nakit hedefi.
   const receivable = parseFloat(row?.kasa ?? "0");
-  const collected = items.reduce((s, i) => s + parseFloat(i.amount), 0);
+  const bankaTarget = parseFloat(row?.banka ?? "0");
+  const nakitTarget = parseFloat(row?.nakit ?? "0");
+  const sumBy = (m: string) =>
+    items.filter((i) => i.method === m).reduce((s, i) => s + parseFloat(i.amount), 0);
+  const bankaCollected = sumBy("banka");
+  const nakitCollected = sumBy("nakit");
+  const collected = bankaCollected + nakitCollected;
+  const bankaDone = bankaTarget <= 0 || bankaCollected >= bankaTarget;
+  const nakitDone = nakitTarget <= 0 || nakitCollected >= nakitTarget;
+  const allDone = (bankaTarget > 0 || nakitTarget > 0) && bankaDone && nakitDone;
 
   const addItem = async () => {
     if (!agentId || !amount) return;
@@ -3438,15 +3449,45 @@ function AgentCollectionDialog({ agentId, row, onClose }: {
         <DialogHeader>
           <DialogTitle>Tahsilat — {row?.employeeName ?? ""}</DialogTitle>
           <p id="agent-collection-desc" className="text-sm text-muted-foreground">
-            BM'nin bu danışmandan tahsil edeceği tutar (KWTR+KDV, BM payı, BM KDV, ÜK payı toplamı).
-            Toplam tahsilat bu tutara ulaşınca ödeme durumu otomatik "Tahsil Edildi" olur.
+            Tahsilat, Kasa'nın iki alt kalemi üzerinden ayrı ayrı izlenir: Banka ve Nakit.
+            Her iki kalem de kendi tutarına ulaşınca ödeme durumu otomatik "Tahsil Edildi" olur.
           </p>
         </DialogHeader>
         <div className="space-y-3 pt-2">
-          <p className="text-xs text-muted-foreground">
-            BM Alacağı: <span className="font-semibold text-foreground">{fmtTRY(receivable)}</span>
-            {" · "}Tahsil Edilen: <span className={`font-semibold ${receivable > 0 && collected >= receivable ? "text-emerald-600" : "text-foreground"}`}>{fmtTRY(collected)}</span>
-          </p>
+          {/* Kasa = Banka + Nakit; her kalem kendi hedefine göre ayrı izlenir */}
+          <div className="rounded-lg border border-border p-3 space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground">Kasa Toplamı (BM Alacağı)</span>
+              <span className={`font-semibold ${allDone ? "text-emerald-600" : "text-foreground"}`}>
+                {fmtTRY(collected)} / {fmtTRY(receivable)}
+              </span>
+            </div>
+            {([
+              { ad: "Banka", hedef: bankaTarget, tahsil: bankaCollected, tamam: bankaDone },
+              { ad: "Nakit", hedef: nakitTarget, tahsil: nakitCollected, tamam: nakitDone },
+            ] as const).map((k) => (
+              <div key={k.ad} className="space-y-1">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="flex items-center gap-1.5">
+                    <Badge variant={k.ad === "Banka" ? "outline" : "secondary"} className="text-[10px]">{k.ad}</Badge>
+                    {k.hedef <= 0 && <span className="text-muted-foreground/60">(tutar yok)</span>}
+                  </span>
+                  <span className={`font-medium ${k.hedef > 0 && k.tamam ? "text-emerald-600" : "text-foreground"}`}>
+                    {fmtTRY(k.tahsil)} / {fmtTRY(k.hedef)}
+                    {k.hedef > 0 && k.tamam && " ✓"}
+                  </span>
+                </div>
+                {k.hedef > 0 && (
+                  <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all ${k.tamam ? "bg-emerald-500" : "bg-amber-500"}`}
+                      style={{ width: `${Math.min(100, (k.tahsil / k.hedef) * 100)}%` }}
+                    />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
 
           <div className="rounded-lg border border-border divide-y divide-border max-h-56 overflow-y-auto">
             {items.length === 0 ? (
@@ -3454,8 +3495,8 @@ function AgentCollectionDialog({ agentId, row, onClose }: {
             ) : (
               items.map((it: any) => (
                 <div key={it.id} className="flex items-center gap-2 px-3 py-2 text-sm">
-                  <Badge variant={it.method === "kasa" ? "secondary" : "outline"} className="text-[10px] shrink-0">
-                    {it.method === "kasa" ? "Kasa" : "Banka"}
+                  <Badge variant={it.method === "banka" ? "outline" : "secondary"} className="text-[10px] shrink-0">
+                    {it.method === "banka" ? "Banka" : "Nakit"}
                   </Badge>
                   <span className="font-medium">{fmtTRY(parseFloat(it.amount))}</span>
                   {it.note && <span className="text-xs text-muted-foreground truncate">{it.note}</span>}
@@ -3473,11 +3514,11 @@ function AgentCollectionDialog({ agentId, row, onClose }: {
           <div className="flex items-end gap-2">
             <div className="space-y-1.5 w-24">
               <label className="text-xs font-medium">Yöntem</label>
-              <Select value={method} onValueChange={(v) => setMethod(v as "kasa" | "banka")}>
+              <Select value={method} onValueChange={(v) => setMethod(v as "banka" | "nakit")}>
                 <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="kasa">Kasa</SelectItem>
                   <SelectItem value="banka">Banka</SelectItem>
+                  <SelectItem value="nakit">Nakit</SelectItem>
                 </SelectContent>
               </Select>
             </div>
