@@ -327,51 +327,23 @@ export async function syncFonzipDebts(createdByUserId: number): Promise<{
   return { total, upserted, matched, expensesCreated, errors };
 }
 
-// ── Günlük sync (API'nin verdiği en yeni kayıtları çeker) ────────────────────
-// NOT: Fonzip /debts tarih filtresini de yok sayıyor (bkz. syncFonzipDebts üstündeki
-// açıklama). Gün gün tarama yapmak aynı 10 kaydı tekrar tekrar getirir; `range`
-// verildiğinde de API filtrelemediği için sonuç aynıdır. Fonksiyon geriye dönük
-// uyumluluk ve idempotent güncelleme için korunuyor: aynı kayıtları upsert eder,
-// yeni olanları ekler. Geçmiş veri için importFonzipExcel() kullanılmalı.
-// Tüm Fonzip üyelerinin membership_no listesi. /users POST search gövdesi kabul ediyor
-// ve GERÇEK sayfalama yapıyor (/debts'in aksine). syncFonzipUsersFinancials ile aynı çağrı.
-async function fetchAllFonzipMemberNos(): Promise<string[]> {
-  const out = new Set<string>();
-  for (let page = 1; page <= 100; page++) {
-    let data: any;
-    let retry = 0;
-    while (true) {
-      try {
-        data = await fonzipPost("/users", {
-          search: { start_page: page, how_many: 100, order_by: "name", filter: { condition: "and", attributes: [] } },
-          values_list: ["id", "membership_no"],
-        });
-        break;
-      } catch (e: any) {
-        if (e.message.includes("429") && retry < 5) { retry++; await new Promise(r => setTimeout(r, 60000)); continue; }
-        throw e;
-      }
-    }
-    const list: any[] = data?.user_list ?? [];
-    for (const u of list) if (u.membership_no != null && String(u.membership_no) !== "") out.add(String(u.membership_no).trim());
-    if (list.length < 100) break;
-    await new Promise(r => setTimeout(r, 400));
-  }
-  return Array.from(out);
-}
-
+// ── Günlük sync: /debts sayfalama ile ─────────────────────────────────────────
+// Canlı API'de doğrulandı (Ekim 2026): /debts, /users ile aynı sayfalama parametrelerini
+// kabul ediyor — `start_page` (1'den başlar) ve `how_many` (tavan 100). `page`/`per_page`
+// ve tarih aralığı parametreleri yok sayılır; `operation_date` yalnızca tam gün eşleşir
+// ve saat dilimi kayması nedeniyle güvenilir değildir. Bu yüzden tarih yerine `-id`
+// sırasıyla sayfa sayfa ilerlenir: 40.5k borç ≈ 406 sayfa ≈ 3–4 dk.
+//
+// "recent": sayfalar, tamamı DB'de olan bir sayfaya gelince durur (manuel buton, saniyeler).
+// "full":   son sayfaya kadar gider; eski borçların status (bekliyor→ödendi) değişimleri
+//           de böyle yakalanır. Gece cron'u bunu kullanır.
 export async function syncFonzipRecentDebts(
   createdByUserId: number,
-  // Korunuyor ama API tarih filtresi uygulamadığı için sonucu etkilemiyor.
-  daysBack: number = 3,
-  range?: { startDate: string; endDate: string },
-  // "global": en yeni ~20 kayıt (hızlı manuel sync). "perUser": her Fonzip üyesi için
-  // ayrı sorgu — gece cron'u bunu kullanır (bkz. aşağıdaki açıklama).
-  mode: "global" | "perUser" = "global",
+  mode: "recent" | "full" = "recent",
+  onProgress?: (p: { page: number; totalPages: number; total: number }) => void,
 ): Promise<{
-  daysScanned: number; total: number; upserted: number; updated: number;
-  matched: number; expensesCreated: number; errors: string[];
-  apiLimitation?: string; usersScanned?: number; apiCalls?: number;
+  mode: string; pages: number; totalPages: number; total: number; upserted: number; updated: number;
+  matched: number; expensesCreated: number; errors: string[]; apiCalls: number;
 }> {
   const { storage } = await import("./storage");
   const { pool } = await import("./db");
@@ -383,153 +355,123 @@ export async function syncFonzipRecentDebts(
   }
 
   let total = 0, upserted = 0, updated = 0, matched = 0, expensesCreated = 0;
-  let apiCalls = 0, usersScanned = 0;
+  let apiCalls = 0, pages = 0, totalPages = 0;
   const errors: string[] = [];
+  const PAGE_SIZE = 100;
 
-  // /debts sayfalama ve tarih filtresini yok sayıyor; her sorgu en yeni 10 kaydı verir.
-  // Çalışan iki filtre var (canlı API'de doğrulandı): `status` (8/1 pencereleri ayrık)
-  // ve `membership_no` (kullanıcı başına; o kullanıcının en yeni 10 kaydı).
-  //
-  // "global" mod: status=8 + status=1 → en yeni 20 kayıt. Hızlı ama toplu aidat gününde
-  // yetmez: Eylül 2026'da tek günde (15 Eyl) 150+ borç açıldı.
-  //
-  // "perUser" mod: tüm Fonzip üyeleri (/users POST, gerçek sayfalama) tek tek sorgulanır.
-  // Liste SİSTEMDEKİ danışmanlarla sınırlanmaz: 15 Eyl toplu girişinin ~%38'i sistemde
-  // kwuid'si olmayan üyelere yazılmıştı. Kullanıcı başına tek sorgu yeterli: bir üyenin
-  // tek günde gözlenen en yüksek kayıt sayısı 7 (<10 tavanı). Maliyet ~1.5k çağrı/gece,
-  // 429'da 60 sn beklenir; gece 03:00 için kabul edilebilir.
-  const fetchWindow = async (params: Record<string, string>): Promise<any[]> => {
+  const fetchPage = async (page: number): Promise<{ list: any[]; total: number }> => {
     let retry = 0;
     while (true) {
       try {
         apiCalls++;
-        const data = await fonzipGet("/debts", params);
-        return data?.debt_list ?? [];
+        const data = await fonzipGet("/debts", { order_by: "-id", how_many: String(PAGE_SIZE), start_page: String(page) });
+        return { list: data?.debt_list ?? [], total: Number(data?.total ?? 0) };
       } catch (e: any) {
         if (e.message.includes("429") && retry < 5) {
           retry++;
           await new Promise(r => setTimeout(r, 60000));
           continue;
         }
-        errors.push(`Fonzip /debts ${JSON.stringify(params)}: ${e.message}`);
-        return [];
+        errors.push(`Fonzip /debts sayfa ${page}: ${e.message}`);
+        return { list: [], total: 0 };
       }
     }
   };
 
-  const byId = new Map<number, any>();
-  if (mode === "perUser") {
-    const members = await fetchAllFonzipMemberNos();
-    for (const mn of members) {
-      const win = await fetchWindow({ membership_no: mn, order_by: "-id" });
-      for (const debt of win) byId.set(debt.id, debt);
-      // Pencere tam doluysa (10) kullanıcının o günkü kayıtları 10'u aşmış olabilir
-      // (gözlenen maksimum tam 10). status=8/1 pencereleri ayrık olduğu için ikisini
-      // de çekmek kapasiteyi 20'ye çıkarır; yalnızca dolu pencerede ödenir (nadir).
-      if (win.length >= 10) {
-        for (const status of ["8", "1"]) {
-          for (const debt of await fetchWindow({ membership_no: mn, status, order_by: "-id" })) byId.set(debt.id, debt);
-          await new Promise(r => setTimeout(r, 250));
-        }
-      }
-      usersScanned++;
-      await new Promise(r => setTimeout(r, 250));
-    }
-  } else {
-    for (const status of ["8", "1"]) {
-      for (const debt of await fetchWindow({ status, order_by: "-id", per_page: "100" })) {
-        byId.set(debt.id, debt);
-      }
-      await new Promise(r => setTimeout(r, 500));
-    }
-  }
+  // Tek borcu işler; kayıt yeni eklendiyse true döner.
+  const processDebt = async (debt: any): Promise<boolean> => {
+    const membershipNo = debt.user__membership_no != null ? String(debt.user__membership_no) : null;
+    const operationDate = debt.operation_date
+      ? debt.operation_date.slice(0, 10)
+      : (debt.create_date ? debt.create_date.slice(0, 10) : null);
+    const empId = membershipNo ? byKwuid[membershipNo.trim()] : undefined;
+    const category = classifyFonzipCategory(debt.details);
 
-  {
-    if (byId.size === 0) {
-      return { daysScanned: 1, total, upserted, updated, matched, expensesCreated, errors };
-    }
-    total += byId.size;
+    const existing = await pool.query(
+      "SELECT id, expense_id FROM fonzip_synced_debts WHERE fonzip_id = $1",
+      [debt.id]
+    );
 
-    for (const debt of Array.from(byId.values())) {
-      try {
-        const membershipNo = debt.user__membership_no != null ? String(debt.user__membership_no) : null;
-        const operationDate = debt.operation_date
-          ? debt.operation_date.slice(0, 10)
-          : (debt.create_date ? debt.create_date.slice(0, 10) : null);
-        const empId = membershipNo ? byKwuid[membershipNo.trim()] : undefined;
-        const category = classifyFonzipCategory(debt.details);
-
-        const existing = await pool.query(
-          "SELECT id, expense_id FROM fonzip_synced_debts WHERE fonzip_id = $1",
-          [debt.id]
+    if (existing.rows.length > 0) {
+      // `status` mutlaka yenilenmeli: borç 8 (bekliyor) -> 1 (ödendi) olduğunda
+      // danışman borç raporu ve Borçlular Raporu (status = 8 filtresi) bunu görsün.
+      await pool.query(
+        `UPDATE fonzip_synced_debts SET
+           details = COALESCE($2, details), period = COALESCE($3, period),
+           user_name = $4, membership_no = COALESCE($5, membership_no),
+           amount = $6, operation_date = COALESCE($7, operation_date),
+           added_by_name = COALESCE($8, added_by_name),
+           employee_id = COALESCE($9, employee_id), status = $10, synced_at = NOW()
+         WHERE fonzip_id = $1`,
+        [debt.id, debt.details, debt.period, debt.user__name ?? "", membershipNo,
+         String(debt.amount ?? 0), operationDate, debt.added_by__name ?? null, empId ?? null,
+         debt.status]
+      );
+      if (existing.rows[0].expense_id) {
+        await pool.query(
+          `UPDATE office_expenses SET notes = $2, category = $3, amount = $4, date = $5, employee_id = $6 WHERE id = $1`,
+          [existing.rows[0].expense_id,
+           `${debt.user__name ?? ""} — ${debt.details ?? ""} (Fonzip #${debt.id})`,
+           category, String(debt.amount ?? 0),
+           operationDate ?? new Date().toISOString().slice(0, 10), empId ?? null]
         );
+      }
+      updated++;
+      return false;
+    }
 
-        if (existing.rows.length > 0) {
-          // `status` mutlaka yenilenmeli: borç 8 (bekliyor) -> 1 (ödendi) olduğunda
-          // danışman borç raporu ve Borçlular Raporu (status = 8 filtresi) bunu görsün.
-          // Önceden bu alan güncellenmiyordu; ödenen borçlar süresiz "bekliyor" kalıyordu.
-          await pool.query(
-            `UPDATE fonzip_synced_debts SET
-               details = COALESCE($2, details), period = COALESCE($3, period),
-               user_name = $4, membership_no = COALESCE($5, membership_no),
-               amount = $6, operation_date = COALESCE($7, operation_date),
-               added_by_name = COALESCE($8, added_by_name),
-               employee_id = COALESCE($9, employee_id), status = $10, synced_at = NOW()
-             WHERE fonzip_id = $1`,
-            [debt.id, debt.details, debt.period, debt.user__name ?? "", membershipNo,
-             String(debt.amount ?? 0), operationDate, debt.added_by__name ?? null, empId ?? null,
-             debt.status]
-          );
-          if (existing.rows[0].expense_id) {
-            await pool.query(
-              `UPDATE office_expenses SET notes = $2, category = $3, amount = $4, date = $5, employee_id = $6 WHERE id = $1`,
-              [existing.rows[0].expense_id,
-               `${debt.user__name ?? ""} — ${debt.details ?? ""} (Fonzip #${debt.id})`,
-               category, String(debt.amount ?? 0),
-               operationDate ?? new Date().toISOString().slice(0, 10), empId ?? null]
-            );
-          }
-          updated++;
-        } else {
-          await storage.upsertFonzipDebt({
-            fonzipId: debt.id, fonzipUserId: debt.user_id, membershipNo,
-            userName: debt.user__name ?? "", amount: String(debt.amount ?? 0),
-            details: debt.details ?? null, period: debt.period ?? null,
-            status: debt.status, operationDate, addedByName: debt.added_by__name ?? null,
-          });
-          if (empId) {
-            await storage.setFonzipDebtEmployee(debt.id, empId);
-            matched++;
-          }
-          const expense = await storage.createOfficeExpense({
-            type: "income", category, amount: String(debt.amount ?? 0),
-            date: operationDate ?? new Date().toISOString().slice(0, 10),
-            notes: `${debt.user__name ?? ""} — ${debt.details ?? ""} (Fonzip #${debt.id})`,
-            employeeId: empId ?? null, createdByUserId,
-          });
-          await storage.setFonzipDebtExpense(debt.id, expense.id);
-          expensesCreated++;
-          upserted++;
-        }
+    await storage.upsertFonzipDebt({
+      fonzipId: debt.id, fonzipUserId: debt.user_id, membershipNo,
+      userName: debt.user__name ?? "", amount: String(debt.amount ?? 0),
+      details: debt.details ?? null, period: debt.period ?? null,
+      status: debt.status, operationDate, addedByName: debt.added_by__name ?? null,
+    });
+    if (empId) {
+      await storage.setFonzipDebtEmployee(debt.id, empId);
+      matched++;
+    }
+    // Tahakkuk esası: her Fonzip borcu, ödenip ödenmediğine ve danışman eşleşmesine
+    // bakılmaksızın gelir kalemidir.
+    const expense = await storage.createOfficeExpense({
+      type: "income", category, amount: String(debt.amount ?? 0),
+      date: operationDate ?? new Date().toISOString().slice(0, 10),
+      notes: `${debt.user__name ?? ""} — ${debt.details ?? ""} (Fonzip #${debt.id})`,
+      employeeId: empId ?? null, createdByUserId,
+    });
+    await storage.setFonzipDebtExpense(debt.id, expense.id);
+    expensesCreated++;
+    upserted++;
+    return true;
+  };
+
+  const seen = new Set<number>();
+  for (let page = 1; page <= 2000; page++) {
+    const { list, total: apiTotal } = await fetchPage(page);
+    if (page === 1 && apiTotal > 0) totalPages = Math.ceil(apiTotal / PAGE_SIZE);
+    if (list.length === 0) break;
+    pages++;
+
+    let newOnPage = 0;
+    for (const debt of list) {
+      if (seen.has(debt.id)) continue; // sayfa kayması (tarama sırasında yeni borç açılması) için
+      seen.add(debt.id);
+      total++;
+      try {
+        if (await processDebt(debt)) newOnPage++;
       } catch (e: any) {
         errors.push(`Debt #${debt.id}: ${e.message}`);
       }
     }
+    onProgress?.({ page, totalPages, total });
+
+    if (list.length < PAGE_SIZE) break;
+    if (mode === "recent" && newOnPage === 0) break;
+    await new Promise(r => setTimeout(r, 300));
   }
 
-  return {
-    daysScanned: 1, total, upserted, updated, matched, expensesCreated, errors, usersScanned, apiCalls,
-    // Çağıranın yanıltıcı sonuç okumasını önlemek için API kısıtını açıkça bildiriyoruz.
-    apiLimitation: range
-      ? `Fonzip /debts tarih filtresini yok sayıyor; ${range.startDate}–${range.endDate} aralığı uygulanmadı. ` +
-        "Geçmiş veri için Excel import kullanın."
-      : mode === "perUser"
-        ? "Her Fonzip üyesi için en yeni 10 borç alındı (membership_no filtresi). Üye başına 10'dan eski kayıtlar " +
-          "API'den erişilemez; geçmiş veri için Excel import kullanın."
-        : "Fonzip /debts sayfalama/tarih filtresi uygulamıyor; status=8 ve status=1 pencereleri ayrı sorgulanarak " +
-          "en yeni ~20 kayıt alınıyor. Toplu aidat günü için yetersizdir — cron perUser modunu kullanır.",
-  };
+  return { mode, pages, totalPages, total, upserted, updated, matched, expensesCreated, errors, apiCalls };
 }
+
 
 // ── Excel Import: Fonzip ödeme geçmişi Excel'inden toplu içe aktarım ─────────
 // Borç açıklamasından otomatik gelir kategorisi çıkar

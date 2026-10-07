@@ -377,10 +377,9 @@ app.use((req, res, next) => {
     cron.schedule("0 3 * * *", async () => {
       log("[cron] Fonzip günlük sync başlıyor");
       try {
-        // admin userId=1. perUser: her Fonzip üyesi ayrı sorgulanır; "en yeni 20" modu
-        // toplu aidat gününde (Eylül 2026'da tek günde 150+ kayıt) yetersiz kalıyordu.
-        // ~1.5k çağrı, 429'da 60 sn bekleme — gece 03:00 için kabul edilebilir.
-        const debtsResult = await syncFonzipRecentDebts(1, 3, undefined, "perUser");
+        // admin userId=1. "full": tüm /debts sayfaları (~400 çağrı, 3–4 dk) — yeni borçlarla
+        // birlikte eski borçların status (bekliyor→ödendi) değişimleri de yakalanır.
+        const debtsResult = await syncFonzipRecentDebts(1, "full");
         log(`[cron] Borç sync: ${JSON.stringify(debtsResult)}`);
       } catch (e: any) {
         log(`[cron] Borç sync hata: ${e.message}`);

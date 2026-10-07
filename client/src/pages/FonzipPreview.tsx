@@ -154,7 +154,7 @@ export default function FonzipPreview() {
 
   const isUsersSyncRunning = usersSyncMutation.isPending || usersSyncStatus?.running;
 
-  const { data: recentSyncStatus, refetch: refetchRecentSyncStatus } = useQuery<{ running: boolean; lastResult: any }>({
+  const { data: recentSyncStatus, refetch: refetchRecentSyncStatus } = useQuery<{ running: boolean; lastResult: any; progress?: { page: number; totalPages: number; total: number } | null }>({
     queryKey: ["/api/fonzip/sync-recent/status"],
     queryFn: () => fetch("/api/fonzip/sync-recent/status", { credentials: "include" }).then(r => r.json()),
     refetchInterval: (q) => q.state.data?.running ? 3000 : false,
@@ -162,13 +162,16 @@ export default function FonzipPreview() {
   });
 
   const recentSyncMutation = useMutation({
-    mutationFn: (days: number = 3) => fetch("/api/fonzip/sync-recent", {
+    mutationFn: (mode: "recent" | "full" = "recent") => fetch("/api/fonzip/sync-recent", {
       method: "POST", credentials: "include",
-      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ days }),
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode }),
     }).then(r => r.json()),
-    onSuccess: (data) => {
+    onSuccess: (data, mode) => {
       if (data.error) { toast({ title: "Sync hatası", description: data.error, variant: "destructive" }); return; }
-      toast({ title: "Günlük sync başlatıldı", description: "Son 3 gün taranıyor, ~30 saniye." });
+      toast({
+        title: mode === "full" ? "Tam tarama başlatıldı" : "Sync başlatıldı",
+        description: mode === "full" ? "Tüm Fonzip borç geçmişi sayfa sayfa alınıyor, 3–4 dakika." : "Yeni borç kayıtları alınıyor, saniyeler sürer.",
+      });
       refetchRecentSyncStatus();
       const interval = setInterval(() => {
         refetchStats();
@@ -361,12 +364,23 @@ export default function FonzipPreview() {
             </Button>
             <Button
               variant="outline" className="gap-1.5"
-              onClick={() => recentSyncMutation.mutate(7)}
+              onClick={() => recentSyncMutation.mutate("recent")}
               disabled={isRecentSyncRunning || !status?.configured}
             >
               {isRecentSyncRunning
-                ? <><Loader2 className="h-4 w-4 animate-spin" />Günlük sync...</>
-                : <><Clock className="h-4 w-4" />Günlük Sync (7 gün)</>}
+                ? <><Loader2 className="h-4 w-4 animate-spin" />
+                    {recentSyncStatus?.progress
+                      ? `Sayfa ${recentSyncStatus.progress.page}/${recentSyncStatus.progress.totalPages || "?"}`
+                      : "Sync..."}</>
+                : <><Clock className="h-4 w-4" />Yeni Borçları Al</>}
+            </Button>
+            <Button
+              variant="outline" className="gap-1.5"
+              onClick={() => recentSyncMutation.mutate("full")}
+              disabled={isRecentSyncRunning || !status?.configured}
+              title="Tüm Fonzip borç geçmişini sayfa sayfa alır (3–4 dk). Eski borçların ödendi durumunu da günceller."
+            >
+              <Clock className="h-4 w-4" />Tam Tarama
             </Button>
             <Button
               variant="outline" className="gap-1.5"
