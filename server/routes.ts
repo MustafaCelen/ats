@@ -4402,16 +4402,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
 
     const days = Math.max(1, Math.min(30, Number(req.body?.days ?? 3)));
+    // mode=perUser: her Fonzip üyesi ayrı sorgulanır (cron'un kullandığı tam tarama,
+    // ~1.5k çağrı, dakikalar sürer). Varsayılan "global": en yeni ~20 kayıt, saniyeler.
+    const mode: "global" | "perUser" = req.body?.mode === "perUser" ? "perUser" : "global";
     recentSyncRunning = true;
     res.json({
       running: true,
-      message: "Fonzip sync başlatıldı.",
+      message: mode === "perUser" ? "Fonzip tam tarama (üye başına) başlatıldı — dakikalar sürebilir." : "Fonzip sync başlatıldı.",
       // Fonzip /debts tarih filtresini/sayfalamayı yok sayıyor; beklenti yönetimi için uyar.
       note: hasRange
         ? `Dikkat: Fonzip API tarih filtresi uygulamıyor, ${startDate}–${endDate} aralığı dikkate alınmayacak. Geçmiş veri için Excel import kullanın.`
-        : "Yalnızca API'nin döndürdüğü en yeni kayıtlar işlenir. Geçmiş veri için Excel import kullanın.",
+        : mode === "perUser"
+          ? "Her üyenin en yeni 10 borcu alınır. Üye başına daha eskiler için Excel import kullanın."
+          : "Yalnızca en yeni ~20 kayıt işlenir; toplu aidat günü için mode=perUser kullanın.",
     });
-    syncFonzipRecentDebts(userId, days, hasRange ? { startDate, endDate } : undefined)
+    syncFonzipRecentDebts(userId, days, hasRange ? { startDate, endDate } : undefined, mode)
       .then(result => { lastRecentSyncResult = { ...result, finishedAt: new Date().toISOString() }; })
       .catch(err => { lastRecentSyncResult = { error: err.message, finishedAt: new Date().toISOString() }; })
       .finally(() => { recentSyncRunning = false; });

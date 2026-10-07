@@ -333,15 +333,45 @@ export async function syncFonzipDebts(createdByUserId: number): Promise<{
 // verildiğinde de API filtrelemediği için sonuç aynıdır. Fonksiyon geriye dönük
 // uyumluluk ve idempotent güncelleme için korunuyor: aynı kayıtları upsert eder,
 // yeni olanları ekler. Geçmiş veri için importFonzipExcel() kullanılmalı.
+// Tüm Fonzip üyelerinin membership_no listesi. /users POST search gövdesi kabul ediyor
+// ve GERÇEK sayfalama yapıyor (/debts'in aksine). syncFonzipUsersFinancials ile aynı çağrı.
+async function fetchAllFonzipMemberNos(): Promise<string[]> {
+  const out = new Set<string>();
+  for (let page = 1; page <= 100; page++) {
+    let data: any;
+    let retry = 0;
+    while (true) {
+      try {
+        data = await fonzipPost("/users", {
+          search: { start_page: page, how_many: 100, order_by: "name", filter: { condition: "and", attributes: [] } },
+          values_list: ["id", "membership_no"],
+        });
+        break;
+      } catch (e: any) {
+        if (e.message.includes("429") && retry < 5) { retry++; await new Promise(r => setTimeout(r, 60000)); continue; }
+        throw e;
+      }
+    }
+    const list: any[] = data?.user_list ?? [];
+    for (const u of list) if (u.membership_no != null && String(u.membership_no) !== "") out.add(String(u.membership_no).trim());
+    if (list.length < 100) break;
+    await new Promise(r => setTimeout(r, 400));
+  }
+  return Array.from(out);
+}
+
 export async function syncFonzipRecentDebts(
   createdByUserId: number,
   // Korunuyor ama API tarih filtresi uygulamadığı için sonucu etkilemiyor.
   daysBack: number = 3,
   range?: { startDate: string; endDate: string },
+  // "global": en yeni ~20 kayıt (hızlı manuel sync). "perUser": her Fonzip üyesi için
+  // ayrı sorgu — gece cron'u bunu kullanır (bkz. aşağıdaki açıklama).
+  mode: "global" | "perUser" = "global",
 ): Promise<{
   daysScanned: number; total: number; upserted: number; updated: number;
   matched: number; expensesCreated: number; errors: string[];
-  apiLimitation?: string;
+  apiLimitation?: string; usersScanned?: number; apiCalls?: number;
 }> {
   const { storage } = await import("./storage");
   const { pool } = await import("./db");
@@ -353,18 +383,26 @@ export async function syncFonzipRecentDebts(
   }
 
   let total = 0, upserted = 0, updated = 0, matched = 0, expensesCreated = 0;
+  let apiCalls = 0, usersScanned = 0;
   const errors: string[] = [];
 
-  // Gün gün taramak aynı kayıtları tekrar getirir (API tarih filtresini yok sayıyor).
-  // Buna karşılık `status` filtresi ÇALIŞIYOR ve status=8 (bekliyor) ile status=1
-  // (ödendi) pencereleri birbirinden tamamen ayrık (canlı API'de doğrulandı: kesişim 0,
-  // birleşim 20). Bu yüzden iki ayrı sorgu atıp fonzip_id ile tekilleştiriyoruz:
-  // günlük yakalama kapasitesi 10'dan 20'ye çıkıyor. Toplu aidat girişi (gözlenen en
-  // yoğun gün 9 kayıt) bu tavanın altında kalıyor.
+  // /debts sayfalama ve tarih filtresini yok sayıyor; her sorgu en yeni 10 kaydı verir.
+  // Çalışan iki filtre var (canlı API'de doğrulandı): `status` (8/1 pencereleri ayrık)
+  // ve `membership_no` (kullanıcı başına; o kullanıcının en yeni 10 kaydı).
+  //
+  // "global" mod: status=8 + status=1 → en yeni 20 kayıt. Hızlı ama toplu aidat gününde
+  // yetmez: Eylül 2026'da tek günde (15 Eyl) 150+ borç açıldı.
+  //
+  // "perUser" mod: tüm Fonzip üyeleri (/users POST, gerçek sayfalama) tek tek sorgulanır.
+  // Liste SİSTEMDEKİ danışmanlarla sınırlanmaz: 15 Eyl toplu girişinin ~%38'i sistemde
+  // kwuid'si olmayan üyelere yazılmıştı. Kullanıcı başına tek sorgu yeterli: bir üyenin
+  // tek günde gözlenen en yüksek kayıt sayısı 7 (<10 tavanı). Maliyet ~1.5k çağrı/gece,
+  // 429'da 60 sn beklenir; gece 03:00 için kabul edilebilir.
   const fetchWindow = async (params: Record<string, string>): Promise<any[]> => {
     let retry = 0;
     while (true) {
       try {
+        apiCalls++;
         const data = await fonzipGet("/debts", params);
         return data?.debt_list ?? [];
       } catch (e: any) {
@@ -380,11 +418,30 @@ export async function syncFonzipRecentDebts(
   };
 
   const byId = new Map<number, any>();
-  for (const status of ["8", "1"]) {
-    for (const debt of await fetchWindow({ status, order_by: "-id", per_page: "100" })) {
-      byId.set(debt.id, debt);
+  if (mode === "perUser") {
+    const members = await fetchAllFonzipMemberNos();
+    for (const mn of members) {
+      const win = await fetchWindow({ membership_no: mn, order_by: "-id" });
+      for (const debt of win) byId.set(debt.id, debt);
+      // Pencere tam doluysa (10) kullanıcının o günkü kayıtları 10'u aşmış olabilir
+      // (gözlenen maksimum tam 10). status=8/1 pencereleri ayrık olduğu için ikisini
+      // de çekmek kapasiteyi 20'ye çıkarır; yalnızca dolu pencerede ödenir (nadir).
+      if (win.length >= 10) {
+        for (const status of ["8", "1"]) {
+          for (const debt of await fetchWindow({ membership_no: mn, status, order_by: "-id" })) byId.set(debt.id, debt);
+          await new Promise(r => setTimeout(r, 250));
+        }
+      }
+      usersScanned++;
+      await new Promise(r => setTimeout(r, 250));
     }
-    await new Promise(r => setTimeout(r, 500));
+  } else {
+    for (const status of ["8", "1"]) {
+      for (const debt of await fetchWindow({ status, order_by: "-id", per_page: "100" })) {
+        byId.set(debt.id, debt);
+      }
+      await new Promise(r => setTimeout(r, 500));
+    }
   }
 
   {
@@ -461,13 +518,16 @@ export async function syncFonzipRecentDebts(
   }
 
   return {
-    daysScanned: 1, total, upserted, updated, matched, expensesCreated, errors,
+    daysScanned: 1, total, upserted, updated, matched, expensesCreated, errors, usersScanned, apiCalls,
     // Çağıranın yanıltıcı sonuç okumasını önlemek için API kısıtını açıkça bildiriyoruz.
     apiLimitation: range
       ? `Fonzip /debts tarih filtresini yok sayıyor; ${range.startDate}–${range.endDate} aralığı uygulanmadı. ` +
-        "Yalnızca API'nin döndürdüğü en yeni kayıtlar işlendi. Geçmiş veri için Excel import kullanın."
-      : "Fonzip /debts sayfalama/tarih filtresi uygulamıyor; status=8 ve status=1 pencereleri ayrı sorgulanarak " +
-        "en yeni ~20 kayıt (10 bekleyen + 10 ödenen) alınıyor. Geçmiş veri için Excel import kullanın.",
+        "Geçmiş veri için Excel import kullanın."
+      : mode === "perUser"
+        ? "Her Fonzip üyesi için en yeni 10 borç alındı (membership_no filtresi). Üye başına 10'dan eski kayıtlar " +
+          "API'den erişilemez; geçmiş veri için Excel import kullanın."
+        : "Fonzip /debts sayfalama/tarih filtresi uygulamıyor; status=8 ve status=1 pencereleri ayrı sorgulanarak " +
+          "en yeni ~20 kayıt alınıyor. Toplu aidat günü için yetersizdir — cron perUser modunu kullanır.",
   };
 }
 
