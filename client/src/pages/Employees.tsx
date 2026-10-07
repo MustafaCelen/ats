@@ -15,7 +15,7 @@ import {
 import {
   Users, Search, Phone, Mail, MapPin, Award, Building2,
   MoreHorizontal, ExternalLink, CheckCircle2, XCircle, Briefcase, CalendarDays,
-  Upload, Download, Pencil, Key, AtSign, AlertCircle, FileText, UserCheck, HandCoins, RotateCcw, History,
+  Upload, Download, Pencil, Key, AtSign, AlertCircle, FileText, UserCheck, HandCoins, RotateCcw, History, Wallet,
   Sparkles,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
@@ -207,7 +207,7 @@ export default function Employees() {
   const [page, setPage] = useState(0);
   const PAGE_SIZE = 50;
   const [detailEmployee, setDetailEmployee] = useState<any | null>(null);
-  const [detailTab, setDetailTab] = useState<"profil" | "islemler" | "history">("profil");
+  const [detailTab, setDetailTab] = useState<"profil" | "islemler" | "history" | "borc">("profil");
   const [editEmployee, setEditEmployee] = useState<any | null>(null);
   const [pendingPassiveEmp, setPendingPassiveEmp] = useState<any | null>(null);
   const [passiveDateInput, setPassiveDateInput] = useState("");
@@ -726,6 +726,19 @@ export default function Employees() {
               >
                 <History className="h-3.5 w-3.5" /> Geçmiş
               </button>
+              {isAdminUser && (
+                <button
+                  onClick={() => setDetailTab("borc")}
+                  className={`pb-2 text-sm font-medium transition-colors border-b-2 -mb-px flex items-center gap-1.5 ${detailTab === "borc" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+                >
+                  <Wallet className="h-3.5 w-3.5" /> Borç
+                  {detailFonzipDebt && (detailFonzipDebt.totalFinancial > 0 || detailFonzipDebt.pendingCount > 0) && (
+                    <span className="ml-0.5 rounded-full bg-red-600 text-white text-[10px] leading-none px-1.5 py-0.5">
+                      {detailFonzipDebt.pendingCount}
+                    </span>
+                  )}
+                </button>
+              )}
             </div>
 
             {detailTab === "profil" && (
@@ -889,30 +902,17 @@ export default function Employees() {
                 </div>
               )}
               {isAdminUser && detailFonzipDebt && (detailFonzipDebt.totalFinancial > 0 || detailFonzipDebt.pendingCount > 0) && (
-                <div className="rounded-lg bg-red-50 ring-1 ring-red-200 p-3 space-y-1.5">
-                  <div className="flex items-center gap-1.5 text-red-700">
-                    <AlertCircle className="h-4 w-4 shrink-0" />
-                    <p className="text-sm font-semibold">
-                      Fonzip Borcu: {fmtTRY(Math.max(detailFonzipDebt.totalFinancial, 0))}
-                    </p>
-                  </div>
-                  <p className="text-xs text-red-600/90">
-                    Ödenmemiş {detailFonzipDebt.pendingCount} kalem · toplam {fmtTRY(detailFonzipDebt.pendingTotal)}
-                  </p>
-                  {detailFonzipDebt.pendingDebts.length > 0 && (
-                    <ul className="text-xs text-red-600/90 space-y-0.5 pl-5 list-disc">
-                      {detailFonzipDebt.pendingDebts.slice(0, 8).map((d: any, i: number) => (
-                        <li key={i}>{fmtTRY(d.amount)}{d.details ? ` — ${d.details}` : ""}{d.operationDate ? ` (${d.operationDate})` : ""}</li>
-                      ))}
-                      {detailFonzipDebt.pendingDebts.length > 8 && (
-                        <li className="list-none text-red-500">… ve {detailFonzipDebt.pendingDebts.length - 8} kalem daha</li>
-                      )}
-                    </ul>
-                  )}
-                </div>
-              )}
-              {isAdminUser && detailFonzipDebt && detailFonzipDebt.totalFinancial <= 0 && detailFonzipDebt.pendingCount === 0 && (
-                <p className="text-xs text-emerald-700 bg-emerald-50 ring-1 ring-emerald-200 rounded-lg px-3 py-2">Fonzip'te ödenmemiş borcu yok.</p>
+                <button
+                  type="button"
+                  onClick={() => setDetailTab("borc")}
+                  className="w-full text-left rounded-lg bg-red-50 ring-1 ring-red-200 px-3 py-2 flex items-center gap-2 hover:bg-red-100 transition-colors"
+                >
+                  <AlertCircle className="h-4 w-4 text-red-600 shrink-0" />
+                  <span className="text-sm text-red-700">
+                    <span className="font-semibold">Fonzip borcu {fmtTRY(Math.max(detailFonzipDebt.totalFinancial, 0))}</span>
+                    {" "}· {detailFonzipDebt.pendingCount} ödenmemiş kalem — detay için Borç sekmesi
+                  </span>
+                </button>
               )}
               <div className="flex gap-2 pt-2">
                 {detailEmployee.candidate?.id && (
@@ -1050,6 +1050,70 @@ export default function Employees() {
               <div className="pt-2 space-y-3 flex-1 overflow-y-auto pr-1">
                 <AuditLogSection employeeId={detailEmployee.id} />
                 <EmployeeOfficeHistoryReadOnly employeeId={detailEmployee.id} />
+              </div>
+            )}
+
+            {detailTab === "borc" && isAdminUser && (
+              <div className="pt-2 space-y-3 flex-1 overflow-y-auto pr-1">
+                {!detailFonzipDebt ? (
+                  <p className="text-sm text-muted-foreground">Yükleniyor…</p>
+                ) : detailFonzipDebt.totalFinancial <= 0 && detailFonzipDebt.pendingCount === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-10 text-emerald-700 gap-2">
+                    <CheckCircle2 className="h-8 w-8 opacity-60" />
+                    <p className="text-sm font-medium">Fonzip'te ödenmemiş borcu yok</p>
+                    {!detailEmployee.kwuid && <p className="text-xs text-muted-foreground">KWUID tanımlı değil — Fonzip eşleşmesi yapılamıyor olabilir.</p>}
+                  </div>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="rounded-lg bg-red-50 ring-1 ring-red-200 p-3">
+                        <p className="text-[11px] text-red-600/80 font-medium">Fonzip Bakiyesi</p>
+                        <p className="text-base font-bold text-red-700">{fmtTRY(Math.max(detailFonzipDebt.totalFinancial, 0))}</p>
+                      </div>
+                      <div className="rounded-lg bg-muted/40 ring-1 ring-border p-3">
+                        <p className="text-[11px] text-muted-foreground font-medium">Ödenmemiş Kalem</p>
+                        <p className="text-base font-bold">{detailFonzipDebt.pendingCount}</p>
+                      </div>
+                      <div className="rounded-lg bg-muted/40 ring-1 ring-border p-3">
+                        <p className="text-[11px] text-muted-foreground font-medium">Kalem Toplamı</p>
+                        <p className="text-base font-bold">{fmtTRY(detailFonzipDebt.pendingTotal)}</p>
+                      </div>
+                    </div>
+                    {Math.abs(detailFonzipDebt.totalFinancial - detailFonzipDebt.pendingTotal) >= 1 && (
+                      <p className="text-[11px] text-muted-foreground">
+                        Bakiye ile kalem toplamı farklı olabilir: Fonzip bakiyesi kısmi ödemeleri ve borç dışı hareketleri de içerir; bakiye esas alınır.
+                      </p>
+                    )}
+                    <div className="rounded-lg border border-border overflow-hidden">
+                      <table className="w-full text-xs">
+                        <thead className="bg-muted/50 text-muted-foreground">
+                          <tr>
+                            <th className="text-left px-3 py-2 font-medium">Tarih</th>
+                            <th className="text-left px-3 py-2 font-medium">Açıklama</th>
+                            <th className="text-right px-3 py-2 font-medium">Tutar</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {detailFonzipDebt.pendingDebts.map((d: any, i: number) => (
+                            <tr key={i} className="border-t border-border">
+                              <td className="px-3 py-1.5 whitespace-nowrap text-muted-foreground">
+                                {d.operationDate ? format(new Date(d.operationDate), "dd.MM.yyyy") : "—"}
+                              </td>
+                              <td className="px-3 py-1.5">{d.details || "—"}</td>
+                              <td className="px-3 py-1.5 text-right font-medium whitespace-nowrap">{fmtTRY(d.amount)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot className="bg-muted/30 border-t border-border">
+                          <tr>
+                            <td className="px-3 py-2 font-semibold" colSpan={2}>Toplam ({detailFonzipDebt.pendingCount} kalem)</td>
+                            <td className="px-3 py-2 text-right font-bold text-red-700">{fmtTRY(detailFonzipDebt.pendingTotal)}</td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  </>
+                )}
               </div>
             )}
 
