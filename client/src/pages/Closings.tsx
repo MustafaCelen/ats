@@ -287,6 +287,20 @@ function useEmployees() {
   });
 }
 
+// Borçlu danışman özeti (Fonzip): { [employeeId]: { balance, pendingTotal, pendingCount } }
+type DebtSummary = { balance: number; pendingTotal: number; pendingCount: number };
+function useDebtSummaries() {
+  return useQuery<Record<number, DebtSummary>>({
+    queryKey: ["/api/employees/debt-summary"],
+    queryFn: async () => {
+      const res = await fetch("/api/employees/debt-summary", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to load debt summary");
+      return res.json();
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 function useCapStatuses() {
   return useQuery<Record<number, CapStatus>>({
     queryKey: ["/api/employees/cap-statuses"],
@@ -582,6 +596,7 @@ function SideSection({
   defaultStatus: string;
 }) {
   const activeEmployees = employees.filter((e) => e.status === "active");
+  const { data: debtSummaries = {} } = useDebtSummaries();
   const newAgentWithDefaults = () => ({
     ...newAgent(),
     closingDate: defaultClosingDate,
@@ -793,6 +808,18 @@ function SideSection({
                       }}
                       triggerClassName="h-8 text-xs"
                     />
+                    {agent.employeeId && debtSummaries[agent.employeeId] && (() => {
+                      const ds = debtSummaries[agent.employeeId];
+                      const owed = Math.max(ds.balance, ds.pendingTotal);
+                      return (
+                        <div className="mt-1 flex items-center gap-1 text-[11px] text-red-700 bg-red-50 ring-1 ring-red-200 rounded px-2 py-0.5"
+                             title="Fonzip'te ödenmemiş borcu var — kapanış öncesi tahsilatı kontrol edin">
+                          <AlertCircle className="h-3 w-3 shrink-0" />
+                          <span className="font-semibold">Borçlu danışman:</span> {fmtTRY(owed)}
+                          {ds.pendingCount > 0 && <span className="text-red-600/80">({ds.pendingCount} kalem)</span>}
+                        </div>
+                      );
+                    })()}
                   </div>
                   {bhbMode === "manual" ? (
                     <>

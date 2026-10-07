@@ -605,8 +605,8 @@ export default function FonzipPreview() {
                               {d.operationDate ? new Date(d.operationDate).toLocaleDateString("tr-TR") : "—"}
                             </TableCell>
                             <TableCell>
-                              <Badge variant={d.status === 1 ? "default" : "secondary"} className="text-[10px]">
-                                {d.status === 1 ? "Ödendi" : "Bekliyor"}
+                              <Badge variant={d.status === 8 ? "default" : d.status === 6 ? "outline" : "destructive"} className="text-[10px]">
+                                {d.status === 8 ? "Ödendi" : d.status === 6 ? "Silindi" : "Bekliyor"}
                               </Badge>
                             </TableCell>
                           </TableRow>

@@ -12,7 +12,7 @@ import { getAuthUrl, createOAuth2Client, createCalendarEvent, updateCalendarEven
 import { sendWhatsApp, sendWhatsAppTemplate, checkWhatsAppStatus, publicBaseUrl, listWhatsAppTemplates } from "./whatsapp";
 import { startBulkSendBatch, getActiveBatchForUser, getLastBatchForUser, getBatch, requestStop, type BulkSendItem } from "./whatsapp-bulk-runner";
 import { sendEmail } from "./email";
-import { isFonzipConfigured, fetchFonzipPreview, fetchFonzipUsers, fetchFonzipDebts, fetchFonzipDonations, syncFonzipDebts, syncFonzipUsersFinancials, getFonzipUserFinancialsReport, importFonzipExcel, getEmployeeFonzipDebt, startDebtSync, getDebtSyncStatus } from "./fonzip";
+import { isFonzipConfigured, fetchFonzipPreview, fetchFonzipUsers, fetchFonzipDebts, fetchFonzipDonations, syncFonzipDebts, syncFonzipUsersFinancials, getFonzipUserFinancialsReport, importFonzipExcel, getEmployeeFonzipDebt, getEmployeeDebtSummaries, startDebtSync, getDebtSyncStatus } from "./fonzip";
 import { isMetaConfigured, isMetaWebhookConfigured, metaConfig, syncMetaCampaigns, fetchMetaLead, mapLeadToCandidate, verifyWebhookSignature, listLeadForms, backfillLeadsFromMeta } from "./meta";
 import { isGoogleFormsConfigured, syncGoogleFormLeads, getGoogleFormsSpreadsheetId } from "./google-forms";
 
@@ -4361,6 +4361,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.get("/api/fonzip/sync-users/status", requireAuth, requireAdmin, (_req, res) => {
     res.json({ running: usersFinancialsSyncRunning, lastResult: lastUsersFinancialsResult });
+  });
+
+  // Borçlu danışman özeti: { [employeeId]: { balance, pendingTotal, pendingCount } }
+  // (/api/employees/:id'den ÖNCE tanımlı olmalı ki "debt-summary" id sanılmasın)
+  app.get("/api/employees/debt-summary", requireAuth, requireAdmin, async (_req, res) => {
+    try {
+      res.json(await getEmployeeDebtSummaries());
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   app.get("/api/employees/:id/fonzip-debt", requireAuth, requireAdmin, async (req, res) => {

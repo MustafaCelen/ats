@@ -178,6 +178,12 @@ async function fonzipPost(path: string, body: any): Promise<any> {
   return callFonzip("POST", path, { body });
 }
 
+// Fonzip borç durum kodları — canlı API'den doğrulandı (Ekim 2026): status=1 kayıtların
+// toplamı kullanıcının user__total_financial bakiyesiyle örtüşüyor (bekliyor), status=8
+// kayıtlı kullanıcıların bakiyesi 0 (ödendi), status=6 kayıtlarda remove_note dolu
+// ("hatalı yansıtma" → silinmiş). Önceden 8=bekliyor / 1=ödendi sanılıyordu.
+export const FONZIP_DEBT_STATUS = { PENDING: 1, REMOVED: 6, PAID: 8 } as const;
+
 export function isFonzipConfigured(): boolean {
   return !!(
     process.env.FONZIP_ACCESS_TOKEN ||
@@ -392,9 +398,11 @@ export async function syncFonzipRecentDebts(
       [debt.id]
     );
 
+    const removed = debt.status === FONZIP_DEBT_STATUS.REMOVED;
+
     if (existing.rows.length > 0) {
-      // `status` mutlaka yenilenmeli: borç 8 (bekliyor) -> 1 (ödendi) olduğunda
-      // danışman borç raporu ve Borçlular Raporu (status = 8 filtresi) bunu görsün.
+      // `status` mutlaka yenilenmeli: borç 1 (bekliyor) -> 8 (ödendi) olduğunda
+      // danışman borç raporu ve Borçlular Raporu (status = 1 filtresi) bunu görsün.
       await pool.query(
         `UPDATE fonzip_synced_debts SET
            details = COALESCE($2, details), period = COALESCE($3, period),
@@ -407,7 +415,11 @@ export async function syncFonzipRecentDebts(
          String(debt.amount ?? 0), operationDate, debt.added_by__name ?? null, empId ?? null,
          debt.status]
       );
-      if (existing.rows[0].expense_id) {
+      if (existing.rows[0].expense_id && removed) {
+        // Fonzip'te silinen (hatalı yansıtma) borç gelir olamaz: bağlı gelir kaydı kaldırılır.
+        await pool.query("DELETE FROM office_expenses WHERE id = $1", [existing.rows[0].expense_id]);
+        await pool.query("UPDATE fonzip_synced_debts SET expense_id = NULL WHERE fonzip_id = $1", [debt.id]);
+      } else if (existing.rows[0].expense_id) {
         await pool.query(
           `UPDATE office_expenses SET notes = $2, category = $3, amount = $4, date = $5, employee_id = $6 WHERE id = $1`,
           [existing.rows[0].expense_id,
@@ -431,7 +443,8 @@ export async function syncFonzipRecentDebts(
       matched++;
     }
     // Tahakkuk esası: her Fonzip borcu, ödenip ödenmediğine ve danışman eşleşmesine
-    // bakılmaksızın gelir kalemidir.
+    // bakılmaksızın gelir kalemidir — silinmiş (status=6) borçlar hariç.
+    if (removed) { upserted++; return true; }
     const expense = await storage.createOfficeExpense({
       type: "income", category, amount: String(debt.amount ?? 0),
       date: operationDate ?? new Date().toISOString().slice(0, 10),
@@ -933,7 +946,7 @@ export async function getFonzipUserFinancialsReport(): Promise<any[]> {
 
 // Danışman Profili + Pasife Alma uyarısı için tek bir çalışanın Fonzip borç özeti.
 export async function getEmployeeFonzipDebt(employeeId: number): Promise<{
-  totalFinancial: number;
+  totalFinancial: number; pendingTotal: number; pendingCount: number;
   pendingDebts: { amount: number; details: string | null; period: string | null; operationDate: string | null }[];
 }> {
   const { pool } = await import("./db");
@@ -943,15 +956,41 @@ export async function getEmployeeFonzipDebt(employeeId: number): Promise<{
   );
   const debtRes = await pool.query(
     `SELECT amount, details, period, operation_date FROM fonzip_synced_debts
-     WHERE employee_id = $1 AND status = 8 ORDER BY operation_date DESC NULLS LAST`,
-    [employeeId]
+     WHERE employee_id = $1 AND status = $2 ORDER BY operation_date DESC NULLS LAST`,
+    [employeeId, FONZIP_DEBT_STATUS.PENDING]
   );
+  const pendingDebts = debtRes.rows.map((r: any) => ({
+    amount: parseFloat(r.amount), details: r.details, period: r.period, operationDate: r.operation_date,
+  }));
   return {
+    // totalFinancial: Fonzip'in kendi bakiyesi (kısmi ödemeleri de içerir, asıl kaynak).
+    // pendingTotal: bekleyen kalemlerin toplamı (bakiye sync'i gecikmişse yedek gösterge).
     totalFinancial: finRes.rows[0] ? parseFloat(finRes.rows[0].total_financial) : 0,
-    pendingDebts: debtRes.rows.map((r: any) => ({
-      amount: parseFloat(r.amount), details: r.details, period: r.period, operationDate: r.operation_date,
-    })),
+    pendingTotal: pendingDebts.reduce((s: number, d: { amount: number }) => s + d.amount, 0),
+    pendingCount: pendingDebts.length,
+    pendingDebts,
   };
+}
+
+// Tüm borçlu danışmanların özeti (işlem kapanışı / liste rozetleri için tek çağrı).
+// Yalnızca bakiyesi > 0 veya bekleyen kalemi olan danışmanlar döner.
+export async function getEmployeeDebtSummaries(): Promise<Record<number, { balance: number; pendingTotal: number; pendingCount: number }>> {
+  const { pool } = await import("./db");
+  const res = await pool.query(
+    `SELECT e.id,
+            COALESCE(MAX(f.total_financial), 0)::float AS balance,
+            COALESCE(SUM(d.amount) FILTER (WHERE d.status = $1), 0)::float AS pending_total,
+            COUNT(d.id) FILTER (WHERE d.status = $1)::int AS pending_count
+       FROM employees e
+       LEFT JOIN fonzip_user_financials f ON f.employee_id = e.id
+       LEFT JOIN fonzip_synced_debts d ON d.employee_id = e.id
+      GROUP BY e.id
+     HAVING COALESCE(MAX(f.total_financial), 0) > 0 OR COUNT(d.id) FILTER (WHERE d.status = $1) > 0`,
+    [FONZIP_DEBT_STATUS.PENDING]
+  );
+  const out: Record<number, { balance: number; pendingTotal: number; pendingCount: number }> = {};
+  for (const r of res.rows) out[r.id] = { balance: r.balance, pendingTotal: r.pending_total, pendingCount: r.pending_count };
+  return out;
 }
 
 // ── Borç sync zamanlayıcı / ortak kilit ───────────────────────────────────────

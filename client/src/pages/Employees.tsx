@@ -300,12 +300,12 @@ export default function Employees() {
 
   // Fonzip borcu — pasife alma uyarısı + profil kartı (admin-only)
   const isAdminUser = authUser?.role === "admin";
-  const { data: pendingPassiveDebt } = useQuery<{ totalFinancial: number; pendingDebts: any[] }>({
+  const { data: pendingPassiveDebt } = useQuery<{ totalFinancial: number; pendingTotal: number; pendingCount: number; pendingDebts: any[] }>({
     queryKey: ["/api/employees", pendingPassiveEmp?.id, "fonzip-debt"],
     queryFn: () => fetch(`/api/employees/${pendingPassiveEmp!.id}/fonzip-debt`).then((r) => r.json()),
     enabled: !!pendingPassiveEmp && isAdminUser,
   });
-  const { data: detailFonzipDebt } = useQuery<{ totalFinancial: number; pendingDebts: any[] }>({
+  const { data: detailFonzipDebt } = useQuery<{ totalFinancial: number; pendingTotal: number; pendingCount: number; pendingDebts: any[] }>({
     queryKey: ["/api/employees", detailEmployee?.id, "fonzip-debt"],
     queryFn: () => fetch(`/api/employees/${detailEmployee!.id}/fonzip-debt`).then((r) => r.json()),
     enabled: !!detailEmployee && isAdminUser,
@@ -888,20 +888,31 @@ export default function Employees() {
                   <p className="text-sm text-foreground bg-muted/40 rounded-lg p-2">{detailEmployee.exitReason}</p>
                 </div>
               )}
-              {isAdminUser && detailFonzipDebt && detailFonzipDebt.totalFinancial > 0 && (
-                <div className="rounded-lg bg-red-50 ring-1 ring-red-200 p-3 space-y-1">
+              {isAdminUser && detailFonzipDebt && (detailFonzipDebt.totalFinancial > 0 || detailFonzipDebt.pendingCount > 0) && (
+                <div className="rounded-lg bg-red-50 ring-1 ring-red-200 p-3 space-y-1.5">
                   <div className="flex items-center gap-1.5 text-red-700">
                     <AlertCircle className="h-4 w-4 shrink-0" />
-                    <p className="text-sm font-semibold">Fonzip Borcu: {fmtTRY(detailFonzipDebt.totalFinancial)}</p>
+                    <p className="text-sm font-semibold">
+                      Fonzip Borcu: {fmtTRY(Math.max(detailFonzipDebt.totalFinancial, 0))}
+                    </p>
                   </div>
+                  <p className="text-xs text-red-600/90">
+                    Ödenmemiş {detailFonzipDebt.pendingCount} kalem · toplam {fmtTRY(detailFonzipDebt.pendingTotal)}
+                  </p>
                   {detailFonzipDebt.pendingDebts.length > 0 && (
                     <ul className="text-xs text-red-600/90 space-y-0.5 pl-5 list-disc">
-                      {detailFonzipDebt.pendingDebts.slice(0, 5).map((d: any, i: number) => (
+                      {detailFonzipDebt.pendingDebts.slice(0, 8).map((d: any, i: number) => (
                         <li key={i}>{fmtTRY(d.amount)}{d.details ? ` — ${d.details}` : ""}{d.operationDate ? ` (${d.operationDate})` : ""}</li>
                       ))}
+                      {detailFonzipDebt.pendingDebts.length > 8 && (
+                        <li className="list-none text-red-500">… ve {detailFonzipDebt.pendingDebts.length - 8} kalem daha</li>
+                      )}
                     </ul>
                   )}
                 </div>
+              )}
+              {isAdminUser && detailFonzipDebt && detailFonzipDebt.totalFinancial <= 0 && detailFonzipDebt.pendingCount === 0 && (
+                <p className="text-xs text-emerald-700 bg-emerald-50 ring-1 ring-emerald-200 rounded-lg px-3 py-2">Fonzip'te ödenmemiş borcu yok.</p>
               )}
               <div className="flex gap-2 pt-2">
                 {detailEmployee.candidate?.id && (
@@ -1075,13 +1086,24 @@ export default function Employees() {
             <p id="passive-date-desc" className="text-sm text-muted-foreground">Çalışanın pasife alınma tarihini seçin.</p>
           </DialogHeader>
           <div className="space-y-4 pt-2">
-            {isAdminUser && pendingPassiveDebt && pendingPassiveDebt.totalFinancial > 0 && (
+            {isAdminUser && pendingPassiveDebt && (pendingPassiveDebt.totalFinancial > 0 || pendingPassiveDebt.pendingCount > 0) && (
               <div className="flex items-start gap-2 rounded-lg bg-red-50 ring-1 ring-red-200 px-3 py-2.5">
                 <AlertCircle className="h-4 w-4 text-red-600 shrink-0 mt-0.5" />
-                <p className="text-sm text-red-700">
-                  <span className="font-semibold">Bu danışmanın Fonzip'te {fmtTRY(pendingPassiveDebt.totalFinancial)} borcu var.</span>
-                  {" "}Pasife almadan önce tahsilat durumunu kontrol edin.
-                </p>
+                <div className="text-sm text-red-700 space-y-1">
+                  <p>
+                    <span className="font-semibold">Bu danışmanın Fonzip'te {fmtTRY(Math.max(pendingPassiveDebt.totalFinancial, 0))} borcu var</span>
+                    {" "}({pendingPassiveDebt.pendingCount} ödenmemiş kalem, {fmtTRY(pendingPassiveDebt.pendingTotal)}).
+                    {" "}Pasife almadan önce tahsilat durumunu kontrol edin.
+                  </p>
+                  {pendingPassiveDebt.pendingDebts.length > 0 && (
+                    <ul className="text-xs text-red-600/90 pl-4 list-disc space-y-0.5">
+                      {pendingPassiveDebt.pendingDebts.slice(0, 4).map((d: any, i: number) => (
+                        <li key={i}>{fmtTRY(d.amount)}{d.details ? ` — ${d.details}` : ""}</li>
+                      ))}
+                      {pendingPassiveDebt.pendingDebts.length > 4 && <li className="list-none">… ve {pendingPassiveDebt.pendingDebts.length - 4} kalem daha</li>}
+                    </ul>
+                  )}
+                </div>
               </div>
             )}
             <div className="space-y-1.5">

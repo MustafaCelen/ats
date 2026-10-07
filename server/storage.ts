@@ -7638,8 +7638,9 @@ export class DatabaseStorage implements IStorage {
     }, null);
     return {
       total: rows.length,
-      paid: rows.filter(r => r.status === 1).length,
-      pending: rows.filter(r => r.status === 8).length,
+      // Fonzip kodları: 8 = ödendi, 1 = bekliyor, 6 = silindi (bkz. fonzip.ts FONZIP_DEBT_STATUS)
+      paid: rows.filter(r => r.status === 8).length,
+      pending: rows.filter(r => r.status === 1).length,
       matched: rows.filter(r => r.employeeId !== null).length,
       unmatched: rows.filter(r => r.employeeId === null).length,
       syncedToExpenses: rows.filter(r => r.expenseId !== null).length,
@@ -7684,7 +7685,8 @@ export class DatabaseStorage implements IStorage {
         };
       }
       const amount = parseFloat(r.amount ?? "0");
-      if (r.status === 1) {
+      if (r.status === 6) continue; // Fonzip'te silinmiş borç
+      if (r.status === 8) {
         byEmployee[r.employeeId].paidTotal += amount;
         byEmployee[r.employeeId].paidCount++;
         if (!byEmployee[r.employeeId].lastPaymentDate || (r.operationDate && r.operationDate > byEmployee[r.employeeId].lastPaymentDate!)) {
