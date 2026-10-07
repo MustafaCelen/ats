@@ -4387,11 +4387,31 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post("/api/fonzip/sync-recent", requireAuth, requireAdmin, (req, res) => {
     if (!isFonzipConfigured()) return res.status(400).json({ error: "Fonzip yapılandırılmamış." });
     if (recentSyncRunning) return res.json({ running: true, message: "Sync zaten devam ediyor." });
-    const days = Math.max(1, Math.min(30, Number(req.body?.days ?? 3)));
     const userId = (req as any).user?.id ?? 0;
+
+    // Tarih aralığı verildiyse (geçmiş dönem senkronu) days sınırı uygulanmaz.
+    const ymd = /^\d{4}-\d{2}-\d{2}$/;
+    const startDate = String(req.body?.startDate ?? "");
+    const endDate = String(req.body?.endDate ?? "");
+    const hasRange = ymd.test(startDate) && ymd.test(endDate);
+    if ((startDate || endDate) && !hasRange) {
+      return res.status(400).json({ error: "startDate ve endDate YYYY-MM-DD formatında olmalı." });
+    }
+    if (hasRange && startDate > endDate) {
+      return res.status(400).json({ error: "startDate, endDate'ten sonra olamaz." });
+    }
+
+    const days = Math.max(1, Math.min(30, Number(req.body?.days ?? 3)));
     recentSyncRunning = true;
-    res.json({ running: true, message: `Son ${days} gün sync başlatıldı.` });
-    syncFonzipRecentDebts(userId, days)
+    res.json({
+      running: true,
+      message: "Fonzip sync başlatıldı.",
+      // Fonzip /debts tarih filtresini/sayfalamayı yok sayıyor; beklenti yönetimi için uyar.
+      note: hasRange
+        ? `Dikkat: Fonzip API tarih filtresi uygulamıyor, ${startDate}–${endDate} aralığı dikkate alınmayacak. Geçmiş veri için Excel import kullanın.`
+        : "Yalnızca API'nin döndürdüğü en yeni kayıtlar işlenir. Geçmiş veri için Excel import kullanın.",
+    });
+    syncFonzipRecentDebts(userId, days, hasRange ? { startDate, endDate } : undefined)
       .then(result => { lastRecentSyncResult = { ...result, finishedAt: new Date().toISOString() }; })
       .catch(err => { lastRecentSyncResult = { error: err.message, finishedAt: new Date().toISOString() }; })
       .finally(() => { recentSyncRunning = false; });

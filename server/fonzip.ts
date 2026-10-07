@@ -220,11 +220,19 @@ export async function fetchFonzipDonations(page = 1, perPage = 100, startDate?: 
   });
 }
 
+// ÖNEMLİ — Fonzip /debts endpoint'inin gerçek davranışı (2026-10 itibarıyla doğrulandı):
+//   • page        → YOK SAYILIYOR (her sayfa aynı kayıtları döndürüyor)
+//   • per_page    → YOK SAYILIYOR (her zaman 10 kayıt)
+//   • start_date / end_date → YOK SAYILIYOR (hep en yeni kayıtlar geliyor)
+// Yanıttaki `total` tüm borç sayısını (ör. 40.522) bildirse de API yalnızca EN YENİ
+// 10 KAYDA erişim veriyor. Dolayısıyla sayfalama/tarih taraması yapmak boşuna API
+// çağrısıdır: aynı 10 kayıt tekrar tekrar işlenir, `total`'a göre döngü kurulursa
+// binlerce tur döner. Geçmiş veri için tek yol Fonzip panelinden Excel indirip
+// importFonzipExcel() ile içe aktarmaktır.
 export async function syncFonzipDebts(createdByUserId: number): Promise<{
   total: number; upserted: number; matched: number; expensesCreated: number; errors: string[];
 }> {
   const { storage } = await import("./storage");
-  const { AIDAT_CATEGORY } = await import("@shared/schema").then(m => ({ AIDAT_CATEGORY: "Aidat & Yer Tahsis" }));
 
   // Get all employees indexed by kwuid for fast matching
   const allEmployees = await storage.getEmployees();
@@ -233,21 +241,19 @@ export async function syncFonzipDebts(createdByUserId: number): Promise<{
     if (emp.kwuid) byKwuid[String(emp.kwuid).trim()] = emp.id;
   }
 
-  let page = 1;
-  const perPage = 10; // Fonzip ignores per_page for debts, always returns 10
   let total = 0;
-  let fetched = 0;
   let upserted = 0;
   let matched = 0;
   let expensesCreated = 0;
   const errors: string[] = [];
 
-  while (true) {
+  // Tek çağrı: API sayfalamayı yok saydığı için döngü kurmanın anlamı yok.
+  {
     let data: any;
     let pageRetry = 0;
     while (true) {
       try {
-        data = await fonzipGet("/debts", { page: String(page), per_page: String(perPage), start_date: "2025-01-01" });
+        data = await fonzipGet("/debts", { per_page: "100" });
         break;
       } catch (e: any) {
         if (e.message.includes("429") && pageRetry < 10) {
@@ -255,16 +261,16 @@ export async function syncFonzipDebts(createdByUserId: number): Promise<{
           await new Promise(r => setTimeout(r, 60000)); // Fonzip rate limit dakikada bir resetleniyor
           continue;
         }
-        errors.push(`Page ${page}: ${e.message}`);
+        errors.push(`Fonzip /debts: ${e.message}`);
         data = null;
         break;
       }
     }
-    if (!data) break;
-
-    if (!data.debt_list || data.debt_list.length === 0) break;
-    if (page === 1) total = data.total ?? 0;
-    fetched += data.debt_list.length;
+    if (!data?.debt_list?.length) {
+      return { total, upserted, matched, expensesCreated, errors };
+    }
+    // `total` API'nin bildirdiği tüm borç sayısıdır; erişilebilen kayıt sayısı değil.
+    total = data.total ?? data.debt_list.length;
 
     for (const debt of data.debt_list) {
       try {
@@ -294,12 +300,15 @@ export async function syncFonzipDebts(createdByUserId: number): Promise<{
           matched++;
         }
 
-        // Auto-create income entry for paid debts without expense record
-        if (debt.status === 1 && !row.expenseId) {
+        // Tahakkuk esası: fatura kesildiği an gelirdir, tahsil edilip edilmediğine
+        // (status 1=ödendi / 8=bekliyor) bakılmaz. Danışman eşleşmesi de şart değil —
+        // eşleşmezse employee_id null kalır ama gelir kaydı yine açılır.
+        // Kategori açıklamadan türetilir (syncFonzipRecentDebts ile aynı mantık).
+        if (!row.expenseId) {
           const effectiveEmpId = empId ?? row.employeeId ?? undefined;
           const expense = await storage.createOfficeExpense({
             type: "income",
-            category: "Aidat & Yer Tahsis",
+            category: classifyFonzipCategory(debt.details),
             amount: String(debt.amount ?? 0),
             date: operationDate ?? new Date().toISOString().slice(0, 10),
             notes: `${debt.user__name ?? ""} — ${debt.details ?? ""} (Fonzip #${debt.id})`,
@@ -313,25 +322,26 @@ export async function syncFonzipDebts(createdByUserId: number): Promise<{
         errors.push(`Debt #${debt.id}: ${e.message}`);
       }
     }
-
-    if (total > 0 && fetched >= total) break;
-    if (data.debt_list.length === 0) break;
-    page++;
-    await new Promise(r => setTimeout(r, 2000));
   }
 
   return { total, upserted, matched, expensesCreated, errors };
 }
 
-// ── Günlük Rolling Window Sync (son N günün borçlarını çeker) ────────────────
-// Fonzip API pagination bozuk olduğu için gün gün çekiyoruz.
-// Her gün için start_date=end_date=aynı gün → o günün tüm borçları döner.
+// ── Günlük sync (API'nin verdiği en yeni kayıtları çeker) ────────────────────
+// NOT: Fonzip /debts tarih filtresini de yok sayıyor (bkz. syncFonzipDebts üstündeki
+// açıklama). Gün gün tarama yapmak aynı 10 kaydı tekrar tekrar getirir; `range`
+// verildiğinde de API filtrelemediği için sonuç aynıdır. Fonksiyon geriye dönük
+// uyumluluk ve idempotent güncelleme için korunuyor: aynı kayıtları upsert eder,
+// yeni olanları ekler. Geçmiş veri için importFonzipExcel() kullanılmalı.
 export async function syncFonzipRecentDebts(
   createdByUserId: number,
+  // Korunuyor ama API tarih filtresi uygulamadığı için sonucu etkilemiyor.
   daysBack: number = 3,
+  range?: { startDate: string; endDate: string },
 ): Promise<{
   daysScanned: number; total: number; upserted: number; updated: number;
   matched: number; expensesCreated: number; errors: string[];
+  apiLimitation?: string;
 }> {
   const { storage } = await import("./storage");
   const { pool } = await import("./db");
@@ -345,13 +355,14 @@ export async function syncFonzipRecentDebts(
   let total = 0, upserted = 0, updated = 0, matched = 0, expensesCreated = 0;
   const errors: string[] = [];
 
-  for (let d = 0; d < daysBack; d++) {
-    const day = new Date(Date.now() - d * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  // Tek çağrı: gün gün taramak aynı kayıtları tekrar getirir (API tarih filtresini
+  // yok sayıyor), bu yüzden tek sorgu yapıp dönen kayıtları upsert ediyoruz.
+  {
     let data: any;
     let retry = 0;
     while (true) {
       try {
-        data = await fonzipGet("/debts", { start_date: day, end_date: day, per_page: "100" });
+        data = await fonzipGet("/debts", { per_page: "100" });
         break;
       } catch (e: any) {
         if (e.message.includes("429") && retry < 5) {
@@ -359,12 +370,14 @@ export async function syncFonzipRecentDebts(
           await new Promise(r => setTimeout(r, 60000));
           continue;
         }
-        errors.push(`${day}: ${e.message}`);
+        errors.push(`Fonzip /debts: ${e.message}`);
         data = null;
         break;
       }
     }
-    if (!data || !data.debt_list) continue;
+    if (!data?.debt_list?.length) {
+      return { daysScanned: 1, total, upserted, updated, matched, expensesCreated, errors };
+    }
     total += data.debt_list.length;
 
     for (const debt of data.debt_list) {
@@ -428,10 +441,17 @@ export async function syncFonzipRecentDebts(
         errors.push(`Debt #${debt.id}: ${e.message}`);
       }
     }
-    await new Promise(r => setTimeout(r, 2000)); // günler arası bekleme
   }
 
-  return { daysScanned: daysBack, total, upserted, updated, matched, expensesCreated, errors };
+  return {
+    daysScanned: 1, total, upserted, updated, matched, expensesCreated, errors,
+    // Çağıranın yanıltıcı sonuç okumasını önlemek için API kısıtını açıkça bildiriyoruz.
+    apiLimitation: range
+      ? `Fonzip /debts tarih filtresini yok sayıyor; ${range.startDate}–${range.endDate} aralığı uygulanmadı. ` +
+        "Yalnızca API'nin döndürdüğü en yeni kayıtlar işlendi. Geçmiş veri için Excel import kullanın."
+      : "Fonzip /debts yalnızca en yeni ~10 kaydı döndürüyor (sayfalama/tarih filtresi çalışmıyor). " +
+        "Geçmiş veri için Excel import kullanın.",
+  };
 }
 
 // ── Excel Import: Fonzip ödeme geçmişi Excel'inden toplu içe aktarım ─────────
