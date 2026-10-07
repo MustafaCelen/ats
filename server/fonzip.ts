@@ -355,32 +355,45 @@ export async function syncFonzipRecentDebts(
   let total = 0, upserted = 0, updated = 0, matched = 0, expensesCreated = 0;
   const errors: string[] = [];
 
-  // Tek çağrı: gün gün taramak aynı kayıtları tekrar getirir (API tarih filtresini
-  // yok sayıyor), bu yüzden tek sorgu yapıp dönen kayıtları upsert ediyoruz.
-  {
-    let data: any;
+  // Gün gün taramak aynı kayıtları tekrar getirir (API tarih filtresini yok sayıyor).
+  // Buna karşılık `status` filtresi ÇALIŞIYOR ve status=8 (bekliyor) ile status=1
+  // (ödendi) pencereleri birbirinden tamamen ayrık (canlı API'de doğrulandı: kesişim 0,
+  // birleşim 20). Bu yüzden iki ayrı sorgu atıp fonzip_id ile tekilleştiriyoruz:
+  // günlük yakalama kapasitesi 10'dan 20'ye çıkıyor. Toplu aidat girişi (gözlenen en
+  // yoğun gün 9 kayıt) bu tavanın altında kalıyor.
+  const fetchWindow = async (params: Record<string, string>): Promise<any[]> => {
     let retry = 0;
     while (true) {
       try {
-        data = await fonzipGet("/debts", { per_page: "100" });
-        break;
+        const data = await fonzipGet("/debts", params);
+        return data?.debt_list ?? [];
       } catch (e: any) {
         if (e.message.includes("429") && retry < 5) {
           retry++;
           await new Promise(r => setTimeout(r, 60000));
           continue;
         }
-        errors.push(`Fonzip /debts: ${e.message}`);
-        data = null;
-        break;
+        errors.push(`Fonzip /debts ${JSON.stringify(params)}: ${e.message}`);
+        return [];
       }
     }
-    if (!data?.debt_list?.length) {
+  };
+
+  const byId = new Map<number, any>();
+  for (const status of ["8", "1"]) {
+    for (const debt of await fetchWindow({ status, order_by: "-id", per_page: "100" })) {
+      byId.set(debt.id, debt);
+    }
+    await new Promise(r => setTimeout(r, 500));
+  }
+
+  {
+    if (byId.size === 0) {
       return { daysScanned: 1, total, upserted, updated, matched, expensesCreated, errors };
     }
-    total += data.debt_list.length;
+    total += byId.size;
 
-    for (const debt of data.debt_list) {
+    for (const debt of Array.from(byId.values())) {
       try {
         const membershipNo = debt.user__membership_no != null ? String(debt.user__membership_no) : null;
         const operationDate = debt.operation_date
@@ -395,16 +408,20 @@ export async function syncFonzipRecentDebts(
         );
 
         if (existing.rows.length > 0) {
+          // `status` mutlaka yenilenmeli: borç 8 (bekliyor) -> 1 (ödendi) olduğunda
+          // danışman borç raporu ve Borçlular Raporu (status = 8 filtresi) bunu görsün.
+          // Önceden bu alan güncellenmiyordu; ödenen borçlar süresiz "bekliyor" kalıyordu.
           await pool.query(
             `UPDATE fonzip_synced_debts SET
                details = COALESCE($2, details), period = COALESCE($3, period),
                user_name = $4, membership_no = COALESCE($5, membership_no),
                amount = $6, operation_date = COALESCE($7, operation_date),
                added_by_name = COALESCE($8, added_by_name),
-               employee_id = COALESCE($9, employee_id), synced_at = NOW()
+               employee_id = COALESCE($9, employee_id), status = $10, synced_at = NOW()
              WHERE fonzip_id = $1`,
             [debt.id, debt.details, debt.period, debt.user__name ?? "", membershipNo,
-             String(debt.amount ?? 0), operationDate, debt.added_by__name ?? null, empId ?? null]
+             String(debt.amount ?? 0), operationDate, debt.added_by__name ?? null, empId ?? null,
+             debt.status]
           );
           if (existing.rows[0].expense_id) {
             await pool.query(
@@ -449,8 +466,8 @@ export async function syncFonzipRecentDebts(
     apiLimitation: range
       ? `Fonzip /debts tarih filtresini yok sayıyor; ${range.startDate}–${range.endDate} aralığı uygulanmadı. ` +
         "Yalnızca API'nin döndürdüğü en yeni kayıtlar işlendi. Geçmiş veri için Excel import kullanın."
-      : "Fonzip /debts yalnızca en yeni ~10 kaydı döndürüyor (sayfalama/tarih filtresi çalışmıyor). " +
-        "Geçmiş veri için Excel import kullanın.",
+      : "Fonzip /debts sayfalama/tarih filtresi uygulamıyor; status=8 ve status=1 pencereleri ayrı sorgulanarak " +
+        "en yeni ~20 kayıt (10 bekleyen + 10 ödenen) alınıyor. Geçmiş veri için Excel import kullanın.",
   };
 }
 
