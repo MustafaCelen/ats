@@ -7,7 +7,7 @@ import { pool } from "./db";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
-import { isFonzipConfigured, syncFonzipRecentDebts, syncFonzipUsersFinancials } from "./fonzip";
+import { isFonzipConfigured, startDebtSync, maybeCatchUpSync } from "./fonzip";
 import { ensureSchema } from "./ensure-schema";
 import { ensureClosingSheetHeader } from "./google-sheets";
 import { isGoogleFormsConfigured, syncGoogleFormLeads } from "./google-forms";
@@ -82,6 +82,12 @@ app.use((req, res, next) => {
   res.on("finish", () => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
+      // Oturumlu her başarılı API isteği ucuz bir Fonzip catch-up kontrolü tetikler
+      // (fonzip.ts: 10 dk'da en fazla bir DB okuması; uyuyan Autoscale instance'ında
+      // kaçan gece cron'unu telafi eder).
+      if ((req as any).user && res.statusCode < 400 && !path.startsWith("/api/fonzip/sync-recent")) {
+        void maybeCatchUpSync("istek");
+      }
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
       if (capturedJsonResponse) {
         logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
@@ -372,26 +378,18 @@ app.use((req, res, next) => {
     },
   );
 
-  // ── Günlük Fonzip sync scheduler (her gece 03:00 TR saati) ─────────────────
+  // ── Fonzip borç sync zamanlaması ────────────────────────────────────────────
+  // Replit Autoscale'de instance trafik yokken uyur; 03:00 cron'u o sırada çalışmaz.
+  // Üç katman: (1) in-process cron — instance uyanıksa; (2) boot + API isteği catch-up
+  // (fonzip.ts/maybeCatchUpSync: tam tarama 20 saatten eskiyse full, yoksa 2 saatte bir
+  // recent); (3) harici tetik POST /api/fonzip/cron (CRON_SECRET) — Replit Scheduled
+  // Deployment ile 03:00'te çağrılır. Hepsi aynı kilidi kullanır, çakışmaz.
   if (isFonzipConfigured()) {
-    cron.schedule("0 3 * * *", async () => {
-      log("[cron] Fonzip günlük sync başlıyor");
-      try {
-        // admin userId=1. "full": tüm /debts sayfaları (~400 çağrı, 3–4 dk) — yeni borçlarla
-        // birlikte eski borçların status (bekliyor→ödendi) değişimleri de yakalanır.
-        const debtsResult = await syncFonzipRecentDebts(1, "full");
-        log(`[cron] Borç sync: ${JSON.stringify(debtsResult)}`);
-      } catch (e: any) {
-        log(`[cron] Borç sync hata: ${e.message}`);
-      }
-      try {
-        const usersResult = await syncFonzipUsersFinancials();
-        log(`[cron] Bakiye sync: ${JSON.stringify(usersResult)}`);
-      } catch (e: any) {
-        log(`[cron] Bakiye sync hata: ${e.message}`);
-      }
+    cron.schedule("0 3 * * *", () => {
+      if (!startDebtSync("full", "cron")) log("[cron] Fonzip sync zaten çalışıyor, atlandı");
     }, { timezone: "Europe/Istanbul" });
-    log("[cron] Fonzip günlük sync planlandı: her gün 03:00");
+    log("[cron] Fonzip günlük sync planlandı: her gün 03:00 (+ boot/istek catch-up)");
+    setTimeout(() => { void maybeCatchUpSync("boot"); }, 20_000);
   }
 
   // ── Google Form lead sync scheduler (her 15 dakikada bir) ──────────────────

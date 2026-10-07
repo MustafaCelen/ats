@@ -12,7 +12,7 @@ import { getAuthUrl, createOAuth2Client, createCalendarEvent, updateCalendarEven
 import { sendWhatsApp, sendWhatsAppTemplate, checkWhatsAppStatus, publicBaseUrl, listWhatsAppTemplates } from "./whatsapp";
 import { startBulkSendBatch, getActiveBatchForUser, getLastBatchForUser, getBatch, requestStop, type BulkSendItem } from "./whatsapp-bulk-runner";
 import { sendEmail } from "./email";
-import { isFonzipConfigured, fetchFonzipPreview, fetchFonzipUsers, fetchFonzipDebts, fetchFonzipDonations, syncFonzipDebts, syncFonzipUsersFinancials, getFonzipUserFinancialsReport, importFonzipExcel, syncFonzipRecentDebts, getEmployeeFonzipDebt } from "./fonzip";
+import { isFonzipConfigured, fetchFonzipPreview, fetchFonzipUsers, fetchFonzipDebts, fetchFonzipDonations, syncFonzipDebts, syncFonzipUsersFinancials, getFonzipUserFinancialsReport, importFonzipExcel, getEmployeeFonzipDebt, startDebtSync, getDebtSyncStatus } from "./fonzip";
 import { isMetaConfigured, isMetaWebhookConfigured, metaConfig, syncMetaCampaigns, fetchMetaLead, mapLeadToCandidate, verifyWebhookSignature, listLeadForms, backfillLeadsFromMeta } from "./meta";
 import { isGoogleFormsConfigured, syncGoogleFormLeads, getGoogleFormsSpreadsheetId } from "./google-forms";
 
@@ -4381,34 +4381,35 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  let recentSyncRunning = false;
-  let lastRecentSyncResult: any = null;
-
-  let recentSyncProgress: { page: number; totalPages: number; total: number } | null = null;
-
   app.post("/api/fonzip/sync-recent", requireAuth, requireAdmin, (req, res) => {
     if (!isFonzipConfigured()) return res.status(400).json({ error: "Fonzip yapılandırılmamış." });
-    if (recentSyncRunning) return res.json({ running: true, message: "Sync zaten devam ediyor." });
     const userId = (req as any).user?.id ?? 0;
-
-    // mode=full: tüm /debts sayfaları (~400 sayfa, 3–4 dk) — eski borçların status
-    // değişimlerini de yakalar; cron bunu kullanır. Varsayılan "recent": yeni kayıt
-    // içermeyen ilk sayfada durur, saniyeler sürer.
+    // mode=full: tüm /debts sayfaları (~400 sayfa, 8 dk) — eski borçların status
+    // değişimlerini de yakalar. Varsayılan "recent": yeni kayıt içermeyen ilk sayfada
+    // durur, saniyeler sürer.
     const mode: "recent" | "full" = req.body?.mode === "full" ? "full" : "recent";
-    recentSyncRunning = true;
-    recentSyncProgress = null;
+    if (!startDebtSync(mode, "manuel", userId)) return res.json({ running: true, message: "Sync zaten devam ediyor." });
     res.json({
       running: true,
       message: mode === "full" ? "Fonzip tam tarama başlatıldı — birkaç dakika sürebilir." : "Fonzip sync başlatıldı.",
     });
-    syncFonzipRecentDebts(userId, mode, (p) => { recentSyncProgress = p; })
-      .then(result => { lastRecentSyncResult = { ...result, finishedAt: new Date().toISOString() }; })
-      .catch(err => { lastRecentSyncResult = { error: err.message, finishedAt: new Date().toISOString() }; })
-      .finally(() => { recentSyncRunning = false; recentSyncProgress = null; });
   });
 
-  app.get("/api/fonzip/sync-recent/status", requireAuth, requireAdmin, (_req, res) => {
-    res.json({ running: recentSyncRunning, lastResult: lastRecentSyncResult, progress: recentSyncProgress });
+  app.get("/api/fonzip/sync-recent/status", requireAuth, requireAdmin, async (_req, res) => {
+    res.json(await getDebtSyncStatus());
+  });
+
+  // Harici zamanlayıcı ucu (Replit Scheduled Deployment, cron-job.org vb.). Oturum yerine
+  // CRON_SECRET ile korunur; in-process cron'un uyuyan Autoscale instance'ında çalışmaması
+  // sorununu çözer. Başlattıysa 202, zaten çalışıyorsa 200 döner.
+  app.all("/api/fonzip/cron", async (req, res) => {
+    const secret = process.env.CRON_SECRET;
+    const given = req.get("x-cron-secret") ?? String(req.query.secret ?? "");
+    if (!secret || given !== secret) return res.status(401).json({ error: "Yetkisiz." });
+    if (!isFonzipConfigured()) return res.status(400).json({ error: "Fonzip yapılandırılmamış." });
+    const mode: "recent" | "full" = String(req.query.mode ?? req.body?.mode ?? "full") === "recent" ? "recent" : "full";
+    const started = startDebtSync(mode, "harici-cron");
+    res.status(started ? 202 : 200).json({ started, running: true, mode });
   });
 
   let excelImportRunning = false;

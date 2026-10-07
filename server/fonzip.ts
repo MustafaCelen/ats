@@ -953,3 +953,106 @@ export async function getEmployeeFonzipDebt(employeeId: number): Promise<{
     })),
   };
 }
+
+// ── Borç sync zamanlayıcı / ortak kilit ───────────────────────────────────────
+// Replit Autoscale instance'ı trafik yokken uyur; in-process cron (03:00) o sırada
+// hiç tetiklenmez. Bu yüzden sync'i tek bir kilit altında toplayıp üç yerden
+// tetikliyoruz: boot, API isteği (catch-up) ve harici /api/fonzip/cron çağrısı.
+// Son başarılı tarama zamanları _fonzip_config'de tutulur (restart'a dayanıklı).
+const FULL_SYNC_STALE_MS = 20 * 60 * 60 * 1000;   // tam tarama 20 saatten eskiyse yenile
+const RECENT_SYNC_STALE_MS = 2 * 60 * 60 * 1000;  // gün içinde 2 saatte bir yeni borçlar
+const CATCHUP_CHECK_MS = 10 * 60 * 1000;          // istek başına DB kontrolü en çok 10 dk'da bir
+
+type DebtSyncMode = "recent" | "full";
+const debtSyncState: {
+  running: boolean;
+  mode: DebtSyncMode | null;
+  trigger: string | null;
+  progress: { page: number; totalPages: number; total: number } | null;
+  lastResult: any;
+} = { running: false, mode: null, trigger: null, progress: null, lastResult: null };
+let lastCatchUpCheck = 0;
+
+async function getConfigValue(key: string): Promise<string | null> {
+  await ensureConfigTable();
+  const { pool } = await import("./db");
+  const r = await pool.query("SELECT value FROM _fonzip_config WHERE key = $1", [key]);
+  return r.rows[0]?.value ?? null;
+}
+
+async function setConfigValue(key: string, value: string): Promise<void> {
+  await ensureConfigTable();
+  const { pool } = await import("./db");
+  await pool.query(
+    `INSERT INTO _fonzip_config (key, value) VALUES ($1, $2)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+    [key, value],
+  );
+}
+
+export async function getDebtSyncStatus() {
+  const [lastSyncAt, lastFullSyncAt] = await Promise.all([
+    getConfigValue("last_debts_sync_at"), getConfigValue("last_full_sync_at"),
+  ]);
+  return { ...debtSyncState, lastSyncAt, lastFullSyncAt };
+}
+
+// Tek giriş noktası: çalışıyorsa false döner, aksi halde arka planda başlatır.
+// "full" sonrası bakiye sync'i de koşar (eski cron ile aynı davranış).
+export function startDebtSync(mode: DebtSyncMode, trigger: string, createdByUserId = 1): boolean {
+  if (debtSyncState.running) return false;
+  debtSyncState.running = true;
+  debtSyncState.mode = mode;
+  debtSyncState.trigger = trigger;
+  debtSyncState.progress = null;
+  console.log(`[fonzip-sync] ${mode} başlıyor (tetik: ${trigger})`);
+  (async () => {
+    try {
+      const result = await syncFonzipRecentDebts(createdByUserId, mode, (p) => { debtSyncState.progress = p; });
+      debtSyncState.lastResult = { ...result, trigger, finishedAt: new Date().toISOString() };
+      if (result.pages > 0) {
+        const now = new Date().toISOString();
+        await setConfigValue("last_debts_sync_at", now);
+        if (mode === "full" && result.pages >= result.totalPages) await setConfigValue("last_full_sync_at", now);
+      }
+      console.log(`[fonzip-sync] ${mode} bitti: ${JSON.stringify(result)}`);
+      if (mode === "full") {
+        try {
+          const users = await syncFonzipUsersFinancials();
+          console.log(`[fonzip-sync] bakiye sync: ${JSON.stringify(users)}`);
+        } catch (e: any) {
+          console.log(`[fonzip-sync] bakiye sync hata: ${e.message}`);
+        }
+      }
+    } catch (e: any) {
+      debtSyncState.lastResult = { error: e.message, trigger, finishedAt: new Date().toISOString() };
+      console.log(`[fonzip-sync] ${mode} hata: ${e.message}`);
+    } finally {
+      debtSyncState.running = false;
+      debtSyncState.mode = null;
+      debtSyncState.trigger = null;
+      debtSyncState.progress = null;
+    }
+  })();
+  return true;
+}
+
+// Gerekiyorsa sync başlatır: tam tarama bayatsa "full", değilse ve son sync 2 saatten
+// eskiyse "recent". Ucuz: 10 dakikada en fazla bir DB okuması; sonuç beklenmez.
+export async function maybeCatchUpSync(trigger: string): Promise<void> {
+  if (!isFonzipConfigured() || debtSyncState.running) return;
+  const now = Date.now();
+  if (now - lastCatchUpCheck < CATCHUP_CHECK_MS) return;
+  lastCatchUpCheck = now;
+  try {
+    const [lastSyncAt, lastFullSyncAt] = await Promise.all([
+      getConfigValue("last_debts_sync_at"), getConfigValue("last_full_sync_at"),
+    ]);
+    const fullAge = lastFullSyncAt ? now - Date.parse(lastFullSyncAt) : Infinity;
+    const anyAge = lastSyncAt ? now - Date.parse(lastSyncAt) : Infinity;
+    if (fullAge > FULL_SYNC_STALE_MS) startDebtSync("full", trigger + "/catch-up");
+    else if (anyAge > RECENT_SYNC_STALE_MS) startDebtSync("recent", trigger + "/catch-up");
+  } catch (e: any) {
+    console.log(`[fonzip-sync] catch-up kontrol hatası: ${e.message}`);
+  }
+}

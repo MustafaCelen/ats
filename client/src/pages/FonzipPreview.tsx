@@ -154,7 +154,7 @@ export default function FonzipPreview() {
 
   const isUsersSyncRunning = usersSyncMutation.isPending || usersSyncStatus?.running;
 
-  const { data: recentSyncStatus, refetch: refetchRecentSyncStatus } = useQuery<{ running: boolean; lastResult: any; progress?: { page: number; totalPages: number; total: number } | null }>({
+  const { data: recentSyncStatus, refetch: refetchRecentSyncStatus } = useQuery<{ running: boolean; lastResult: any; progress?: { page: number; totalPages: number; total: number } | null; lastSyncAt?: string | null; lastFullSyncAt?: string | null; trigger?: string | null }>({
     queryKey: ["/api/fonzip/sync-recent/status"],
     queryFn: () => fetch("/api/fonzip/sync-recent/status", { credentials: "include" }).then(r => r.json()),
     refetchInterval: (q) => q.state.data?.running ? 3000 : false,
@@ -382,6 +382,12 @@ export default function FonzipPreview() {
             >
               <Clock className="h-4 w-4" />Tam Tarama
             </Button>
+            {(recentSyncStatus?.lastSyncAt || recentSyncStatus?.lastFullSyncAt) && (
+              <span className="text-xs text-muted-foreground self-center" title="Boot, API isteği ve harici cron tetikleriyle otomatik güncellenir">
+                Son sync: {recentSyncStatus.lastSyncAt ? new Date(recentSyncStatus.lastSyncAt).toLocaleString("tr-TR") : "—"}
+                {" · "}Son tam tarama: {recentSyncStatus.lastFullSyncAt ? new Date(recentSyncStatus.lastFullSyncAt).toLocaleString("tr-TR") : "—"}
+              </span>
+            )}
             <Button
               variant="outline" className="gap-1.5"
               onClick={() => usersSyncMutation.mutate()}
