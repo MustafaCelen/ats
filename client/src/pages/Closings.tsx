@@ -810,7 +810,8 @@ function SideSection({
                     />
                     {agent.employeeId && debtSummaries[agent.employeeId] && (() => {
                       const ds = debtSummaries[agent.employeeId];
-                      const owed = Math.max(ds.balance, ds.pendingTotal);
+                      // Fonzip bakiyesi net borçtur (kısmi/toplu tahsilatlar düşülmüş); kalem toplamı yalnızca bakiye sync'i yoksa yedek.
+                      const owed = ds.balance > 0 ? ds.balance : ds.pendingTotal;
                       return (
                         <div className="mt-1 flex items-center gap-1 text-[11px] text-red-700 bg-red-50 ring-1 ring-red-200 rounded px-2 py-0.5"
                              title="Fonzip'te ödenmemiş borcu var — kapanış öncesi tahsilatı kontrol edin">
