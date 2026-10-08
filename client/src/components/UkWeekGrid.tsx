@@ -13,7 +13,7 @@ function fmtYmd(ymd: string | null) {
 }
 
 export function UkWeekGrid({
-  week, week1Monday, today, checks, canToggle, onToggle, compact = false,
+  week, week1Monday, today, checks, canToggle, onToggle, compact = false, showScore = true,
 }: {
   week: number;
   week1Monday: string | null;
@@ -22,6 +22,8 @@ export function UkWeekGrid({
   canToggle: (a: UkActivity, date: string | null) => boolean;
   onToggle: (id: string, done: boolean) => void;
   compact?: boolean;
+  /** false: puanlı/puansız ayrımı ve skor ipuçları gizlenir (danışman portalı). */
+  showScore?: boolean;
 }) {
   const acts = UK_ACTIVITIES.filter((a) => a.week === week);
   const monday = week1Monday ? ukAddDays(week1Monday, (week - 1) * 7) : null;
@@ -58,7 +60,7 @@ export function UkWeekGrid({
         {acts.map((a) => {
           const date = monday ? ukAddDays(monday, a.day) : null;
           const done = !!checks[a.id];
-          const score = a.score ? scoreLabel.get(a.score) : null;
+          const score = showScore && a.score ? scoreLabel.get(a.score) : null;
           const by = checks[a.id]?.by;
           const enabled = canToggle(a, date);
           const future = !date || date > today;
@@ -68,9 +70,11 @@ export function UkWeekGrid({
               type="button"
               disabled={!enabled}
               onClick={() => onToggle(a.id, !done)}
-              title={[score ? `Skor: ${score}` : "Takvim aktivitesi (puansız)", done && by ? `İşaretleyen: ${by}` : null].filter(Boolean).join("\n")}
+              title={showScore
+                ? [score ? `Skor: ${score}` : "Takvim aktivitesi (puansız)", done && by ? `İşaretleyen: ${by}` : null].filter(Boolean).join("\n")
+                : a.label}
               className={`relative rounded-lg px-2 py-1.5 text-left ${compact ? "text-[11px]" : "text-[11.5px]"} leading-snug font-medium ring-1 transition-colors flex items-center gap-2
-                ${done ? "bg-emerald-50 ring-emerald-300 text-emerald-900" : score ? "bg-white ring-border hover:ring-primary/50" : "bg-muted/30 ring-border/70 text-muted-foreground hover:ring-primary/40"}
+                ${done ? "bg-emerald-50 ring-emerald-300 text-emerald-900" : score || !showScore ? "bg-white ring-border hover:ring-primary/50" : "bg-muted/30 ring-border/70 text-muted-foreground hover:ring-primary/40"}
                 ${score && !done ? "border-l-[3px] border-l-primary" : ""}
                 ${enabled ? "cursor-pointer" : "cursor-default"}
                 ${!done && future && !enabled ? "opacity-60" : ""}`}
@@ -88,11 +92,15 @@ export function UkWeekGrid({
   );
 }
 
-export function UkGridLegend() {
+export function UkGridLegend({ showScore = true }: { showScore?: boolean }) {
   return (
     <div className="flex items-center gap-4 text-[11px] text-muted-foreground flex-wrap">
-      <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-sm bg-white ring-1 ring-border border-l-[3px] border-l-primary" /> Puanlı aktivite</span>
-      <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-sm bg-muted/50 ring-1 ring-border" /> Takvim aktivitesi (puansız)</span>
+      {showScore && (
+        <>
+          <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-sm bg-white ring-1 ring-border border-l-[3px] border-l-primary" /> Puanlı aktivite</span>
+          <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-sm bg-muted/50 ring-1 ring-border" /> Takvim aktivitesi (puansız)</span>
+        </>
+      )}
       <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-sm bg-emerald-100 ring-1 ring-emerald-300" /> Yapıldı</span>
     </div>
   );

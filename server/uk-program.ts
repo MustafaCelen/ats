@@ -180,7 +180,9 @@ function registerAdvisorUkRoutes(app: Express) {
         [k, { at: v.at, by: v.by === "Danışman" ? "Siz" : "Koçunuz" }]));
       const weeks = prog.weeks.map((w) => ({ ...w, confirmedBy: w.confirmedAt ? "Koçunuz" : null }));
       const realIds: number[] = (req.session as any)?.advisorEmployeeIds ?? [];
-      res.json({ ...prog, checks, weeks, today: todayYmd(), preview: !realIds.includes(p.employeeId) });
+      // Puan/skor danışmana gösterilmez (onaylı karar) — yanıttan da çıkarılır.
+      const { score: _score, ...rest } = prog;
+      res.json({ ...rest, checks, weeks, today: todayYmd(), preview: !realIds.includes(p.employeeId) });
     } catch (err: any) {
       console.error("[GET advisor uk-program]", err);
       res.status(500).json({ message: "Veriler yüklenemedi." });

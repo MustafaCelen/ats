@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, CheckCircle2, Loader2, Lock, Route as RouteIcon, Trophy, AlertCircle } from "lucide-react";
+import { Check, CheckCircle2, Loader2, Lock, Route as RouteIcon, AlertCircle } from "lucide-react";
 import { UK_ACTIVITIES, UK_DAYS, UK_TIME_ROWS, UK_PROGRAM_WEEKS, ukAddDays } from "@shared/uk-program";
 import { UkWeekGrid, UkGridLegend } from "@/components/UkWeekGrid";
 import { CalendarDays, List } from "lucide-react";
@@ -11,8 +11,8 @@ function initialViewMode(): ViewMode {
     const s = localStorage.getItem(VIEW_KEY);
     if (s === "liste" || s === "takvim") return s;
   } catch {}
-  // Telefonda liste, geniş ekranda takvim.
-  return typeof window !== "undefined" && window.innerWidth >= 768 ? "takvim" : "liste";
+  // Varsayılan liste (onaylı karar); danışmanın seçimi hatırlanır.
+  return "liste";
 }
 
 // Danışman portalı (/a/:token) → "Rotam": 45+45 Başarı Rotası'nı danışmanın kendisi
@@ -32,7 +32,6 @@ type Data = {
   today: string;
   checks: Record<string, { at: string; by: string }>;
   weeks: WeekRow[];
-  score: { rows: { key: string; label: string; points: number; planned: number; done: number; earned: number }[]; total: number; max: number };
   totals: { activities: number };
   preview?: boolean;
 };
@@ -61,7 +60,7 @@ export function AdvisorRotaView({ token, onWideChange }: { token: string; onWide
   const [errMsg, setErrMsg] = useState<string | null>(null);
   const [loginErr, setLoginErr] = useState<string | null>(null);
   const [redirecting, setRedirecting] = useState(false);
-  const [tab, setTab] = useState<number | "skor">(1);
+  const [tab, setTab] = useState<number>(1);
   const [notice, setNotice] = useState<string | null>(null);
   const [view, setView] = useState<ViewMode>(initialViewMode);
   const changeView = (v: ViewMode) => {
@@ -70,7 +69,7 @@ export function AdvisorRotaView({ token, onWideChange }: { token: string; onWide
   };
   // Takvim görünümünde portal kabuğu genişlesin (masaüstünde tüm hafta tek ekranda).
   useEffect(() => {
-    onWideChange?.(state === "ready" && view === "takvim" && typeof tab === "number");
+    onWideChange?.(state === "ready" && view === "takvim");
     return () => onWideChange?.(false);
   }, [state, view, tab, onWideChange]);
 
@@ -88,7 +87,7 @@ export function AdvisorRotaView({ token, onWideChange }: { token: string; onWide
         if (!r.ok) { setErrMsg((await r.json().catch(() => ({}))).message ?? null); setState("error"); return; }
         const d: Data = await r.json();
         setData(d);
-        if (first) setTab(d.currentWeek >= 1 && d.currentWeek <= UK_PROGRAM_WEEKS ? d.currentWeek : d.currentWeek > UK_PROGRAM_WEEKS ? "skor" : 1);
+        if (first) setTab(Math.min(UK_PROGRAM_WEEKS, Math.max(1, d.currentWeek)));
         setState("ready");
       })
       .catch(() => setState("error"));
@@ -166,6 +165,7 @@ export function AdvisorRotaView({ token, onWideChange }: { token: string; onWide
   }
 
   const doneCount = Object.keys(data.checks).length;
+  const currentRow = data.currentWeek >= 1 && data.currentWeek <= UK_PROGRAM_WEEKS ? data.weeks[data.currentWeek - 1] : null;
   const pct = Math.round((doneCount / data.totals.activities) * 100);
 
   return (
@@ -188,9 +188,11 @@ export function AdvisorRotaView({ token, onWideChange }: { token: string; onWide
             <p className="text-[10px] text-white/70">Aktivite</p>
             <p className="font-bold text-sm">{doneCount}/{data.totals.activities}</p>
           </div>
-          <div className="rounded-xl bg-red-600 px-3 py-2">
-            <p className="text-[10px] text-white/80">Puan</p>
-            <p className="font-extrabold text-sm">{data.score.total.toLocaleString("tr-TR")} / {data.score.max}</p>
+          <div className="rounded-xl bg-white/10 px-3 py-2">
+            <p className="text-[10px] text-white/70">Bu hafta</p>
+            <p className="font-bold text-sm">
+              {currentRow ? `${currentRow.doneActivities}/${currentRow.totalActivities}` : "—"}
+            </p>
           </div>
         </div>
         <div className="mt-3 h-1.5 rounded-full bg-white/15 overflow-hidden"><div className="h-full bg-amber-300" style={{ width: `${pct}%` }} /></div>
@@ -207,35 +209,25 @@ export function AdvisorRotaView({ token, onWideChange }: { token: string; onWide
             {w.confirmedAt ? <Lock className="h-3 w-3" /> : data.currentWeek === w.week ? <span className="h-1.5 w-1.5 rounded-full bg-amber-400" /> : null}
           </button>
         ))}
-        <button
-          onClick={() => setTab("skor")}
-          className={`shrink-0 h-9 px-3 rounded-xl text-sm font-medium flex items-center gap-1.5 ring-1 ${tab === "skor" ? "bg-primary text-primary-foreground ring-primary" : "bg-card ring-border text-muted-foreground"}`}
-        >
-          <Trophy className="h-4 w-4" /> Puanım
-        </button>
       </div>
 
-      {typeof tab === "number" && (
-        <div className="flex justify-end">
-          <div className="inline-flex rounded-xl bg-card ring-1 ring-border p-1 gap-1">
-            {([["liste", "Liste", List], ["takvim", "Takvim", CalendarDays]] as const).map(([k, label, Icon]) => (
-              <button
-                key={k}
-                onClick={() => changeView(k)}
-                className={`h-8 px-3 rounded-lg text-xs font-medium flex items-center gap-1.5 ${view === k ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}
-              >
-                <Icon className="h-3.5 w-3.5" /> {label}
-              </button>
-            ))}
-          </div>
+      <div className="flex justify-end">
+        <div className="inline-flex rounded-xl bg-card ring-1 ring-border p-1 gap-1">
+          {([["liste", "Liste", List], ["takvim", "Takvim", CalendarDays]] as const).map(([k, label, Icon]) => (
+            <button
+              key={k}
+              onClick={() => changeView(k)}
+              className={`h-8 px-3 rounded-lg text-xs font-medium flex items-center gap-1.5 ${view === k ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}
+            >
+              <Icon className="h-3.5 w-3.5" /> {label}
+            </button>
+          ))}
         </div>
-      )}
+      </div>
 
       {notice && <div className="rounded-xl bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">{notice}</div>}
 
-      {typeof tab === "number"
-        ? <WeekView token={token} data={data} week={tab} onToggle={toggle} onSaved={() => load()} readOnly={!!data.preview} view={view} />
-        : <ScoreView data={data} />}
+      <WeekView token={token} data={data} week={tab} onToggle={toggle} onSaved={() => load()} readOnly={!!data.preview} view={view} />
     </>
   );
 }
@@ -263,9 +255,10 @@ function WeekView({ token, data, week, onToggle, onSaved, readOnly = false, view
 
       {view === "takvim" && (
         <>
-          <UkGridLegend />
+          <UkGridLegend showScore={false} />
           <UkWeekGrid
             compact
+            showScore={false}
             week={week}
             week1Monday={data.week1Monday}
             today={data.today}
@@ -306,7 +299,7 @@ function WeekView({ token, data, week, onToggle, onSaved, readOnly = false, view
                       </span>
                       <span className="flex-1 min-w-0">
                         <span className={`block text-sm leading-snug ${done ? "text-emerald-800" : ""}`}>{a.label}</span>
-                        <span className="block text-[11px] text-muted-foreground">{time}{a.score ? " · puanlı" : ""}</span>
+                        <span className="block text-[11px] text-muted-foreground">{time}</span>
                       </span>
                     </button>
                   </li>
@@ -387,37 +380,6 @@ function WeekActuals({ token, row, editable, onSaved }: { token: string; row: We
         </button>
       )}
       {msg && <p className={`text-xs mt-2 ${msg.ok ? "text-emerald-700" : "text-red-600"}`}>{msg.text}</p>}
-    </Card>
-  );
-}
-
-function ScoreView({ data }: { data: Data }) {
-  return (
-    <Card className="!p-0 overflow-hidden">
-      <div className="px-4 py-3 border-b border-border">
-        <h3 className="font-semibold text-sm">Aktivite Puanım</h3>
-        <p className="text-[11px] text-muted-foreground">Her kalemde yaptığınız oranda puan kazanırsınız.</p>
-      </div>
-      <ul className="divide-y divide-border">
-        {data.score.rows.map((r) => {
-          const pct = r.planned ? Math.min(100, (r.done / r.planned) * 100) : 0;
-          return (
-            <li key={r.key} className="px-4 py-2.5">
-              <div className="flex items-baseline justify-between gap-3">
-                <span className="text-sm">{r.label}</span>
-                <span className="text-sm font-semibold whitespace-nowrap">{r.earned.toLocaleString("tr-TR")} <span className="text-muted-foreground font-normal text-xs">/ {r.points}</span></span>
-              </div>
-              <div className="flex items-center gap-2 mt-1">
-                <div className="h-1 flex-1 rounded-full bg-muted overflow-hidden"><div className="h-full bg-primary" style={{ width: `${pct}%` }} /></div>
-                <span className="text-[11px] text-muted-foreground w-12 text-right">{r.done}/{r.planned}</span>
-              </div>
-            </li>
-          );
-        })}
-      </ul>
-      <div className="bg-red-600 text-white px-4 py-3 flex justify-between font-bold">
-        <span>TOPLAM PUAN</span><span>{data.score.total.toLocaleString("tr-TR")} / {data.score.max}</span>
-      </div>
     </Card>
   );
 }
