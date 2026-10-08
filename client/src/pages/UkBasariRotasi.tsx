@@ -1,0 +1,157 @@
+import { useMemo, useState } from "react";
+import { Link } from "wouter";
+import { useQuery } from "@tanstack/react-query";
+import { Layout } from "@/components/Layout";
+import { Route as RouteIcon, Search, CheckCircle2, ChevronRight } from "lucide-react";
+import { UK_PROGRAM_WEEKS } from "@shared/uk-program";
+
+type Row = {
+  employeeId: number; name: string; kwuid: string | null; status: string;
+  coachId: number | null; coachName: string | null;
+  programStart: string | null; week1Monday: string | null; currentWeek: number;
+  done: number; total: number; score: number; lastConfirmedWeek: number | null; canEdit: boolean;
+};
+
+function fmtDate(ymd: string | null) {
+  if (!ymd) return "—";
+  const [y, m, d] = ymd.split("-");
+  return `${d}.${m}.${y}`;
+}
+
+function WeekBadge({ week }: { week: number }) {
+  if (week === 0) return <span className="text-xs text-muted-foreground">Başlamadı</span>;
+  if (week > UK_PROGRAM_WEEKS) {
+    return <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200">Tamamlandı</span>;
+  }
+  return <span className="inline-flex items-center text-xs font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary ring-1 ring-primary/20">{week}. hafta</span>;
+}
+
+export default function UkBasariRotasi() {
+  const [q, setQ] = useState("");
+  const [includePassive, setIncludePassive] = useState(false);
+  const [phase, setPhase] = useState<"all" | "active" | "done">("active");
+
+  const { data = [], isLoading } = useQuery<Row[]>({
+    queryKey: ["/api/uk-program", includePassive],
+    queryFn: () => fetch(`/api/uk-program?includePassive=${includePassive}`, { credentials: "include" }).then((r) => r.json()),
+  });
+
+  const rows = useMemo(() => {
+    const needle = q.trim().toLocaleLowerCase("tr");
+    return data.filter((r) => {
+      if (phase === "active" && (r.currentWeek === 0 || r.currentWeek > UK_PROGRAM_WEEKS)) return false;
+      if (phase === "done" && r.currentWeek <= UK_PROGRAM_WEEKS) return false;
+      if (!needle) return true;
+      return [r.name, r.kwuid, r.coachName].some((v) => v?.toLocaleLowerCase("tr").includes(needle));
+    });
+  }, [data, q, phase]);
+
+  const counts = useMemo(() => ({
+    all: data.length,
+    active: data.filter((r) => r.currentWeek >= 1 && r.currentWeek <= UK_PROGRAM_WEEKS).length,
+    done: data.filter((r) => r.currentWeek > UK_PROGRAM_WEEKS).length,
+  }), [data]);
+
+  return (
+    <Layout>
+      <div className="space-y-5">
+        <div>
+          <h1 className="text-2xl font-bold flex items-center gap-2">
+            <RouteIcon className="h-6 w-6 text-primary" /> 45+45 Başarı Rotası
+          </h1>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Üretkenlik Koçluğu programındaki danışmanların 6 haftalık rota ilerlemesi ve aktivite puanı
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          {([["active", "Devam Eden"], ["done", "Tamamlanan"], ["all", "Tümü"]] as const).map(([k, label]) => (
+            <button
+              key={k}
+              onClick={() => setPhase(k)}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium ring-1 transition-colors ${phase === k ? "bg-primary text-primary-foreground ring-primary" : "bg-card ring-border text-muted-foreground hover:text-foreground"}`}
+            >
+              {label} ({counts[k]})
+            </button>
+          ))}
+          <label className="flex items-center gap-1.5 text-sm text-muted-foreground ml-2">
+            <input type="checkbox" checked={includePassive} onChange={(e) => setIncludePassive(e.target.checked)} />
+            Pasifleri dahil et
+          </label>
+          <div className="relative ml-auto w-full sm:w-72">
+            <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Danışman, KWUID veya koç ara…"
+              className="w-full border border-input rounded-lg pl-9 pr-3 py-2 text-sm bg-card focus:outline-none focus:ring-2 focus:ring-primary/40"
+            />
+          </div>
+        </div>
+
+        <div className="bg-card rounded-xl border border-border overflow-x-auto [contain:inline-size]">
+          <table className="w-full text-sm min-w-[760px]">
+            <thead className="bg-muted/40 text-muted-foreground text-xs">
+              <tr>
+                <th className="text-left font-medium px-4 py-2.5">Danışman</th>
+                <th className="text-left font-medium px-4 py-2.5">Koç</th>
+                <th className="text-left font-medium px-4 py-2.5">Program Başlangıcı</th>
+                <th className="text-left font-medium px-4 py-2.5">Durum</th>
+                <th className="text-left font-medium px-4 py-2.5 w-48">Aktivite İlerlemesi</th>
+                <th className="text-right font-medium px-4 py-2.5">Aktivite Puanı</th>
+                <th className="text-left font-medium px-4 py-2.5">Koç Onayı</th>
+                <th className="w-8" />
+              </tr>
+            </thead>
+            <tbody>
+              {isLoading && (
+                <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">Yükleniyor…</td></tr>
+              )}
+              {!isLoading && rows.length === 0 && (
+                <tr><td colSpan={8} className="px-4 py-10 text-center text-muted-foreground">
+                  {data.length === 0
+                    ? "Üretkenlik Koçluğu işaretli danışman yok. Danışman profilinde Üretkenlik Koçluğu'nu açın."
+                    : "Bu filtrede danışman yok."}
+                </td></tr>
+              )}
+              {rows.map((r) => {
+                const pct = r.total > 0 ? Math.round((r.done / r.total) * 100) : 0;
+                return (
+                  <tr key={r.employeeId} className="border-t border-border hover:bg-muted/20">
+                    <td className="px-4 py-2.5">
+                      <Link href={`/uk-basari-rotasi/${r.employeeId}`} className="font-semibold hover:text-primary">{r.name}</Link>
+                      {r.kwuid && <span className="ml-2 text-xs text-muted-foreground font-mono">{r.kwuid}</span>}
+                      {r.status !== "active" && <span className="ml-2 text-[10px] text-muted-foreground">(pasif)</span>}
+                    </td>
+                    <td className="px-4 py-2.5 text-muted-foreground">{r.coachName ?? "—"}</td>
+                    <td className="px-4 py-2.5">{fmtDate(r.programStart)}</td>
+                    <td className="px-4 py-2.5"><WeekBadge week={r.currentWeek} /></td>
+                    <td className="px-4 py-2.5">
+                      <div className="flex items-center gap-2">
+                        <div className="h-1.5 flex-1 rounded-full bg-muted overflow-hidden">
+                          <div className="h-full bg-primary" style={{ width: `${pct}%` }} />
+                        </div>
+                        <span className="text-xs text-muted-foreground w-16 text-right">{r.done}/{r.total}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-2.5 text-right font-semibold">{r.score.toLocaleString("tr-TR")} <span className="text-muted-foreground font-normal">/ 50</span></td>
+                    <td className="px-4 py-2.5">
+                      {r.lastConfirmedWeek
+                        ? <span className="inline-flex items-center gap-1 text-xs text-emerald-700"><CheckCircle2 className="h-3.5 w-3.5" /> {r.lastConfirmedWeek}. hafta</span>
+                        : <span className="text-xs text-muted-foreground">—</span>}
+                    </td>
+                    <td className="px-2">
+                      <Link href={`/uk-basari-rotasi/${r.employeeId}`} className="text-muted-foreground hover:text-primary">
+                        <ChevronRight className="h-4 w-4" />
+                      </Link>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </Layout>
+  );
+}

@@ -129,6 +129,7 @@ export const candidates = pgTable("candidates", {
   languages: text("languages").array().default([]),           // Turkish | English | Arabic | Russian ...
   socialMedia: text("social_media"),             // LinkedIn URL or Instagram
   referredBy: text("referred_by"),               // who referred this candidate
+  referredByEmployeeId: integer("referred_by_employee_id"), // referans danışman (ÜK "Katkı Payı Yönlendirme")
   experience: integer("experience").default(0),  // years in real estate
   resumeText: text("resume_text"),               // notes / background
   tags: text("tags").array().default([]),

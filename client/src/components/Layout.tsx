@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Users, Briefcase, BarChart2, ChevronRight, Menu, X,
   Calendar, Shield, LogOut, ClipboardList, UserCheck, KanbanSquare, DollarSign, GraduationCap,
   Receipt, TrendingUp, Building2, Trophy, ShieldAlert, Users2, Puzzle, BarChart3, Copy, Megaphone,
-  MessageCircle, MapPin, Target, UserPlus, AlertCircle,
+  MessageCircle, MapPin, Target, UserPlus, AlertCircle, Route as RouteIcon,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { useState } from "react";
@@ -95,6 +95,7 @@ const advisorsGroupHM: NavGroup = {
   children: [
     { icon: UserCheck, label: "Danışmanlar",    href: "/employees"     },
     { icon: UserPlus,  label: "ÜK Giriş/Çıkış", href: "/uk-entry-exit" },
+    { icon: RouteIcon, label: "45+45 Başarı Rotası", href: "/uk-basari-rotasi" },
   ],
 };
 
@@ -104,6 +105,7 @@ const advisorsGroupAdmin: NavGroup = {
   children: [
     { icon: UserCheck, label: "Danışmanlar",       href: "/employees"          },
     { icon: UserPlus,  label: "ÜK Giriş/Çıkış",    href: "/uk-entry-exit"      },
+    { icon: RouteIcon, label: "45+45 Başarı Rotası", href: "/uk-basari-rotasi" },
     { icon: Users2,    label: "Takımlar",          href: "/teams"              },
     { icon: Copy,      label: "Danışman Birleştir", href: "/duplicate-merge"   },
     { icon: AlertCircle, label: "Borçlular Raporu", href: "/borclular-raporu"  },

@@ -24,6 +24,7 @@ import {
 } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 import { PhoneInput } from "@/components/PhoneInput";
+import { ReferralAdvisorField } from "@/components/ReferralAdvisorField";
 import { composePhone, isValidPhoneForCountry } from "@/lib/phone";
 import { DEFAULT_COUNTRY, COUNTRY_CODES } from "@/lib/countryCodes";
 
@@ -350,6 +351,7 @@ function CreateCandidateDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     city: "", district: "", experience: "0",
     referredBy: "", socialMedia: "", resumeText: "",
     office: "", campaignId: "",
+    referredByEmployeeId: null as number | null,
   });
 
   const { data: campaigns = [] } = useQuery<{ id: number; name: string; status: string }[]>({
@@ -369,7 +371,7 @@ function CreateCandidateDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const hasJobSelected = selectedJobId !== "none";
 
   const resetForm = () => {
-    setForm({ name: "", email: "", phone: "", category: "", currentBrand: "", licenseStatus: "unlicensed", licenseNumber: "", city: "", district: "", experience: "0", referredBy: "", socialMedia: "", resumeText: "", office: "", campaignId: "" });
+    setForm({ name: "", email: "", phone: "", category: "", currentBrand: "", licenseStatus: "unlicensed", licenseNumber: "", city: "", district: "", experience: "0", referredBy: "", socialMedia: "", resumeText: "", office: "", campaignId: "", referredByEmployeeId: null });
     setSpecialization([]); setLanguages(["Türkçe"]); setSelectedJobId("none");
     setPhoneCountry(DEFAULT_COUNTRY.iso2);
     setIvDate(""); setIvStart(""); setIvEnd("");
@@ -407,6 +409,7 @@ function CreateCandidateDialog({ open, onOpenChange }: { open: boolean; onOpenCh
       languages,
       experience: parseInt(form.experience) || 0,
       referredBy: form.referredBy || undefined,
+      referredByEmployeeId: form.referredByEmployeeId ?? undefined,
       socialMedia: form.socialMedia || undefined,
       resumeText: form.resumeText || undefined,
       campaignId: form.campaignId ? Number(form.campaignId) : undefined,
@@ -608,6 +611,12 @@ function CreateCandidateDialog({ open, onOpenChange }: { open: boolean; onOpenCh
               </Field>
               <Field label="Referans (kim tanıttı?)">
                 <Input value={form.referredBy} onChange={(e) => f("referredBy", e.target.value)} placeholder="Ad Soyad veya kaynak" />
+              </Field>
+              <Field label="Referans Danışman (Katkı Payı)">
+                <ReferralAdvisorField
+                  value={form.referredByEmployeeId}
+                  onChange={(id, name) => setForm((p) => ({ ...p, referredByEmployeeId: id, referredBy: p.referredBy || name || "" }))}
+                />
               </Field>
               <Field label="Notlar / Özet">
                 <Textarea value={form.resumeText} onChange={(e) => f("resumeText", e.target.value)} rows={2} placeholder="Ek bilgiler..." data-testid="textarea-candidate-resume" />

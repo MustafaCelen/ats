@@ -338,6 +338,34 @@ export async function ensureSchema(): Promise<void> {
       created_at TIMESTAMP DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS closing_agent_collections_agent_id_idx ON closing_agent_collections(closing_agent_id);
+
+    -- Adayı yönlendiren danışman (ÜK 45+45 "Katkı Payı Yönlendirme").
+    ALTER TABLE candidates ADD COLUMN IF NOT EXISTS referred_by_employee_id INTEGER;
+    CREATE INDEX IF NOT EXISTS candidates_referred_by_employee_idx ON candidates(referred_by_employee_id);
+
+    -- ÜK 45+45 Başarı Rotası: işaretlenen aktiviteler (şablon shared/uk-program.ts).
+    CREATE TABLE IF NOT EXISTS uk_program_checks (
+      id SERIAL PRIMARY KEY,
+      employee_id INTEGER NOT NULL,
+      activity_id TEXT NOT NULL,
+      checked_by_user_id INTEGER,
+      checked_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE (employee_id, activity_id)
+    );
+    -- Haftalık gerçekleşenler (manuel kısım) + koç onayı.
+    CREATE TABLE IF NOT EXISTS uk_program_weeks (
+      id SERIAL PRIMARY KEY,
+      employee_id INTEGER NOT NULL,
+      week INTEGER NOT NULL,
+      arama INTEGER,
+      randevu INTEGER,
+      tek_yetki INTEGER,
+      coach_note TEXT,
+      confirmed_at TIMESTAMP,
+      confirmed_by_user_id INTEGER,
+      updated_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE (employee_id, week)
+    );
   `;
   try {
     await pool.query(sql);

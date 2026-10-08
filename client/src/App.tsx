@@ -19,6 +19,8 @@ import Employees from "@/pages/Employees";
 import OnboardingBoard from "@/pages/OnboardingBoard";
 import LeadTrackingBoard from "@/pages/LeadTrackingBoard";
 import UkEntryExitReport from "@/pages/UkEntryExitReport";
+import UkBasariRotasi from "@/pages/UkBasariRotasi";
+import UkBasariRotasiDetail from "@/pages/UkBasariRotasiDetail";
 import Closings from "@/pages/Closings";
 import FinancialReports from "@/pages/FinancialReports";
 import CapReport from "@/pages/CapReport";
@@ -92,6 +94,8 @@ function Router() {
       <Route path="/onboarding" component={() => <ProtectedRoute><OnboardingBoard /></ProtectedRoute>} />
       <Route path="/lead-tracking" component={() => <ProtectedRoute><LeadTrackingBoard /></ProtectedRoute>} />
       <Route path="/uk-entry-exit" component={() => <ProtectedRoute><UkEntryExitReport /></ProtectedRoute>} />
+      <Route path="/uk-basari-rotasi" component={() => <ProtectedRoute noAssistant><UkBasariRotasi /></ProtectedRoute>} />
+      <Route path="/uk-basari-rotasi/:employeeId" component={() => <ProtectedRoute noAssistant><UkBasariRotasiDetail /></ProtectedRoute>} />
       <Route path="/closings" component={() => <ProtectedRoute adminOnly><Closings /></ProtectedRoute>} />
       <Route path="/listings" component={() => <ProtectedRoute><Listings /></ProtectedRoute>} />
       <Route path="/listings/reports" component={() => <ProtectedRoute noAssistant><ListingReports /></ProtectedRoute>} />

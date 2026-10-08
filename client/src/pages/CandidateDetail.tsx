@@ -12,6 +12,7 @@ import { useCandidate, useUpdateCandidate, useDeleteCandidate } from "@/hooks/us
 import { useApplications } from "@/hooks/use-applications";
 import { EmployeeEditDialog } from "@/components/EmployeeEditDialog";
 import { EmployeeDebtPanel, EmployeeDebtSummaryLine, useEmployeeFonzipDebt, hasDebt } from "@/components/EmployeeDebtPanel";
+import { ReferralAdvisorField } from "@/components/ReferralAdvisorField";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ScoreBadge, ScoreBar } from "@/components/ScoreBadge";
 import { MentionTextarea } from "@/components/MentionTextarea";
@@ -1478,6 +1479,7 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
     office: (candidate as any).office ?? "",
     experience: String(candidate.experience ?? 0),
     referredBy: candidate.referredBy ?? "",
+    referredByEmployeeId: ((candidate as any).referredByEmployeeId ?? null) as number | null,
     socialMedia: candidate.socialMedia ?? "",
     resumeText: candidate.resumeText ?? "",
     expectedStartMonth: candidate.expectedStartMonth ?? "",
@@ -1522,6 +1524,7 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
         emergencyContactPhone: form.emergencyContactPhone || undefined,
         office: (form as any).office || undefined,
         referredBy: form.referredBy || undefined,
+        referredByEmployeeId: form.referredByEmployeeId,
         socialMedia: form.socialMedia || undefined,
         resumeText: form.resumeText || undefined,
         expectedStartMonth: form.expectedStartMonth || undefined,
@@ -1668,6 +1671,12 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
               </Field>
               <Field label="Referans (kim tanıttı?)">
                 <Input value={form.referredBy} onChange={(e) => f("referredBy", e.target.value)} placeholder="Ad Soyad veya kaynak" />
+              </Field>
+              <Field label="Referans Danışman (Katkı Payı)">
+                <ReferralAdvisorField
+                  value={form.referredByEmployeeId}
+                  onChange={(id, name) => setForm((p) => ({ ...p, referredByEmployeeId: id, referredBy: p.referredBy || name || "" }))}
+                />
               </Field>
               <div className="col-span-2">
                 <Field label="Notlar / Özet">

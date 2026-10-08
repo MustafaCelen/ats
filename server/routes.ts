@@ -15,6 +15,7 @@ import { sendEmail } from "./email";
 import { isFonzipConfigured, fetchFonzipPreview, fetchFonzipUsers, fetchFonzipDebts, fetchFonzipDonations, syncFonzipDebts, syncFonzipUsersFinancials, getFonzipUserFinancialsReport, importFonzipExcel, getEmployeeFonzipDebt, getEmployeeDebtSummaries, startDebtSync, getDebtSyncStatus } from "./fonzip";
 import { isMetaConfigured, isMetaWebhookConfigured, metaConfig, syncMetaCampaigns, fetchMetaLead, mapLeadToCandidate, verifyWebhookSignature, listLeadForms, backfillLeadsFromMeta } from "./meta";
 import { isGoogleFormsConfigured, syncGoogleFormLeads, getGoogleFormsSpreadsheetId } from "./google-forms";
+import { registerUkProgramRoutes } from "./uk-program";
 
 // Scoping helper:
 //   admin      → undefined (all jobs)
@@ -84,6 +85,7 @@ async function sendClosingNotifications(_closingId: number, _agentIdFilter?: num
 }
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
+  registerUkProgramRoutes(app);
 
   // Seed default admin on startup
   await storage.seedAdminIfEmpty();
