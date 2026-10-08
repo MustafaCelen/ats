@@ -206,7 +206,9 @@ export function AdvisorRotaView({ token, onWideChange }: { token: string; onWide
             className={`shrink-0 h-9 px-3 rounded-xl text-sm font-medium flex items-center gap-1.5 ring-1 transition-colors ${tab === w.week ? "bg-primary text-primary-foreground ring-primary" : "bg-card ring-border text-muted-foreground"}`}
           >
             {w.week}. Hafta
-            {w.confirmedAt ? <Lock className="h-3 w-3" /> : data.currentWeek === w.week ? <span className="h-1.5 w-1.5 rounded-full bg-amber-400" /> : null}
+            {data.currentWeek === w.week && !w.confirmedAt
+              ? <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+              : <Lock className="h-3 w-3 opacity-70" />}
           </button>
         ))}
       </div>
@@ -236,14 +238,28 @@ function WeekView({ token, data, week, onToggle, onSaved, readOnly = false, view
   token: string; data: Data; week: number; onToggle: (id: string, done: boolean) => void; onSaved: () => void; readOnly?: boolean; view?: ViewMode;
 }) {
   const row = data.weeks[week - 1];
-  const locked = !!row.confirmedAt;
+  const confirmed = !!row.confirmedAt;
   const monday = data.week1Monday ? ukAddDays(data.week1Monday, (week - 1) * 7) : null;
+  // Yalnızca içinde bulunulan hafta düzenlenebilir (sunucu da aynı kuralı uygular).
+  const isCurrent = week === data.currentWeek;
+  const isPast = !isCurrent && data.currentWeek > week;
+  const locked = confirmed || !isCurrent;
   const started = !!monday && monday <= data.today;
   const acts = useMemo(() => UK_ACTIVITIES.filter((a) => a.week === week), [week]);
 
   return (
     <>
-      {locked && (
+      {!confirmed && !isCurrent && (
+        <div className="rounded-xl bg-muted/60 border border-border px-3 py-2.5 text-xs text-muted-foreground flex gap-2">
+          <Lock className="h-4 w-4 shrink-0" />
+          <p>
+            {isPast
+              ? "Bu hafta kapandı. Yalnızca içinde bulunduğunuz hafta düzenlenebilir; değişiklik için koçunuzla görüşün."
+              : "Bu hafta henüz başlamadı. Haftası geldiğinde düzenleyebilirsiniz."}
+          </p>
+        </div>
+      )}
+      {confirmed && (
         <div className="rounded-xl bg-emerald-50 border border-emerald-200 px-3 py-2.5 text-xs text-emerald-800 flex gap-2">
           <CheckCircle2 className="h-4 w-4 shrink-0" />
           <div>

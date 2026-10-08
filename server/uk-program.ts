@@ -213,6 +213,15 @@ async function advisorParticipant(req: Request, res: Response, write = false): P
   return loadParticipant(emp.id);
 }
 
+// Danışman yalnızca içinde bulunduğu haftayı düzenleyebilir; geçmiş/gelecek haftalar
+// salt okunur (koç ve admin tüm haftaları düzenleyebilir).
+function advisorWeekError(programStart: string, week: number): string | null {
+  const current = ukCurrentWeek(ukProgramWeek1Monday(programStart), todayYmd());
+  if (week === current) return null;
+  if (current === 0 || week > current) return "Bu hafta henüz başlamadı.";
+  return "Bu hafta kapandı; yalnızca içinde bulunduğunuz hafta düzenlenebilir. Değişiklik için koçunuzla görüşün.";
+}
+
 async function isWeekConfirmed(employeeId: number, week: number): Promise<boolean> {
   const r = await pool.query(
     "SELECT 1 FROM uk_program_weeks WHERE employee_id = $1 AND week = $2 AND confirmed_at IS NOT NULL",
@@ -248,6 +257,8 @@ function registerAdvisorUkRoutes(app: Express) {
       const activity = UK_ACTIVITIES.find((a) => a.id === String(req.params.activityId));
       if (!activity) return res.status(400).json({ message: "Geçersiz aktivite." });
       if (!p.programStart) return res.status(409).json({ message: "Program başlangıç tarihi tanımlı değil, koçunuzla görüşün." });
+      const weekErr = advisorWeekError(p.programStart, activity.week);
+      if (weekErr) return res.status(409).json({ message: weekErr });
       const date = ukAddDays(ukProgramWeek1Monday(p.programStart), (activity.week - 1) * 7 + activity.day);
       if (date > todayYmd()) return res.status(409).json({ message: "Henüz gelmemiş bir günün aktivitesi işaretlenemez." });
       if (await isWeekConfirmed(p.employeeId, activity.week)) {
@@ -277,8 +288,8 @@ function registerAdvisorUkRoutes(app: Express) {
       const week = Number(req.params.week);
       if (!Number.isInteger(week) || week < 1 || week > UK_PROGRAM_WEEKS) return res.status(400).json({ message: "Geçersiz hafta." });
       if (!p.programStart) return res.status(409).json({ message: "Program başlangıç tarihi tanımlı değil, koçunuzla görüşün." });
-      const monday = ukAddDays(ukProgramWeek1Monday(p.programStart), (week - 1) * 7);
-      if (monday > todayYmd()) return res.status(409).json({ message: "Bu hafta henüz başlamadı." });
+      const weekErr = advisorWeekError(p.programStart, week);
+      if (weekErr) return res.status(409).json({ message: weekErr });
       if (await isWeekConfirmed(p.employeeId, week)) {
         return res.status(409).json({ message: "Bu hafta koçunuz tarafından onaylandı; değişiklik için koçunuzla görüşün." });
       }
