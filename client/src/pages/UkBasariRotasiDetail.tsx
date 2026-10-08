@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useRoute } from "wouter";
+import { Link, useLocation, useRoute } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Layout } from "@/components/Layout";
 import { Button } from "@/components/ui/button";
@@ -16,7 +16,7 @@ type WeekRow = {
 };
 
 type ProgramData = {
-  participant: { employeeId: number; name: string; kwuid: string | null; status: string; coachName: string | null; programStart: string | null; ukStartDate: string | null };
+  participant: { employeeId: number; name: string; kwuid: string | null; status: string; coachId: number | null; coachName: string | null; programStart: string | null; ukStartDate: string | null; manual: boolean; isUkFlag: boolean };
   week1Monday: string | null;
   currentWeek: number;
   checks: Record<string, { at: string; by: string | null }>;
@@ -24,6 +24,7 @@ type ProgramData = {
   score: { rows: { key: string; label: string; points: number; planned: number; done: number; earned: number }[]; total: number; max: number };
   totals: { activities: number; done: number };
   canEdit: boolean;
+  isAdmin?: boolean;
 };
 
 function fmtYmd(ymd: string | null) {
@@ -279,6 +280,35 @@ export default function UkBasariRotasiDetail() {
     }
   };
 
+  // Manuel katılım: koç değiştir / programdan çıkar (admin).
+  const [, navigate] = useLocation();
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const { data: coaches = [] } = useQuery<{ id: number; name: string }[]>({
+    queryKey: ["/api/hiring-managers"],
+    queryFn: () => fetch("/api/hiring-managers", { credentials: "include" }).then((r) => r.json()),
+    enabled: !!data?.isAdmin && !!data?.participant.manual,
+  });
+  const changeCoach = useMutation({
+    mutationFn: (coachUserId: string) =>
+      fetch(`/api/uk-program/${employeeId}/coach`, {
+        method: "PUT", credentials: "include", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ coachUserId: coachUserId ? Number(coachUserId) : null }),
+      }).then(async (r) => { if (!r.ok) throw new Error((await r.json()).error ?? "Kaydedilemedi"); }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/uk-program"] }); toast({ title: "Koç güncellendi" }); },
+    onError: (e: any) => toast({ title: "Hata", description: e.message, variant: "destructive" }),
+  });
+  const removeEnrollment = useMutation({
+    mutationFn: () =>
+      fetch(`/api/uk-program/${employeeId}/enrollment`, { method: "DELETE", credentials: "include" })
+        .then(async (r) => { if (!r.ok) throw new Error((await r.json()).error ?? "Çıkarılamadı"); }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/uk-program"] });
+      toast({ title: "Danışman programdan çıkarıldı", description: "Kayıtları saklandı; yeniden eklenirse geri gelir." });
+      navigate("/uk-basari-rotasi");
+    },
+    onError: (e: any) => toast({ title: "Hata", description: e.message, variant: "destructive" }),
+  });
+
   if (isLoading || !data) {
     return <Layout><p className="text-sm text-muted-foreground">Yükleniyor…</p></Layout>;
   }
@@ -318,7 +348,35 @@ export default function UkBasariRotasiDetail() {
               <p className="text-xs tracking-widest text-white/70">ÜRETKENLİK KOÇLUĞU PROGRAMI</p>
               <h1 className="text-2xl font-extrabold flex items-center gap-2 mt-0.5"><RouteIcon className="h-6 w-6 text-amber-300" /> 45+45 Başarı Rotası</h1>
               <p className="mt-2 text-lg font-semibold">{p.name}{p.kwuid && <span className="ml-2 text-sm font-mono text-white/60">{p.kwuid}</span>}</p>
-              <p className="text-sm text-white/70">Koç: {p.coachName ?? "atanmamış"}</p>
+              <div className="text-sm text-white/70 flex items-center gap-2 flex-wrap">
+                Koç:
+                {data.isAdmin && p.manual ? (
+                  <select
+                    value={p.coachId ?? ""}
+                    onChange={(e) => changeCoach.mutate(e.target.value)}
+                    className="bg-white/90 text-foreground rounded px-1.5 py-0.5 text-sm"
+                  >
+                    <option value="">atanmamış</option>
+                    {coaches.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                ) : <span>{p.coachName ?? "atanmamış"}</span>}
+                {p.manual && !p.isUkFlag && (
+                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-sky-400/20 text-sky-100 ring-1 ring-sky-300/40">Manuel eklendi</span>
+                )}
+              </div>
+              {data.isAdmin && p.manual && !p.isUkFlag && (
+                confirmRemove ? (
+                  <div className="mt-2 flex items-center gap-2 text-xs">
+                    <span className="text-white/80">Programdan çıkarılsın mı?</span>
+                    <button onClick={() => removeEnrollment.mutate()} className="rounded bg-red-500 px-2 py-1 font-semibold">Evet, çıkar</button>
+                    <button onClick={() => setConfirmRemove(false)} className="rounded bg-white/15 px-2 py-1">Vazgeç</button>
+                  </div>
+                ) : (
+                  <button onClick={() => setConfirmRemove(true)} className="mt-2 text-xs text-white/60 hover:text-white underline underline-offset-2">
+                    Programdan çıkar
+                  </button>
+                )
+              )}
             </div>
             <div className="flex gap-3 flex-wrap">
               <div className="rounded-lg bg-white/10 px-4 py-2.5 min-w-[150px]">

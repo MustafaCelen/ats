@@ -15,7 +15,7 @@ import { sendEmail } from "./email";
 import { isFonzipConfigured, fetchFonzipPreview, fetchFonzipUsers, fetchFonzipDebts, fetchFonzipDonations, syncFonzipDebts, syncFonzipUsersFinancials, getFonzipUserFinancialsReport, importFonzipExcel, getEmployeeFonzipDebt, getEmployeeDebtSummaries, startDebtSync, getDebtSyncStatus } from "./fonzip";
 import { isMetaConfigured, isMetaWebhookConfigured, metaConfig, syncMetaCampaigns, fetchMetaLead, mapLeadToCandidate, verifyWebhookSignature, listLeadForms, backfillLeadsFromMeta } from "./meta";
 import { isGoogleFormsConfigured, syncGoogleFormLeads, getGoogleFormsSpreadsheetId } from "./google-forms";
-import { registerUkProgramRoutes } from "./uk-program";
+import { registerUkProgramRoutes, isInUkProgram } from "./uk-program";
 
 // Scoping helper:
 //   admin      → undefined (all jobs)
@@ -716,7 +716,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.json({
         name: (emp as any).candidate?.name ?? "Danışman",
         // ÜK 45+45 "Rotam" sekmesi yalnızca programdaki danışmanlara görünür.
-        isUk: !!(emp as any).uretkenlikKoclugu,
+        isUk: await isInUkProgram(emp.id),
         active: pending.active.map((l) => ({
           id: l.id, listingNumber: l.listingNumber, price: l.price,
           publishedDate: l.publishedDate, office: l.office, store: l.store,

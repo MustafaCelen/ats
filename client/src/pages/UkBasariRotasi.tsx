@@ -1,15 +1,18 @@
 import { useMemo, useState } from "react";
-import { Link } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { Link, useLocation } from "wouter";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useAuth } from "@/hooks/use-auth";
+import { Button } from "@/components/ui/button";
+import { UkEnrollDialog } from "@/components/UkEnrollDialog";
 import { Layout } from "@/components/Layout";
-import { Route as RouteIcon, Search, CheckCircle2, ChevronRight } from "lucide-react";
+import { Route as RouteIcon, Search, CheckCircle2, ChevronRight, UserPlus } from "lucide-react";
 import { UK_PROGRAM_WEEKS } from "@shared/uk-program";
 
 type Row = {
   employeeId: number; name: string; kwuid: string | null; status: string;
   coachId: number | null; coachName: string | null;
   programStart: string | null; week1Monday: string | null; currentWeek: number;
-  done: number; total: number; score: number; lastConfirmedWeek: number | null; canEdit: boolean;
+  done: number; total: number; score: number; lastConfirmedWeek: number | null; canEdit: boolean; manual: boolean;
 };
 
 function fmtDate(ymd: string | null) {
@@ -30,6 +33,11 @@ export default function UkBasariRotasi() {
   const [q, setQ] = useState("");
   const [includePassive, setIncludePassive] = useState(false);
   const [phase, setPhase] = useState<"all" | "active" | "done">("active");
+  const [enrollOpen, setEnrollOpen] = useState(false);
+  const { data: me } = useAuth();
+  const isAdmin = me?.role === "admin";
+  const qc = useQueryClient();
+  const [, navigate] = useLocation();
 
   const { data = [], isLoading } = useQuery<Row[]>({
     queryKey: ["/api/uk-program", includePassive],
@@ -55,14 +63,27 @@ export default function UkBasariRotasi() {
   return (
     <Layout>
       <div className="space-y-5">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <RouteIcon className="h-6 w-6 text-primary" /> 45+45 Başarı Rotası
-          </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Üretkenlik Koçluğu programındaki danışmanların 6 haftalık rota ilerlemesi ve aktivite puanı
-          </p>
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <h1 className="text-2xl font-bold flex items-center gap-2">
+              <RouteIcon className="h-6 w-6 text-primary" /> 45+45 Başarı Rotası
+            </h1>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              Üretkenlik Koçluğu programındaki danışmanların 6 haftalık rota ilerlemesi ve aktivite puanı
+            </p>
+          </div>
+          {isAdmin && (
+            <Button className="gap-1.5" onClick={() => setEnrollOpen(true)}>
+              <UserPlus className="h-4 w-4" /> Danışman Ekle
+            </Button>
+          )}
         </div>
+        <UkEnrollDialog
+          open={enrollOpen}
+          onOpenChange={setEnrollOpen}
+          excludeIds={data.map((r) => r.employeeId)}
+          onEnrolled={(id) => { qc.invalidateQueries({ queryKey: ["/api/uk-program"] }); navigate(`/uk-basari-rotasi/${id}`); }}
+        />
 
         <div className="flex items-center gap-2 flex-wrap">
           {([["active", "Devam Eden"], ["done", "Tamamlanan"], ["all", "Tümü"]] as const).map(([k, label]) => (
@@ -110,7 +131,7 @@ export default function UkBasariRotasi() {
               {!isLoading && rows.length === 0 && (
                 <tr><td colSpan={8} className="px-4 py-10 text-center text-muted-foreground">
                   {data.length === 0
-                    ? "Üretkenlik Koçluğu işaretli danışman yok. Danışman profilinde Üretkenlik Koçluğu'nu açın."
+                    ? "Programda danışman yok. Danışman profilinde Üretkenlik Koçluğu'nu açın veya \"Danışman Ekle\" ile manuel ekleyin."
                     : "Bu filtrede danışman yok."}
                 </td></tr>
               )}
@@ -122,6 +143,7 @@ export default function UkBasariRotasi() {
                       <Link href={`/uk-basari-rotasi/${r.employeeId}`} className="font-semibold hover:text-primary">{r.name}</Link>
                       {r.kwuid && <span className="ml-2 text-xs text-muted-foreground font-mono">{r.kwuid}</span>}
                       {r.status !== "active" && <span className="ml-2 text-[10px] text-muted-foreground">(pasif)</span>}
+                      {r.manual && <span className="ml-2 text-[10px] font-medium px-1.5 py-0.5 rounded bg-sky-50 text-sky-700 ring-1 ring-sky-200" title="Programa manuel eklendi (ÜK işareti yok)">Manuel</span>}
                     </td>
                     <td className="px-4 py-2.5 text-muted-foreground">{r.coachName ?? "—"}</td>
                     <td className="px-4 py-2.5">{fmtDate(r.programStart)}</td>

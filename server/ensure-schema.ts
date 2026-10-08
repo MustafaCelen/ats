@@ -354,6 +354,17 @@ export async function ensureSchema(): Promise<void> {
     );
     -- Danışmanın kendi portalından işaretlediği aktiviteler.
     ALTER TABLE uk_program_checks ADD COLUMN IF NOT EXISTS by_advisor BOOLEAN NOT NULL DEFAULT false;
+
+    -- 45+45'e manuel katılım. employees.uretkenlik_koclugu ÜK payı kesintisini, K kategorisini
+    -- ve koçluk raporlarını da etkilediği için manuel eklemede ona dokunulmaz; katılım burada.
+    CREATE TABLE IF NOT EXISTS uk_program_enrollments (
+      employee_id INTEGER PRIMARY KEY,
+      coach_user_id INTEGER,
+      start_date TEXT,
+      added_by_user_id INTEGER,
+      added_at TIMESTAMP DEFAULT NOW(),
+      removed_at TIMESTAMP
+    );
     -- Haftalık gerçekleşenler (manuel kısım) + koç onayı.
     CREATE TABLE IF NOT EXISTS uk_program_weeks (
       id SERIAL PRIMARY KEY,

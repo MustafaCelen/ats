@@ -23,26 +23,45 @@ function todayYmd(): string {
 type Participant = {
   employeeId: number; name: string; kwuid: string | null; status: string;
   coachId: number | null; coachName: string | null;
-  programStart: string | null; ukStartDate: string | null;
+  programStart: string | null;
+  // Detay sayfasındaki düzenlenebilir başlangıç (manuelde kayıt tarihi, ÜK'de uk_start_date).
+  ukStartDate: string | null;
+  isUkFlag: boolean;        // employees.uretkenlik_koclugu (ÜK payı vb. ile bağlı)
+  manual: boolean;          // uk_program_enrollments ile eklendi
+  inProgram: boolean;
 };
 
-async function loadParticipant(employeeId: number): Promise<Participant | null> {
-  const r = await pool.query(
-    `SELECT e.id, c.name, e.kwuid, e.status, e.uretkenlik_koclugu_manager_id AS coach_id, u.name AS coach_name,
-            e.uk_start_date, to_char(e.start_date, 'YYYY-MM-DD') AS start_date
+// Katılım: ÜK işaretli danışmanlar ∪ manuel eklenenler. Manuel kayıttaki koç ve
+// başlangıç, ÜK alanlarından önceliklidir.
+const PARTICIPANT_FROM = `
        FROM employees e
        JOIN candidates c ON c.id = e.candidate_id
-       LEFT JOIN users u ON u.id = e.uretkenlik_koclugu_manager_id
-      WHERE e.id = $1`,
+       LEFT JOIN uk_program_enrollments en ON en.employee_id = e.id AND en.removed_at IS NULL
+       LEFT JOIN users u ON u.id = COALESCE(en.coach_user_id, e.uretkenlik_koclugu_manager_id)`;
+const PARTICIPANT_COLS = `e.id, c.name, e.kwuid, e.status, u.id AS coach_id, u.name AS coach_name,
+       e.uretkenlik_koclugu AS is_uk, (en.employee_id IS NOT NULL) AS manual,
+       en.start_date AS en_start, e.uk_start_date, to_char(e.start_date, 'YYYY-MM-DD') AS start_date`;
+
+export async function isInUkProgram(employeeId: number): Promise<boolean> {
+  const r = await pool.query(
+    `SELECT 1 FROM employees e LEFT JOIN uk_program_enrollments en ON en.employee_id = e.id AND en.removed_at IS NULL
+      WHERE e.id = $1 AND (e.uretkenlik_koclugu = true OR en.employee_id IS NOT NULL)`,
     [employeeId],
   );
+  return r.rows.length > 0;
+}
+
+async function loadParticipant(employeeId: number): Promise<Participant | null> {
+  const r = await pool.query(`SELECT ${PARTICIPANT_COLS} ${PARTICIPANT_FROM} WHERE e.id = $1`, [employeeId]);
   const row = r.rows[0];
   if (!row) return null;
+  const editableStart = row.manual ? row.en_start : row.uk_start_date;
   return {
     employeeId: row.id, name: row.name, kwuid: row.kwuid, status: row.status,
     coachId: row.coach_id, coachName: row.coach_name,
-    ukStartDate: row.uk_start_date,
-    programStart: row.uk_start_date || row.start_date || null,
+    ukStartDate: editableStart ?? null,
+    programStart: row.en_start || row.uk_start_date || row.start_date || null,
+    isUkFlag: !!row.is_uk, manual: !!row.manual, inProgram: !!row.is_uk || !!row.manual,
   };
 }
 
@@ -157,7 +176,7 @@ async function advisorParticipant(req: Request, res: Response, write = false): P
       res.status(401).json({ message: "Giriş gerekli", needAuth: true }); return null;
     }
   }
-  if (!(emp as any).uretkenlikKoclugu) { res.status(404).json({ message: "Üretkenlik Koçluğu programında değilsiniz." }); return null; }
+  if (!(await isInUkProgram(emp.id))) { res.status(404).json({ message: "Üretkenlik Koçluğu programında değilsiniz." }); return null; }
   return loadParticipant(emp.id);
 }
 
@@ -250,6 +269,66 @@ function registerAdvisorUkRoutes(app: Express) {
 export function registerUkProgramRoutes(app: Express) {
   registerAdvisorUkRoutes(app);
 
+  // Manuel ekleme (admin). ÜK işaretine/ÜK payına dokunmaz; yeniden eklemede önceki
+  // işaretler ve haftalık kayıtlar korunur.
+  app.post("/api/uk-program/enrollments", requireAuth, async (req: Request, res: Response) => {
+    try {
+      if ((req as any).user?.role !== "admin") return res.status(403).json({ error: "Yalnızca admin danışman ekleyebilir." });
+      const employeeId = Number(req.body?.employeeId);
+      const coachUserId = req.body?.coachUserId ? Number(req.body.coachUserId) : null;
+      const startDate = String(req.body?.startDate ?? "");
+      if (!Number.isInteger(employeeId)) return res.status(400).json({ error: "Danışman seçin." });
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) return res.status(400).json({ error: "Başlangıç tarihi YYYY-MM-DD olmalı." });
+      const p = await loadParticipant(employeeId);
+      if (!p) return res.status(404).json({ error: "Danışman bulunamadı." });
+      if (p.inProgram) return res.status(409).json({ error: `${p.name} zaten programda.` });
+      if (coachUserId != null) {
+        const c = await pool.query("SELECT 1 FROM users WHERE id = $1 AND role IN ('admin', 'hiring_manager')", [coachUserId]);
+        if (!c.rows.length) return res.status(400).json({ error: "Geçersiz koç." });
+      }
+      await pool.query(
+        `INSERT INTO uk_program_enrollments (employee_id, coach_user_id, start_date, added_by_user_id, added_at, removed_at)
+         VALUES ($1, $2, $3, $4, NOW(), NULL)
+         ON CONFLICT (employee_id) DO UPDATE SET coach_user_id = EXCLUDED.coach_user_id, start_date = EXCLUDED.start_date,
+           added_by_user_id = EXCLUDED.added_by_user_id, added_at = NOW(), removed_at = NULL`,
+        [employeeId, coachUserId, startDate, (req as any).user.id],
+      );
+      res.json({ ok: true, employeeId });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Manuel eklenen danışmanın koçunu değiştir (admin).
+  app.put("/api/uk-program/:employeeId/coach", requireAuth, async (req: Request, res: Response) => {
+    try {
+      if ((req as any).user?.role !== "admin") return res.status(403).json({ error: "Yalnızca admin." });
+      const p = await loadParticipant(Number(req.params.employeeId));
+      if (!p?.manual) return res.status(409).json({ error: "Koç yalnızca manuel eklenen danışmanlarda buradan değişir; ÜK danışmanlarında profilden." });
+      const coachUserId = req.body?.coachUserId ? Number(req.body.coachUserId) : null;
+      await pool.query("UPDATE uk_program_enrollments SET coach_user_id = $2 WHERE employee_id = $1 AND removed_at IS NULL", [p.employeeId, coachUserId]);
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Programdan çıkar (yalnızca manuel). Kayıtlar silinmez; yeniden eklenirse geri gelir.
+  app.delete("/api/uk-program/:employeeId/enrollment", requireAuth, async (req: Request, res: Response) => {
+    try {
+      if ((req as any).user?.role !== "admin") return res.status(403).json({ error: "Yalnızca admin çıkarabilir." });
+      const p = await loadParticipant(Number(req.params.employeeId));
+      if (!p) return res.status(404).json({ error: "Danışman bulunamadı." });
+      if (!p.manual) {
+        return res.status(409).json({ error: "Bu danışman ÜK işareti nedeniyle programda; profilden Üretkenlik Koçluğu kapatılmalı." });
+      }
+      await pool.query("UPDATE uk_program_enrollments SET removed_at = NOW() WHERE employee_id = $1 AND removed_at IS NULL", [p.employeeId]);
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // "Danışman Gözüyle Gör": personel oturumuna bu danışman için salt okunur önizleme
   // izni ekler ve portala yönlendirir (Google girişi gerekmez, değişiklik yapılamaz).
   app.get("/api/uk-program/:employeeId/preview-as-advisor", requireAuth, requireHiringManagerOrAdmin, async (req: Request, res: Response) => {
@@ -290,21 +369,18 @@ export function registerUkProgramRoutes(app: Express) {
     try {
       const includePassive = req.query.includePassive === "true";
       const r = await pool.query(
-        `SELECT e.id, c.name, e.kwuid, e.status, e.uretkenlik_koclugu_manager_id AS coach_id, u.name AS coach_name,
-                e.uk_start_date, to_char(e.start_date, 'YYYY-MM-DD') AS start_date,
+        `SELECT ${PARTICIPANT_COLS},
                 (SELECT COUNT(*)::int FROM uk_program_checks k WHERE k.employee_id = e.id) AS done,
                 (SELECT array_agg(k.activity_id) FROM uk_program_checks k WHERE k.employee_id = e.id) AS ids,
                 (SELECT MAX(w.week) FROM uk_program_weeks w WHERE w.employee_id = e.id AND w.confirmed_at IS NOT NULL) AS last_confirmed,
                 (SELECT COUNT(*)::int FROM candidates rc WHERE rc.referred_by_employee_id = e.id) AS referrals
-           FROM employees e
-           JOIN candidates c ON c.id = e.candidate_id
-           LEFT JOIN users u ON u.id = e.uretkenlik_koclugu_manager_id
-          WHERE e.uretkenlik_koclugu = true ${includePassive ? "" : "AND e.status = 'active'"}
-          ORDER BY COALESCE(e.uk_start_date, to_char(e.start_date, 'YYYY-MM-DD')) DESC NULLS LAST, c.name`,
+           ${PARTICIPANT_FROM}
+          WHERE (e.uretkenlik_koclugu = true OR en.employee_id IS NOT NULL) ${includePassive ? "" : "AND e.status = 'active'"}
+          ORDER BY COALESCE(en.start_date, e.uk_start_date, to_char(e.start_date, 'YYYY-MM-DD')) DESC NULLS LAST, c.name`,
       );
       const today = todayYmd();
       res.json(r.rows.map((row: any) => {
-        const programStart = row.uk_start_date || row.start_date || null;
+        const programStart = row.en_start || row.uk_start_date || row.start_date || null;
         const week1Monday = programStart ? ukProgramWeek1Monday(programStart) : null;
         const done: Partial<Record<UkScoreKey, number>> = {};
         for (const id of (row.ids ?? []) as string[]) {
@@ -321,6 +397,7 @@ export function registerUkProgramRoutes(app: Express) {
           done: row.done, total: UK_ACTIVITIES.length,
           score: computeUkActivityScore(done).total,
           lastConfirmedWeek: row.last_confirmed ?? null,
+          manual: !!row.manual && !row.is_uk,
           canEdit: (req as any).user?.role === "admin" || (req as any).user?.id === row.coach_id,
         };
       }));
@@ -334,7 +411,8 @@ export function registerUkProgramRoutes(app: Express) {
     try {
       const p = await loadParticipant(Number(req.params.employeeId));
       if (!p) return res.status(404).json({ error: "Danışman bulunamadı." });
-      res.json({ ...(await buildProgram(p)), canEdit: canEdit(req, p) });
+      if (!p.inProgram) return res.status(404).json({ error: "Bu danışman 45+45 programında değil." });
+      res.json({ ...(await buildProgram(p)), canEdit: canEdit(req, p), isAdmin: (req as any).user?.role === "admin" });
     } catch (err: any) {
       console.error("[GET /api/uk-program/:id]", err);
       res.status(500).json({ error: err.message });
@@ -405,7 +483,11 @@ export function registerUkProgramRoutes(app: Express) {
       if (!canEdit(req, p)) return res.status(403).json({ error: "Yalnızca danışmanın ÜK koçu veya admin değiştirebilir." });
       const v = String(req.body?.ukStartDate ?? "");
       if (v && !/^\d{4}-\d{2}-\d{2}$/.test(v)) return res.status(400).json({ error: "Tarih YYYY-MM-DD olmalı." });
-      await pool.query("UPDATE employees SET uk_start_date = $2 WHERE id = $1", [p.employeeId, v || null]);
+      if (p.manual) {
+        await pool.query("UPDATE uk_program_enrollments SET start_date = $2 WHERE employee_id = $1 AND removed_at IS NULL", [p.employeeId, v || null]);
+      } else {
+        await pool.query("UPDATE employees SET uk_start_date = $2 WHERE id = $1", [p.employeeId, v || null]);
+      }
       res.json({ ok: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
