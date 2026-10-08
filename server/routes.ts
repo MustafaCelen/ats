@@ -659,7 +659,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const emp = await storage.getAdvisorByToken(req.params.token);
     if (!emp) { res.status(404).json({ message: "Bağlantı geçersiz" }); return null; }
     const ids: number[] = req.session?.advisorEmployeeIds ?? [];
-    if (!ids.includes(emp.id)) {
+    // Personel önizlemesi ("Danışman Gözüyle Gör") yalnızca okuma uçlarında geçerli.
+    const previewIds: number[] = req.session?.advisorPreviewIds ?? [];
+    if (!ids.includes(emp.id) && !previewIds.includes(emp.id)) {
       res.status(401).json({ message: "Giriş gerekli", needAuth: true });
       return null;
     }

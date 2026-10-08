@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Layout } from "@/components/Layout";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Check, CheckCircle2, Route as RouteIcon, Trophy, Lock, Link2 } from "lucide-react";
+import { ArrowLeft, Check, CheckCircle2, Route as RouteIcon, Trophy, Lock, Link2, Eye } from "lucide-react";
 import {
   UK_ACTIVITIES, UK_DAYS, UK_TIME_ROWS, UK_PROGRAM_WEEKS, UK_SCORE_ITEMS, UK_TARGET_ITEMS, ukAddDays,
 } from "@shared/uk-program";
@@ -361,9 +361,16 @@ export default function UkBasariRotasiDetail() {
             <ArrowLeft className="h-4 w-4" /> 45+45 Başarı Rotası
           </Link>
           {data.canEdit && (
-            <Button variant="outline" size="sm" className="gap-1.5" onClick={copyAdvisorLink}>
-              <Link2 className="h-4 w-4" /> Danışman Linkini Kopyala
-            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" className="gap-1.5" asChild>
+                <a href={`/api/uk-program/${employeeId}/preview-as-advisor`} target="_blank" rel="noreferrer">
+                  <Eye className="h-4 w-4" /> Danışman Gözüyle Gör
+                </a>
+              </Button>
+              <Button variant="outline" size="sm" className="gap-1.5" onClick={copyAdvisorLink}>
+                <Link2 className="h-4 w-4" /> Danışman Linkini Kopyala
+              </Button>
+            </div>
           )}
         </div>
 

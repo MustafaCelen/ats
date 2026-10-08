@@ -144,11 +144,19 @@ async function buildProgram(p: Participant) {
 // - koçun onayladığı hafta kilitlidir,
 // - henüz gelmemiş günlerin aktiviteleri işaretlenemez,
 // - koç notu / onay / program başlangıcı danışmana kapalıdır.
-async function advisorParticipant(req: Request, res: Response): Promise<Participant | null> {
+// write=true: personel önizlemesi (advisorPreviewIds) salt okunurdur → 403.
+async function advisorParticipant(req: Request, res: Response, write = false): Promise<Participant | null> {
   const emp = await storage.getAdvisorByToken(String(req.params.token));
   if (!emp) { res.status(404).json({ message: "Bağlantı geçersiz" }); return null; }
   const ids: number[] = (req.session as any)?.advisorEmployeeIds ?? [];
-  if (!ids.includes(emp.id)) { res.status(401).json({ message: "Giriş gerekli", needAuth: true }); return null; }
+  const previewIds: number[] = (req.session as any)?.advisorPreviewIds ?? [];
+  if (!ids.includes(emp.id)) {
+    if (previewIds.includes(emp.id)) {
+      if (write) { res.status(403).json({ message: "Önizleme modu: değişiklik yapılamaz." }); return null; }
+    } else {
+      res.status(401).json({ message: "Giriş gerekli", needAuth: true }); return null;
+    }
+  }
   if (!(emp as any).uretkenlikKoclugu) { res.status(404).json({ message: "Üretkenlik Koçluğu programında değilsiniz." }); return null; }
   return loadParticipant(emp.id);
 }
@@ -171,7 +179,8 @@ function registerAdvisorUkRoutes(app: Express) {
       const checks = Object.fromEntries(Object.entries(prog.checks as Record<string, { at: string; by: string | null }>).map(([k, v]) =>
         [k, { at: v.at, by: v.by === "Danışman" ? "Siz" : "Koçunuz" }]));
       const weeks = prog.weeks.map((w) => ({ ...w, confirmedBy: w.confirmedAt ? "Koçunuz" : null }));
-      res.json({ ...prog, checks, weeks, today: todayYmd() });
+      const realIds: number[] = (req.session as any)?.advisorEmployeeIds ?? [];
+      res.json({ ...prog, checks, weeks, today: todayYmd(), preview: !realIds.includes(p.employeeId) });
     } catch (err: any) {
       console.error("[GET advisor uk-program]", err);
       res.status(500).json({ message: "Veriler yüklenemedi." });
@@ -180,7 +189,7 @@ function registerAdvisorUkRoutes(app: Express) {
 
   app.put("/api/public/advisor/:token/uk-program/checks/:activityId", async (req: Request, res: Response) => {
     try {
-      const p = await advisorParticipant(req, res);
+      const p = await advisorParticipant(req, res, true);
       if (!p) return;
       const activity = UK_ACTIVITIES.find((a) => a.id === String(req.params.activityId));
       if (!activity) return res.status(400).json({ message: "Geçersiz aktivite." });
@@ -209,7 +218,7 @@ function registerAdvisorUkRoutes(app: Express) {
   // Danışman yalnızca Arama / Randevu / Tek Yetki girer; koç notu ve onay korunur.
   app.put("/api/public/advisor/:token/uk-program/weeks/:week", async (req: Request, res: Response) => {
     try {
-      const p = await advisorParticipant(req, res);
+      const p = await advisorParticipant(req, res, true);
       if (!p) return;
       const week = Number(req.params.week);
       if (!Number.isInteger(week) || week < 1 || week > UK_PROGRAM_WEEKS) return res.status(400).json({ message: "Geçersiz hafta." });
@@ -238,6 +247,24 @@ function registerAdvisorUkRoutes(app: Express) {
 
 export function registerUkProgramRoutes(app: Express) {
   registerAdvisorUkRoutes(app);
+
+  // "Danışman Gözüyle Gör": personel oturumuna bu danışman için salt okunur önizleme
+  // izni ekler ve portala yönlendirir (Google girişi gerekmez, değişiklik yapılamaz).
+  app.get("/api/uk-program/:employeeId/preview-as-advisor", requireAuth, requireHiringManagerOrAdmin, async (req: Request, res: Response) => {
+    try {
+      const p = await loadParticipant(Number(req.params.employeeId));
+      if (!p) return res.status(404).send("Danışman bulunamadı.");
+      if (!canEdit(req, p)) return res.status(403).send("Yalnızca danışmanın ÜK koçu veya admin önizleyebilir.");
+      const token = await storage.ensureAdvisorToken(p.employeeId);
+      const ids = new Set<number>((req.session as any).advisorPreviewIds ?? []);
+      ids.add(p.employeeId);
+      (req.session as any).advisorPreviewIds = Array.from(ids);
+      await new Promise<void>((resolve, reject) => req.session.save((err) => (err ? reject(err) : resolve())));
+      res.redirect(`/a/${token}?tab=rota`);
+    } catch (err: any) {
+      res.status(500).send(err.message);
+    }
+  });
 
   // Danışmanın portal linki (rotasını doldurması için). Giriş, kayıtlı KW / kişisel
   // e-postası ile Google üzerinden yapılır; e-posta yoksa giriş mümkün değildir.

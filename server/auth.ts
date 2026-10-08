@@ -7,6 +7,8 @@ declare module "express-session" {
     userId: number;
     /** Employee ids the visitor has authenticated for via Google on the advisor self-service link. */
     advisorEmployeeIds?: number[];
+    /** Personelin "Danışman Gözüyle Gör" önizlemesi açtığı danışmanlar (salt okunur). */
+    advisorPreviewIds?: number[];
   }
 }
 

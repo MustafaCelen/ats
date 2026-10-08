@@ -21,6 +21,7 @@ type Data = {
   weeks: WeekRow[];
   score: { rows: { key: string; label: string; points: number; planned: number; done: number; earned: number }[]; total: number; max: number };
   totals: { activities: number };
+  preview?: boolean;
 };
 
 const fmt = (ymd: string | null) => (ymd ? ymd.slice(8, 10) + "." + ymd.slice(5, 7) + "." + ymd.slice(0, 4) : "—");
@@ -88,7 +89,7 @@ export function AdvisorRotaView({ token }: { token: string }) {
   };
 
   const toggle = async (id: string, done: boolean) => {
-    if (!data) return;
+    if (!data || data.preview) return;
     setNotice(null);
     const prev = data;
     const checks = { ...data.checks };
@@ -146,6 +147,11 @@ export function AdvisorRotaView({ token }: { token: string }) {
 
   return (
     <>
+      {data.preview && (
+        <div className="rounded-xl bg-amber-50 border border-amber-300 px-3 py-2.5 text-xs text-amber-900">
+          <b>Önizleme:</b> Danışmanın gördüğü ekranı görüyorsunuz. Bu modda değişiklik yapılamaz.
+        </div>
+      )}
       <div className="rounded-2xl bg-[#24064f] text-white p-5 shadow-sm">
         <p className="text-[10px] tracking-widest text-white/70">ÜRETKENLİK KOÇLUĞU PROGRAMI</p>
         <h2 className="text-xl font-extrabold mt-0.5">45+45 Başarı Rotası</h2>
@@ -189,14 +195,14 @@ export function AdvisorRotaView({ token }: { token: string }) {
       {notice && <div className="rounded-xl bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">{notice}</div>}
 
       {typeof tab === "number"
-        ? <WeekView token={token} data={data} week={tab} onToggle={toggle} onSaved={() => load()} />
+        ? <WeekView token={token} data={data} week={tab} onToggle={toggle} onSaved={() => load()} readOnly={!!data.preview} />
         : <ScoreView data={data} />}
     </>
   );
 }
 
-function WeekView({ token, data, week, onToggle, onSaved }: {
-  token: string; data: Data; week: number; onToggle: (id: string, done: boolean) => void; onSaved: () => void;
+function WeekView({ token, data, week, onToggle, onSaved, readOnly = false }: {
+  token: string; data: Data; week: number; onToggle: (id: string, done: boolean) => void; onSaved: () => void; readOnly?: boolean;
 }) {
   const row = data.weeks[week - 1];
   const locked = !!row.confirmedAt;
@@ -231,7 +237,7 @@ function WeekView({ token, data, week, onToggle, onSaved }: {
             <ul className="divide-y divide-border">
               {dayActs.map((a) => {
                 const done = !!data.checks[a.id];
-                const disabled = locked || future;
+                const disabled = locked || future || readOnly;
                 const time = a.from === a.to ? UK_TIME_ROWS[a.from] : `${UK_TIME_ROWS[a.from].split("–")[0]}–${UK_TIME_ROWS[a.to].split("–")[1] ?? ""}`;
                 return (
                   <li key={a.id}>
@@ -257,7 +263,7 @@ function WeekView({ token, data, week, onToggle, onSaved }: {
         );
       })}
 
-      <WeekActuals token={token} row={row} editable={started && !locked} onSaved={onSaved} />
+      <WeekActuals token={token} row={row} editable={started && !locked && !readOnly} onSaved={onSaved} />
     </>
   );
 }
