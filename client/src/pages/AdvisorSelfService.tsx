@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "wouter";
 import { LISTING_CLOSE_REASONS_SATILIK, LISTING_CLOSE_REASONS_KIRALIK } from "@shared/schema";
+import { AdvisorRotaView } from "@/components/AdvisorRotaView";
 import {
   Building2, UploadCloud, CheckCircle2, Loader2, AlertCircle, ChevronDown, ChevronUp, XCircle, Trash2, ArrowDownToLine,
-  Trophy, Wallet, Clock3, FileText, ListChecks,
+  Trophy, Wallet, Clock3, FileText, ListChecks, Route as RouteIcon,
 } from "lucide-react";
 
 interface PendingListing {
@@ -21,6 +22,7 @@ interface PendingListing {
 
 interface AdvisorData {
   name: string;
+  isUk?: boolean;
   active: PendingListing[];
   passive: PendingListing[];
 }
@@ -671,11 +673,13 @@ function SummaryView({ token }: { token: string }) {
   );
 }
 
-function AdvisorApp({ token, initialTab = "listings" }: { token: string; initialTab?: "listings" | "summary" }) {
+type AdvisorTab = "listings" | "summary" | "rota";
+
+function AdvisorApp({ token, initialTab = "listings" }: { token: string; initialTab?: AdvisorTab }) {
   const [data, setData] = useState<AdvisorData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<"listings" | "summary">(initialTab);
+  const [tab, setTab] = useState<AdvisorTab>(initialTab);
 
   const loadData = useCallback(() => {
     setLoading(true);
@@ -712,30 +716,42 @@ function AdvisorApp({ token, initialTab = "listings" }: { token: string; initial
   }
 
   const totalPending = data.active.length + data.passive.length;
+  // ÜK programında olmayan danışman "Rotam" linkiyle gelse bile İlanlarım açılır.
+  const activeTab: AdvisorTab = tab === "rota" && !data.isUk ? "listings" : tab;
 
   return (
     <Shell>
       <Card className="!p-1.5">
-        <div className="grid grid-cols-2 gap-1">
+        <div className={`grid gap-1 ${data.isUk ? "grid-cols-3" : "grid-cols-2"}`}>
           <button
             onClick={() => setTab("listings")}
-            className={`h-9 rounded-xl text-sm font-medium transition-colors flex items-center justify-center gap-1.5 ${tab === "listings" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
+            className={`h-9 rounded-xl text-sm font-medium transition-colors flex items-center justify-center gap-1.5 ${activeTab === "listings" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
           >
             <ListChecks className="h-4 w-4" /> İlanlarım
             {totalPending > 0 && (
-              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${tab === "listings" ? "bg-white/20" : "bg-red-100 text-red-700"}`}>{totalPending}</span>
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${activeTab === "listings" ? "bg-white/20" : "bg-red-100 text-red-700"}`}>{totalPending}</span>
             )}
           </button>
           <button
             onClick={() => setTab("summary")}
-            className={`h-9 rounded-xl text-sm font-medium transition-colors flex items-center justify-center gap-1.5 ${tab === "summary" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
+            className={`h-9 rounded-xl text-sm font-medium transition-colors flex items-center justify-center gap-1.5 ${activeTab === "summary" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
           >
             <Trophy className="h-4 w-4" /> Durumum
           </button>
+          {data.isUk && (
+            <button
+              onClick={() => setTab("rota")}
+              className={`h-9 rounded-xl text-sm font-medium transition-colors flex items-center justify-center gap-1.5 ${activeTab === "rota" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
+            >
+              <RouteIcon className="h-4 w-4" /> Rotam
+            </button>
+          )}
         </div>
       </Card>
 
-      {tab === "summary" ? (
+      {activeTab === "rota" ? (
+        <AdvisorRotaView token={token} />
+      ) : activeTab === "summary" ? (
         <SummaryView token={token} />
       ) : totalPending === 0 ? (
         <Card>
@@ -798,6 +814,14 @@ export default function AdvisorSelfService() {
   const { token } = useParams<{ token: string }>();
   // Listings are token-only; financial data (Durumum) is Google-gated inside SummaryView.
   // If we returned here from a failed Google login, open the Durumum tab to show the error.
-  const hasAuthError = new URLSearchParams(window.location.search).has("error");
-  return <AdvisorApp token={token} initialTab={hasAuthError ? "summary" : "listings"} />;
+  const params = new URLSearchParams(window.location.search);
+  const hasAuthError = params.has("error");
+  // ?tab=rota (koçun gönderdiği link) veya Rotam'dan başlatılan Google girişi dönüşü.
+  let wanted: string | null = params.get("tab");
+  try {
+    const s = sessionStorage.getItem("advisorTab");
+    if (s) { wanted = wanted ?? s; sessionStorage.removeItem("advisorTab"); }
+  } catch {}
+  const initialTab: AdvisorTab = wanted === "rota" ? "rota" : hasAuthError ? "summary" : "listings";
+  return <AdvisorApp token={token} initialTab={initialTab} />;
 }

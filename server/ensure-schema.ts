@@ -352,6 +352,8 @@ export async function ensureSchema(): Promise<void> {
       checked_at TIMESTAMP DEFAULT NOW(),
       UNIQUE (employee_id, activity_id)
     );
+    -- Danışmanın kendi portalından işaretlediği aktiviteler.
+    ALTER TABLE uk_program_checks ADD COLUMN IF NOT EXISTS by_advisor BOOLEAN NOT NULL DEFAULT false;
     -- Haftalık gerçekleşenler (manuel kısım) + koç onayı.
     CREATE TABLE IF NOT EXISTS uk_program_weeks (
       id SERIAL PRIMARY KEY,

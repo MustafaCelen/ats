@@ -713,6 +713,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const pending = await storage.getAdvisorPendingListings(emp.id);
       res.json({
         name: (emp as any).candidate?.name ?? "Danışman",
+        // ÜK 45+45 "Rotam" sekmesi yalnızca programdaki danışmanlara görünür.
+        isUk: !!(emp as any).uretkenlikKoclugu,
         active: pending.active.map((l) => ({
           id: l.id, listingNumber: l.listingNumber, price: l.price,
           publishedDate: l.publishedDate, office: l.office, store: l.store,

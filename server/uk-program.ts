@@ -7,6 +7,7 @@
 import type { Express, Request, Response } from "express";
 import { pool } from "./db";
 import { requireAuth, requireHiringManagerOrAdmin } from "./auth";
+import { storage } from "./storage";
 import {
   UK_ACTIVITIES, UK_ACTIVITY_IDS, UK_PROGRAM_WEEKS, computeUkActivityScore,
   ukProgramWeek1Monday, ukAddDays, ukCurrentWeek, type UkScoreKey,
@@ -84,7 +85,7 @@ async function buildProgram(p: Participant) {
   const week1Monday = p.programStart ? ukProgramWeek1Monday(p.programStart) : null;
   const [checks, weeks] = await Promise.all([
     pool.query(
-      `SELECT k.activity_id, k.checked_at, u.name AS checked_by
+      `SELECT k.activity_id, k.checked_at, CASE WHEN k.by_advisor THEN 'Danışman' ELSE u.name END AS checked_by
          FROM uk_program_checks k LEFT JOIN users u ON u.id = k.checked_by_user_id
         WHERE k.employee_id = $1`,
       [p.employeeId],
@@ -137,7 +138,124 @@ async function buildProgram(p: Participant) {
   };
 }
 
+// ── Danışman portalı (/a/:token) ─────────────────────────────────────────────
+// Danışman kendi linkinden Google ile giriş yapar (session.advisorEmployeeIds, bkz.
+// routes.ts authedAdvisor). Yalnızca kendi rotasını görür/doldurur:
+// - koçun onayladığı hafta kilitlidir,
+// - henüz gelmemiş günlerin aktiviteleri işaretlenemez,
+// - koç notu / onay / program başlangıcı danışmana kapalıdır.
+async function advisorParticipant(req: Request, res: Response): Promise<Participant | null> {
+  const emp = await storage.getAdvisorByToken(String(req.params.token));
+  if (!emp) { res.status(404).json({ message: "Bağlantı geçersiz" }); return null; }
+  const ids: number[] = (req.session as any)?.advisorEmployeeIds ?? [];
+  if (!ids.includes(emp.id)) { res.status(401).json({ message: "Giriş gerekli", needAuth: true }); return null; }
+  if (!(emp as any).uretkenlikKoclugu) { res.status(404).json({ message: "Üretkenlik Koçluğu programında değilsiniz." }); return null; }
+  return loadParticipant(emp.id);
+}
+
+async function isWeekConfirmed(employeeId: number, week: number): Promise<boolean> {
+  const r = await pool.query(
+    "SELECT 1 FROM uk_program_weeks WHERE employee_id = $1 AND week = $2 AND confirmed_at IS NOT NULL",
+    [employeeId, week],
+  );
+  return r.rows.length > 0;
+}
+
+function registerAdvisorUkRoutes(app: Express) {
+  app.get("/api/public/advisor/:token/uk-program", async (req: Request, res: Response) => {
+    try {
+      const p = await advisorParticipant(req, res);
+      if (!p) return;
+      const prog = await buildProgram(p);
+      // Danışmana iç bilgi gösterme: işaretleyen personel adı yerine yalnızca rol.
+      const checks = Object.fromEntries(Object.entries(prog.checks as Record<string, { at: string; by: string | null }>).map(([k, v]) =>
+        [k, { at: v.at, by: v.by === "Danışman" ? "Siz" : "Koçunuz" }]));
+      const weeks = prog.weeks.map((w) => ({ ...w, confirmedBy: w.confirmedAt ? "Koçunuz" : null }));
+      res.json({ ...prog, checks, weeks, today: todayYmd() });
+    } catch (err: any) {
+      console.error("[GET advisor uk-program]", err);
+      res.status(500).json({ message: "Veriler yüklenemedi." });
+    }
+  });
+
+  app.put("/api/public/advisor/:token/uk-program/checks/:activityId", async (req: Request, res: Response) => {
+    try {
+      const p = await advisorParticipant(req, res);
+      if (!p) return;
+      const activity = UK_ACTIVITIES.find((a) => a.id === String(req.params.activityId));
+      if (!activity) return res.status(400).json({ message: "Geçersiz aktivite." });
+      if (!p.programStart) return res.status(409).json({ message: "Program başlangıç tarihi tanımlı değil, koçunuzla görüşün." });
+      const date = ukAddDays(ukProgramWeek1Monday(p.programStart), (activity.week - 1) * 7 + activity.day);
+      if (date > todayYmd()) return res.status(409).json({ message: "Henüz gelmemiş bir günün aktivitesi işaretlenemez." });
+      if (await isWeekConfirmed(p.employeeId, activity.week)) {
+        return res.status(409).json({ message: "Bu hafta koçunuz tarafından onaylandı; değişiklik için koçunuzla görüşün." });
+      }
+      if (req.body?.done) {
+        await pool.query(
+          `INSERT INTO uk_program_checks (employee_id, activity_id, checked_by_user_id, by_advisor)
+           VALUES ($1, $2, NULL, true) ON CONFLICT (employee_id, activity_id) DO NOTHING`,
+          [p.employeeId, activity.id],
+        );
+      } else {
+        await pool.query("DELETE FROM uk_program_checks WHERE employee_id = $1 AND activity_id = $2", [p.employeeId, activity.id]);
+      }
+      res.json({ ok: true });
+    } catch (err: any) {
+      console.error("[PUT advisor uk checks]", err);
+      res.status(500).json({ message: "Kaydedilemedi." });
+    }
+  });
+
+  // Danışman yalnızca Arama / Randevu / Tek Yetki girer; koç notu ve onay korunur.
+  app.put("/api/public/advisor/:token/uk-program/weeks/:week", async (req: Request, res: Response) => {
+    try {
+      const p = await advisorParticipant(req, res);
+      if (!p) return;
+      const week = Number(req.params.week);
+      if (!Number.isInteger(week) || week < 1 || week > UK_PROGRAM_WEEKS) return res.status(400).json({ message: "Geçersiz hafta." });
+      if (!p.programStart) return res.status(409).json({ message: "Program başlangıç tarihi tanımlı değil, koçunuzla görüşün." });
+      const monday = ukAddDays(ukProgramWeek1Monday(p.programStart), (week - 1) * 7);
+      if (monday > todayYmd()) return res.status(409).json({ message: "Bu hafta henüz başlamadı." });
+      if (await isWeekConfirmed(p.employeeId, week)) {
+        return res.status(409).json({ message: "Bu hafta koçunuz tarafından onaylandı; değişiklik için koçunuzla görüşün." });
+      }
+      const num = (v: any) => (v === null || v === undefined || v === "" ? null : Math.max(0, Math.floor(Number(v))) || 0);
+      const b = req.body ?? {};
+      await pool.query(
+        `INSERT INTO uk_program_weeks (employee_id, week, arama, randevu, tek_yetki, updated_at)
+         VALUES ($1, $2, $3, $4, $5, NOW())
+         ON CONFLICT (employee_id, week) DO UPDATE SET
+           arama = EXCLUDED.arama, randevu = EXCLUDED.randevu, tek_yetki = EXCLUDED.tek_yetki, updated_at = NOW()`,
+        [p.employeeId, week, num(b.arama), num(b.randevu), num(b.tekYetki)],
+      );
+      res.json({ ok: true });
+    } catch (err: any) {
+      console.error("[PUT advisor uk weeks]", err);
+      res.status(500).json({ message: "Kaydedilemedi." });
+    }
+  });
+}
+
 export function registerUkProgramRoutes(app: Express) {
+  registerAdvisorUkRoutes(app);
+
+  // Danışmanın portal linki (rotasını doldurması için). Giriş, kayıtlı KW / kişisel
+  // e-postası ile Google üzerinden yapılır; e-posta yoksa giriş mümkün değildir.
+  app.get("/api/uk-program/:employeeId/advisor-link", requireAuth, requireHiringManagerOrAdmin, async (req: Request, res: Response) => {
+    try {
+      const p = await loadParticipant(Number(req.params.employeeId));
+      if (!p) return res.status(404).json({ error: "Danışman bulunamadı." });
+      if (!canEdit(req, p)) return res.status(403).json({ error: "Yalnızca danışmanın ÜK koçu veya admin." });
+      const emp = await storage.getEmployee(p.employeeId);
+      const emails = [(emp as any)?.kwMail, (emp as any)?.candidate?.email].map((m) => (m ?? "").trim()).filter(Boolean);
+      const token = await storage.ensureAdvisorToken(p.employeeId);
+      const base = process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get("host")}`;
+      res.json({ url: `${base.replace(/\/$/, "")}/a/${token}?tab=rota`, loginEmails: emails });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Katılımcılar: ÜK bayrağı olan danışmanlar + ilerleme özeti.
   app.get("/api/uk-program", requireAuth, requireHiringManagerOrAdmin, async (req: Request, res: Response) => {
     try {

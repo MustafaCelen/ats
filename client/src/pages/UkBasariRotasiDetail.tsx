@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Layout } from "@/components/Layout";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Check, CheckCircle2, Route as RouteIcon, Trophy, Lock } from "lucide-react";
+import { ArrowLeft, Check, CheckCircle2, Route as RouteIcon, Trophy, Lock, Link2 } from "lucide-react";
 import {
   UK_ACTIVITIES, UK_DAYS, UK_TIME_ROWS, UK_PROGRAM_WEEKS, UK_SCORE_ITEMS, UK_TARGET_ITEMS, ukAddDays,
 } from "@shared/uk-program";
@@ -323,6 +323,25 @@ export default function UkBasariRotasiDetail() {
     onError: (e: any) => toast({ title: "Hata", description: e.message, variant: "destructive" }),
   });
 
+  // Danışmanın rotasını kendisinin doldurduğu portal linki (Google girişli, yalnızca kendi verisi).
+  const copyAdvisorLink = async () => {
+    try {
+      const r = await fetch(`/api/uk-program/${employeeId}/advisor-link`, { credentials: "include" });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? "Link alınamadı");
+      await navigator.clipboard.writeText(d.url);
+      toast({
+        title: "Danışman linki kopyalandı",
+        description: d.loginEmails?.length
+          ? `Danışman bu linkten Google ile giriş yapar: ${d.loginEmails.join(" / ")}`
+          : "Uyarı: danışmanın kayıtlı e-postası yok, giriş yapamaz. Önce KW e-postasını girin.",
+        variant: d.loginEmails?.length ? undefined : "destructive",
+      });
+    } catch (e: any) {
+      toast({ title: "Hata", description: e.message, variant: "destructive" });
+    }
+  };
+
   if (isLoading || !data) {
     return <Layout><p className="text-sm text-muted-foreground">Yükleniyor…</p></Layout>;
   }
@@ -337,9 +356,16 @@ export default function UkBasariRotasiDetail() {
   return (
     <Layout>
       <div className="space-y-4">
-        <Link href="/uk-basari-rotasi" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="h-4 w-4" /> 45+45 Başarı Rotası
-        </Link>
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <Link href="/uk-basari-rotasi" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+            <ArrowLeft className="h-4 w-4" /> 45+45 Başarı Rotası
+          </Link>
+          {data.canEdit && (
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={copyAdvisorLink}>
+              <Link2 className="h-4 w-4" /> Danışman Linkini Kopyala
+            </Button>
+          )}
+        </div>
 
         {/* Başlık */}
         <div className="rounded-xl overflow-hidden border border-border bg-[#24064f] text-white">
