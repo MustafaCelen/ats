@@ -11,6 +11,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { useCandidate, useUpdateCandidate, useDeleteCandidate } from "@/hooks/use-candidates";
 import { useApplications } from "@/hooks/use-applications";
 import { EmployeeEditDialog } from "@/components/EmployeeEditDialog";
+import { EmployeeDebtPanel, EmployeeDebtSummaryLine, useEmployeeFonzipDebt, hasDebt } from "@/components/EmployeeDebtPanel";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ScoreBadge, ScoreBar } from "@/components/ScoreBadge";
 import { MentionTextarea } from "@/components/MentionTextarea";
@@ -240,6 +241,9 @@ export default function CandidateDetail() {
   const candidateInterviews = (allInterviews ?? []).filter((iv) => iv.candidateId === candidateId);
 
   const { data: user } = useAuth();
+  // Fonzip borcu (admin): aday aynı zamanda danışmansa Borç sekmesi + çalışan kartında özet.
+  const canSeeBorc = !!employeeRecord && user?.role === "admin";
+  const { data: fonzipDebt } = useEmployeeFonzipDebt(employeeRecord?.id, canSeeBorc);
   const canSeeIslemler = !!employeeRecord && (
     user?.role !== "hiring_manager" ||
     employeeRecord.uretkenlikKocluguManagerId === user.id ||
@@ -253,7 +257,7 @@ export default function CandidateDetail() {
   const [noteText, setNoteText] = useState("");
   const [editingHistoryId, setEditingHistoryId] = useState<number | null>(null);
   const [editingHistoryDate, setEditingHistoryDate] = useState<string>("");
-  const [activeTab, setActiveTab] = useState<"overview" | "applications" | "interviews" | "notes" | "islemler" | "history">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "applications" | "interviews" | "notes" | "islemler" | "borc" | "history">("overview");
   const [editOpen, setEditOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -444,7 +448,7 @@ export default function CandidateDetail() {
 
         {/* ── Tabs ── */}
         <div className="flex gap-1 border-b border-border flex-wrap">
-          {(["overview", "applications", "interviews", "notes", ...(canSeeIslemler ? ["islemler"] : []), "history"] as const).map((tab) => (
+          {(["overview", "applications", "interviews", "notes", ...(canSeeIslemler ? ["islemler"] : []), ...(canSeeBorc ? ["borc"] : []), "history"] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab as any)}
@@ -453,7 +457,10 @@ export default function CandidateDetail() {
               }`}
               data-testid={`tab-${tab}`}
             >
-              {tab === "overview" ? "Profil" : tab === "applications" ? "Başvurular" : tab === "interviews" ? "Randevular" : tab === "notes" ? "Notlar" : tab === "islemler" ? "İşlemler" : "Geçmiş"}
+              {tab === "overview" ? "Profil" : tab === "applications" ? "Başvurular" : tab === "interviews" ? "Randevular" : tab === "notes" ? "Notlar" : tab === "islemler" ? "İşlemler" : tab === "borc" ? "Borç" : "Geçmiş"}
+              {tab === "borc" && hasDebt(fonzipDebt) && (
+                <span className="ml-1.5 text-xs bg-red-600 text-white px-1.5 py-0.5 rounded-full">{fonzipDebt.pendingCount}</span>
+              )}
               {tab === "applications" && applications && (
                 <span className="ml-1.5 text-xs bg-muted px-1.5 py-0.5 rounded-full">{applications.length}</span>
               )}
@@ -549,6 +556,12 @@ export default function CandidateDetail() {
                     </div>
                   )}
                 </div>
+
+                {canSeeBorc && hasDebt(fonzipDebt) && (
+                  <div className="mt-4">
+                    <EmployeeDebtSummaryLine debt={fonzipDebt} onClick={() => setActiveTab("borc")} />
+                  </div>
+                )}
 
                 {employeeRecord.uretkenlikKoclugu && (
                   <div className="mt-4 pt-4 border-t border-[#CC0000]/15">
@@ -1076,6 +1089,15 @@ export default function CandidateDetail() {
         )}
 
         {/* ── History Tab ── */}
+        {activeTab === "borc" && canSeeBorc && (
+          <div className="bg-card rounded-xl border border-border p-5">
+            <h3 className="text-sm font-semibold mb-3 flex items-center gap-1.5">
+              <HandCoins className="h-4 w-4 text-[#CC0000]" /> Fonzip Borç Durumu
+            </h3>
+            <EmployeeDebtPanel debt={fonzipDebt} kwuid={employeeRecord?.kwuid} />
+          </div>
+        )}
+
         {activeTab === "history" && (
           <div className="space-y-4">
             <CandidateAuditLogSection candidateId={candidateId} />

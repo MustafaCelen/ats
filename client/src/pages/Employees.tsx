@@ -23,6 +23,7 @@ import { type PublicUser } from "@shared/schema";
 import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import { EmployeeEditDialog, AuditLogSection } from "@/components/EmployeeEditDialog";
+import { EmployeeDebtPanel, EmployeeDebtSummaryLine, useEmployeeFonzipDebt, hasDebt } from "@/components/EmployeeDebtPanel";
 import { useAuth } from "@/hooks/use-auth";
 
 
@@ -300,16 +301,8 @@ export default function Employees() {
 
   // Fonzip borcu — pasife alma uyarısı + profil kartı (admin-only)
   const isAdminUser = authUser?.role === "admin";
-  const { data: pendingPassiveDebt } = useQuery<{ totalFinancial: number; pendingTotal: number; pendingCount: number; pendingDebts: any[] }>({
-    queryKey: ["/api/employees", pendingPassiveEmp?.id, "fonzip-debt"],
-    queryFn: () => fetch(`/api/employees/${pendingPassiveEmp!.id}/fonzip-debt`).then((r) => r.json()),
-    enabled: !!pendingPassiveEmp && isAdminUser,
-  });
-  const { data: detailFonzipDebt } = useQuery<{ totalFinancial: number; pendingTotal: number; pendingCount: number; pendingDebts: any[] }>({
-    queryKey: ["/api/employees", detailEmployee?.id, "fonzip-debt"],
-    queryFn: () => fetch(`/api/employees/${detailEmployee!.id}/fonzip-debt`).then((r) => r.json()),
-    enabled: !!detailEmployee && isAdminUser,
-  });
+  const { data: pendingPassiveDebt } = useEmployeeFonzipDebt(pendingPassiveEmp?.id, isAdminUser);
+  const { data: detailFonzipDebt } = useEmployeeFonzipDebt(detailEmployee?.id, isAdminUser);
 
   const handleDelete = (emp: any) => {
     if (!confirm(`${emp.candidate?.name} çalışan listesinden çıkarılsın mı?`)) return;
@@ -732,7 +725,7 @@ export default function Employees() {
                   className={`pb-2 text-sm font-medium transition-colors border-b-2 -mb-px flex items-center gap-1.5 ${detailTab === "borc" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
                 >
                   <Wallet className="h-3.5 w-3.5" /> Borç
-                  {detailFonzipDebt && (detailFonzipDebt.totalFinancial > 0 || detailFonzipDebt.pendingCount > 0) && (
+                  {hasDebt(detailFonzipDebt) && (
                     <span className="ml-0.5 rounded-full bg-red-600 text-white text-[10px] leading-none px-1.5 py-0.5">
                       {detailFonzipDebt.pendingCount}
                     </span>
@@ -901,19 +894,7 @@ export default function Employees() {
                   <p className="text-sm text-foreground bg-muted/40 rounded-lg p-2">{detailEmployee.exitReason}</p>
                 </div>
               )}
-              {isAdminUser && detailFonzipDebt && (detailFonzipDebt.totalFinancial > 0 || detailFonzipDebt.pendingCount > 0) && (
-                <button
-                  type="button"
-                  onClick={() => setDetailTab("borc")}
-                  className="w-full text-left rounded-lg bg-red-50 ring-1 ring-red-200 px-3 py-2 flex items-center gap-2 hover:bg-red-100 transition-colors"
-                >
-                  <AlertCircle className="h-4 w-4 text-red-600 shrink-0" />
-                  <span className="text-sm text-red-700">
-                    <span className="font-semibold">Fonzip borcu {fmtTRY(Math.max(detailFonzipDebt.totalFinancial, 0))}</span>
-                    {" "}· {detailFonzipDebt.pendingCount} ödenmemiş kalem — detay için Borç sekmesi
-                  </span>
-                </button>
-              )}
+              {isAdminUser && <EmployeeDebtSummaryLine debt={detailFonzipDebt} onClick={() => setDetailTab("borc")} />}
               <div className="flex gap-2 pt-2">
                 {detailEmployee.candidate?.id && (
                   <Button variant="outline" size="sm" asChild className="flex-1">
@@ -1054,105 +1035,8 @@ export default function Employees() {
             )}
 
             {detailTab === "borc" && isAdminUser && (
-              <div className="pt-2 space-y-3 flex-1 overflow-y-auto pr-1">
-                {!detailFonzipDebt ? (
-                  <p className="text-sm text-muted-foreground">Yükleniyor…</p>
-                ) : detailFonzipDebt.totalFinancial <= 0 && detailFonzipDebt.pendingCount === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-10 text-emerald-700 gap-2">
-                    <CheckCircle2 className="h-8 w-8 opacity-60" />
-                    <p className="text-sm font-medium">Fonzip'te ödenmemiş borcu yok</p>
-                    {!detailEmployee.kwuid && <p className="text-xs text-muted-foreground">KWUID tanımlı değil — Fonzip eşleşmesi yapılamıyor olabilir.</p>}
-                  </div>
-                ) : (
-                  <>
-                    {(() => {
-                      // Mutabakat: Fonzip tahsilatı kalemlere kendisi tahsis eder (tam kapanan kalem
-                      // status=8 olur). Kısmi / toplu tahsilatın kaleme bağlanmamış kısmı bakiyeyi
-                      // düşürür ama kalemler "açık" kalır → açık kalemler − bakiye = tahsis edilmemiş
-                      // tahsilat. Bu tutar en eski kalemden başlayarak tahmini dağıtılır (FIFO).
-                      const bal = Math.max(detailFonzipDebt.totalFinancial, 0);
-                      const unalloc = Math.max(detailFonzipDebt.pendingTotal - bal, 0);
-                      return (
-                        <>
-                          <div className="grid grid-cols-3 gap-2">
-                            <div className="rounded-lg bg-muted/40 ring-1 ring-border p-3">
-                              <p className="text-[11px] text-muted-foreground font-medium">Açık Kalemler ({detailFonzipDebt.pendingCount})</p>
-                              <p className="text-base font-bold">{fmtTRY(detailFonzipDebt.pendingTotal)}</p>
-                            </div>
-                            <div className="rounded-lg bg-emerald-50 ring-1 ring-emerald-200 p-3">
-                              <p className="text-[11px] text-emerald-700/80 font-medium">Kaleme Bağlanmamış Tahsilat</p>
-                              <p className="text-base font-bold text-emerald-700">− {fmtTRY(unalloc)}</p>
-                            </div>
-                            <div className="rounded-lg bg-red-50 ring-1 ring-red-200 p-3">
-                              <p className="text-[11px] text-red-600/80 font-medium">Fonzip Bakiyesi (net borç)</p>
-                              <p className="text-base font-bold text-red-700">{fmtTRY(bal)}</p>
-                            </div>
-                          </div>
-                          <p className="text-[11px] text-muted-foreground">
-                            {unalloc >= 1
-                              ? "Kısmi veya toplu tahsilatlar Fonzip'te tek tek kalemlere eşleşmez; kaleme bağlanmamış tutar aşağıda en eski kalemden başlayarak tahmini dağıtıldı. Esas alınacak rakam Fonzip bakiyesidir."
-                              : "Tüm tahsilatlar kalemlere eşleşmiş; açık kalemler toplamı Fonzip bakiyesine eşit."}
-                          </p>
-                        </>
-                      );
-                    })()}
-                    <div className="rounded-lg border border-border overflow-hidden">
-                      <table className="w-full text-xs">
-                        <thead className="bg-muted/50 text-muted-foreground">
-                          <tr>
-                            <th className="text-left px-3 py-2 font-medium">Tarih</th>
-                            <th className="text-left px-3 py-2 font-medium">Açıklama</th>
-                            <th className="text-right px-3 py-2 font-medium">Tutar</th>
-                            <th className="text-right px-3 py-2 font-medium">Kalan</th>
-                            <th className="text-left px-3 py-2 font-medium">Durum</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {(() => {
-                            // En eskiden yeniye sırala, bağlanmamış tahsilatı sırayla düş.
-                            const bal = Math.max(detailFonzipDebt.totalFinancial, 0);
-                            let unalloc = Math.max(detailFonzipDebt.pendingTotal - bal, 0);
-                            const rows = [...detailFonzipDebt.pendingDebts]
-                              .sort((a: any, b: any) => String(a.operationDate ?? "").localeCompare(String(b.operationDate ?? "")))
-                              .map((d: any) => {
-                                const covered = Math.min(d.amount, unalloc);
-                                unalloc -= covered;
-                                const remaining = d.amount - covered;
-                                const state: "kapandi" | "kismi" | "acik" = remaining <= 0.005 ? "kapandi" : covered > 0 ? "kismi" : "acik";
-                                return { ...d, remaining, state };
-                              })
-                              .reverse(); // gösterim: yeniden eskiye
-                            return rows.map((d: any, i: number) => (
-                              <tr key={i} className={`border-t border-border ${d.state === "kapandi" ? "text-muted-foreground" : ""}`}>
-                                <td className="px-3 py-1.5 whitespace-nowrap text-muted-foreground">
-                                  {d.operationDate ? format(new Date(d.operationDate), "dd.MM.yyyy") : "—"}
-                                </td>
-                                <td className="px-3 py-1.5">{d.details || "—"}</td>
-                                <td className="px-3 py-1.5 text-right whitespace-nowrap">{fmtTRY(d.amount)}</td>
-                                <td className={`px-3 py-1.5 text-right font-medium whitespace-nowrap ${d.state === "kapandi" ? "" : "text-red-700"}`}>
-                                  {d.state === "kapandi" ? "—" : fmtTRY(d.remaining)}
-                                </td>
-                                <td className="px-3 py-1.5 whitespace-nowrap">
-                                  {d.state === "kapandi" && <span className="rounded-full bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200 px-1.5 py-0.5 text-[10px] font-medium">Kapandı*</span>}
-                                  {d.state === "kismi" && <span className="rounded-full bg-amber-50 text-amber-700 ring-1 ring-amber-200 px-1.5 py-0.5 text-[10px] font-medium">Kısmi*</span>}
-                                  {d.state === "acik" && <span className="rounded-full bg-red-50 text-red-700 ring-1 ring-red-200 px-1.5 py-0.5 text-[10px] font-medium">Açık</span>}
-                                </td>
-                              </tr>
-                            ));
-                          })()}
-                        </tbody>
-                        <tfoot className="bg-muted/30 border-t border-border">
-                          <tr>
-                            <td className="px-3 py-2 font-semibold" colSpan={2}>Toplam ({detailFonzipDebt.pendingCount} kalem)</td>
-                            <td className="px-3 py-2 text-right font-semibold">{fmtTRY(detailFonzipDebt.pendingTotal)}</td>
-                            <td className="px-3 py-2 text-right font-bold text-red-700">{fmtTRY(Math.max(detailFonzipDebt.totalFinancial, 0))}</td>
-                            <td className="px-3 py-2 text-[10px] text-muted-foreground">* tahmini dağılım</td>
-                          </tr>
-                        </tfoot>
-                      </table>
-                    </div>
-                  </>
-                )}
+              <div className="pt-2 flex-1 overflow-y-auto pr-1">
+                <EmployeeDebtPanel debt={detailFonzipDebt} kwuid={detailEmployee.kwuid} />
               </div>
             )}
 
