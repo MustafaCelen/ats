@@ -213,6 +213,8 @@ export default function Employees() {
   const [pendingPassiveEmp, setPendingPassiveEmp] = useState<any | null>(null);
   const [passiveDateInput, setPassiveDateInput] = useState("");
   const [exitReasonInput, setExitReasonInput] = useState("");
+  // Borçlu danışmanı pasife almak için açık onay şart (kutucuk işaretlenmeden buton kapalı).
+  const [passiveDebtAck, setPassiveDebtAck] = useState(false);
   const [reEnrollEmp, setReEnrollEmp] = useState<any | null>(null);
   const [reEnrollJobId, setReEnrollJobId] = useState<number | null>(null);
   const [autoCategoryOpen, setAutoCategoryOpen] = useState(false);
@@ -275,6 +277,7 @@ export default function Employees() {
     if (emp.status === "active") {
       setPassiveDateInput(new Date().toISOString().slice(0, 10));
       setExitReasonInput("");
+      setPassiveDebtAck(false);
       setPendingPassiveEmp(emp);
     } else {
       updateEmployee({ id: emp.id, status: "active", passiveAt: null }, {
@@ -1080,7 +1083,7 @@ export default function Employees() {
                   <p>
                     <span className="font-semibold">Bu danışmanın Fonzip'te {fmtTRY(Math.max(pendingPassiveDebt.totalFinancial, 0))} borcu var</span>
                     {" "}({pendingPassiveDebt.pendingCount} ödenmemiş kalem, {fmtTRY(pendingPassiveDebt.pendingTotal)}).
-                    {" "}Pasife almadan önce tahsilat durumunu kontrol edin.
+                    {" "}Pasife alınan danışmandan tahsilat zorlaşır; önce tahsilatı planlayın.
                   </p>
                   {pendingPassiveDebt.pendingDebts.length > 0 && (
                     <ul className="text-xs text-red-600/90 pl-4 list-disc space-y-0.5">
@@ -1090,6 +1093,10 @@ export default function Employees() {
                       {pendingPassiveDebt.pendingDebts.length > 4 && <li className="list-none">… ve {pendingPassiveDebt.pendingDebts.length - 4} kalem daha</li>}
                     </ul>
                   )}
+                  <label className="flex items-center gap-2 pt-1 text-xs font-medium cursor-pointer select-none">
+                    <input type="checkbox" className="h-3.5 w-3.5 accent-red-600" checked={passiveDebtAck} onChange={(e) => setPassiveDebtAck(e.target.checked)} />
+                    Borcu gördüm, yine de pasife al
+                  </label>
                 </div>
               </div>
             )}
@@ -1116,7 +1123,7 @@ export default function Employees() {
               <Button variant="outline" className="flex-1" onClick={() => setPendingPassiveEmp(null)}>
                 İptal
               </Button>
-              <Button className="flex-1" onClick={confirmPassive} disabled={updating || !passiveDateInput}>
+              <Button className="flex-1" onClick={confirmPassive} disabled={updating || !passiveDateInput || (isAdminUser && hasDebt(pendingPassiveDebt) && !passiveDebtAck)}>
                 {updating ? "Kaydediliyor…" : "Pasife Al"}
               </Button>
             </div>

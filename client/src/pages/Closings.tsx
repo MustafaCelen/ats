@@ -15,6 +15,10 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogAction, AlertDialogCancel,
+} from "@/components/ui/alert-dialog";
+import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -1411,6 +1415,32 @@ function NewClosingDialog({
   const [notes, setNotes] = useState("");
   const [buyerSide, setBuyerSide] = useState<SideState>({ enabled: false, agents: [newAgent()] });
   const [sellerSide, setSellerSide] = useState<SideState>({ enabled: false, agents: [newAgent()] });
+
+  // Borçlu danışman uyarısı: formdaki danışmanlardan Fonzip borcu olanlar.
+  // Kaydetmeden önce onay diyaloğu açılır (engellemez, bilinçli onay ister).
+  const { data: debtSummaries = {} } = useDebtSummaries();
+  const [debtConfirmOpen, setDebtConfirmOpen] = useState(false);
+  const debtors = useMemo(() => {
+    const seen = new Set<number>();
+    const out: { employeeId: number; name: string; owed: number; count: number }[] = [];
+    for (const side of [buyerSide, sellerSide]) {
+      if (!side.enabled) continue;
+      for (const a of side.agents) {
+        if (!a.employeeId || seen.has(a.employeeId)) continue;
+        const ds = debtSummaries[a.employeeId];
+        if (!ds) continue;
+        seen.add(a.employeeId);
+        const emp = employees.find((e) => e.id === a.employeeId);
+        out.push({
+          employeeId: a.employeeId,
+          name: emp?.candidate?.name ?? `Çalışan #${a.employeeId}`,
+          owed: ds.balance > 0 ? ds.balance : ds.pendingTotal,
+          count: ds.pendingCount,
+        });
+      }
+    }
+    return out;
+  }, [buyerSide, sellerSide, debtSummaries, employees]);
   const [referralSide, setReferralSide] = useState<SideState>({ enabled: false, agents: [newAgent()] });
 
   const saleValueNum = parseFloat(saleValue || "0");
@@ -1678,7 +1708,17 @@ function NewClosingDialog({
     return null;
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = () => {
+    const err = validate();
+    if (err) {
+      toast({ title: "Hata", description: err, variant: "destructive" });
+      return;
+    }
+    if (debtors.length > 0) { setDebtConfirmOpen(true); return; }
+    void doSubmit();
+  };
+
+  const doSubmit = async () => {
     const err = validate();
     if (err) {
       toast({ title: "Hata", description: err, variant: "destructive" });
@@ -1989,6 +2029,21 @@ function NewClosingDialog({
           </section>
         </div>
 
+        {debtors.length > 0 && (
+          <div className="rounded-lg bg-red-50 ring-1 ring-red-200 px-3 py-2.5 flex items-start gap-2">
+            <AlertCircle className="h-4 w-4 text-red-600 shrink-0 mt-0.5" />
+            <div className="text-sm text-red-700">
+              <p className="font-semibold">Bu işlemde Fonzip borcu olan danışman var:</p>
+              <ul className="text-xs mt-0.5 space-y-0.5">
+                {debtors.map((d) => (
+                  <li key={d.employeeId}>{d.name} — <span className="font-semibold">{fmtTRY(d.owed)}</span>{d.count > 0 ? ` (${d.count} açık kalem)` : ""}</li>
+                ))}
+              </ul>
+              <p className="text-xs mt-1 text-red-600/90">Kaydederken onay istenecek. Tahsilatı kapanış öncesi planlayın.</p>
+            </div>
+          </div>
+        )}
+
         <DialogFooter>
           <Button variant="outline" onClick={() => { resetForm(); onClose(); }}>
             İptal
@@ -1997,6 +2052,36 @@ function NewClosingDialog({
             {(createClosing.isPending || updateClosing.isPending) ? "Kaydediliyor..." : isEditing ? "Güncelle" : "Kaydet"}
           </Button>
         </DialogFooter>
+
+        <AlertDialog open={debtConfirmOpen} onOpenChange={setDebtConfirmOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle className="flex items-center gap-2 text-red-700">
+                <AlertCircle className="h-5 w-5" /> Borçlu danışman uyarısı
+              </AlertDialogTitle>
+              <AlertDialogDescription asChild>
+                <div className="space-y-2 text-sm">
+                  <p>Bu işlemdeki danışman(lar)ın Fonzip'te ödenmemiş borcu var:</p>
+                  <ul className="rounded-md bg-red-50 ring-1 ring-red-200 px-3 py-2 space-y-1 text-red-700">
+                    {debtors.map((d) => (
+                      <li key={d.employeeId} className="flex justify-between gap-3">
+                        <span>{d.name}{d.count > 0 ? <span className="text-red-600/80"> · {d.count} açık kalem</span> : null}</span>
+                        <span className="font-semibold whitespace-nowrap">{fmtTRY(d.owed)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <p>Kapanışı yine de kaydetmek istiyor musunuz?</p>
+                </div>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Vazgeç</AlertDialogCancel>
+              <AlertDialogAction className="bg-red-600 hover:bg-red-700" onClick={() => { setDebtConfirmOpen(false); void doSubmit(); }}>
+                Borcu gördüm, kaydet
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </DialogContent>
     </Dialog>
   );
