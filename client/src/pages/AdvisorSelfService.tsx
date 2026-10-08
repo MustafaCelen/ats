@@ -34,7 +34,7 @@ function fmtPrice(p: string | null): string {
   return Number(p).toLocaleString("tr-TR") + " ₺";
 }
 
-function Shell({ children }: { children: React.ReactNode }) {
+function Shell({ children, wide = false }: { children: React.ReactNode; wide?: boolean }) {
   return (
     <div className="min-h-screen bg-muted/40 flex flex-col items-center px-4 py-8">
       <div className="flex items-center gap-2 mb-6">
@@ -46,7 +46,7 @@ function Shell({ children }: { children: React.ReactNode }) {
           <div className="text-[10px] text-muted-foreground leading-none">KW Platin &amp; Karma</div>
         </div>
       </div>
-      <div className="w-full max-w-lg space-y-4">
+      <div className={`w-full space-y-4 ${wide ? "max-w-6xl" : "max-w-lg"}`}>
         {children}
       </div>
       <p className="text-[11px] text-muted-foreground mt-6 text-center max-w-lg">
@@ -680,6 +680,7 @@ function AdvisorApp({ token, initialTab = "listings" }: { token: string; initial
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<AdvisorTab>(initialTab);
+  const [rotaWide, setRotaWide] = useState(false);
 
   const loadData = useCallback(() => {
     setLoading(true);
@@ -720,7 +721,7 @@ function AdvisorApp({ token, initialTab = "listings" }: { token: string; initial
   const activeTab: AdvisorTab = tab === "rota" && !data.isUk ? "listings" : tab;
 
   return (
-    <Shell>
+    <Shell wide={activeTab === "rota" && rotaWide}>
       <Card className="!p-1.5">
         <div className={`grid gap-1 ${data.isUk ? "grid-cols-3" : "grid-cols-2"}`}>
           <button
@@ -750,7 +751,7 @@ function AdvisorApp({ token, initialTab = "listings" }: { token: string; initial
       </Card>
 
       {activeTab === "rota" ? (
-        <AdvisorRotaView token={token} />
+        <AdvisorRotaView token={token} onWideChange={setRotaWide} />
       ) : activeTab === "summary" ? (
         <SummaryView token={token} />
       ) : totalPending === 0 ? (

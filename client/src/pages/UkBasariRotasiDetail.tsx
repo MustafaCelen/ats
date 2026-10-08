@@ -4,10 +4,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Layout } from "@/components/Layout";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Check, CheckCircle2, Route as RouteIcon, Trophy, Lock, Link2, Eye } from "lucide-react";
-import {
-  UK_ACTIVITIES, UK_DAYS, UK_TIME_ROWS, UK_PROGRAM_WEEKS, UK_SCORE_ITEMS, UK_TARGET_ITEMS, ukAddDays,
-} from "@shared/uk-program";
+import { ArrowLeft, CheckCircle2, Route as RouteIcon, Trophy, Lock, Link2, Eye } from "lucide-react";
+import { UK_PROGRAM_WEEKS, UK_TARGET_ITEMS } from "@shared/uk-program";
+import { UkWeekGrid, UkGridLegend } from "@/components/UkWeekGrid";
 
 type WeekRow = {
   week: number; monday: string | null; totalActivities: number; doneActivities: number;
@@ -27,8 +26,6 @@ type ProgramData = {
   canEdit: boolean;
 };
 
-const scoreLabel = new Map(UK_SCORE_ITEMS.map((s) => [s.key, s.label]));
-
 function fmtYmd(ymd: string | null) {
   if (!ymd) return "—";
   const [y, m, d] = ymd.slice(0, 10).split("-");
@@ -40,66 +37,6 @@ function fmtTRY(n: number) {
 function todayYmd() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-// ── Haftalık takvim (PDF düzeni: satırlar saat, sütunlar gün) ────────────────
-function WeekGrid({ data, week, onToggle }: { data: ProgramData; week: number; onToggle: (id: string, done: boolean) => void }) {
-  const acts = UK_ACTIVITIES.filter((a) => a.week === week);
-  const monday = data.week1Monday ? ukAddDays(data.week1Monday, (week - 1) * 7) : null;
-  const today = todayYmd();
-  return (
-    <div className="overflow-x-auto rounded-xl border border-border bg-card [contain:inline-size]">
-      <div
-        className="grid min-w-[980px] gap-1.5 p-3"
-        style={{ gridTemplateColumns: "112px repeat(5, minmax(0, 1fr))", gridTemplateRows: `auto repeat(${UK_TIME_ROWS.length}, minmax(46px, auto))` }}
-      >
-        <div />
-        {UK_DAYS.map((d, i) => {
-          const date = monday ? ukAddDays(monday, i) : null;
-          const isToday = date === today;
-          return (
-            <div key={d} className={`rounded-lg px-2 py-1.5 text-center ${isToday ? "bg-primary text-primary-foreground" : "bg-muted/60"}`}>
-              <p className="text-xs font-bold uppercase tracking-wide">{d}</p>
-              <p className={`text-[11px] ${isToday ? "opacity-90" : "text-muted-foreground"}`}>{fmtYmd(date)}</p>
-            </div>
-          );
-        })}
-        {UK_TIME_ROWS.map((t, r) => (
-          <div
-            key={t}
-            className="flex items-center justify-center rounded-lg bg-amber-50 ring-1 ring-amber-200 text-[11px] font-semibold text-amber-900 text-center px-1"
-            style={{ gridColumn: 1, gridRow: r + 2 }}
-          >
-            {t}
-          </div>
-        ))}
-        {acts.map((a) => {
-          const done = !!data.checks[a.id];
-          const score = a.score ? scoreLabel.get(a.score) : null;
-          const by = data.checks[a.id]?.by;
-          return (
-            <button
-              key={a.id}
-              type="button"
-              disabled={!data.canEdit}
-              onClick={() => onToggle(a.id, !done)}
-              title={[score ? `Skor: ${score}` : "Takvim aktivitesi (puansız)", done && by ? `İşaretleyen: ${by}` : null].filter(Boolean).join("\n")}
-              className={`group relative rounded-lg px-2 py-1.5 text-left text-[11.5px] leading-snug font-medium ring-1 transition-colors flex items-center gap-2
-                ${done ? "bg-emerald-50 ring-emerald-300 text-emerald-900" : score ? "bg-white ring-border hover:ring-primary/50" : "bg-muted/30 ring-border/70 text-muted-foreground hover:ring-primary/40"}
-                ${score && !done ? "border-l-[3px] border-l-primary" : ""}
-                ${data.canEdit ? "cursor-pointer" : "cursor-default"}`}
-              style={{ gridColumn: a.day + 2, gridRow: `${a.from + 2} / ${a.to + 3}` }}
-            >
-              <span className="flex-1">{a.label}</span>
-              <span className={`h-5 w-5 shrink-0 rounded-full flex items-center justify-center ring-1 ${done ? "bg-emerald-500 ring-emerald-500 text-white" : "ring-border bg-white"}`}>
-                {done && <Check className="h-3 w-3" />}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
 }
 
 // ── Haftalık gerçekleşen + koç onayı ─────────────────────────────────────────
@@ -451,12 +388,15 @@ export default function UkBasariRotasiDetail() {
 
         {typeof tab === "number" && weekRow && (
           <>
-            <div className="flex items-center gap-4 text-[11px] text-muted-foreground flex-wrap">
-              <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-sm bg-white ring-1 ring-border border-l-[3px] border-l-primary" /> Puanlı aktivite</span>
-              <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-sm bg-muted/50 ring-1 ring-border" /> Takvim aktivitesi (puansız)</span>
-              <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-sm bg-emerald-100 ring-1 ring-emerald-300" /> Yapıldı</span>
-            </div>
-            <WeekGrid data={data} week={tab} onToggle={(id, done) => toggle.mutate({ id, done })} />
+            <UkGridLegend />
+            <UkWeekGrid
+              week={tab}
+              week1Monday={data.week1Monday}
+              today={todayYmd()}
+              checks={data.checks}
+              canToggle={() => data.canEdit}
+              onToggle={(id, done) => toggle.mutate({ id, done })}
+            />
             <WeekSummary employeeId={employeeId} row={weekRow} canEdit={data.canEdit} />
           </>
         )}

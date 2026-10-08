@@ -1,6 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, CheckCircle2, Loader2, Lock, Route as RouteIcon, Trophy, AlertCircle } from "lucide-react";
 import { UK_ACTIVITIES, UK_DAYS, UK_TIME_ROWS, UK_PROGRAM_WEEKS, ukAddDays } from "@shared/uk-program";
+import { UkWeekGrid, UkGridLegend } from "@/components/UkWeekGrid";
+import { CalendarDays, List } from "lucide-react";
+
+type ViewMode = "liste" | "takvim";
+const VIEW_KEY = "ukRotaView";
+function initialViewMode(): ViewMode {
+  try {
+    const s = localStorage.getItem(VIEW_KEY);
+    if (s === "liste" || s === "takvim") return s;
+  } catch {}
+  // Telefonda liste, geniş ekranda takvim.
+  return typeof window !== "undefined" && window.innerWidth >= 768 ? "takvim" : "liste";
+}
 
 // Danışman portalı (/a/:token) → "Rotam": 45+45 Başarı Rotası'nı danışmanın kendisi
 // doldurur. Telefon öncelikli: gün gün liste. Yetki kuralları sunucuda
@@ -42,7 +55,7 @@ function GoogleIcon() {
   );
 }
 
-export function AdvisorRotaView({ token }: { token: string }) {
+export function AdvisorRotaView({ token, onWideChange }: { token: string; onWideChange?: (wide: boolean) => void }) {
   const [data, setData] = useState<Data | null>(null);
   const [state, setState] = useState<"loading" | "need-login" | "error" | "ready">("loading");
   const [errMsg, setErrMsg] = useState<string | null>(null);
@@ -50,6 +63,16 @@ export function AdvisorRotaView({ token }: { token: string }) {
   const [redirecting, setRedirecting] = useState(false);
   const [tab, setTab] = useState<number | "skor">(1);
   const [notice, setNotice] = useState<string | null>(null);
+  const [view, setView] = useState<ViewMode>(initialViewMode);
+  const changeView = (v: ViewMode) => {
+    setView(v);
+    try { localStorage.setItem(VIEW_KEY, v); } catch {}
+  };
+  // Takvim görünümünde portal kabuğu genişlesin (masaüstünde tüm hafta tek ekranda).
+  useEffect(() => {
+    onWideChange?.(state === "ready" && view === "takvim" && typeof tab === "number");
+    return () => onWideChange?.(false);
+  }, [state, view, tab, onWideChange]);
 
   useEffect(() => {
     const e = new URLSearchParams(window.location.search).get("error");
@@ -192,17 +215,33 @@ export function AdvisorRotaView({ token }: { token: string }) {
         </button>
       </div>
 
+      {typeof tab === "number" && (
+        <div className="flex justify-end">
+          <div className="inline-flex rounded-xl bg-card ring-1 ring-border p-1 gap-1">
+            {([["liste", "Liste", List], ["takvim", "Takvim", CalendarDays]] as const).map(([k, label, Icon]) => (
+              <button
+                key={k}
+                onClick={() => changeView(k)}
+                className={`h-8 px-3 rounded-lg text-xs font-medium flex items-center gap-1.5 ${view === k ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}
+              >
+                <Icon className="h-3.5 w-3.5" /> {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {notice && <div className="rounded-xl bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">{notice}</div>}
 
       {typeof tab === "number"
-        ? <WeekView token={token} data={data} week={tab} onToggle={toggle} onSaved={() => load()} readOnly={!!data.preview} />
+        ? <WeekView token={token} data={data} week={tab} onToggle={toggle} onSaved={() => load()} readOnly={!!data.preview} view={view} />
         : <ScoreView data={data} />}
     </>
   );
 }
 
-function WeekView({ token, data, week, onToggle, onSaved, readOnly = false }: {
-  token: string; data: Data; week: number; onToggle: (id: string, done: boolean) => void; onSaved: () => void; readOnly?: boolean;
+function WeekView({ token, data, week, onToggle, onSaved, readOnly = false, view = "liste" }: {
+  token: string; data: Data; week: number; onToggle: (id: string, done: boolean) => void; onSaved: () => void; readOnly?: boolean; view?: ViewMode;
 }) {
   const row = data.weeks[week - 1];
   const locked = !!row.confirmedAt;
@@ -222,7 +261,22 @@ function WeekView({ token, data, week, onToggle, onSaved, readOnly = false }: {
         </div>
       )}
 
-      {UK_DAYS.map((dayName, d) => {
+      {view === "takvim" && (
+        <>
+          <UkGridLegend />
+          <UkWeekGrid
+            compact
+            week={week}
+            week1Monday={data.week1Monday}
+            today={data.today}
+            checks={data.checks}
+            canToggle={(_a, date) => !readOnly && !locked && !!date && date <= data.today}
+            onToggle={onToggle}
+          />
+        </>
+      )}
+
+      {view === "liste" && UK_DAYS.map((dayName, d) => {
         const date = monday ? ukAddDays(monday, d) : null;
         const isToday = date === data.today;
         const future = !date || date > data.today;
