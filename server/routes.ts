@@ -15,7 +15,7 @@ import { sendEmail } from "./email";
 import { isFonzipConfigured, fetchFonzipPreview, fetchFonzipUsers, fetchFonzipDebts, fetchFonzipDonations, syncFonzipDebts, syncFonzipUsersFinancials, getFonzipUserFinancialsReport, importFonzipExcel, getEmployeeFonzipDebt, getEmployeeDebtSummaries, startDebtSync, getDebtSyncStatus } from "./fonzip";
 import { isMetaConfigured, isMetaWebhookConfigured, metaConfig, syncMetaCampaigns, fetchMetaLead, mapLeadToCandidate, verifyWebhookSignature, listLeadForms, backfillLeadsFromMeta } from "./meta";
 import { isGoogleFormsConfigured, syncGoogleFormLeads, getGoogleFormsSpreadsheetId } from "./google-forms";
-import { registerUkProgramRoutes, isInUkProgram } from "./uk-program";
+import { registerUkProgramRoutes, isInUkProgram, autoEnrollOnCoachAssigned } from "./uk-program";
 
 // Scoping helper:
 //   admin      → undefined (all jobs)
@@ -2431,8 +2431,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (taxOffice !== undefined) update.taxOffice = taxOffice || null;
       if (taxId !== undefined) update.taxId = taxId || null;
       if (birthDate !== undefined) update.birthDate = birthDate || null;
+      // ÜK koçu atanıyorsa 45+45'e otomatik katılım için önceki koçu sakla.
+      const prevCoachId = update.uretkenlikKocluguManagerId !== undefined
+        ? (await storage.getEmployee(id))?.uretkenlikKocluguManagerId ?? null
+        : undefined;
       const emp = await storage.updateEmployee(id, update);
       if (!emp) return res.status(404).json({ message: "Employee not found" });
+      if (prevCoachId !== undefined) {
+        try {
+          await autoEnrollOnCoachAssigned(id, prevCoachId, update.uretkenlikKocluguManagerId);
+        } catch (e) {
+          console.error("[uk-program auto-enroll]", e);
+        }
+      }
       res.json(emp);
     } catch {
       res.status(500).json({ message: "Internal server error" });
@@ -2697,7 +2708,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           // Check if already an employee (re-use existingEmployee found by KWUID above)
           if (!existingEmployee) existingEmployee = await storage.getEmployeeByCandidateId(cand.id);
           if (existingEmployee) {
+            const prevCoachId = (existingEmployee as any).uretkenlikKocluguManagerId ?? null;
             if (Object.keys(patch).length) await storage.updateEmployee(existingEmployee.id, patch);
+            // Yalnızca koçu gerçekten değişen danışman 45+45'e girer (tüm kadro her
+            // içe aktarımda yeniden yazıldığı için yeni oluşturulanlar hariç tutulur).
+            if (patch.uretkenlikKocluguManagerId && patch.uretkenlikKocluguManagerId !== prevCoachId) {
+              await autoEnrollOnCoachAssigned(existingEmployee.id, prevCoachId, patch.uretkenlikKocluguManagerId).catch((e) =>
+                console.error("[uk-program auto-enroll/import]", e));
+            }
             updated++;
           } else {
             await storage.createEmployee({

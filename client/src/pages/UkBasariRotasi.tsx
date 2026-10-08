@@ -131,7 +131,7 @@ export default function UkBasariRotasi() {
               {!isLoading && rows.length === 0 && (
                 <tr><td colSpan={8} className="px-4 py-10 text-center text-muted-foreground">
                   {data.length === 0
-                    ? "Programda danışman yok. Danışman profilinde Üretkenlik Koçluğu'nu açın veya \"Danışman Ekle\" ile manuel ekleyin."
+                    ? "Programda danışman yok. Danışman profilinde ÜK koçu atandığında bir sonraki pazartesiden otomatik eklenir; \"Danışman Ekle\" ile manuel de eklenebilir."
                     : "Bu filtrede danışman yok."}
                 </td></tr>
               )}

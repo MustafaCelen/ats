@@ -365,6 +365,22 @@ export async function ensureSchema(): Promise<void> {
       added_at TIMESTAMP DEFAULT NOW(),
       removed_at TIMESTAMP
     );
+    -- manual: admin ekledi | auto: profilde ÜK koçu atandı (sonraki pazartesi başlar)
+    -- | backfill: kural değişmeden önce ÜK işaretli + koçlu olanlar (tek seferlik).
+    ALTER TABLE uk_program_enrollments ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'manual';
+
+    -- Tek seferlik veri taşımaları.
+    CREATE TABLE IF NOT EXISTS app_migrations (name TEXT PRIMARY KEY, ran_at TIMESTAMP DEFAULT NOW());
+    -- Katılım artık yalnızca uk_program_enrollments'tan gelir. Önceden ÜK işareti
+    -- (uretkenlik_koclugu) ile otomatik programda görünen ve koçu atanmış danışmanlar
+    -- mevcut başlangıçlarıyla bir kez taşınır.
+    INSERT INTO uk_program_enrollments (employee_id, coach_user_id, start_date, source, added_at)
+    SELECT e.id, NULL, COALESCE(e.uk_start_date, to_char(e.start_date, 'YYYY-MM-DD')), 'backfill', NOW()
+      FROM employees e
+     WHERE e.uretkenlik_koclugu = true AND e.uretkenlik_koclugu_manager_id IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM app_migrations WHERE name = 'uk_enroll_backfill_v1')
+    ON CONFLICT (employee_id) DO NOTHING;
+    INSERT INTO app_migrations (name) VALUES ('uk_enroll_backfill_v1') ON CONFLICT (name) DO NOTHING;
     -- Haftalık gerçekleşenler (manuel kısım) + koç onayı.
     CREATE TABLE IF NOT EXISTS uk_program_weeks (
       id SERIAL PRIMARY KEY,

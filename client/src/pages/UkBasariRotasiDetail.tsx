@@ -16,7 +16,7 @@ type WeekRow = {
 };
 
 type ProgramData = {
-  participant: { employeeId: number; name: string; kwuid: string | null; status: string; coachId: number | null; coachName: string | null; programStart: string | null; ukStartDate: string | null; manual: boolean; isUkFlag: boolean };
+  participant: { employeeId: number; name: string; kwuid: string | null; status: string; coachId: number | null; coachName: string | null; programStart: string | null; ukStartDate: string | null; manual: boolean; source: "manual" | "auto" | "backfill" | null };
   week1Monday: string | null;
   currentWeek: number;
   checks: Record<string, { at: string; by: string | null }>;
@@ -360,11 +360,14 @@ export default function UkBasariRotasiDetail() {
                     {coaches.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                 ) : <span>{p.coachName ?? "atanmamış"}</span>}
-                {p.manual && !p.isUkFlag && (
+                {p.source === "manual" && (
                   <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-sky-400/20 text-sky-100 ring-1 ring-sky-300/40">Manuel eklendi</span>
                 )}
+                {p.source === "auto" && (
+                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-300/20 text-amber-100 ring-1 ring-amber-200/40" title="Profilde ÜK koçu atandığında bir sonraki pazartesiden başladı">Koç atamasıyla eklendi</span>
+                )}
               </div>
-              {data.isAdmin && p.manual && !p.isUkFlag && (
+              {data.isAdmin && (
                 confirmRemove ? (
                   <div className="mt-2 flex items-center gap-2 text-xs">
                     <span className="text-white/80">Programdan çıkarılsın mı?</span>
@@ -392,7 +395,7 @@ export default function UkBasariRotasiDetail() {
                     )}
                   </div>
                 ) : <p className="font-semibold">{fmtYmd(p.programStart)}</p>}
-                {!p.ukStartDate && <p className="text-[10px] text-white/60 mt-0.5">Boş: işe başlangıç ({fmtYmd(p.programStart)})</p>}
+
               </div>
               <div className="rounded-lg bg-white/10 px-4 py-2.5">
                 <p className="text-[11px] text-white/70">Şu an</p>
