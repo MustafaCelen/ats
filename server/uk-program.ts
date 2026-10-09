@@ -30,7 +30,8 @@ type Participant = {
   // Detay sayfasındaki düzenlenebilir başlangıç (uk_program_enrollments.start_date).
   ukStartDate: string | null;
   source: "manual" | "auto" | "backfill" | null;
-  manual: boolean;          // admin elle ekledi (koçu programa özel olabilir)
+  manual: boolean;          // elle eklendi
+  profileCoach: boolean;    // koç danışman profilinden geliyor (programda değiştirilemez)
   inProgram: boolean;
   welcomeSentAt: string | null;
 };
@@ -38,17 +39,20 @@ type Participant = {
 // Katılım yalnızca uk_program_enrollments'tan gelir:
 //  - auto: profilde ÜK koçu atandığında, bir sonraki haftanın pazartesisinden başlar
 //    (autoEnrollOnCoachAssigned). Koç profildekini izler (coach_user_id NULL).
-//  - manual: admin "Danışman Ekle" ile; koç/başlangıç programa özel.
+//  - manual: "Danışman Ekle" ile; profilde ÜK koçu varsa koç odur, yoksa programa özel koç.
 //  - backfill: eski sürümün toplu aktarımı; artık üretilmez (ÜK işaretliler toplu taşınmaz).
 // employees.uretkenlik_koclugu ÜK payını etkilediği için programda kullanılmaz.
 const PARTICIPANT_FROM = `
        FROM employees e
        JOIN candidates c ON c.id = e.candidate_id
        LEFT JOIN uk_program_enrollments en ON en.employee_id = e.id AND en.removed_at IS NULL
-       LEFT JOIN users u ON u.id = COALESCE(en.coach_user_id, e.uretkenlik_koclugu_manager_id)`;
+       LEFT JOIN users u ON u.id = COALESCE(e.uretkenlik_koclugu_manager_id, en.coach_user_id)`;
+// Koç önceliği: danışman profilindeki ÜK koçu her zaman esastır; programa özel koç
+// (en.coach_user_id) yalnızca profilde koç yoksa kullanılır.
 const PARTICIPANT_COLS = `e.id, c.name, e.kwuid, e.status, u.id AS coach_id, u.name AS coach_name,
        (en.employee_id IS NOT NULL) AS enrolled, en.source,
-       en.start_date AS en_start, to_char(e.start_date, 'YYYY-MM-DD') AS start_date, en.welcome_sent_at`;
+       en.start_date AS en_start, to_char(e.start_date, 'YYYY-MM-DD') AS start_date, en.welcome_sent_at,
+       e.uretkenlik_koclugu_manager_id AS profile_coach_id`;
 
 export async function isInUkProgram(employeeId: number): Promise<boolean> {
   const r = await pool.query(
@@ -69,6 +73,7 @@ async function loadParticipant(employeeId: number): Promise<Participant | null> 
     programStart: row.en_start || row.start_date || null,
     source: row.enrolled ? row.source : null,
     manual: !!row.enrolled && row.source === "manual",
+    profileCoach: row.profile_coach_id != null,
     inProgram: !!row.enrolled,
     welcomeSentAt: row.welcome_sent_at ?? null,
   };
@@ -397,15 +402,20 @@ export function registerUkProgramRoutes(app: Express) {
       if (role !== "admin" && role !== "hiring_manager") return res.status(403).json({ error: "Yalnızca admin veya hiring manager danışman ekleyebilir." });
       const employeeId = Number(req.body?.employeeId);
       const coachUserId = req.body?.coachUserId ? Number(req.body.coachUserId) : null;
-      if (role !== "admin" && coachUserId == null) return res.status(400).json({ error: "Koç seçin." });
+      // Danışmanın profilinde ÜK koçu varsa koç odur (seçim yok sayılır). Kayda koç yazılmaz;
+      // böylece profilde koç değişirse program da onu izler (coachId = COALESCE(en, profil)).
+      const prof = await pool.query("SELECT uretkenlik_koclugu_manager_id AS mid FROM employees WHERE id = $1", [employeeId]);
+      const profileCoachId: number | null = prof.rows[0]?.mid ?? null;
+      const storeCoach = profileCoachId != null ? null : coachUserId;
+      if (role !== "admin" && profileCoachId == null && coachUserId == null) return res.status(400).json({ error: "Koç seçin." });
       const startDate = String(req.body?.startDate ?? "");
       if (!Number.isInteger(employeeId)) return res.status(400).json({ error: "Danışman seçin." });
       if (!ukIsMonday(startDate)) return res.status(400).json({ error: "Program başlangıcı pazartesi olmalı." });
       const p = await loadParticipant(employeeId);
       if (!p) return res.status(404).json({ error: "Danışman bulunamadı." });
       if (p.inProgram) return res.status(409).json({ error: `${p.name} zaten programda.` });
-      if (coachUserId != null) {
-        const c = await pool.query("SELECT 1 FROM users WHERE id = $1 AND role IN ('admin', 'hiring_manager')", [coachUserId]);
+      if (storeCoach != null) {
+        const c = await pool.query("SELECT 1 FROM users WHERE id = $1 AND role IN ('admin', 'hiring_manager')", [storeCoach]);
         if (!c.rows.length) return res.status(400).json({ error: "Geçersiz koç." });
       }
       await pool.query(
@@ -413,9 +423,9 @@ export function registerUkProgramRoutes(app: Express) {
          VALUES ($1, $2, $3, $4, NOW(), NULL, 'manual')
          ON CONFLICT (employee_id) DO UPDATE SET coach_user_id = EXCLUDED.coach_user_id, start_date = EXCLUDED.start_date,
            added_by_user_id = EXCLUDED.added_by_user_id, added_at = NOW(), removed_at = NULL, source = 'manual'`,
-        [employeeId, coachUserId, startDate, (req as any).user.id],
+        [employeeId, storeCoach, startDate, (req as any).user.id],
       );
-      res.json({ ok: true, employeeId });
+      res.json({ ok: true, employeeId, coachUserId: profileCoachId ?? storeCoach });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -426,7 +436,7 @@ export function registerUkProgramRoutes(app: Express) {
     try {
       if ((req as any).user?.role !== "admin") return res.status(403).json({ error: "Yalnızca admin." });
       const p = await loadParticipant(Number(req.params.employeeId));
-      if (!p?.manual) return res.status(409).json({ error: "Koç yalnızca manuel eklenen danışmanlarda buradan değişir; diğerlerinde danışman profilinden." });
+      if (!p?.manual || p.profileCoach) return res.status(409).json({ error: "Bu danışmanın koçu profilinden gelir; danışman profilinden değiştirin." });
       const coachUserId = req.body?.coachUserId ? Number(req.body.coachUserId) : null;
       await pool.query("UPDATE uk_program_enrollments SET coach_user_id = $2 WHERE employee_id = $1 AND removed_at IS NULL", [p.employeeId, coachUserId]);
       res.json({ ok: true });

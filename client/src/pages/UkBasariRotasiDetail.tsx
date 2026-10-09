@@ -19,7 +19,7 @@ type WeekRow = {
 };
 
 type ProgramData = {
-  participant: { employeeId: number; name: string; kwuid: string | null; status: string; coachId: number | null; coachName: string | null; programStart: string | null; ukStartDate: string | null; manual: boolean; source: "manual" | "auto" | "backfill" | null };
+  participant: { employeeId: number; name: string; kwuid: string | null; status: string; coachId: number | null; coachName: string | null; programStart: string | null; ukStartDate: string | null; manual: boolean; profileCoach?: boolean; source: "manual" | "auto" | "backfill" | null };
   week1Monday: string | null;
   currentWeek: number;
   checks: Record<string, { at: string; by: string | null }>;
@@ -384,7 +384,7 @@ export default function UkBasariRotasiDetail() {
               <p className="mt-2 text-lg font-semibold">{p.name}{p.kwuid && <span className="ml-2 text-sm font-mono text-white/60">{p.kwuid}</span>}</p>
               <div className="text-sm text-white/70 flex items-center gap-2 flex-wrap">
                 Koç:
-                {data.isAdmin && p.manual ? (
+                {data.isAdmin && p.manual && !p.profileCoach ? (
                   <select
                     value={p.coachId ?? ""}
                     onChange={(e) => changeCoach.mutate(e.target.value)}

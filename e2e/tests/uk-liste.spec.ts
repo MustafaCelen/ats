@@ -143,3 +143,39 @@ test("hoş geldin maili: e-postası olmayan danışmanda gönder kapalı", async
   await expect(dlg.getByText("kayıtlı e-posta yok")).toBeVisible();
   await expect(dlg.getByRole("button", { name: /^Gönder$/ })).toBeDisabled();
 });
+
+test("profilinde ÜK koçu olan danışman: koç profilden gelir, değiştirilemez", async ({ page }) => {
+  const kocu = await createAdvisor("Profil Koclu");
+  await q(`UPDATE employees SET uretkenlik_koclugu = true, uretkenlik_koclugu_manager_id = $2 WHERE id = $1`, [kocu.employeeId, USERS.mehmet.id]);
+
+  await loginAs(page, "zeynep");
+  await page.goto("/uk-basari-rotasi");
+  await page.getByRole("button", { name: "Danışman Ekle" }).click();
+  const dlg = page.getByRole("dialog");
+  const coachSel = dlg.locator("select").nth(0);
+  await expect(coachSel).toHaveValue(String(USERS.zeynep.id));   // seçim öncesi: HM kendisi
+
+  await pickEmployee(page, "Aktif danışman seçin", kocu.name, dlg);
+  await expect(coachSel).toHaveValue(String(USERS.mehmet.id));
+  await expect(coachSel).toBeDisabled();
+  await expect(dlg.getByText("Danışmanın profilindeki ÜK koçu")).toBeVisible();
+  await expect(dlg.getByLabel(/Hoş geldin mailini/)).toBeDisabled();   // koçu Mehmet → maili o gönderir
+  await dlg.getByRole("button", { name: "Programa Ekle" }).click();
+  await expect(page).toHaveURL(new RegExp(`/uk-basari-rotasi/${kocu.employeeId}$`));
+
+  const [en] = await q(`SELECT source, coach_user_id FROM uk_program_enrollments WHERE employee_id = $1`, [kocu.employeeId]);
+  expect(en).toMatchObject({ source: "manual", coach_user_id: null });   // koç profilden izlenir
+  await expect(page.getByText("Koç:").locator("..")).toContainText("Mehmet Ozkan");
+
+  // Admin rota sayfasında koç seçici çıkmaz (profilden gelir); API de reddeder
+  await loginAs(page, "admin");
+  await page.goto(`/uk-basari-rotasi/${kocu.employeeId}`);
+  await expect(page.getByText("Koç:").locator("..").locator("select")).toHaveCount(0);
+  const r = await page.request.put(`/api/uk-program/${kocu.employeeId}/coach`, { data: { coachUserId: USERS.zeynep.id } });
+  expect(r.status()).toBe(409);
+
+  // Profilde koç değişince program da onu izler
+  await q(`UPDATE employees SET uretkenlik_koclugu_manager_id = $2 WHERE id = $1`, [kocu.employeeId, USERS.zeynep.id]);
+  await page.reload();
+  await expect(page.getByText("Koç:").locator("..")).toContainText("Zeynep Yilmaz");
+});
