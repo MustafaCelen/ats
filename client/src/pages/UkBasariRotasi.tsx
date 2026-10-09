@@ -44,21 +44,38 @@ export default function UkBasariRotasi() {
     queryFn: () => fetch(`/api/uk-program?includePassive=${includePassive}`, { credentials: "include" }).then((r) => r.json()),
   });
 
+  // Koç (hiring manager) filtresi: "all" | "none" (koçu atanmamış) | kullanıcı id'si.
+  const [coach, setCoach] = useState<string>(() => {
+    try { return localStorage.getItem("ukRotaCoachFilter") ?? "all"; } catch { return "all"; }
+  });
+  const changeCoach = (v: string) => {
+    setCoach(v);
+    try { localStorage.setItem("ukRotaCoachFilter", v); } catch {}
+  };
+  const { data: coaches = [] } = useQuery<{ id: number; name: string }[]>({
+    queryKey: ["/api/hiring-managers"],
+    queryFn: () => fetch("/api/hiring-managers", { credentials: "include" }).then((r) => r.json()),
+  });
+  const byCoach = useMemo(() => data.filter((r) =>
+    coach === "all" ? true : coach === "none" ? r.coachId == null : String(r.coachId) === coach,
+  ), [data, coach]);
+
   const rows = useMemo(() => {
     const needle = q.trim().toLocaleLowerCase("tr");
-    return data.filter((r) => {
-      if (phase === "active" && (r.currentWeek === 0 || r.currentWeek > UK_PROGRAM_WEEKS)) return false;
+    return byCoach.filter((r) => {
+      // "Devam Eden" henüz başlamamışları da içerir (koç atamasıyla eklenenler sonraki pazartesi başlar).
+      if (phase === "active" && r.currentWeek > UK_PROGRAM_WEEKS) return false;
       if (phase === "done" && r.currentWeek <= UK_PROGRAM_WEEKS) return false;
       if (!needle) return true;
       return [r.name, r.kwuid, r.coachName].some((v) => v?.toLocaleLowerCase("tr").includes(needle));
     });
-  }, [data, q, phase]);
+  }, [byCoach, q, phase]);
 
   const counts = useMemo(() => ({
-    all: data.length,
-    active: data.filter((r) => r.currentWeek >= 1 && r.currentWeek <= UK_PROGRAM_WEEKS).length,
-    done: data.filter((r) => r.currentWeek > UK_PROGRAM_WEEKS).length,
-  }), [data]);
+    all: byCoach.length,
+    active: byCoach.filter((r) => r.currentWeek <= UK_PROGRAM_WEEKS).length,
+    done: byCoach.filter((r) => r.currentWeek > UK_PROGRAM_WEEKS).length,
+  }), [byCoach]);
 
   return (
     <Layout>
@@ -95,6 +112,18 @@ export default function UkBasariRotasi() {
               {label} ({counts[k]})
             </button>
           ))}
+          <select
+            value={coach}
+            onChange={(e) => changeCoach(e.target.value)}
+            className="h-9 border border-input rounded-lg px-2.5 text-sm bg-card focus:outline-none focus:ring-2 focus:ring-primary/40"
+            aria-label="Koç filtresi"
+          >
+            <option value="all">Tüm koçlar</option>
+            {coaches.map((c) => (
+              <option key={c.id} value={String(c.id)}>{c.name}{me?.id === c.id ? " (ben)" : ""}</option>
+            ))}
+            <option value="none">Koçu atanmamış</option>
+          </select>
           <label className="flex items-center gap-1.5 text-sm text-muted-foreground ml-2">
             <input type="checkbox" checked={includePassive} onChange={(e) => setIncludePassive(e.target.checked)} />
             Pasifleri dahil et
