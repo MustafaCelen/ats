@@ -7,3 +7,7 @@ vite.config.ts.*
 .env
 graphify-out
 .claude
+
+# E2E test çıktıları
+e2e/report
+e2e/test-results

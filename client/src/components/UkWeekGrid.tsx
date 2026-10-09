@@ -68,6 +68,8 @@ export function UkWeekGrid({
             <button
               key={a.id}
               type="button"
+              data-testid={`uk-grid-${a.id}`}
+              data-done={done ? "1" : "0"}
               disabled={!enabled}
               onClick={() => onToggle(a.id, !done)}
               title={showScore

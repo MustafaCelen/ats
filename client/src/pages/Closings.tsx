@@ -651,6 +651,8 @@ function SideSection({
           <button
             type="button"
             onClick={toggle}
+            aria-label={sideLabel}
+            aria-pressed={side.enabled}
             className={`h-5 w-5 rounded border-2 flex items-center justify-center transition-colors ${
               side.enabled ? "bg-primary border-primary text-white" : "border-input bg-background"
             }`}
