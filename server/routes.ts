@@ -1193,7 +1193,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const interview = await storage.getInterview(id);
     if (!interview) return res.status(404).json({ message: "Interview not found" });
 
-    const user = await storage.getUserById(req.user!.id);
+    const user = await storage.getUserByIdFull(req.user!.id);
     if (!user?.googleAccessToken) {
       return res.status(400).json({ message: "Google Calendar not connected" });
     }
@@ -1241,7 +1241,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const interview = await storage.getInterview(id);
     if (!interview) return res.status(404).json({ message: "Interview not found" });
 
-    const user = await storage.getUserById(req.user!.id);
+    const user = await storage.getUserByIdFull(req.user!.id);
     if (!user?.googleAccessToken || !interview.calendarEventId) {
       return res.status(400).json({ message: "No calendar event to remove" });
     }
@@ -1846,7 +1846,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       // Update Google Calendar event if one is linked
       if (updated.calendarEventId) {
         try {
-          const user = await storage.getUserById(req.user!.id);
+          const user = await storage.getUserByIdFull(req.user!.id);
           if (!user?.googleAccessToken) throw new Error("No Google token");
           const full = await storage.getInterview(id);
           const candidate = full?.candidate;
@@ -1884,7 +1884,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     // Delete calendar event when interview is cancelled
     if (status === "cancelled" && interview.calendarEventId) {
       try {
-        const user = await storage.getUserById(req.user!.id);
+        const user = await storage.getUserByIdFull(req.user!.id);
         if (user?.googleAccessToken) {
           await deleteCalendarEvent(user, interview.calendarEventId);
           await storage.setInterviewCalendarEventId(id, "");
@@ -2129,7 +2129,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         if (!updated) return res.status(404).json({ message: "Randevu bulunamadı" });
         if (updated.calendarEventId) {
           try {
-            const user = await storage.getUserById(req.user!.id);
+            const user = await storage.getUserByIdFull(req.user!.id);
             if (user?.googleAccessToken) {
               await updateCalendarEvent(user, updated.calendarEventId, {
                 title: updated.title,
@@ -2149,7 +2149,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (!updated) return res.status(404).json({ message: "Randevu bulunamadı" });
       if (status === "cancelled" && updated.calendarEventId) {
         try {
-          const user = await storage.getUserById(req.user!.id);
+          const user = await storage.getUserByIdFull(req.user!.id);
           if (user?.googleAccessToken) {
             await deleteCalendarEvent(user, updated.calendarEventId);
             await storage.setAdvisorAppointmentCalendarEventId(id, "");
@@ -2175,7 +2175,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const appointment = await storage.getAdvisorAppointment(id);
     if (!appointment) return res.status(404).json({ message: "Randevu bulunamadı" });
 
-    const user = await storage.getUserById(req.user!.id);
+    const user = await storage.getUserByIdFull(req.user!.id);
     if (!user?.googleAccessToken) {
       return res.status(400).json({ message: "Google Calendar not connected" });
     }
@@ -2212,7 +2212,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const appointment = await storage.getAdvisorAppointment(id);
     if (!appointment) return res.status(404).json({ message: "Randevu bulunamadı" });
 
-    const user = await storage.getUserById(req.user!.id);
+    const user = await storage.getUserByIdFull(req.user!.id);
     if (!user?.googleAccessToken || !appointment.calendarEventId) {
       return res.status(400).json({ message: "No calendar event to remove" });
     }

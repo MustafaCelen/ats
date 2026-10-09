@@ -26,7 +26,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   if (!req.session?.userId) {
     return res.status(401).json({ message: "Unauthorized" });
   }
-  const user = await storage.getUserById(req.session.userId);
+  const user = await storage.getUserByIdFull(req.session.userId);
   if (!user) {
     req.session.destroy(() => {});
     return res.status(401).json({ message: "Unauthorized" });

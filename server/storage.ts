@@ -129,13 +129,16 @@ export interface ReportStats {
   newContractSignerCount: number;
 }
 
+// İstemciye giden kullanıcı: şifre ve Google anahtarları ASLA dışarı çıkmaz.
+// Anahtar gereken sunucu içi işler getUserByIdFull / getUserByEmailFull kullanır.
 function toPublicUser(u: User): PublicUser {
-  const { passwordHash: _, ...pub } = u;
-  return pub;
+  const { passwordHash: _, googleAccessToken: _a, googleRefreshToken: _r, ...pub } = u;
+  return { ...pub, hasGoogleCalendar: !!u.googleAccessToken };
 }
 
 export interface IStorage {
   getUserById(id: number): Promise<PublicUser | undefined>;
+  getUserByIdFull(id: number): Promise<User | undefined>;
   getUserByEmailFull(email: string): Promise<User | undefined>;
   getUsers(): Promise<PublicUser[]>;
   createUser(data: { name: string; email: string; passwordHash: string; role: string }): Promise<PublicUser>;
@@ -331,6 +334,10 @@ export class DatabaseStorage implements IStorage {
   async getUserById(id: number): Promise<PublicUser | undefined> {
     const [u] = await db.select().from(users).where(eq(users.id, id));
     return u ? toPublicUser(u) : undefined;
+  }
+  async getUserByIdFull(id: number): Promise<User | undefined> {
+    const [u] = await db.select().from(users).where(eq(users.id, id));
+    return u;
   }
   async getUserByEmailFull(email: string): Promise<User | undefined> {
     const [u] = await db.select().from(users).where(eq(users.email, email.toLowerCase()));
