@@ -16,7 +16,7 @@ import { isFonzipConfigured, fetchFonzipPreview, fetchFonzipUsers, fetchFonzipDe
 import { isMetaConfigured, isMetaWebhookConfigured, metaConfig, syncMetaCampaigns, fetchMetaLead, mapLeadToCandidate, verifyWebhookSignature, listLeadForms, backfillLeadsFromMeta } from "./meta";
 import { isGoogleFormsConfigured, syncGoogleFormLeads, getGoogleFormsSpreadsheetId } from "./google-forms";
 import { registerUkProgramRoutes, isInUkProgram, autoEnrollOnCoachAssigned } from "./uk-program";
-import { registerReferralRoutes, recordReferralDecision } from "./referral";
+import { registerReferralRoutes, recordReferralDecision, matchReferral } from "./referral";
 
 // Scoping helper:
 //   admin      → undefined (all jobs)
@@ -1488,7 +1488,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         const dup = await storage.getCandidateByPhone(input.phone);
         if (dup) return res.status(409).json({ message: `Bu telefon numarası zaten kayıtlı: ${dup.name}` });
       }
-      if (req.body?.referralExternal === true && input.referredBy) {
+      // "Dış referans": aday kaydında saklanır (referral_external). Metin bir danışmanla birebir
+      // eşleşmiyorsa karar metin bazında da hatırlanır; birebir danışman adı genel olarak
+      // dış referans işaretlenmez (yalnızca bu aday).
+      if (req.body?.referralExternal === true && input.referredBy && (await matchReferral(input.referredBy)).exactEmployeeId == null) {
         await recordReferralDecision(input.referredBy, null, req.user!.id);
       }
       const candidate = await storage.createCandidate({ ...input, createdByUserId: req.user!.id });
@@ -1509,7 +1512,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         if (dup && dup.id !== Number(req.params.id))
           return res.status(409).json({ message: `Bu telefon numarası zaten kayıtlı: ${dup.name}` });
       }
-      if (req.body?.referralExternal === true && input.referredBy) {
+      // "Dış referans": aday kaydında saklanır (referral_external). Metin bir danışmanla birebir
+      // eşleşmiyorsa karar metin bazında da hatırlanır; birebir danışman adı genel olarak
+      // dış referans işaretlenmez (yalnızca bu aday).
+      if (req.body?.referralExternal === true && input.referredBy && (await matchReferral(input.referredBy)).exactEmployeeId == null) {
         await recordReferralDecision(input.referredBy, null, req.user!.id);
       }
       const candidate = await storage.updateCandidate(Number(req.params.id), input);

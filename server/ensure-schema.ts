@@ -398,6 +398,7 @@ export async function ensureSchema(): Promise<void> {
       updated_at TIMESTAMP DEFAULT NOW(),
       UNIQUE (employee_id, week)
     );
+    ALTER TABLE candidates ADD COLUMN IF NOT EXISTS referral_external BOOLEAN NOT NULL DEFAULT FALSE;
     -- Referans metni kararları (normalize metin → danışman / dış referans). Bkz. server/referral.ts
     CREATE TABLE IF NOT EXISTS referral_text_decisions (
       norm_text TEXT PRIMARY KEY,

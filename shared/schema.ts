@@ -130,6 +130,7 @@ export const candidates = pgTable("candidates", {
   socialMedia: text("social_media"),             // LinkedIn URL or Instagram
   referredBy: text("referred_by"),               // who referred this candidate
   referredByEmployeeId: integer("referred_by_employee_id"), // referans danışman (ÜK "Katkı Payı Yönlendirme")
+  referralExternal: boolean("referral_external").notNull().default(false), // bu adayda referans bilinçli olarak dış referans
   experience: integer("experience").default(0),  // years in real estate
   resumeText: text("resume_text"),               // notes / background
   tags: text("tags").array().default([]),

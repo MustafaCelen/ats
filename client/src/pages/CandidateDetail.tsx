@@ -1485,7 +1485,7 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
     experience: String(candidate.experience ?? 0),
     referredBy: candidate.referredBy ?? "",
     referredByEmployeeId: ((candidate as any).referredByEmployeeId ?? null) as number | null,
-    referralExternal: false,
+    referralExternal: !!(candidate as any).referralExternal,
     socialMedia: candidate.socialMedia ?? "",
     resumeText: candidate.resumeText ?? "",
     expectedStartMonth: candidate.expectedStartMonth ?? "",

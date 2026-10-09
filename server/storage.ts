@@ -504,7 +504,7 @@ export class DatabaseStorage implements IStorage {
   }
   async createCandidate(insertCandidate: InsertCandidate & { createdByUserId?: number }): Promise<Candidate> {
     // Referans danışmanı seçilmemişse metinden bağla (önceki karar / kesin+tekil eşleşme).
-    if (insertCandidate.referredBy && typeof insertCandidate.referredByEmployeeId !== "number") {
+    if (insertCandidate.referredBy && typeof insertCandidate.referredByEmployeeId !== "number" && !insertCandidate.referralExternal) {
       const { resolveReferralEmployee } = await import("./referral");
       const id = await resolveReferralEmployee(insertCandidate.referredBy);
       if (id != null) insertCandidate = { ...insertCandidate, referredByEmployeeId: id };
@@ -513,10 +513,20 @@ export class DatabaseStorage implements IStorage {
     return candidate;
   }
   async updateCandidate(id: number, update: Partial<InsertCandidate> & { assignedHiringManagerId?: number | null }): Promise<Candidate | undefined> {
-    if (update.referredBy && typeof update.referredByEmployeeId !== "number") {
-      const { resolveReferralEmployee } = await import("./referral");
-      const rid = await resolveReferralEmployee(update.referredBy);
-      if (rid != null) update = { ...update, referredByEmployeeId: rid };
+    if (update.referredBy && typeof update.referredByEmployeeId !== "number" && update.referralExternal !== true) {
+      // Bayrak gönderilmediyse (ör. danışman düzenleme formu): aynı metin bu adayda dış referans
+      // işaretliyse yeniden bağlama; metin değiştiyse bayrak düşer.
+      let skip = false;
+      if (update.referralExternal === undefined) {
+        const [cur] = await db.select({ ext: candidates.referralExternal, rb: candidates.referredBy }).from(candidates).where(eq(candidates.id, id));
+        if (cur?.ext && cur.rb === update.referredBy) skip = true;
+        else if (cur?.ext) update = { ...update, referralExternal: false };
+      }
+      if (!skip) {
+        const { resolveReferralEmployee } = await import("./referral");
+        const rid = await resolveReferralEmployee(update.referredBy);
+        if (rid != null) update = { ...update, referredByEmployeeId: rid };
+      }
     }
     const [candidate] = await db.update(candidates).set(update).where(eq(candidates.id, id)).returning();
     return candidate;

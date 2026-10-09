@@ -141,7 +141,7 @@ async function unmatchedGroups() {
   const [cands, decisions] = await Promise.all([
     pool.query(
       `SELECT id, name, referred_by, created_at FROM candidates
-        WHERE referred_by_employee_id IS NULL AND trim(coalesce(referred_by, '')) <> ''
+        WHERE referred_by_employee_id IS NULL AND NOT referral_external AND trim(coalesce(referred_by, '')) <> ''
         ORDER BY created_at DESC`,
     ),
     pool.query("SELECT norm_text, external FROM referral_text_decisions"),
@@ -172,7 +172,7 @@ async function unmatchedGroups() {
 
 async function linkNorm(norm: string, employeeId: number): Promise<number> {
   const r = await pool.query(
-    `SELECT id, referred_by FROM candidates WHERE referred_by_employee_id IS NULL AND trim(coalesce(referred_by, '')) <> ''`,
+    `SELECT id, referred_by FROM candidates WHERE referred_by_employee_id IS NULL AND NOT referral_external AND trim(coalesce(referred_by, '')) <> ''`,
   );
   const ids = r.rows.filter((c: any) => referralKey(c.referred_by) === norm).map((c: any) => c.id);
   if (!ids.length) return 0;
