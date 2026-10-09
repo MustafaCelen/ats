@@ -32,7 +32,7 @@ type Data = {
   today: string;
   checks: Record<string, { at: string; by: string }>;
   weeks: WeekRow[];
-  totals: { activities: number };
+  weekEnd: string | null;   // içinde bulunulan haftanın pazarı
   preview?: boolean;
 };
 
@@ -60,7 +60,6 @@ export function AdvisorRotaView({ token, onWideChange }: { token: string; onWide
   const [errMsg, setErrMsg] = useState<string | null>(null);
   const [loginErr, setLoginErr] = useState<string | null>(null);
   const [redirecting, setRedirecting] = useState(false);
-  const [tab, setTab] = useState<number>(1);
   const [notice, setNotice] = useState<string | null>(null);
   const [view, setView] = useState<ViewMode>(initialViewMode);
   const changeView = (v: ViewMode) => {
@@ -71,7 +70,7 @@ export function AdvisorRotaView({ token, onWideChange }: { token: string; onWide
   useEffect(() => {
     onWideChange?.(state === "ready" && view === "takvim");
     return () => onWideChange?.(false);
-  }, [state, view, tab, onWideChange]);
+  }, [state, view, onWideChange]);
 
   useEffect(() => {
     const e = new URLSearchParams(window.location.search).get("error");
@@ -87,7 +86,6 @@ export function AdvisorRotaView({ token, onWideChange }: { token: string; onWide
         if (!r.ok) { setErrMsg((await r.json().catch(() => ({}))).message ?? null); setState("error"); return; }
         const d: Data = await r.json();
         setData(d);
-        if (first) setTab(Math.min(UK_PROGRAM_WEEKS, Math.max(1, d.currentWeek)));
         setState("ready");
       })
       .catch(() => setState("error"));
@@ -164,9 +162,10 @@ export function AdvisorRotaView({ token, onWideChange }: { token: string; onWide
     );
   }
 
-  const doneCount = Object.keys(data.checks).length;
-  const currentRow = data.currentWeek >= 1 && data.currentWeek <= UK_PROGRAM_WEEKS ? data.weeks[data.currentWeek - 1] : null;
-  const pct = Math.round((doneCount / data.totals.activities) * 100);
+  // Danışman yalnızca içinde bulunduğu haftayı görür; sunucu da yalnızca o haftayı döner.
+  const inProgram = data.currentWeek >= 1 && data.currentWeek <= UK_PROGRAM_WEEKS;
+  const currentRow = inProgram ? data.weeks.find((w) => w.week === data.currentWeek) ?? null : null;
+  const pct = currentRow && currentRow.totalActivities ? Math.round((currentRow.doneActivities / currentRow.totalActivities) * 100) : 0;
 
   return (
     <>
@@ -178,15 +177,15 @@ export function AdvisorRotaView({ token, onWideChange }: { token: string; onWide
       <div className="rounded-2xl bg-[#24064f] text-white p-5 shadow-sm">
         <p className="text-[10px] tracking-widest text-white/70">ÜRETKENLİK KOÇLUĞU PROGRAMI</p>
         <h2 className="text-xl font-extrabold mt-0.5">45+45 Başarı Rotası</h2>
-        <p className="text-sm text-white/75 mt-1">Koçunuz: {data.participant.coachName ?? "—"} · Başlangıç {fmt(data.participant.programStart)}</p>
+        <p className="text-sm text-white/75 mt-1">Koçunuz: {data.participant.coachName ?? "—"} · Başlangıç {fmt(data.week1Monday)}</p>
         <div className="grid grid-cols-3 gap-2 mt-4">
           <div className="rounded-xl bg-white/10 px-3 py-2">
             <p className="text-[10px] text-white/70">Şu an</p>
             <p className="font-bold text-sm">{data.currentWeek === 0 ? "Başlamadı" : data.currentWeek > UK_PROGRAM_WEEKS ? "Tamamlandı" : `${data.currentWeek}. hafta`}</p>
           </div>
           <div className="rounded-xl bg-white/10 px-3 py-2">
-            <p className="text-[10px] text-white/70">Aktivite</p>
-            <p className="font-bold text-sm">{doneCount}/{data.totals.activities}</p>
+            <p className="text-[10px] text-white/70">Son giriş</p>
+            <p className="font-bold text-sm">{data.weekEnd ? `Pazar ${fmt(data.weekEnd).slice(0, 5)} 23:59` : "—"}</p>
           </div>
           <div className="rounded-xl bg-white/10 px-3 py-2">
             <p className="text-[10px] text-white/70">Bu hafta</p>
@@ -198,22 +197,33 @@ export function AdvisorRotaView({ token, onWideChange }: { token: string; onWide
         <div className="mt-3 h-1.5 rounded-full bg-white/15 overflow-hidden"><div className="h-full bg-amber-300" style={{ width: `${pct}%` }} /></div>
       </div>
 
-      <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
-        {data.weeks.map((w) => (
-          <button
-            key={w.week}
-            onClick={() => { setTab(w.week); setNotice(null); }}
-            className={`shrink-0 h-9 px-3 rounded-xl text-sm font-medium flex items-center gap-1.5 ring-1 transition-colors ${tab === w.week ? "bg-primary text-primary-foreground ring-primary" : "bg-card ring-border text-muted-foreground"}`}
-          >
-            {w.week}. Hafta
-            {data.currentWeek === w.week && !w.confirmedAt
-              ? <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
-              : <Lock className="h-3 w-3 opacity-70" />}
-          </button>
-        ))}
-      </div>
+      {!inProgram && (
+        <Card>
+          <div className="text-center py-4">
+            <RouteIcon className="h-8 w-8 text-[#24064f] mx-auto mb-2" />
+            {data.currentWeek === 0 ? (
+              <>
+                <p className="font-semibold">Programınız {fmt(data.week1Monday)} Pazartesi başlıyor.</p>
+                <p className="text-sm text-muted-foreground mt-1">İlk haftanız o gün burada açılacak.</p>
+              </>
+            ) : (
+              <>
+                <p className="font-semibold">Tebrikler, 6 haftalık programı tamamladınız! 🎉</p>
+                <p className="text-sm text-muted-foreground mt-1">Değerlendirmeniz için koçunuzla görüşebilirsiniz.</p>
+              </>
+            )}
+          </div>
+        </Card>
+      )}
 
-      <div className="flex justify-end">
+      {inProgram && (
+        <div className="rounded-xl bg-primary/5 border border-primary/15 px-3 py-2.5 text-xs text-foreground/80">
+          <b>{data.currentWeek}. hafta</b> açık. Girişlerinizi <b>Pazar {fmt(data.weekEnd)} 23:59</b>'a kadar yapabilirsiniz;
+          pazartesi otomatik olarak bir sonraki haftaya geçilir.
+        </div>
+      )}
+
+      {inProgram && <div className="flex justify-end">
         <div className="inline-flex rounded-xl bg-card ring-1 ring-border p-1 gap-1">
           {([["liste", "Liste", List], ["takvim", "Takvim", CalendarDays]] as const).map(([k, label, Icon]) => (
             <button
@@ -225,11 +235,11 @@ export function AdvisorRotaView({ token, onWideChange }: { token: string; onWide
             </button>
           ))}
         </div>
-      </div>
+      </div>}
 
       {notice && <div className="rounded-xl bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">{notice}</div>}
 
-      <WeekView token={token} data={data} week={tab} onToggle={toggle} onSaved={() => load()} readOnly={!!data.preview} view={view} />
+      {inProgram && <WeekView token={token} data={data} week={data.currentWeek} onToggle={toggle} onSaved={() => load()} readOnly={!!data.preview} view={view} />}
     </>
   );
 }
@@ -237,7 +247,7 @@ export function AdvisorRotaView({ token, onWideChange }: { token: string; onWide
 function WeekView({ token, data, week, onToggle, onSaved, readOnly = false, view = "liste" }: {
   token: string; data: Data; week: number; onToggle: (id: string, done: boolean) => void; onSaved: () => void; readOnly?: boolean; view?: ViewMode;
 }) {
-  const row = data.weeks[week - 1];
+  const row = data.weeks.find((w) => w.week === week)!;
   const confirmed = !!row.confirmedAt;
   const monday = data.week1Monday ? ukAddDays(data.week1Monday, (week - 1) * 7) : null;
   // Yalnızca içinde bulunulan hafta düzenlenebilir (sunucu da aynı kuralı uygular).

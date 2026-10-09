@@ -368,6 +368,10 @@ export async function ensureSchema(): Promise<void> {
     -- manual: admin ekledi | auto: profilde ÜK koçu atandı (sonraki pazartesi başlar)
     -- | backfill: eski sürümün toplu aktarımı (artık üretilmiyor; kullanılmayanlar aşağıda temizlenir).
     ALTER TABLE uk_program_enrollments ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'manual';
+    -- Program başlangıcı yalnızca pazartesi: eski kayıtları o haftanın pazartesisine çek (idempotent).
+    UPDATE uk_program_enrollments
+       SET start_date = to_char(date_trunc('week', start_date::date), 'YYYY-MM-DD')
+     WHERE start_date ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' AND extract(isodow FROM start_date::date) <> 1;
     -- Hoş geldin maili (manuel tetiklenir): son gönderim.
     ALTER TABLE uk_program_enrollments ADD COLUMN IF NOT EXISTS welcome_sent_at TIMESTAMP;
     ALTER TABLE uk_program_enrollments ADD COLUMN IF NOT EXISTS welcome_sent_by_user_id INTEGER;

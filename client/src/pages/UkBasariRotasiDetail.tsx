@@ -8,6 +8,8 @@ import { ArrowLeft, CheckCircle2, Route as RouteIcon, Trophy, Lock, Link2, Eye, 
 import { UkWelcomeEmailDialog } from "@/components/UkWelcomeEmailDialog";
 import { UK_PROGRAM_WEEKS, UK_TARGET_ITEMS } from "@shared/uk-program";
 import { UkWeekGrid, UkGridLegend } from "@/components/UkWeekGrid";
+import { UkMondaySelect, localTodayYmd } from "@/components/UkMondaySelect";
+import { ukStartForCurrentWeek } from "@shared/uk-program";
 
 type WeekRow = {
   week: number; monday: string | null; totalActivities: number; doneActivities: number;
@@ -392,23 +394,44 @@ export default function UkBasariRotasiDetail() {
               <div className="rounded-lg bg-white/10 px-4 py-2.5 min-w-[150px]">
                 <p className="text-[11px] text-white/70">Program başlangıcı</p>
                 {data.canEdit ? (
-                  <div className="flex items-center gap-1.5 mt-0.5">
-                    <input
-                      type="date" value={startInput} onChange={(e) => setStartInput(e.target.value)}
-                      className="bg-white/90 text-foreground rounded px-1.5 py-0.5 text-sm"
+                  <div className="mt-0.5">
+                    <UkMondaySelect
+                      value={startInput}
+                      onChange={(v) => { setStartInput(v); saveStart.mutate(v); }}
+                      className="bg-white/90 text-foreground rounded px-1.5 py-0.5 text-sm max-w-[260px]"
                     />
-                    {startInput !== (p.ukStartDate ?? "") && (
-                      <button onClick={() => saveStart.mutate(startInput)} className="text-xs font-semibold bg-amber-300 text-[#24064f] rounded px-2 py-1">Kaydet</button>
-                    )}
                   </div>
                 ) : <p className="font-semibold">{fmtYmd(p.programStart)}</p>}
 
               </div>
               <div className="rounded-lg bg-white/10 px-4 py-2.5">
                 <p className="text-[11px] text-white/70">Şu an</p>
-                <p className="font-semibold">
-                  {data.currentWeek === 0 ? "Başlamadı" : data.currentWeek > UK_PROGRAM_WEEKS ? "Tamamlandı" : `${data.currentWeek}. hafta`}
-                </p>
+                {data.canEdit ? (
+                  // Koç danışmanı başka haftaya taşıyabilir: başlangıç, bugün seçilen haftada
+                  // kalacak şekilde pazartesiye kaydırılır.
+                  <select
+                    value={data.currentWeek >= 1 && data.currentWeek <= UK_PROGRAM_WEEKS ? String(data.currentWeek) : ""}
+                    onChange={(e) => {
+                      if (!e.target.value) return;
+                      const v = ukStartForCurrentWeek(localTodayYmd(), Number(e.target.value));
+                      setStartInput(v);
+                      saveStart.mutate(v);
+                    }}
+                    className="mt-0.5 bg-white/90 text-foreground rounded px-1.5 py-0.5 text-sm"
+                    title="Danışmanın içinde bulunduğu haftayı değiştir"
+                  >
+                    {!(data.currentWeek >= 1 && data.currentWeek <= UK_PROGRAM_WEEKS) && (
+                      <option value="">{data.currentWeek === 0 ? "Başlamadı" : "Tamamlandı"}</option>
+                    )}
+                    {Array.from({ length: UK_PROGRAM_WEEKS }, (_, i) => i + 1).map((w) => (
+                      <option key={w} value={w}>{w}. hafta</option>
+                    ))}
+                  </select>
+                ) : (
+                  <p className="font-semibold">
+                    {data.currentWeek === 0 ? "Başlamadı" : data.currentWeek > UK_PROGRAM_WEEKS ? "Tamamlandı" : `${data.currentWeek}. hafta`}
+                  </p>
+                )}
               </div>
               <div className="rounded-lg bg-white/10 px-4 py-2.5">
                 <p className="text-[11px] text-white/70">Aktivite</p>

@@ -13,7 +13,7 @@ import { buildUkWelcomeEmail } from "./uk-welcome-email";
 import { publicBaseUrl } from "./whatsapp";
 import {
   UK_ACTIVITIES, UK_ACTIVITY_IDS, UK_PROGRAM_WEEKS, computeUkActivityScore,
-  ukProgramWeek1Monday, ukAddDays, ukCurrentWeek, type UkScoreKey,
+  ukProgramWeek1Monday, ukAddDays, ukCurrentWeek, ukIsMonday, type UkScoreKey,
 } from "@shared/uk-program";
 
 const scoreOfActivity = new Map(UK_ACTIVITIES.map((a) => [a.id, a.score] as const));
@@ -242,13 +242,24 @@ function registerAdvisorUkRoutes(app: Express) {
       if (!p) return;
       const prog = await buildProgram(p);
       // Danışmana iç bilgi gösterme: işaretleyen personel adı yerine yalnızca rol.
-      const checks = Object.fromEntries(Object.entries(prog.checks as Record<string, { at: string; by: string | null }>).map(([k, v]) =>
-        [k, { at: v.at, by: v.by === "Danışman" ? "Siz" : "Koçunuz" }]));
-      const weeks = prog.weeks.map((w) => ({ ...w, confirmedBy: w.confirmedAt ? "Koçunuz" : null }));
+      // Danışman yalnızca içinde bulunduğu haftayı görür (onaylı karar): diğer haftaların
+      // işaretleri ve gerçekleşenleri yanıta hiç konmaz. Hafta pazartesi 00:00 – pazar 23:59
+      // (İstanbul); koç onayı beklenmeden pazartesi bir sonraki haftaya geçilir.
+      const cw = prog.currentWeek;
+      const prefix = `w${cw}-`;
+      const checks = Object.fromEntries(
+        Object.entries(prog.checks as Record<string, { at: string; by: string | null }>)
+          .filter(([k]) => cw >= 1 && cw <= UK_PROGRAM_WEEKS && k.startsWith(prefix))
+          .map(([k, v]) => [k, { at: v.at, by: v.by === "Danışman" ? "Siz" : "Koçunuz" }]));
+      const weeks = prog.weeks
+        .filter((w) => w.week === cw)
+        .map((w) => ({ ...w, confirmedBy: w.confirmedAt ? "Koçunuz" : null }));
+      const weekEnd = prog.week1Monday && cw >= 1 && cw <= UK_PROGRAM_WEEKS
+        ? ukAddDays(prog.week1Monday, (cw - 1) * 7 + 6) : null;
       const realIds: number[] = (req.session as any)?.advisorEmployeeIds ?? [];
       // Puan/skor danışmana gösterilmez (onaylı karar) — yanıttan da çıkarılır.
-      const { score: _score, ...rest } = prog;
-      res.json({ ...rest, checks, weeks, today: todayYmd(), preview: !realIds.includes(p.employeeId) });
+      const { score: _score, totals: _totals, ...rest } = prog;
+      res.json({ ...rest, checks, weeks, weekEnd, today: todayYmd(), preview: !realIds.includes(p.employeeId) });
     } catch (err: any) {
       console.error("[GET advisor uk-program]", err);
       res.status(500).json({ message: "Veriler yüklenemedi." });
@@ -379,7 +390,7 @@ export function registerUkProgramRoutes(app: Express) {
       const coachUserId = req.body?.coachUserId ? Number(req.body.coachUserId) : null;
       const startDate = String(req.body?.startDate ?? "");
       if (!Number.isInteger(employeeId)) return res.status(400).json({ error: "Danışman seçin." });
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) return res.status(400).json({ error: "Başlangıç tarihi YYYY-MM-DD olmalı." });
+      if (!ukIsMonday(startDate)) return res.status(400).json({ error: "Program başlangıcı pazartesi olmalı." });
       const p = await loadParticipant(employeeId);
       if (!p) return res.status(404).json({ error: "Danışman bulunamadı." });
       if (p.inProgram) return res.status(409).json({ error: `${p.name} zaten programda.` });
@@ -583,7 +594,7 @@ export function registerUkProgramRoutes(app: Express) {
       if (!p) return res.status(404).json({ error: "Danışman bulunamadı." });
       if (!canEdit(req, p)) return res.status(403).json({ error: "Yalnızca danışmanın ÜK koçu veya admin değiştirebilir." });
       const v = String(req.body?.ukStartDate ?? "");
-      if (v && !/^\d{4}-\d{2}-\d{2}$/.test(v)) return res.status(400).json({ error: "Tarih YYYY-MM-DD olmalı." });
+      if (v && !ukIsMonday(v)) return res.status(400).json({ error: "Program başlangıcı pazartesi olmalı." });
       if (!p.inProgram) return res.status(404).json({ error: "Bu danışman programda değil." });
       if (!v) return res.status(400).json({ error: "Başlangıç tarihi boş olamaz." });
       await pool.query("UPDATE uk_program_enrollments SET start_date = $2 WHERE employee_id = $1 AND removed_at IS NULL", [p.employeeId, v]);

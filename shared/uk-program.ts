@@ -218,3 +218,21 @@ export function ukCurrentWeek(week1Monday: string, todayYmd: string): number {
   if (diff < 0) return 0;
   return Math.min(UK_PROGRAM_WEEKS + 1, Math.floor(diff / 7) + 1);
 }
+
+// Program başlangıcı yalnızca pazartesi olabilir.
+export function ukIsMonday(ymd: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(ymd) && new Date(ymd + "T00:00:00Z").getUTCDay() === 1;
+}
+
+// Bugün (todayYmd) belirtilen haftada olacak şekilde 1. hafta pazartesisi.
+export function ukStartForCurrentWeek(todayYmd: string, week: number): string {
+  return ukAddDays(ukProgramWeek1Monday(todayYmd), -(week - 1) * 7);
+}
+
+// Seçim listesi için pazartesiler (bugünün haftasından -before … +after hafta).
+export function ukMondayOptions(todayYmd: string, before = 8, after = 12): string[] {
+  const thisMonday = ukProgramWeek1Monday(todayYmd);
+  const out: string[] = [];
+  for (let i = -before; i <= after; i++) out.push(ukAddDays(thisMonday, i * 7));
+  return out;
+}

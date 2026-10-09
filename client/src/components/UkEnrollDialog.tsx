@@ -6,6 +6,7 @@ import { EmployeePicker } from "@/components/EmployeePicker";
 import { useToast } from "@/hooks/use-toast";
 import { Info, Loader2 } from "lucide-react";
 import { sendUkWelcomeEmail } from "@/components/UkWelcomeEmailDialog";
+import { UkMondaySelect, nextMondayYmd } from "@/components/UkMondaySelect";
 
 // 45+45 Başarı Rotası'na manuel danışman ekleme (admin). ÜK işaretine ve ÜK payına
 // dokunmaz; katılım uk_program_enrollments'ta tutulur (bkz. server/uk-program.ts).
@@ -20,7 +21,7 @@ export function UkEnrollDialog({
   const { toast } = useToast();
   const [employeeId, setEmployeeId] = useState<number | null>(null);
   const [coachId, setCoachId] = useState<string>("");
-  const [startDate, setStartDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [startDate, setStartDate] = useState(() => nextMondayYmd());
   const [saving, setSaving] = useState(false);
   const [sendWelcome, setSendWelcome] = useState(true);
 
@@ -98,11 +99,12 @@ export function UkEnrollDialog({
           </div>
           <div className="space-y-1.5">
             <label className="text-sm font-medium">Program başlangıcı</label>
-            <input
-              type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)}
-              className="w-full border border-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+            <UkMondaySelect
+              value={startDate}
+              onChange={setStartDate}
+              className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/40"
             />
-            <p className="text-[11px] text-muted-foreground">1. hafta bu tarihin haftasının pazartesi günü başlar.</p>
+            <p className="text-[11px] text-muted-foreground">Program her zaman pazartesi başlar; haftalar pazar 23:59'da kapanır.</p>
           </div>
           <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
             <input type="checkbox" checked={sendWelcome} onChange={(e) => setSendWelcome(e.target.checked)} />
