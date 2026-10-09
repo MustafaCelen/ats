@@ -42,6 +42,7 @@ import PublicListing from "@/pages/PublicListing";
 import AdvisorSelfService from "@/pages/AdvisorSelfService";
 import Teams from "@/pages/Teams";
 import BorclularRaporu from "@/pages/BorclularRaporu";
+import ReferansEslestirme from "@/pages/ReferansEslestirme";
 import HedefGirisModulu from "@/pages/HedefGirisModulu";
 import FonzipPreview from "@/pages/FonzipPreview";
 import WhatsappBulk from "@/pages/WhatsappBulk";
@@ -114,6 +115,7 @@ function Router() {
       <Route path="/campaigns/:id" component={() => <ProtectedRoute><CampaignDetail /></ProtectedRoute>} />
       <Route path="/pl-report" component={() => <ProtectedRoute adminOnly><PLReport /></ProtectedRoute>} />
       <Route path="/teams" component={() => <ProtectedRoute adminOnly><Teams /></ProtectedRoute>} />
+      <Route path="/referans-eslestirme" component={() => <ProtectedRoute noAssistant><ReferansEslestirme /></ProtectedRoute>} />
       <Route path="/borclular-raporu" component={() => <ProtectedRoute adminOnly><BorclularRaporu /></ProtectedRoute>} />
       <Route path="/hedef-giris" component={() => <ProtectedRoute adminOnly><HedefGirisModulu /></ProtectedRoute>} />
       <Route path="/fonzip" component={() => <ProtectedRoute adminOnly><FonzipPreview /></ProtectedRoute>} />

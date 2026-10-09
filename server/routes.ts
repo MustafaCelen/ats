@@ -16,6 +16,7 @@ import { isFonzipConfigured, fetchFonzipPreview, fetchFonzipUsers, fetchFonzipDe
 import { isMetaConfigured, isMetaWebhookConfigured, metaConfig, syncMetaCampaigns, fetchMetaLead, mapLeadToCandidate, verifyWebhookSignature, listLeadForms, backfillLeadsFromMeta } from "./meta";
 import { isGoogleFormsConfigured, syncGoogleFormLeads, getGoogleFormsSpreadsheetId } from "./google-forms";
 import { registerUkProgramRoutes, isInUkProgram, autoEnrollOnCoachAssigned } from "./uk-program";
+import { registerReferralRoutes, recordReferralDecision } from "./referral";
 
 // Scoping helper:
 //   admin      → undefined (all jobs)
@@ -86,6 +87,7 @@ async function sendClosingNotifications(_closingId: number, _agentIdFilter?: num
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
   registerUkProgramRoutes(app);
+  registerReferralRoutes(app);
 
   // Seed default admin on startup
   await storage.seedAdminIfEmpty();
@@ -1486,6 +1488,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         const dup = await storage.getCandidateByPhone(input.phone);
         if (dup) return res.status(409).json({ message: `Bu telefon numarası zaten kayıtlı: ${dup.name}` });
       }
+      if (req.body?.referralExternal === true && input.referredBy) {
+        await recordReferralDecision(input.referredBy, null, req.user!.id);
+      }
       const candidate = await storage.createCandidate({ ...input, createdByUserId: req.user!.id });
       res.status(201).json(candidate);
     } catch (err) {
@@ -1503,6 +1508,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         const dup = await storage.getCandidateByPhone(input.phone);
         if (dup && dup.id !== Number(req.params.id))
           return res.status(409).json({ message: `Bu telefon numarası zaten kayıtlı: ${dup.name}` });
+      }
+      if (req.body?.referralExternal === true && input.referredBy) {
+        await recordReferralDecision(input.referredBy, null, req.user!.id);
       }
       const candidate = await storage.updateCandidate(Number(req.params.id), input);
       if (!candidate) return res.status(404).json({ message: "Candidate not found" });

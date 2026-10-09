@@ -12,7 +12,7 @@ import { useCandidate, useUpdateCandidate, useDeleteCandidate } from "@/hooks/us
 import { useApplications } from "@/hooks/use-applications";
 import { EmployeeEditDialog } from "@/components/EmployeeEditDialog";
 import { EmployeeDebtPanel, EmployeeDebtSummaryLine, useEmployeeFonzipDebt, hasDebt } from "@/components/EmployeeDebtPanel";
-import { ReferralAdvisorField } from "@/components/ReferralAdvisorField";
+import { ReferralField, useReferralConfirm } from "@/components/ReferralField";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ScoreBadge, ScoreBar } from "@/components/ScoreBadge";
 import { MentionTextarea } from "@/components/MentionTextarea";
@@ -758,7 +758,12 @@ export default function CandidateDetail() {
                 <div className="rounded-xl border border-border bg-card p-5 shadow-sm space-y-3">
                   <h2 className="text-sm font-semibold flex items-center gap-2"><Users className="h-4 w-4 text-primary" />Diğer</h2>
                   {candidate.referredBy && (
-                    <InfoRow icon={<Users className="h-3.5 w-3.5" />} label="Referans">{candidate.referredBy}</InfoRow>
+                    <InfoRow icon={<Users className="h-3.5 w-3.5" />} label="Referans">
+                      {candidate.referredBy}
+                      {(candidate as any).referredByEmployeeId != null && (
+                        <span className="ml-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200" title="Referans danışmana bağlı (katkı payı)">Danışman</span>
+                      )}
+                    </InfoRow>
                   )}
                   {candidate.socialMedia && (
                     <InfoRow icon={<Globe className="h-3.5 w-3.5" />} label="Sosyal Medya">
@@ -1480,6 +1485,7 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
     experience: String(candidate.experience ?? 0),
     referredBy: candidate.referredBy ?? "",
     referredByEmployeeId: ((candidate as any).referredByEmployeeId ?? null) as number | null,
+    referralExternal: false,
     socialMedia: candidate.socialMedia ?? "",
     resumeText: candidate.resumeText ?? "",
     expectedStartMonth: candidate.expectedStartMonth ?? "",
@@ -1488,7 +1494,8 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
   const [languages, setLanguages] = useState<string[]>(candidate.languages ?? []);
   const f = (k: string, v: string) => setForm((p) => ({ ...p, [k]: v }));
 
-  const handleSave = () => {
+  const { confirm: confirmReferral, dialog: referralDialog } = useReferralConfirm();
+  const handleSave = async () => {
     if (!form.name.trim()) {
       toast({ title: "Ad zorunludur", variant: "destructive" }); return;
     }
@@ -1507,6 +1514,8 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
     if (isNaN(expNum) || expNum < 0) {
       toast({ title: "Deneyim geçerli bir sayı olmalıdır (0 veya üzeri)", variant: "destructive" }); return;
     }
+    const ref = await confirmReferral({ text: form.referredBy, employeeId: form.referredByEmployeeId, external: form.referralExternal });
+    if (!ref) return;
     update({
       id: candidate.id,
       data: {
@@ -1524,7 +1533,8 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
         emergencyContactPhone: form.emergencyContactPhone || undefined,
         office: (form as any).office || undefined,
         referredBy: form.referredBy || undefined,
-        referredByEmployeeId: form.referredByEmployeeId,
+        referredByEmployeeId: ref.employeeId,
+        referralExternal: ref.external,
         socialMedia: form.socialMedia || undefined,
         resumeText: form.resumeText || undefined,
         expectedStartMonth: form.expectedStartMonth || undefined,
@@ -1670,13 +1680,11 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
                 <Input type="month" value={form.expectedStartMonth} onChange={(e) => f("expectedStartMonth", e.target.value)} data-testid="input-edit-expected-start-month" />
               </Field>
               <Field label="Referans (kim tanıttı?)">
-                <Input value={form.referredBy} onChange={(e) => f("referredBy", e.target.value)} placeholder="Ad Soyad veya kaynak" />
-              </Field>
-              <Field label="Referans Danışman (Katkı Payı)">
-                <ReferralAdvisorField
-                  value={form.referredByEmployeeId}
-                  onChange={(id, name) => setForm((p) => ({ ...p, referredByEmployeeId: id, referredBy: p.referredBy || name || "" }))}
+                <ReferralField
+                  value={{ text: form.referredBy, employeeId: form.referredByEmployeeId, external: form.referralExternal }}
+                  onChange={(v) => setForm((p) => ({ ...p, referredBy: v.text, referredByEmployeeId: v.employeeId, referralExternal: v.external }))}
                 />
+                {referralDialog}
               </Field>
               <div className="col-span-2">
                 <Field label="Notlar / Özet">

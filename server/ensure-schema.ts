@@ -398,6 +398,15 @@ export async function ensureSchema(): Promise<void> {
       updated_at TIMESTAMP DEFAULT NOW(),
       UNIQUE (employee_id, week)
     );
+    -- Referans metni kararları (normalize metin → danışman / dış referans). Bkz. server/referral.ts
+    CREATE TABLE IF NOT EXISTS referral_text_decisions (
+      norm_text TEXT PRIMARY KEY,
+      sample_text TEXT,
+      employee_id INTEGER,
+      external BOOLEAN NOT NULL DEFAULT FALSE,
+      decided_by_user_id INTEGER,
+      decided_at TIMESTAMP DEFAULT NOW()
+    );
   `;
   try {
     await pool.query(sql);

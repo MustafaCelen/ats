@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Users, Briefcase, BarChart2, ChevronRight, Menu, X,
   Calendar, Shield, LogOut, ClipboardList, UserCheck, KanbanSquare, DollarSign, GraduationCap,
   Receipt, TrendingUp, Building2, Trophy, ShieldAlert, Users2, Puzzle, BarChart3, Copy, Megaphone,
-  MessageCircle, MapPin, Target, UserPlus, AlertCircle, Route as RouteIcon,
+  MessageCircle, MapPin, Target, UserPlus, AlertCircle, Route as RouteIcon, Link2,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { useState } from "react";
@@ -67,6 +67,7 @@ const recruitingGroup: NavGroup = {
     { icon: Calendar,      label: "Randevular",   href: "/interviews" },
     { icon: KanbanSquare,  label: "Onboarding",   href: "/onboarding" },
     { icon: ClipboardList, label: "Görevler",     href: "/tasks"      },
+    { icon: Link2,         label: "Referans Eşleştirme", href: "/referans-eslestirme" },
   ],
 };
 

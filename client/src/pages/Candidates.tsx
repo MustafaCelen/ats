@@ -24,7 +24,7 @@ import {
 } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 import { PhoneInput } from "@/components/PhoneInput";
-import { ReferralAdvisorField } from "@/components/ReferralAdvisorField";
+import { ReferralField, useReferralConfirm } from "@/components/ReferralField";
 import { composePhone, isValidPhoneForCountry } from "@/lib/phone";
 import { DEFAULT_COUNTRY, COUNTRY_CODES } from "@/lib/countryCodes";
 
@@ -352,7 +352,9 @@ function CreateCandidateDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     referredBy: "", socialMedia: "", resumeText: "",
     office: "", campaignId: "",
     referredByEmployeeId: null as number | null,
+    referralExternal: false,
   });
+  const { confirm: confirmReferral, dialog: referralDialog } = useReferralConfirm();
 
   const { data: campaigns = [] } = useQuery<{ id: number; name: string; status: string }[]>({
     queryKey: ["/api/campaigns"],
@@ -371,13 +373,13 @@ function CreateCandidateDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const hasJobSelected = selectedJobId !== "none";
 
   const resetForm = () => {
-    setForm({ name: "", email: "", phone: "", category: "", currentBrand: "", licenseStatus: "unlicensed", licenseNumber: "", city: "", district: "", experience: "0", referredBy: "", socialMedia: "", resumeText: "", office: "", campaignId: "", referredByEmployeeId: null });
+    setForm({ name: "", email: "", phone: "", category: "", currentBrand: "", licenseStatus: "unlicensed", licenseNumber: "", city: "", district: "", experience: "0", referredBy: "", socialMedia: "", resumeText: "", office: "", campaignId: "", referredByEmployeeId: null, referralExternal: false });
     setSpecialization([]); setLanguages(["Türkçe"]); setSelectedJobId("none");
     setPhoneCountry(DEFAULT_COUNTRY.iso2);
     setIvDate(""); setIvStart(""); setIvEnd("");
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!form.name.trim()) { toast({ title: "Ad zorunludur", variant: "destructive" }); return; }
     if (!form.category) { toast({ title: "Kategori (K0/K1/K2) zorunludur", variant: "destructive" }); return; }
     if (!form.phone.trim()) { toast({ title: "Telefon zorunludur", variant: "destructive" }); return; }
@@ -394,6 +396,10 @@ function CreateCandidateDialog({ open, onOpenChange }: { open: boolean; onOpenCh
       toast({ title: "Randevu saatlerini giriniz", variant: "destructive" }); return;
     }
 
+    // Referans danışmana benziyorsa kaydetmeden önce sorulur (vazgeçilirse kaydedilmez).
+    const ref = await confirmReferral({ text: form.referredBy, employeeId: form.referredByEmployeeId, external: form.referralExternal });
+    if (!ref) return;
+
     mutate({
       name: form.name.trim(),
       email: form.email.trim() || undefined,
@@ -409,7 +415,8 @@ function CreateCandidateDialog({ open, onOpenChange }: { open: boolean; onOpenCh
       languages,
       experience: parseInt(form.experience) || 0,
       referredBy: form.referredBy || undefined,
-      referredByEmployeeId: form.referredByEmployeeId ?? undefined,
+      referredByEmployeeId: ref.employeeId ?? undefined,
+      referralExternal: ref.external,
       socialMedia: form.socialMedia || undefined,
       resumeText: form.resumeText || undefined,
       campaignId: form.campaignId ? Number(form.campaignId) : undefined,
@@ -610,13 +617,11 @@ function CreateCandidateDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                 </Select>
               </Field>
               <Field label="Referans (kim tanıttı?)">
-                <Input value={form.referredBy} onChange={(e) => f("referredBy", e.target.value)} placeholder="Ad Soyad veya kaynak" />
-              </Field>
-              <Field label="Referans Danışman (Katkı Payı)">
-                <ReferralAdvisorField
-                  value={form.referredByEmployeeId}
-                  onChange={(id, name) => setForm((p) => ({ ...p, referredByEmployeeId: id, referredBy: p.referredBy || name || "" }))}
+                <ReferralField
+                  value={{ text: form.referredBy, employeeId: form.referredByEmployeeId, external: form.referralExternal }}
+                  onChange={(v) => setForm((p) => ({ ...p, referredBy: v.text, referredByEmployeeId: v.employeeId, referralExternal: v.external }))}
                 />
+                {referralDialog}
               </Field>
               <Field label="Notlar / Özet">
                 <Textarea value={form.resumeText} onChange={(e) => f("resumeText", e.target.value)} rows={2} placeholder="Ek bilgiler..." data-testid="textarea-candidate-resume" />

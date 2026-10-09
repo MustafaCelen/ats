@@ -503,10 +503,21 @@ export class DatabaseStorage implements IStorage {
     return candidate;
   }
   async createCandidate(insertCandidate: InsertCandidate & { createdByUserId?: number }): Promise<Candidate> {
+    // Referans danışmanı seçilmemişse metinden bağla (önceki karar / kesin+tekil eşleşme).
+    if (insertCandidate.referredBy && typeof insertCandidate.referredByEmployeeId !== "number") {
+      const { resolveReferralEmployee } = await import("./referral");
+      const id = await resolveReferralEmployee(insertCandidate.referredBy);
+      if (id != null) insertCandidate = { ...insertCandidate, referredByEmployeeId: id };
+    }
     const [candidate] = await db.insert(candidates).values(insertCandidate).returning();
     return candidate;
   }
   async updateCandidate(id: number, update: Partial<InsertCandidate> & { assignedHiringManagerId?: number | null }): Promise<Candidate | undefined> {
+    if (update.referredBy && typeof update.referredByEmployeeId !== "number") {
+      const { resolveReferralEmployee } = await import("./referral");
+      const rid = await resolveReferralEmployee(update.referredBy);
+      if (rid != null) update = { ...update, referredByEmployeeId: rid };
+    }
     const [candidate] = await db.update(candidates).set(update).where(eq(candidates.id, id)).returning();
     return candidate;
   }
