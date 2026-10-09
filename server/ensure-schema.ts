@@ -376,14 +376,6 @@ export async function ensureSchema(): Promise<void> {
     ALTER TABLE uk_program_enrollments ADD COLUMN IF NOT EXISTS welcome_sent_at TIMESTAMP;
     ALTER TABLE uk_program_enrollments ADD COLUMN IF NOT EXISTS welcome_sent_by_user_id INTEGER;
 
-    -- ÜK işaretli danışmanlar programa toplu taşınmaz (onaylı karar, 2026-10-09): katılım
-    -- yalnızca koç ataması veya manuel ekleme ile olur. Önceki sürümün tek seferlik
-    -- aktarımı bir ortamda çalıştıysa, o yolla eklenip hiç kullanılmamış kayıtlar temizlenir.
-    -- (Artık "backfill" kaydı üretilmediği için fiilen bir kez etkili olur.)
-    DELETE FROM uk_program_enrollments en
-     WHERE en.source = 'backfill'
-       AND NOT EXISTS (SELECT 1 FROM uk_program_checks k WHERE k.employee_id = en.employee_id)
-       AND NOT EXISTS (SELECT 1 FROM uk_program_weeks w WHERE w.employee_id = en.employee_id);
     -- Haftalık gerçekleşenler (manuel kısım) + koç onayı.
     CREATE TABLE IF NOT EXISTS uk_program_weeks (
       id SERIAL PRIMARY KEY,
@@ -398,6 +390,15 @@ export async function ensureSchema(): Promise<void> {
       updated_at TIMESTAMP DEFAULT NOW(),
       UNIQUE (employee_id, week)
     );
+    -- ÜK işaretli danışmanlar programa toplu taşınmaz (onaylı karar, 2026-10-09): katılım
+    -- yalnızca koç ataması veya manuel ekleme ile olur. Önceki sürümün tek seferlik
+    -- aktarımı bir ortamda çalıştıysa, o yolla eklenip hiç kullanılmamış kayıtlar temizlenir.
+    -- (Artık "backfill" kaydı üretilmediği için fiilen bir kez etkili olur.)
+    -- uk_program_weeks'e başvurduğu için o tablo oluşturulduktan SONRA çalışmalı.
+    DELETE FROM uk_program_enrollments en
+     WHERE en.source = 'backfill'
+       AND NOT EXISTS (SELECT 1 FROM uk_program_checks k WHERE k.employee_id = en.employee_id)
+       AND NOT EXISTS (SELECT 1 FROM uk_program_weeks w WHERE w.employee_id = en.employee_id);
     ALTER TABLE candidates ADD COLUMN IF NOT EXISTS referral_external BOOLEAN NOT NULL DEFAULT FALSE;
     -- Referans metni kararları (normalize metin → danışman / dış referans). Bkz. server/referral.ts
     CREATE TABLE IF NOT EXISTS referral_text_decisions (
