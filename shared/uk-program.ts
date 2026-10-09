@@ -53,21 +53,22 @@ export const UK_SCORE_ITEMS: { key: UkScoreKey; label: string; points: number }[
 // (hedefle aynı: 6 hafta sonunda 2 referans aday).
 export const UK_KATKI_PLANNED = 2;
 
-// Skor tablosu — hedef tarafı (2026-10-09 onaylı hedefler). Her kalem 10 puan, toplam 50.
+// Skor tablosu — hedef tarafı (2026-10-09 onaylı hedefler ve puan dağılımı, toplam 50).
 //  weekly: her hafta ayrı değerlendirilir (haftalık oran 1'de kesilir), 6 haftanın ortalaması.
 //  total : 6 haftanın toplamı program hedefiyle karşılaştırılır.
-// BHB hedefe dahil değil; yalnızca bilgi olarak gösterilir.
-export type UkTargetKey = "arama" | "randevu" | "tekYetki" | "kapanis" | "katkiPayi";
+// target null: hedef tutarı henüz verilmedi → gerçekleşen > 0 ise tam puan.
+export type UkTargetKey = "arama" | "randevu" | "tekYetki" | "kapanis" | "bhb" | "katkiPayi";
 export type UkTargetItem = {
   key: UkTargetKey; label: string; points: number;
-  source: "manual" | "auto"; mode: "weekly" | "total"; target: number; hint: string;
+  source: "manual" | "auto"; mode: "weekly" | "total"; target: number | null; hint: string;
 };
 export const UK_TARGET_ITEMS: readonly UkTargetItem[] = [
   { key: "arama",     label: "Arama",               points: 10, source: "manual", mode: "weekly", target: 50, hint: "Günde 10 arama (haftada 50)" },
-  { key: "randevu",   label: "Randevu",             points: 10, source: "manual", mode: "weekly", target: 1,  hint: "Haftada 1 randevu" },
-  { key: "tekYetki",  label: "Tek Yetki (Satılık)", points: 10, source: "manual", mode: "total",  target: 1,  hint: "6 hafta sonunda 1 satılık tek yetki" },
-  { key: "kapanis",   label: "Kapanış",             points: 10, source: "auto",   mode: "total",  target: 1,  hint: "6 hafta sonunda 1 kapanış (satılık veya kiralık)" },
-  { key: "katkiPayi", label: "Katkı Payı",          points: 10, source: "auto",   mode: "total",  target: 2,  hint: "6 hafta sonunda 2 referans aday" },
+  { key: "randevu",   label: "Randevu",             points: 8,  source: "manual", mode: "weekly", target: 1,  hint: "Haftada 1 randevu" },
+  { key: "tekYetki",  label: "Tek Yetki (Satılık)", points: 8,  source: "manual", mode: "total",  target: 1,  hint: "6 hafta sonunda 1 satılık tek yetki" },
+  { key: "kapanis",   label: "Kapanış",             points: 8,  source: "auto",   mode: "total",  target: 1,  hint: "6 hafta sonunda 1 kapanış (satılık veya kiralık)" },
+  { key: "bhb",       label: "BHB",                 points: 8,  source: "auto",   mode: "total",  target: null, hint: "Hedef tutar bekleniyor — şimdilik BHB oluşursa tam puan" },
+  { key: "katkiPayi", label: "Katkı Payı",          points: 8,  source: "auto",   mode: "total",  target: 2,  hint: "6 hafta sonunda 2 referans aday" },
 ];
 
 export type UkActivity = {
@@ -252,13 +253,16 @@ export function computeUkTargetScore(weeks: UkWeekActuals[]) {
   const rows = UK_TARGET_ITEMS.map((it) => {
     const vals = weeks.slice(0, UK_PROGRAM_WEEKS).map((w) => Math.max(0, Number(w[it.key]) || 0));
     const done = vals.reduce((s, v) => s + v, 0);
-    const ratio = it.mode === "weekly"
-      ? vals.reduce((s, v) => s + Math.min(1, v / it.target), 0) / UK_PROGRAM_WEEKS
-      : Math.min(1, done / it.target);
+    const t = it.target;
+    const ratio = t == null
+      ? (done > 0 ? 1 : 0)
+      : it.mode === "weekly"
+        ? vals.reduce((s, v) => s + Math.min(1, v / t), 0) / UK_PROGRAM_WEEKS
+        : Math.min(1, done / t);
     return {
-      ...it, done,
-      targetTotal: it.mode === "weekly" ? it.target * UK_PROGRAM_WEEKS : it.target,
-      weeksMet: it.mode === "weekly" ? vals.filter((v) => v >= it.target).length : null,
+      ...it, done: Math.round(done * 100) / 100,
+      targetTotal: t == null ? null : it.mode === "weekly" ? t * UK_PROGRAM_WEEKS : t,
+      weeksMet: it.mode === "weekly" && t != null ? vals.filter((v) => v >= t).length : null,
       earned: Math.round(it.points * ratio * 10) / 10,
     };
   });

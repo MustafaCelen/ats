@@ -26,7 +26,7 @@ type ProgramData = {
   weeks: WeekRow[];
   score: { rows: { key: string; label: string; points: number; planned: number; done: number; earned: number }[]; total: number; max: number };
   targetScore: {
-    rows: { key: string; label: string; points: number; source: "manual" | "auto"; mode: "weekly" | "total"; target: number; hint: string; done: number; targetTotal: number; weeksMet: number | null; earned: number }[];
+    rows: { key: string; label: string; points: number; source: "manual" | "auto"; mode: "weekly" | "total"; target: number | null; hint: string; done: number; targetTotal: number | null; weeksMet: number | null; earned: number }[];
     total: number; max: number;
   };
   totals: { activities: number; done: number };
@@ -206,7 +206,9 @@ function ScoreTable({ data }: { data: ProgramData }) {
                     <div className="mt-1 h-1 rounded-full bg-muted overflow-hidden"><div className="h-full bg-primary" style={{ width: `${pct}%` }} /></div>
                   </td>
                   <td className="px-3 py-2 text-right text-muted-foreground whitespace-nowrap">
-                    {r.done.toLocaleString("tr-TR")} / {r.targetTotal.toLocaleString("tr-TR")}
+                    {r.key === "bhb"
+                      ? <>{fmtTRY(r.done)} / {r.targetTotal == null ? "—" : fmtTRY(r.targetTotal)}</>
+                      : <>{r.done.toLocaleString("tr-TR")} / {r.targetTotal?.toLocaleString("tr-TR") ?? "—"}</>}
                     {r.weeksMet != null && <p className="text-[10px]">{r.weeksMet}/{UK_PROGRAM_WEEKS} hafta tuttu</p>}
                   </td>
                   <td className="px-3 py-2 text-right">{r.points}</td>
@@ -214,10 +216,6 @@ function ScoreTable({ data }: { data: ProgramData }) {
                 </tr>
               );
             })}
-            <tr className="border-t border-border text-muted-foreground">
-              <td className="px-4 py-2 text-xs" colSpan={2}>BHB <span className="text-[10px]">(bilgi, puana dahil değil)</span></td>
-              <td className="px-4 py-2 text-right text-xs" colSpan={2}>{fmtTRY(targetTotals.bhb)}</td>
-            </tr>
           </tbody>
           <tfoot className="bg-red-600 text-white">
             <tr>

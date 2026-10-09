@@ -264,8 +264,8 @@ function registerAdvisorUkRoutes(app: Express) {
       const { score: _score, targetScore, totals: _totals, ...rest } = prog;
       // Hedefler danışmana puansız gösterilir: 6 hafta sonu hedeflerinde ilerleme.
       const programTargets = targetScore.rows
-        .filter((r) => r.mode === "total")
-        .map((r) => ({ key: r.key, label: r.label, target: r.target, done: r.done, hint: r.hint }));
+        .filter((r) => r.mode === "total" && r.target != null)
+        .map((r) => ({ key: r.key, label: r.label, target: r.target as number, done: r.done, hint: r.hint }));
       res.json({ ...rest, checks, weeks, weekEnd, programTargets, today: todayYmd(), preview: !realIds.includes(p.employeeId) });
     } catch (err: any) {
       console.error("[GET advisor uk-program]", err);
@@ -513,7 +513,7 @@ export function registerUkProgramRoutes(app: Express) {
         const targetScore = computeUkTargetScore(Array.from({ length: UK_PROGRAM_WEEKS }, (_, i) => {
           const m = manualWeeks.find((x: any) => x.employee_id === row.id && x.week === i + 1);
           const a = auto?.[i + 1];
-          return { arama: m?.arama, randevu: m?.randevu, tekYetki: m?.tek_yetki, kapanis: a?.kapanis ?? 0, katkiPayi: a?.katkiPayi ?? 0 };
+          return { arama: m?.arama, randevu: m?.randevu, tekYetki: m?.tek_yetki, kapanis: a?.kapanis ?? 0, bhb: a?.bhb ?? 0, katkiPayi: a?.katkiPayi ?? 0 };
         })).total;
         const done: Partial<Record<UkScoreKey, number>> = {};
         for (const id of (row.ids ?? []) as string[]) {
