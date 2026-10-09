@@ -35,7 +35,7 @@ type Participant = {
 //  - auto: profilde ÜK koçu atandığında, bir sonraki haftanın pazartesisinden başlar
 //    (autoEnrollOnCoachAssigned). Koç profildekini izler (coach_user_id NULL).
 //  - manual: admin "Danışman Ekle" ile; koç/başlangıç programa özel.
-//  - backfill: kural değişmeden önce ÜK işaretli + koçlu olanlar (ensure-schema).
+//  - backfill: eski sürümün toplu aktarımı; artık üretilmez (ÜK işaretliler toplu taşınmaz).
 // employees.uretkenlik_koclugu ÜK payını etkilediği için programda kullanılmaz.
 const PARTICIPANT_FROM = `
        FROM employees e

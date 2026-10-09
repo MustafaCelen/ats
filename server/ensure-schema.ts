@@ -366,21 +366,17 @@ export async function ensureSchema(): Promise<void> {
       removed_at TIMESTAMP
     );
     -- manual: admin ekledi | auto: profilde ÜK koçu atandı (sonraki pazartesi başlar)
-    -- | backfill: kural değişmeden önce ÜK işaretli + koçlu olanlar (tek seferlik).
+    -- | backfill: eski sürümün toplu aktarımı (artık üretilmiyor; kullanılmayanlar aşağıda temizlenir).
     ALTER TABLE uk_program_enrollments ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'manual';
 
-    -- Tek seferlik veri taşımaları.
-    CREATE TABLE IF NOT EXISTS app_migrations (name TEXT PRIMARY KEY, ran_at TIMESTAMP DEFAULT NOW());
-    -- Katılım artık yalnızca uk_program_enrollments'tan gelir. Önceden ÜK işareti
-    -- (uretkenlik_koclugu) ile otomatik programda görünen ve koçu atanmış danışmanlar
-    -- mevcut başlangıçlarıyla bir kez taşınır.
-    INSERT INTO uk_program_enrollments (employee_id, coach_user_id, start_date, source, added_at)
-    SELECT e.id, NULL, COALESCE(e.uk_start_date, to_char(e.start_date, 'YYYY-MM-DD')), 'backfill', NOW()
-      FROM employees e
-     WHERE e.uretkenlik_koclugu = true AND e.uretkenlik_koclugu_manager_id IS NOT NULL
-       AND NOT EXISTS (SELECT 1 FROM app_migrations WHERE name = 'uk_enroll_backfill_v1')
-    ON CONFLICT (employee_id) DO NOTHING;
-    INSERT INTO app_migrations (name) VALUES ('uk_enroll_backfill_v1') ON CONFLICT (name) DO NOTHING;
+    -- ÜK işaretli danışmanlar programa toplu taşınmaz (onaylı karar, 2026-10-09): katılım
+    -- yalnızca koç ataması veya manuel ekleme ile olur. Önceki sürümün tek seferlik
+    -- aktarımı bir ortamda çalıştıysa, o yolla eklenip hiç kullanılmamış kayıtlar temizlenir.
+    -- (Artık "backfill" kaydı üretilmediği için fiilen bir kez etkili olur.)
+    DELETE FROM uk_program_enrollments en
+     WHERE en.source = 'backfill'
+       AND NOT EXISTS (SELECT 1 FROM uk_program_checks k WHERE k.employee_id = en.employee_id)
+       AND NOT EXISTS (SELECT 1 FROM uk_program_weeks w WHERE w.employee_id = en.employee_id);
     -- Haftalık gerçekleşenler (manuel kısım) + koç onayı.
     CREATE TABLE IF NOT EXISTS uk_program_weeks (
       id SERIAL PRIMARY KEY,
