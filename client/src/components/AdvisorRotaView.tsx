@@ -33,6 +33,7 @@ type Data = {
   checks: Record<string, { at: string; by: string }>;
   weeks: WeekRow[];
   weekEnd: string | null;   // içinde bulunulan haftanın pazarı
+  programTargets?: { key: string; label: string; target: number; done: number; hint: string }[];
   preview?: boolean;
 };
 
@@ -337,7 +338,34 @@ function WeekView({ token, data, week, onToggle, onSaved, readOnly = false, view
       })}
 
       <WeekActuals token={token} row={row} editable={started && !locked && !readOnly} onSaved={onSaved} />
+      {!!data.programTargets?.length && <ProgramTargets items={data.programTargets} />}
     </>
+  );
+}
+
+// 6 hafta sonu hedefleri: ilerleme (puan gösterilmez).
+function ProgramTargets({ items }: { items: { key: string; label: string; target: number; done: number; hint: string }[] }) {
+  return (
+    <Card>
+      <h3 className="font-semibold text-sm">6 hafta sonu hedeflerin</h3>
+      <div className="mt-3 space-y-2.5">
+        {items.map((t) => {
+          const ok = t.done >= t.target;
+          return (
+            <div key={t.key}>
+              <div className="flex items-center justify-between text-sm">
+                <span className="flex items-center gap-1.5">{ok && <CheckCircle2 className="h-4 w-4 text-emerald-600" />}{t.label}</span>
+                <span className={`font-semibold ${ok ? "text-emerald-700" : ""}`}>{t.done} / {t.target}</span>
+              </div>
+              <div className="mt-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                <div className={`h-full ${ok ? "bg-emerald-500" : "bg-primary"}`} style={{ width: `${Math.min(100, (t.done / t.target) * 100)}%` }} />
+              </div>
+              <p className="text-[11px] text-muted-foreground mt-0.5">{t.hint}</p>
+            </div>
+          );
+        })}
+      </div>
+    </Card>
   );
 }
 
@@ -367,9 +395,10 @@ function WeekActuals({ token, row, editable, onSaved }: { token: string; row: We
     else setMsg({ ok: false, text: (await r.json().catch(() => ({}))).message ?? "Kaydedilemedi." });
   };
 
-  const input = (label: string, v: string, set: (s: string) => void) => (
+  const input = (label: string, v: string, set: (s: string) => void, hint?: string) => (
     <label className="rounded-xl bg-muted/40 ring-1 ring-border p-2.5 block">
       <span className="text-[11px] text-muted-foreground font-medium">{label}</span>
+      {hint && <span className="block text-[10px] text-primary/80">{hint}</span>}
       <input
         type="number" inputMode="numeric" min={0} value={v} disabled={!editable}
         onChange={(e) => set(e.target.value)} placeholder="—"
@@ -389,9 +418,9 @@ function WeekActuals({ token, row, editable, onSaved }: { token: string; row: We
       <h3 className="font-semibold text-sm">{row.week}. hafta gerçekleşen</h3>
       <p className="text-[11px] text-muted-foreground mt-0.5 mb-3">Koçunla ölçülebilirliğini ve sonraki haftanın programını teyit et.</p>
       <div className="grid grid-cols-3 gap-2">
-        {input("Arama", arama, setArama)}
-        {input("Randevu", randevu, setRandevu)}
-        {input("Tek Yetki", tekYetki, setTekYetki)}
+        {input("Arama", arama, setArama, "Hedef: 50 (günde 10)")}
+        {input("Randevu", randevu, setRandevu, "Hedef: 1")}
+        {input("Tek Yetki (Satılık)", tekYetki, setTekYetki, "Bu hafta alınan")}
         {auto("Kapanış", String(row.kapanis))}
         {auto("BHB", fmtTRY(row.bhb))}
         {auto("Katkı Payı", String(row.katkiPayi))}

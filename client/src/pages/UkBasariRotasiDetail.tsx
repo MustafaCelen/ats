@@ -25,6 +25,10 @@ type ProgramData = {
   checks: Record<string, { at: string; by: string | null }>;
   weeks: WeekRow[];
   score: { rows: { key: string; label: string; points: number; planned: number; done: number; earned: number }[]; total: number; max: number };
+  targetScore: {
+    rows: { key: string; label: string; points: number; source: "manual" | "auto"; mode: "weekly" | "total"; target: number; hint: string; done: number; targetTotal: number; weeksMet: number | null; earned: number }[];
+    total: number; max: number;
+  };
   totals: { activities: number; done: number };
   canEdit: boolean;
   isAdmin?: boolean;
@@ -72,9 +76,9 @@ function WeekSummary({ employeeId, row, canEdit }: { employeeId: number; row: We
     onError: (e: any) => toast({ title: "Hata", description: e.message, variant: "destructive" }),
   });
 
-  const manual = (label: string, v: string, set: (s: string) => void) => (
+  const manual = (label: string, v: string, set: (s: string) => void, hint?: string) => (
     <div className="rounded-lg bg-muted/40 ring-1 ring-border p-2.5">
-      <p className="text-[11px] text-muted-foreground font-medium mb-1">{label}</p>
+      <p className="text-[11px] text-muted-foreground font-medium mb-1">{label} {hint && <span className="text-[10px] text-primary/70">{hint}</span>}</p>
       <input
         type="number" min={0} value={v} disabled={!canEdit}
         onChange={(e) => set(e.target.value)}
@@ -99,14 +103,14 @@ function WeekSummary({ employeeId, row, canEdit }: { employeeId: number; row: We
           : <span className="text-xs text-muted-foreground">Koç onayı bekliyor</span>}
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-        {manual("Arama", arama, setArama)}
-        {manual("Randevu", randevu, setRandevu)}
-        {manual("Tek Yetki", tekYetki, setTekYetki)}
+        {manual("Arama", arama, setArama, "hedef 50")}
+        {manual("Randevu", randevu, setRandevu, "hedef 1")}
+        {manual("Tek Yetki (Satılık)", tekYetki, setTekYetki)}
         {auto("Kapanış", String(row.kapanis), "Bu haftaki tamamlanan işlem kapanışları")}
         {auto("BHB", fmtTRY(row.bhb), "Bu haftaki tamamlanan kapanışların BHB toplamı")}
         {auto("Katkı Payı", String(row.katkiPayi), "Bu hafta referans olduğu yeni adaylar")}
       </div>
-      <p className="text-[11px] text-muted-foreground">Haftalık hedefler henüz tanımlanmadı; şimdilik yalnızca gerçekleşenler tutuluyor.</p>
+      <p className="text-[11px] text-muted-foreground">Haftalık hedef: günde 10 arama (haftada 50) ve 1 randevu. Tek yetki, kapanış ve katkı payı 6 hafta toplamında değerlendirilir.</p>
       <textarea
         value={note} disabled={!canEdit} onChange={(e) => setNote(e.target.value)} rows={2}
         placeholder={canEdit ? "Koç notu: haftanın değerlendirmesi, sonraki hafta için odak…" : "Koç notu yok"}
@@ -178,27 +182,50 @@ function ScoreTable({ data }: { data: ProgramData }) {
       </div>
 
       <div className="rounded-xl border border-border bg-card overflow-hidden">
-        <div className="px-4 py-3 border-b border-border">
+        <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-2">
           <h3 className="text-sm font-semibold">Hedef</h3>
-          <p className="text-[11px] text-muted-foreground">Hedef puanlaması sonra tanımlanacak — şimdilik 6 haftalık gerçekleşen toplamları.</p>
+          <span className="text-xs text-muted-foreground text-right">Haftalık kalemler her hafta ayrı, diğerleri 6 hafta toplamı</span>
         </div>
         <table className="w-full text-sm">
           <thead className="bg-muted/40 text-xs text-muted-foreground">
             <tr>
               <th className="text-left font-medium px-4 py-2">Kalem</th>
+              <th className="text-right font-medium px-3 py-2">Gerçekleşen / Hedef</th>
               <th className="text-right font-medium px-3 py-2">Puan</th>
-              <th className="text-right font-medium px-4 py-2">Gerçekleşen</th>
+              <th className="text-right font-medium px-4 py-2">Kazanılan</th>
             </tr>
           </thead>
           <tbody>
-            {UK_TARGET_ITEMS.map((t) => (
-              <tr key={t.key} className="border-t border-border">
-                <td className="px-4 py-2">{t.label} {t.source === "auto" && <span className="text-[10px] text-primary/70">otomatik</span>}</td>
-                <td className="px-3 py-2 text-right text-muted-foreground">{t.points}</td>
-                <td className="px-4 py-2 text-right font-semibold">{t.key === "bhb" ? fmtTRY(targetTotals.bhb) : targetTotals[t.key]}</td>
-              </tr>
-            ))}
+            {data.targetScore.rows.map((r) => {
+              const pct = r.points ? Math.min(100, (r.earned / r.points) * 100) : 0;
+              return (
+                <tr key={r.key} className="border-t border-border">
+                  <td className="px-4 py-2">
+                    {r.label} {r.source === "auto" && <span className="text-[10px] text-primary/70">otomatik</span>}
+                    <p className="text-[10px] text-muted-foreground">{r.hint}</p>
+                    <div className="mt-1 h-1 rounded-full bg-muted overflow-hidden"><div className="h-full bg-primary" style={{ width: `${pct}%` }} /></div>
+                  </td>
+                  <td className="px-3 py-2 text-right text-muted-foreground whitespace-nowrap">
+                    {r.done.toLocaleString("tr-TR")} / {r.targetTotal.toLocaleString("tr-TR")}
+                    {r.weeksMet != null && <p className="text-[10px]">{r.weeksMet}/{UK_PROGRAM_WEEKS} hafta tuttu</p>}
+                  </td>
+                  <td className="px-3 py-2 text-right">{r.points}</td>
+                  <td className="px-4 py-2 text-right font-semibold">{r.earned.toLocaleString("tr-TR")}</td>
+                </tr>
+              );
+            })}
+            <tr className="border-t border-border text-muted-foreground">
+              <td className="px-4 py-2 text-xs" colSpan={2}>BHB <span className="text-[10px]">(bilgi, puana dahil değil)</span></td>
+              <td className="px-4 py-2 text-right text-xs" colSpan={2}>{fmtTRY(targetTotals.bhb)}</td>
+            </tr>
           </tbody>
+          <tfoot className="bg-red-600 text-white">
+            <tr>
+              <td className="px-4 py-2.5 font-bold" colSpan={2}>TOPLAM PUAN</td>
+              <td className="px-3 py-2.5 text-right font-bold">{data.targetScore.max}</td>
+              <td className="px-4 py-2.5 text-right font-bold text-base">{data.targetScore.total.toLocaleString("tr-TR")}</td>
+            </tr>
+          </tfoot>
         </table>
       </div>
     </div>
@@ -440,6 +467,10 @@ export default function UkBasariRotasiDetail() {
               <div className="rounded-lg bg-red-600 px-4 py-2.5">
                 <p className="text-[11px] text-white/80">Aktivite puanı</p>
                 <p className="text-xl font-extrabold">{data.score.total.toLocaleString("tr-TR")} <span className="text-sm font-semibold text-white/70">/ {data.score.max}</span></p>
+              </div>
+              <div className="rounded-lg bg-red-600 px-4 py-2.5">
+                <p className="text-[11px] text-white/80">Hedef puanı</p>
+                <p className="text-xl font-extrabold">{data.targetScore.total.toLocaleString("tr-TR")} <span className="text-sm font-semibold text-white/70">/ {data.targetScore.max}</span></p>
               </div>
             </div>
           </div>

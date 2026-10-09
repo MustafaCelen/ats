@@ -13,7 +13,7 @@ type Row = {
   employeeId: number; name: string; kwuid: string | null; status: string;
   coachId: number | null; coachName: string | null;
   programStart: string | null; week1Monday: string | null; currentWeek: number;
-  done: number; total: number; score: number; lastConfirmedWeek: number | null; canEdit: boolean; manual: boolean; welcomeSentAt: string | null;
+  done: number; total: number; score: number; targetScore: number; lastConfirmedWeek: number | null; canEdit: boolean; manual: boolean; welcomeSentAt: string | null;
 };
 
 function fmtDate(ymd: string | null) {
@@ -151,6 +151,7 @@ export default function UkBasariRotasi() {
                 <th className="text-left font-medium px-4 py-2.5">Durum</th>
                 <th className="text-left font-medium px-4 py-2.5 w-48">Aktivite İlerlemesi</th>
                 <th className="text-right font-medium px-4 py-2.5">Aktivite Puanı</th>
+                <th className="text-right font-medium px-4 py-2.5">Hedef Puanı</th>
                 <th className="text-left font-medium px-4 py-2.5">Koç Onayı</th>
                 <th className="text-left font-medium px-4 py-2.5">Hoş Geldin Maili</th>
                 <th className="w-8" />
@@ -158,10 +159,10 @@ export default function UkBasariRotasi() {
             </thead>
             <tbody>
               {isLoading && (
-                <tr><td colSpan={9} className="px-4 py-8 text-center text-muted-foreground">Yükleniyor…</td></tr>
+                <tr><td colSpan={10} className="px-4 py-8 text-center text-muted-foreground">Yükleniyor…</td></tr>
               )}
               {!isLoading && rows.length === 0 && (
-                <tr><td colSpan={9} className="px-4 py-10 text-center text-muted-foreground">
+                <tr><td colSpan={10} className="px-4 py-10 text-center text-muted-foreground">
                   {data.length === 0
                     ? "Programda danışman yok. Danışman profilinde ÜK koçu atandığında bir sonraki pazartesiden otomatik eklenir; \"Danışman Ekle\" ile manuel de eklenebilir."
                     : "Bu filtrede danışman yok."}
@@ -189,6 +190,7 @@ export default function UkBasariRotasi() {
                       </div>
                     </td>
                     <td className="px-4 py-2.5 text-right font-semibold">{r.score.toLocaleString("tr-TR")} <span className="text-muted-foreground font-normal">/ 50</span></td>
+                    <td className="px-4 py-2.5 text-right font-semibold">{(r.targetScore ?? 0).toLocaleString("tr-TR")} <span className="text-muted-foreground font-normal">/ 50</span></td>
                     <td className="px-4 py-2.5">
                       {r.lastConfirmedWeek
                         ? <span className="inline-flex items-center gap-1 text-xs text-emerald-700"><CheckCircle2 className="h-3.5 w-3.5" /> {r.lastConfirmedWeek}. hafta</span>

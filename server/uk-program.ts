@@ -12,7 +12,7 @@ import { sendEmail } from "./email";
 import { buildUkWelcomeEmail } from "./uk-welcome-email";
 import { publicBaseUrl } from "./whatsapp";
 import {
-  UK_ACTIVITIES, UK_ACTIVITY_IDS, UK_PROGRAM_WEEKS, computeUkActivityScore,
+  UK_ACTIVITIES, UK_ACTIVITY_IDS, UK_PROGRAM_WEEKS, computeUkActivityScore, computeUkTargetScore,
   ukProgramWeek1Monday, ukAddDays, ukCurrentWeek, ukIsMonday, type UkScoreKey,
 } from "@shared/uk-program";
 
@@ -181,6 +181,8 @@ async function buildProgram(p: Participant) {
     };
   });
 
+  const targetScore = computeUkTargetScore(weekRows);
+
   return {
     participant: p,
     week1Monday,
@@ -188,6 +190,7 @@ async function buildProgram(p: Participant) {
     checks: Object.fromEntries(checks.rows.map((r: any) => [r.activity_id, { at: r.checked_at, by: r.checked_by }])),
     weeks: weekRows,
     score,
+    targetScore,
     totals: {
       activities: UK_ACTIVITIES.length,
       done: checks.rows.length,
@@ -258,8 +261,12 @@ function registerAdvisorUkRoutes(app: Express) {
         ? ukAddDays(prog.week1Monday, (cw - 1) * 7 + 6) : null;
       const realIds: number[] = (req.session as any)?.advisorEmployeeIds ?? [];
       // Puan/skor danışmana gösterilmez (onaylı karar) — yanıttan da çıkarılır.
-      const { score: _score, totals: _totals, ...rest } = prog;
-      res.json({ ...rest, checks, weeks, weekEnd, today: todayYmd(), preview: !realIds.includes(p.employeeId) });
+      const { score: _score, targetScore, totals: _totals, ...rest } = prog;
+      // Hedefler danışmana puansız gösterilir: 6 hafta sonu hedeflerinde ilerleme.
+      const programTargets = targetScore.rows
+        .filter((r) => r.mode === "total")
+        .map((r) => ({ key: r.key, label: r.label, target: r.target, done: r.done, hint: r.hint }));
+      res.json({ ...rest, checks, weeks, weekEnd, programTargets, today: todayYmd(), preview: !realIds.includes(p.employeeId) });
     } catch (err: any) {
       console.error("[GET advisor uk-program]", err);
       res.status(500).json({ message: "Veriler yüklenemedi." });
@@ -489,16 +496,32 @@ export function registerUkProgramRoutes(app: Express) {
           ORDER BY en.start_date DESC NULLS LAST, c.name`,
       );
       const today = todayYmd();
+      const ids = r.rows.map((row: any) => row.id);
+      const manualWeeks = ids.length
+        ? (await pool.query(
+            `SELECT employee_id, week, arama, randevu, tek_yetki FROM uk_program_weeks WHERE employee_id = ANY($1::int[])`, [ids])).rows
+        : [];
+      const autoBy = new Map<number, Awaited<ReturnType<typeof loadAutoWeekly>>>();
+      await Promise.all(r.rows.map(async (row: any) => {
+        const ps = row.en_start || row.start_date || null;
+        if (ps) autoBy.set(row.id, await loadAutoWeekly(row.id, ukProgramWeek1Monday(ps)));
+      }));
       res.json(r.rows.map((row: any) => {
         const programStart = row.en_start || row.start_date || null;
         const week1Monday = programStart ? ukProgramWeek1Monday(programStart) : null;
+        const auto = autoBy.get(row.id);
+        const targetScore = computeUkTargetScore(Array.from({ length: UK_PROGRAM_WEEKS }, (_, i) => {
+          const m = manualWeeks.find((x: any) => x.employee_id === row.id && x.week === i + 1);
+          const a = auto?.[i + 1];
+          return { arama: m?.arama, randevu: m?.randevu, tekYetki: m?.tek_yetki, kapanis: a?.kapanis ?? 0, katkiPayi: a?.katkiPayi ?? 0 };
+        })).total;
         const done: Partial<Record<UkScoreKey, number>> = {};
         for (const id of (row.ids ?? []) as string[]) {
           const s = scoreOfActivity.get(id);
           if (s) done[s] = (done[s] ?? 0) + 1;
         }
-        // Liste özetinde katkı payı tüm referanslardan (detayda program penceresiyle sınırlı).
-        done.katki = row.referrals;
+        // Katkı payı program penceresindeki referanslardan (detayla aynı).
+        done.katki = auto ? Object.values(auto).reduce((s, w) => s + w.katkiPayi, 0) : 0;
         return {
           employeeId: row.id, name: row.name, kwuid: row.kwuid, status: row.status,
           coachId: row.coach_id, coachName: row.coach_name,
@@ -506,6 +529,7 @@ export function registerUkProgramRoutes(app: Express) {
           currentWeek: week1Monday ? ukCurrentWeek(week1Monday, today) : 0,
           done: row.done, total: UK_ACTIVITIES.length,
           score: computeUkActivityScore(done).total,
+          targetScore,
           lastConfirmedWeek: row.last_confirmed ?? null,
           welcomeSentAt: row.welcome_sent_at ?? null,
           manual: row.source === "manual",
