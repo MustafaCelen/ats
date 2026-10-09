@@ -40,3 +40,20 @@ Kökten: `npm run test:e2e`.
   (verilmezse `%LOCALAPPDATA%\ms-playwright` altındaki Chromium kullanılır; yoksa `npx playwright install chromium`).
 - Gerçek mail gönderimi test edilmez (yerelde Gmail yok); mail önizlemesi ve buton/yetki kuralları test edilir.
 - Bazı kontroller güne bağlıdır: "gelecek günler kapalı" testi haftanın son günlerinde daha az gün kontrol eder.
+
+## Liste hizalama denetimi (`audit-lists.mjs`)
+
+Tüm sayfalardaki tablo ve grid listeleri tarayıp şunları raporlar: hücre metni sarıyor mu,
+başlık hizası gövdeyle aynı mı (sayı sağ / metin sol), satır yükseklikleri sapıyor mu.
+
+```bash
+cd e2e
+docker compose -f ../docker-compose.yml exec -T postgres psql -U hireflow -d hireflow -f - < audit-seed.sql   # boş listeler için örnek veri (isteğe bağlı)
+node audit-lists.mjs                 # tüm sayfalar
+node audit-lists.mjs /employees      # tek sayfa
+docker compose -f ../docker-compose.yml exec -T postgres psql -U hireflow -d hireflow -f - < audit-cleanup.sql
+```
+
+Liste kuralları (tüm sayfalarda ortak): başlıklar `SortTh`/`SortHead` ile tıklanarak sıralanır
+(`@/lib/sort`: 1. tık artan, 2. tık azalan, 3. tık varsayılan; Türkçe harf sırası, boşlar sonda);
+hücreler tek satır (`whitespace-nowrap`), uzun metin `truncate` + `title`; sayı/para sağa, `tabular-nums`.

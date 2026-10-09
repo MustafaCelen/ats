@@ -1,3 +1,4 @@
+import { SortTh as SharedSortTh, SortableRows } from "@/components/SortTh";
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import * as XLSX from "xlsx";
@@ -351,22 +352,13 @@ export default function ListingReports() {
 
   // ── Sort header components ──
 
-  const SortTh = ({ col, label }: { col: AdvisorSortKey; label: string }) => (
-    <th
-      className="px-3 py-2.5 font-medium text-right cursor-pointer select-none hover:text-foreground whitespace-nowrap"
-      onClick={() => toggleSort(col)}
-    >
-      {label}{sortKey === col ? (sortDir === "desc" ? " ↓" : " ↑") : ""}
-    </th>
+  // Ortak sıralanabilir başlık (SortTh) — mevcut sıralama durumları korunur
+  const SortTh = ({ col, label, align = "right" }: { col: AdvisorSortKey; label: string; align?: "left" | "right" }) => (
+    <SharedSortTh label={label} sortKey={col} sort={{ key: sortKey, dir: sortDir }} onSort={(k) => toggleSort(k as AdvisorSortKey)} align={align} className="px-3 py-2.5" />
   );
 
   const O90Th = ({ col, label, align = "right" }: { col: Over90SortKey; label: string; align?: "left" | "right" }) => (
-    <th
-      className={`px-3 py-2.5 font-medium cursor-pointer select-none hover:text-foreground whitespace-nowrap text-${align}`}
-      onClick={() => toggleO90Sort(col)}
-    >
-      {label}{o90Sort.key === col ? (o90Sort.dir === "desc" ? " ↓" : " ↑") : ""}
-    </th>
+    <SharedSortTh label={label} sortKey={col} sort={{ key: o90Sort.key, dir: o90Sort.dir }} onSort={(k) => toggleO90Sort(k as Over90SortKey)} align={align} className="px-3 py-2.5" />
   );
 
   function Pager({ page, total, onPage }: { page: number; total: number; onPage: (p: number) => void }) {
@@ -707,10 +699,8 @@ export default function ListingReports() {
             <SectionCard title={`Danışman Bazlı Rapor (${sortedAdvisors.length})`} icon={Users}>
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-border bg-muted/40 text-left text-xs text-muted-foreground">
-                    <th className="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort("displayName")}>
-                      Danışman / Takım{sortKey === "displayName" ? (sortDir === "desc" ? " ↓" : " ↑") : ""}
-                    </th>
+                  <tr className="border-b border-border bg-muted/40 text-xs text-muted-foreground">
+                    <SortTh col="displayName" label="Danışman / Takım" align="left" />
                     <SortTh col="totalActive"          label="Aktif" />
                     <SortTh col="totalPassive"         label="Pasif" />
                     <SortTh col="agreementUploaded"    label="Söz. Yüklendi" />
@@ -739,7 +729,7 @@ export default function ListingReports() {
                           </div>
                         ) : (
                           <>
-                            <div className="font-medium text-sm">{r.displayName}</div>
+                            <div className="font-medium text-sm whitespace-nowrap max-w-[240px] truncate" title={r.displayName}>{r.displayName}</div>
                             {r.subName && <div className="text-[11px] text-muted-foreground">{r.subName}</div>}
                             {!r.hasEmployeeId && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">Eşleşmemiş</span>}
                           </>
@@ -776,28 +766,29 @@ export default function ListingReports() {
                 </Button>
               }
             >
-              <table className="w-full text-sm">
+              <SortableRows rows={advisorInventory} getters={{ name: (r: any) => r.employeeName ?? r.advisorName }} initial={{ key: "totalCount", dir: "desc" }}>{({ sorted, sort, toggle }) => (
+              <table className="w-full text-sm [&_td]:whitespace-nowrap">
                 <thead>
-                  <tr className="border-b border-border bg-muted/40 text-left text-xs text-muted-foreground">
-                    <th className="px-3 py-2.5 font-medium">Danışman</th>
-                    <th className="px-3 py-2.5 font-medium text-right">Toplam</th>
-                    <th className="px-3 py-2.5 font-medium text-right">Satılık</th>
-                    <th className="px-3 py-2.5 font-medium text-right">Kiralık</th>
-                    <th className="px-3 py-2.5 font-medium text-right">Satılık Hacmi</th>
-                    <th className="px-3 py-2.5 font-medium text-right">Kiralık Hacmi</th>
-                    <th className="px-3 py-2.5 font-medium text-right">Ort. Süre (Satılık)</th>
-                    <th className="px-3 py-2.5 font-medium text-right">Ort. Süre (Kiralık)</th>
+                  <tr className="border-b border-border bg-muted/40 text-xs text-muted-foreground [&_th]:px-3 [&_th]:py-2.5">
+                    <SharedSortTh label="Danışman" sortKey="name" sort={sort} onSort={toggle} />
+                    <SharedSortTh label="Toplam" sortKey="totalCount" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                    <SharedSortTh label="Satılık" sortKey="satilikCount" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                    <SharedSortTh label="Kiralık" sortKey="kiralikCount" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                    <SharedSortTh label="Satılık Hacmi" sortKey="satilikVolume" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                    <SharedSortTh label="Kiralık Hacmi" sortKey="kiralikVolume" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                    <SharedSortTh label="Ort. Süre (Satılık)" sortKey="avgDurationSatilik" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                    <SharedSortTh label="Ort. Süre (Kiralık)" sortKey="avgDurationKiralik" sort={sort} onSort={toggle} align="right" firstDir="desc" />
                   </tr>
                 </thead>
                 <tbody>
                   {loadingAdvisorInventory ? (
                     <tr><td colSpan={8} className="px-3 py-8 text-center text-muted-foreground">Yükleniyor…</td></tr>
-                  ) : advisorInventory.length === 0 ? (
+                  ) : sorted.length === 0 ? (
                     <tr><td colSpan={8} className="px-3 py-8 text-center text-muted-foreground">Veri yok.</td></tr>
-                  ) : advisorInventory.map((r, i) => (
+                  ) : sorted.map((r, i) => (
                     <tr key={i} className="border-b border-border last:border-0 hover:bg-muted/30">
                       <td className="px-3 py-2.5">
-                        <div className="font-medium text-sm">{r.employeeName ?? r.advisorName ?? "—"}</div>
+                        <div className="font-medium text-sm max-w-[240px] truncate" title={r.employeeName ?? r.advisorName ?? undefined}>{r.employeeName ?? r.advisorName ?? "—"}</div>
                         {!r.employeeId && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">Eşleşmemiş</span>}
                       </td>
                       <td className="px-3 py-2.5 text-right font-medium">{r.totalCount}</td>
@@ -811,6 +802,7 @@ export default function ListingReports() {
                   ))}
                 </tbody>
               </table>
+              )}</SortableRows>
             </SectionCard>
 
           </div>
@@ -900,7 +892,7 @@ export default function ListingReports() {
                   <>
                     <table className="w-full text-xs">
                       <thead>
-                        <tr className="border-b border-border bg-muted/30 text-muted-foreground">
+                        <tr className="border-b border-border bg-muted/30 text-muted-foreground [&_td]:whitespace-nowrap">
                           <O90Th col="listingNumber" label="İlan No"  align="left" />
                           <O90Th col="employeeName"  label="Danışman" align="left" />
                           <O90Th col="office"        label="Ofis"     align="left" />
@@ -913,7 +905,7 @@ export default function ListingReports() {
                         {o90PageRows.map((r) => (
                           <tr key={r.id} className="hover:bg-muted/20 transition-colors">
                             <td className="px-3 py-2 font-mono text-[11px]">{r.listingNumber}</td>
-                            <td className="px-3 py-2">{r.employeeName ?? r.advisorName ?? "—"}</td>
+                            <td className="px-3 py-2 whitespace-nowrap max-w-[220px] truncate" title={r.employeeName ?? r.advisorName ?? undefined}>{r.employeeName ?? r.advisorName ?? "—"}</td>
                             <td className="px-3 py-2 text-muted-foreground">{r.office ?? "—"}</td>
                             <td className="px-3 py-2 text-right tabular-nums">
                               {r.price ? Number(r.price).toLocaleString("tr-TR") + " ₺" : "—"}
@@ -943,50 +935,53 @@ export default function ListingReports() {
 
             {/* Aylık Trend Tablosu */}
             <SectionCard title="Aylık Trend (Son 12 Ay)" icon={TrendingUp}>
-              <table className="w-full text-sm">
+              <SortableRows rows={[...trendData].reverse()}>{({ sorted, sort, toggle }) => (
+              <table className="w-full text-sm [&_td]:whitespace-nowrap">
                 <thead>
-                  <tr className="border-b border-border bg-muted/40 text-left text-xs text-muted-foreground">
-                    <th className="px-3 py-2.5 font-medium">Ay</th>
-                    <th className="px-3 py-2.5 font-medium text-right">Yeni Aktif</th>
-                    <th className="px-3 py-2.5 font-medium text-right">Yeni Pasif</th>
+                  <tr className="border-b border-border bg-muted/40 text-xs text-muted-foreground [&_th]:px-3 [&_th]:py-2.5">
+                    <SharedSortTh label="Ay" sortKey="month" sort={sort} onSort={toggle} />
+                    <SharedSortTh label="Yeni Aktif" sortKey="newActive" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                    <SharedSortTh label="Yeni Pasif" sortKey="newPassive" sort={sort} onSort={toggle} align="right" firstDir="desc" />
                   </tr>
                 </thead>
                 <tbody>
                   {loadingTrend ? (
                     <tr><td colSpan={3} className="px-3 py-8 text-center text-muted-foreground">Yükleniyor…</td></tr>
-                  ) : trendData.length === 0 ? (
+                  ) : sorted.length === 0 ? (
                     <tr><td colSpan={3} className="px-3 py-8 text-center text-muted-foreground">Veri yok.</td></tr>
-                  ) : [...trendData].reverse().map((r, i) => (
+                  ) : sorted.map((r, i) => (
                     <tr key={i} className="border-b border-border last:border-0 hover:bg-muted/30">
                       <td className="px-3 py-2.5 font-medium">{fmtMonth(r.month)}</td>
-                      <td className="px-3 py-2.5 text-right text-emerald-700 font-medium">{r.newActive}</td>
-                      <td className="px-3 py-2.5 text-right text-slate-500">{r.newPassive}</td>
+                      <td className="px-3 py-2.5 text-right text-emerald-700 font-medium tabular-nums">{r.newActive}</td>
+                      <td className="px-3 py-2.5 text-right text-slate-500 tabular-nums">{r.newPassive}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+              )}</SortableRows>
             </SectionCard>
 
             {/* İlan Tarihi Bazlı Rapor */}
             <SectionCard title="İlan Tarihi Bazlı Rapor (Aylık)" icon={TrendingUp}>
-              <table className="w-full text-sm">
+              <SortableRows rows={dateReport}>{({ sorted, sort, toggle }) => (
+              <table className="w-full text-sm [&_td]:whitespace-nowrap">
                 <thead>
-                  <tr className="border-b border-border bg-muted/40 text-left text-xs text-muted-foreground">
-                    <th className="px-3 py-2.5 font-medium">Ay</th>
-                    <th className="px-3 py-2.5 font-medium text-right text-blue-700">Sat. Aktif</th>
-                    <th className="px-3 py-2.5 font-medium text-right text-blue-400">Sat. Pasif</th>
-                    <th className="px-3 py-2.5 font-medium text-right text-blue-700">Sat. Hacim</th>
-                    <th className="px-3 py-2.5 font-medium text-right text-violet-700">Kir. Aktif</th>
-                    <th className="px-3 py-2.5 font-medium text-right text-violet-400">Kir. Pasif</th>
-                    <th className="px-3 py-2.5 font-medium text-right text-violet-700">Kir. Hacim</th>
+                  <tr className="border-b border-border bg-muted/40 text-xs text-muted-foreground [&_th]:px-3 [&_th]:py-2.5">
+                    <SharedSortTh label="Ay" sortKey="month" sort={sort} onSort={toggle} />
+                    <SharedSortTh label="Sat. Aktif" sortKey="satilikActive" sort={sort} onSort={toggle} align="right" firstDir="desc" className="text-blue-700" />
+                    <SharedSortTh label="Sat. Pasif" sortKey="satilikPassive" sort={sort} onSort={toggle} align="right" firstDir="desc" className="text-blue-400" />
+                    <SharedSortTh label="Sat. Hacim" sortKey="satilikVolume" sort={sort} onSort={toggle} align="right" firstDir="desc" className="text-blue-700" />
+                    <SharedSortTh label="Kir. Aktif" sortKey="kiralikActive" sort={sort} onSort={toggle} align="right" firstDir="desc" className="text-violet-700" />
+                    <SharedSortTh label="Kir. Pasif" sortKey="kiralikPassive" sort={sort} onSort={toggle} align="right" firstDir="desc" className="text-violet-400" />
+                    <SharedSortTh label="Kir. Hacim" sortKey="kiralikVolume" sort={sort} onSort={toggle} align="right" firstDir="desc" className="text-violet-700" />
                   </tr>
                 </thead>
                 <tbody>
                   {loadingDateReport ? (
                     <tr><td colSpan={7} className="px-3 py-8 text-center text-muted-foreground">Yükleniyor…</td></tr>
-                  ) : dateReport.length === 0 ? (
+                  ) : sorted.length === 0 ? (
                     <tr><td colSpan={7} className="px-3 py-8 text-center text-muted-foreground">Veri yok.</td></tr>
-                  ) : dateReport.map((r, i) => (
+                  ) : sorted.map((r, i) => (
                     <tr key={i} className="border-b border-border last:border-0 hover:bg-muted/30">
                       <td className="px-3 py-2.5 font-medium">{fmtMonth(r.month)}</td>
                       <td className="px-3 py-2.5 text-right text-blue-700 font-medium">{r.satilikActive || "—"}</td>
@@ -999,6 +994,7 @@ export default function ListingReports() {
                   ))}
                 </tbody>
               </table>
+              )}</SortableRows>
             </SectionCard>
 
           </div>
@@ -1010,22 +1006,23 @@ export default function ListingReports() {
 
             {/* Paket (Ofis) Bazlı Kırılım */}
             <SectionCard title="Paket Bazlı Kırılım" icon={Building2}>
-              <table className="w-full text-sm">
+              <SortableRows rows={officeData}>{({ sorted, sort, toggle }) => (
+              <table className="w-full text-sm [&_td]:whitespace-nowrap">
                 <thead>
-                  <tr className="border-b border-border bg-muted/40 text-left text-xs text-muted-foreground">
-                    <th className="px-3 py-2.5 font-medium">Ofis</th>
-                    <th className="px-3 py-2.5 font-medium text-right">Aktif</th>
-                    <th className="px-3 py-2.5 font-medium text-right">Pasif</th>
-                    <th className="px-3 py-2.5 font-medium text-right">Söz. Yüklendi</th>
-                    <th className="px-3 py-2.5 font-medium text-right">Sebep Girildi</th>
+                  <tr className="border-b border-border bg-muted/40 text-xs text-muted-foreground [&_th]:px-3 [&_th]:py-2.5">
+                    <SharedSortTh label="Ofis" sortKey="office" sort={sort} onSort={toggle} />
+                    <SharedSortTh label="Aktif" sortKey="totalActive" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                    <SharedSortTh label="Pasif" sortKey="totalPassive" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                    <SharedSortTh label="Söz. Yüklendi" sortKey="agreementUploaded" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                    <SharedSortTh label="Sebep Girildi" sortKey="closeReasonSubmitted" sort={sort} onSort={toggle} align="right" firstDir="desc" />
                   </tr>
                 </thead>
                 <tbody>
                   {loadingOffice ? (
                     <tr><td colSpan={5} className="px-3 py-8 text-center text-muted-foreground">Yükleniyor…</td></tr>
-                  ) : officeData.length === 0 ? (
+                  ) : sorted.length === 0 ? (
                     <tr><td colSpan={5} className="px-3 py-8 text-center text-muted-foreground">Veri yok.</td></tr>
-                  ) : officeData.map((r, i) => (
+                  ) : sorted.map((r, i) => (
                     <tr key={i} className="border-b border-border last:border-0 hover:bg-muted/30">
                       <td className="px-3 py-2.5 font-medium">{r.office ?? "—"}</td>
                       <td className="px-3 py-2.5 text-right font-medium text-emerald-700">{r.totalActive}</td>
@@ -1036,6 +1033,7 @@ export default function ListingReports() {
                   ))}
                 </tbody>
               </table>
+              )}</SortableRows>
             </SectionCard>
 
             {/* Kalkış Sebebi Analizi — Satılık / Kiralık ayrı */}

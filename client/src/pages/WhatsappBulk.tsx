@@ -1,3 +1,4 @@
+import { SortTh, SortableRows } from "@/components/SortTh";
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Layout } from "@/components/Layout";
@@ -387,25 +388,26 @@ export default function WhatsappBulk() {
             <h2 className="text-sm font-semibold">Gönderim Geçmişi</h2>
           </div>
           <div className="overflow-x-auto max-h-[400px] overflow-y-auto">
-            <table className="w-full text-xs">
+            <SortableRows rows={history as any[]} initial={{ key: "createdAt", dir: "desc" }}>{({ sorted, sort, toggle }) => (
+            <table className="w-full text-xs [&_td]:whitespace-nowrap">
               <thead className="bg-muted/40 sticky top-0">
-                <tr className="text-left text-muted-foreground">
-                  <th className="px-3 py-2 font-medium">Tarih</th>
-                  <th className="px-3 py-2 font-medium">Danışman</th>
-                  <th className="px-3 py-2 font-medium">Telefon</th>
-                  <th className="px-3 py-2 font-medium">Şablon</th>
-                  <th className="px-3 py-2 font-medium">Durum</th>
+                <tr className="text-muted-foreground [&_th]:px-3 [&_th]:py-2">
+                  <SortTh label="Tarih" sortKey="createdAt" sort={sort} onSort={toggle} firstDir="desc" />
+                  <SortTh label="Danışman" sortKey="employeeName" sort={sort} onSort={toggle} />
+                  <SortTh label="Telefon" sortKey="phone" sort={sort} onSort={toggle} />
+                  <SortTh label="Şablon" sortKey="templateName" sort={sort} onSort={toggle} />
+                  <SortTh label="Durum" sortKey="status" sort={sort} onSort={toggle} />
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {history.length === 0 ? (
+                {sorted.length === 0 ? (
                   <tr><td colSpan={5} className="px-3 py-8 text-center text-muted-foreground">Henüz gönderim yok.</td></tr>
-                ) : history.map((h) => (
+                ) : sorted.map((h: any) => (
                   <tr key={h.id}>
-                    <td className="px-3 py-2 whitespace-nowrap">{new Date(h.createdAt).toLocaleString("tr-TR")}</td>
-                    <td className="px-3 py-2">{h.employeeName ?? "—"}</td>
-                    <td className="px-3 py-2">{h.phone}</td>
-                    <td className="px-3 py-2">{h.templateName}</td>
+                    <td className="px-3 py-2 tabular-nums">{new Date(h.createdAt).toLocaleString("tr-TR")}</td>
+                    <td className="px-3 py-2 max-w-[240px] truncate" title={h.employeeName ?? undefined}>{h.employeeName ?? "—"}</td>
+                    <td className="px-3 py-2 font-mono">{h.phone}</td>
+                    <td className="px-3 py-2 max-w-[240px] truncate" title={h.templateName}>{h.templateName}</td>
                     <td className="px-3 py-2">
                       {h.status === "sent" ? (
                         <span className="text-emerald-600 font-medium">Gönderildi</span>
@@ -417,6 +419,7 @@ export default function WhatsappBulk() {
                 ))}
               </tbody>
             </table>
+            )}</SortableRows>
           </div>
         </div>
       </div>

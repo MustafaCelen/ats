@@ -1,3 +1,4 @@
+import { SortTh, SortableRows } from "@/components/SortTh";
 import { useState, useMemo, Fragment } from "react";
 import { Link } from "wouter";
 import { Layout } from "@/components/Layout";
@@ -376,20 +377,25 @@ export default function Dashboard() {
             const brutTotal = (t: GrowthTargetValue) => t.brutTargetK0 + t.brutTargetK1 + t.brutTargetK2;
             const emptyTarget: GrowthTargetValue = { brutTargetK0: 0, brutTargetK1: 0, brutTargetK2: 0, netTarget: 0 };
 
-            const HeaderRow = () => (
-              <tr className="border-b border-border bg-muted/30">
-                <th className="text-left font-medium text-muted-foreground py-2.5 px-4">{isAdmin ? "Hiring Manager" : "Siz"}</th>
-                {K0K1K2.map((cat) => (
-                  <th key={cat} className={`text-center font-semibold py-2.5 px-4 ${CAT_COLORS[cat].text}`}>{cat}</th>
-                ))}
-                <th className="text-center font-medium text-muted-foreground py-2.5 px-4">Toplam Brüt</th>
-                <th className="text-center font-medium text-muted-foreground py-2.5 px-4">Net Hedef</th>
-              </tr>
-            );
+            // Başlık: sort verilirse tıklanabilir (admin tablosu), verilmezse düz başlık
+            const HeaderRow = ({ sort, toggle }: { sort?: any; toggle?: any }) => {
+              const H = ({ label, k, align, cls }: { label: string; k: string; align: "left" | "center"; cls: string }) =>
+                sort && toggle
+                  ? <SortTh label={label} sortKey={k} sort={sort} onSort={toggle} align={align} className={`py-2.5 px-4 ${cls}`} />
+                  : <th className={`text-${align} py-2.5 px-4 ${cls}`}>{label}</th>;
+              return (
+                <tr className="border-b border-border bg-muted/30">
+                  <H label={isAdmin ? "Hiring Manager" : "Siz"} k="name" align="left" cls="font-medium text-muted-foreground" />
+                  {K0K1K2.map((cat) => <H key={cat} label={cat} k={cat} align="center" cls={`font-semibold ${CAT_COLORS[cat].text}`} />)}
+                  <H label="Toplam Brüt" k="brut" align="center" cls="font-medium text-muted-foreground" />
+                  <H label="Net Hedef" k="net" align="center" cls="font-medium text-muted-foreground" />
+                </tr>
+              );
+            };
 
             const Row = ({ name, t }: { name: string; t: GrowthTargetValue }) => (
               <tr className="border-b border-border/50 hover:bg-muted/20 transition-colors">
-                <td className="py-3 px-4 font-medium text-sm text-foreground">{name}</td>
+                <td className="py-3 px-4 font-medium text-sm text-foreground whitespace-nowrap">{name}</td>
                 {K0K1K2.map((cat) => (
                   <td key={cat} className="py-3 px-4 text-center">
                     <TargetCell value={t[catKey[cat]]} onSave={() => {}} readOnly />
@@ -409,10 +415,21 @@ export default function Dashboard() {
               const allValues = hiringManagers.map((hm) => targetsByUserMap.get(hm.id) ?? emptyTarget);
               return (
                 <div className="overflow-x-auto">
+                  <SortableRows
+                    rows={hiringManagers}
+                    getters={{
+                      name: (hm: any) => hm.name,
+                      K0: (hm: any) => (targetsByUserMap.get(hm.id) ?? emptyTarget).brutTargetK0,
+                      K1: (hm: any) => (targetsByUserMap.get(hm.id) ?? emptyTarget).brutTargetK1,
+                      K2: (hm: any) => (targetsByUserMap.get(hm.id) ?? emptyTarget).brutTargetK2,
+                      brut: (hm: any) => brutTotal(targetsByUserMap.get(hm.id) ?? emptyTarget),
+                      net: (hm: any) => (targetsByUserMap.get(hm.id) ?? emptyTarget).netTarget,
+                    }}
+                  >{({ sorted, sort, toggle }) => (
                   <table className="w-full text-sm">
-                    <thead><HeaderRow /></thead>
+                    <thead><HeaderRow sort={sort} toggle={toggle} /></thead>
                     <tbody>
-                      {hiringManagers.map((hm) => {
+                      {sorted.map((hm) => {
                         const t = targetsByUserMap.get(hm.id) ?? emptyTarget;
                         return <Row key={hm.id} name={hm.name} t={t} />;
                       })}
@@ -428,6 +445,7 @@ export default function Dashboard() {
                       </tr>
                     </tbody>
                   </table>
+                  )}</SortableRows>
                 </div>
               );
             }
@@ -468,21 +486,30 @@ export default function Dashboard() {
               <p className="text-sm text-muted-foreground p-6 text-center">Pozisyon bulunamadı</p>
             ) : (
               <div className="overflow-x-auto">
+                <SortableRows
+                  rows={jobs}
+                  getters={{
+                    title: (job: any) => job.title,
+                    K0: (job: any) => actualsByJob[job.id]?.K0 ?? 0, K1: (job: any) => actualsByJob[job.id]?.K1 ?? 0, K2: (job: any) => actualsByJob[job.id]?.K2 ?? 0,
+                    total: (job: any) => CANDIDATE_CATEGORIES.reduce((s, c) => s + (actualsByJob[job.id]?.[c] ?? 0), 0),
+                  }}
+                >{({ sorted, sort, toggle }) => (
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border bg-muted/30">
-                      <th className="text-left font-medium text-muted-foreground py-2.5 px-4">Pozisyon</th>
+                      <SortTh label="Pozisyon" sortKey="title" sort={sort} onSort={toggle} className="py-2.5 px-4 font-medium text-muted-foreground" />
                       {CANDIDATE_CATEGORIES.map((cat) => (
-                        <th key={cat} className={`text-center font-semibold py-2.5 px-4 ${CAT_COLORS[cat].text}`}>
-                          <div>{cat}</div>
-                          <div className="text-[10px] font-normal text-muted-foreground">Fiili / Hedef</div>
-                        </th>
+                        <SortTh
+                          key={cat} sortKey={cat} sort={sort} onSort={toggle} align="center" firstDir="desc"
+                          className={`py-2.5 px-4 font-semibold ${CAT_COLORS[cat].text}`}
+                          label={<span className="inline-block text-center"><span className="block">{cat}</span><span className="block text-[10px] font-normal text-muted-foreground">Fiili / Hedef</span></span>}
+                        />
                       ))}
-                      <th className="text-center font-medium text-muted-foreground py-2.5 px-4">Toplam</th>
+                      <SortTh label="Toplam" sortKey="total" sort={sort} onSort={toggle} align="center" firstDir="desc" className="py-2.5 px-4 font-medium text-muted-foreground" />
                     </tr>
                   </thead>
                   <tbody>
-                    {jobs.map((job: any) => {
+                    {sorted.map((job: any) => {
                       const actuals = actualsByJob[job.id] ?? { K0: 0, K1: 0, K2: 0 };
                       const tgts = targetsByJob[job.id] ?? { K0: 0, K1: 0, K2: 0 };
                       const totalActual = CANDIDATE_CATEGORIES.reduce((s, c) => s + actuals[c], 0);
@@ -490,11 +517,11 @@ export default function Dashboard() {
                       return (
                         <tr key={job.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
                           <td className="py-3 px-4">
-                            <p className="font-medium text-sm text-foreground truncate max-w-[180px]">{job.title}</p>
-                            <p className="text-xs text-muted-foreground">{job.department}</p>
+                            <p className="font-medium text-sm text-foreground truncate max-w-[180px]" title={job.title}>{job.title}</p>
+                            <p className="text-xs text-muted-foreground truncate max-w-[180px]">{job.department}</p>
                           </td>
                           {CANDIDATE_CATEGORIES.map((cat) => (
-                            <td key={cat} className="py-3 px-4">
+                            <td key={cat} className="py-3 px-4 text-center">
                               <div className="flex flex-col items-center gap-1.5">
                                 <Progress actual={actuals[cat]} target={tgts[cat]} />
                                 <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
@@ -512,6 +539,7 @@ export default function Dashboard() {
                     })}
                   </tbody>
                 </table>
+                )}</SortableRows>
               </div>
             )}
           </div>

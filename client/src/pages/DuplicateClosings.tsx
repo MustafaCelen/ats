@@ -1,3 +1,4 @@
+import { SortTh, SortableRows } from "@/components/SortTh";
 import { useState } from "react";
 import { Layout } from "@/components/Layout";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -123,20 +124,24 @@ export default function DuplicateClosings() {
             </Card>
 
             <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-              <Table>
+              <SortableRows
+                rows={groups}
+                getters={{ saleValue: (g: any) => parseFloat(g.saleValue), agents: (g: any) => g.agentNames.join(", "), count: (g: any) => g.deleteIds.length + 1 }}
+              >{({ sorted, sort, toggle }) => (
+              <Table className="[&_td]:whitespace-nowrap">
                 <TableHeader>
-                  <TableRow>
-                    <TableHead>Adres</TableHead>
-                    <TableHead>Tarih</TableHead>
-                    <TableHead className="text-right">Bedel</TableHead>
-                    <TableHead>Danışman</TableHead>
-                    <TableHead className="text-center">Kaç Kez</TableHead>
-                    <TableHead className="text-center">Tutulacak ID</TableHead>
+                  <TableRow className="text-muted-foreground [&_th]:h-12 [&_th]:px-4">
+                    <SortTh label="Adres" sortKey="propertyAddress" sort={sort} onSort={toggle} />
+                    <SortTh label="Tarih" sortKey="closingDate" sort={sort} onSort={toggle} firstDir="desc" />
+                    <SortTh label="Bedel" sortKey="saleValue" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                    <SortTh label="Danışman" sortKey="agents" sort={sort} onSort={toggle} />
+                    <SortTh label="Kaç Kez" sortKey="count" sort={sort} onSort={toggle} align="center" firstDir="desc" />
+                    <SortTh label="Tutulacak ID" sortKey="keepId" sort={sort} onSort={toggle} align="center" />
                     <TableHead>Silinecek ID'ler</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {groups.map((g) => (
+                  {sorted.map((g) => (
                     <TableRow key={`${g.propertyAddress}-${g.closingDate}-${g.saleValue}`}>
                       <TableCell className="max-w-[220px] truncate" title={g.propertyAddress}>{g.propertyAddress}</TableCell>
                       <TableCell className="whitespace-nowrap">{fmtDate(g.closingDate)}</TableCell>
@@ -149,6 +154,7 @@ export default function DuplicateClosings() {
                   ))}
                 </TableBody>
               </Table>
+              )}</SortableRows>
             </div>
           </>
         )}

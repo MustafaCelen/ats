@@ -23,6 +23,8 @@ import { useAuth } from "@/hooks/use-auth";
 import type { PublicUser } from "@shared/schema";
 import { format, isPast, parseISO } from "date-fns";
 import { tr } from "date-fns/locale";
+import { useSortable } from "@/lib/sort";
+import { SortHead } from "@/components/SortTh";
 
 type TaskStatus = "pending" | "in_progress" | "done";
 
@@ -74,9 +76,16 @@ function useAssignableUsers(enabled = true) {
   });
 }
 
+const TASK_SORT = {
+  title: (t: any) => t.title, assignedTo: (t: any) => t.assignedTo?.name, candidate: (t: any) => t.candidate?.name,
+  createdBy: (t: any) => t.createdBy?.name, dueDate: (t: any) => t.dueDate, status: (t: any) => t.status,
+};
+
 export default function Tasks() {
   const { data: user } = useAuth();
   const { data: tasks, isLoading } = useTasks();
+  // Sütun sıralaması (ortak altyapı: @/lib/sort)
+  const { sorted: sortedTasks, sort, toggle: toggleSort } = useSortable(tasks ?? [], TASK_SORT);
   const isAssistant = user?.role === "assistant";
   const isAdmin = user?.role === "admin";
   const isHiringManager = user?.role === "hiring_manager";
@@ -110,14 +119,14 @@ export default function Tasks() {
           )}
         </div>
 
-        <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-          <div className="hidden md:grid grid-cols-[2fr_1fr_1fr_1.5fr_1fr_220px] gap-4 px-5 py-3 bg-muted/30 border-b border-border text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            <div>Görev</div>
-            <div>Atanan</div>
-            <div>Aday</div>
-            <div>Oluşturan</div>
-            <div>Son Tarih</div>
-            <div>Durum</div>
+        <div className="rounded-xl border border-border bg-card shadow-sm overflow-x-auto">
+          <div className="hidden md:grid grid-cols-[minmax(200px,2fr)_minmax(110px,1fr)_minmax(110px,1fr)_minmax(110px,1fr)_104px_210px] md:min-w-[900px] gap-3 px-5 py-3 bg-muted/30 border-b border-border text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            <SortHead label="Görev" sortKey="title" sort={sort} onSort={toggleSort} />
+            <SortHead label="Atanan" sortKey="assignedTo" sort={sort} onSort={toggleSort} />
+            <SortHead label="Aday" sortKey="candidate" sort={sort} onSort={toggleSort} />
+            <SortHead label="Oluşturan" sortKey="createdBy" sort={sort} onSort={toggleSort} />
+            <SortHead label="Son Tarih" sortKey="dueDate" sort={sort} onSort={toggleSort} />
+            <SortHead label="Durum" sortKey="status" sort={sort} onSort={toggleSort} />
           </div>
 
           {isLoading ? (
@@ -132,7 +141,7 @@ export default function Tasks() {
             </div>
           ) : (
             <div className="divide-y divide-border">
-              {tasks.map((task) => (
+              {sortedTasks.map((task) => (
                 <TaskRow
                   key={task.id}
                   task={task}
@@ -205,16 +214,16 @@ function TaskRow({
 
   return (
     <div
-      className="grid grid-cols-1 md:grid-cols-[2fr_1fr_1fr_1.5fr_1fr_220px] gap-4 px-5 py-4 items-center hover:bg-muted/10 transition-colors"
+      className="grid grid-cols-1 md:grid-cols-[minmax(200px,2fr)_minmax(110px,1fr)_minmax(110px,1fr)_minmax(110px,1fr)_104px_210px] md:min-w-[900px] gap-3 px-5 py-4 items-center hover:bg-muted/10 transition-colors"
       data-testid={`row-task-${task.id}`}
     >
-      <div>
-        <p className="font-medium text-sm">{task.title}</p>
+      <div className="min-w-0">
+        <p className="font-medium text-sm truncate" title={task.title}>{task.title}</p>
         {task.description && (
-          <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{task.description}</p>
+          <p className="text-xs text-muted-foreground mt-0.5 truncate" title={task.description}>{task.description}</p>
         )}
       </div>
-      <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+      <div className="flex items-center gap-1.5 text-sm text-muted-foreground min-w-0">
         <User className="h-3.5 w-3.5 shrink-0" />
         <span className="truncate text-xs">{task.assignedTo?.name ?? "—"}</span>
       </div>
@@ -232,11 +241,11 @@ function TaskRow({
           <span className="text-xs text-muted-foreground">—</span>
         )}
       </div>
-      <div className="text-xs text-muted-foreground truncate">{task.createdBy?.name ?? "—"}</div>
-      <div className={`text-xs flex items-center gap-1 ${overdue ? "text-red-600 font-medium" : "text-muted-foreground"}`}>
+      <div className="text-xs text-muted-foreground truncate" title={task.createdBy?.name}>{task.createdBy?.name ?? "—"}</div>
+      <div className={`text-xs flex items-center gap-1 whitespace-nowrap tabular-nums ${overdue ? "text-red-600 font-medium" : "text-muted-foreground"}`}>
         {dueDateStr ? <><CalendarDays className="h-3 w-3 shrink-0" />{dueDateStr}</> : "—"}
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 whitespace-nowrap">
         <span
           className={`inline-flex items-center text-xs px-2 py-0.5 rounded-full font-medium ${meta.color}`}
           data-testid={`status-task-${task.id}`}

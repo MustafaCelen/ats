@@ -1,3 +1,4 @@
+import { SortTh, SortableRows } from "@/components/SortTh";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { AlertCircle, CheckCircle2 } from "lucide-react";
@@ -101,23 +102,24 @@ export function EmployeeDebtPanel({ debt, kwuid }: { debt: EmployeeFonzipDebt | 
           : "Tüm tahsilatlar kalemlere eşleşmiş; açık kalemler toplamı Fonzip bakiyesine eşit."}
       </p>
       <div className="rounded-lg border border-border overflow-hidden">
-        <table className="w-full text-xs">
+        <SortableRows rows={rows} getters={{ state: (d: any) => ({ acik: 0, kismi: 1, kapandi: 2 })[d.state as string] }}>{({ sorted, sort, toggle }) => (
+        <table className="w-full text-xs [&_td]:whitespace-nowrap">
           <thead className="bg-muted/50 text-muted-foreground">
-            <tr>
-              <th className="text-left px-3 py-2 font-medium">Tarih</th>
-              <th className="text-left px-3 py-2 font-medium">Açıklama</th>
-              <th className="text-right px-3 py-2 font-medium">Tutar</th>
-              <th className="text-right px-3 py-2 font-medium">Kalan</th>
-              <th className="text-left px-3 py-2 font-medium">Durum</th>
+            <tr className="[&_th]:px-3 [&_th]:py-2">
+              <SortTh label="Tarih" sortKey="operationDate" sort={sort} onSort={toggle} firstDir="desc" />
+              <SortTh label="Açıklama" sortKey="details" sort={sort} onSort={toggle} />
+              <SortTh label="Tutar" sortKey="amount" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+              <SortTh label="Kalan" sortKey="remaining" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+              <SortTh label="Durum" sortKey="state" sort={sort} onSort={toggle} />
             </tr>
           </thead>
           <tbody>
-            {rows.map((d, i) => (
+            {sorted.map((d, i) => (
               <tr key={i} className={`border-t border-border ${d.state === "kapandi" ? "text-muted-foreground" : ""}`}>
                 <td className="px-3 py-1.5 whitespace-nowrap text-muted-foreground">
                   {d.operationDate ? format(new Date(d.operationDate), "dd.MM.yyyy") : "—"}
                 </td>
-                <td className="px-3 py-1.5">{d.details || "—"}</td>
+                <td className="px-3 py-1.5 max-w-[260px] truncate" title={d.details || undefined}>{d.details || "—"}</td>
                 <td className="px-3 py-1.5 text-right whitespace-nowrap">{fmtTRY(d.amount)}</td>
                 <td className={`px-3 py-1.5 text-right font-medium whitespace-nowrap ${d.state === "kapandi" ? "" : "text-red-700"}`}>
                   {d.state === "kapandi" ? "—" : fmtTRY(d.remaining)}
@@ -139,6 +141,7 @@ export function EmployeeDebtPanel({ debt, kwuid }: { debt: EmployeeFonzipDebt | 
             </tr>
           </tfoot>
         </table>
+        )}</SortableRows>
       </div>
     </div>
   );

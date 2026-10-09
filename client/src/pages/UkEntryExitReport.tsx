@@ -1,3 +1,4 @@
+import { SortHead, SortableRows } from "@/components/SortTh";
 import { useState } from "react";
 import { Layout } from "@/components/Layout";
 import { useQuery } from "@tanstack/react-query";
@@ -119,22 +120,28 @@ export default function UkEntryExitReport() {
                 {!data?.entries.length ? (
                   <p className="text-sm text-muted-foreground text-center py-6">Bu aralıkta ÜK'ya giriş yapan yok.</p>
                 ) : (
-                  <div className="space-y-2">
-                    {data.entries.map((e) => (
+                  <SortableRows rows={data.entries} getters={{ name: (e: any) => e.name, date: (e: any) => e.startDate }}>{({ sorted, sort, toggle }) => (
+                  <div>
+                    <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-wide text-muted-foreground pb-1.5 border-b border-border">
+                      <SortHead label="Danışman" sortKey="name" sort={sort} onSort={toggle} />
+                      <SortHead label="Giriş" sortKey="date" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                    </div>
+                    {sorted.map((e) => (
                       <div key={e.employeeId} className="flex items-center justify-between text-sm py-1.5 border-b border-border last:border-0">
-                        <div className="min-w-0">
-                          <span className="font-medium truncate">{e.name}</span>
+                        <div className="min-w-0 flex items-center whitespace-nowrap">
+                          <span className="font-medium truncate" title={e.name}>{e.name}</span>
                           {e.office && <span className="text-xs text-muted-foreground ml-1.5">({e.office})</span>}
                           {e.status === "passive" && (
                             <span className="ml-1.5 rounded border border-slate-300 bg-slate-100 px-1 py-0.5 text-[10px] font-medium text-slate-500">Pasif</span>
                           )}
                         </div>
-                        <span className="text-xs text-muted-foreground whitespace-nowrap ml-2">
+                        <span className="text-xs text-muted-foreground whitespace-nowrap ml-2 tabular-nums">
                           {e.startDate ? fmtDate(e.startDate) : "—"}
                         </span>
                       </div>
                     ))}
                   </div>
+                  )}</SortableRows>
                 )}
               </div>
             </div>
@@ -149,22 +156,28 @@ export default function UkEntryExitReport() {
                 {!data?.exits.length ? (
                   <p className="text-sm text-muted-foreground text-center py-6">Bu aralıkta ÜK'dan çıkış yapan yok.</p>
                 ) : (
-                  <div className="space-y-2">
-                    {data.exits.map((e) => (
+                  <SortableRows rows={data.exits} getters={{ name: (e: any) => e.name, date: (e: any) => e.ukEndDate }}>{({ sorted, sort, toggle }) => (
+                  <div>
+                    <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-wide text-muted-foreground pb-1.5 border-b border-border">
+                      <SortHead label="Danışman" sortKey="name" sort={sort} onSort={toggle} />
+                      <SortHead label="Çıkış" sortKey="date" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                    </div>
+                    {sorted.map((e) => (
                       <div key={e.employeeId} className="flex items-center justify-between text-sm py-1.5 border-b border-border last:border-0">
-                        <div className="min-w-0">
-                          <span className="font-medium truncate">{e.name}</span>
+                        <div className="min-w-0 flex items-center whitespace-nowrap">
+                          <span className="font-medium truncate" title={e.name}>{e.name}</span>
                           {e.office && <span className="text-xs text-muted-foreground ml-1.5">({e.office})</span>}
                           {e.status === "passive" && (
                             <span className="ml-1.5 rounded border border-slate-300 bg-slate-100 px-1 py-0.5 text-[10px] font-medium text-slate-500">Pasif</span>
                           )}
                         </div>
-                        <span className="text-xs text-muted-foreground whitespace-nowrap ml-2">
+                        <span className="text-xs text-muted-foreground whitespace-nowrap ml-2 tabular-nums">
                           {fmtDate(e.ukEndDate)}
                         </span>
                       </div>
                     ))}
                   </div>
+                  )}</SortableRows>
                 )}
               </div>
             </div>

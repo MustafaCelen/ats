@@ -1,3 +1,4 @@
+import { SortTh } from "@/components/SortTh";
 import { useState, useMemo } from "react";
 import { Layout } from "@/components/Layout";
 import { useQuery } from "@tanstack/react-query";
@@ -13,23 +14,14 @@ type SortKey = "name" | "risk" | "lastClosingDate" | "daysSinceLast" | "closings
 const fmtTRY = (n: number) => n === 0 ? "—" :
   new Intl.NumberFormat("tr-TR", { maximumFractionDigits: 0 }).format(n) + " ₺";
 
+// Ortak sıralanabilir başlık (SortTh) — mevcut sıralama durumu ve karşılaştırıcıları korunur
 function SortHeader({
   label, sortKey, currentKey, dir, onSort, align = "left",
 }: {
   label: string; sortKey: SortKey; currentKey: SortKey; dir: "asc" | "desc"; onSort: (k: SortKey) => void;
   align?: "left" | "center" | "right";
 }) {
-  const active = currentKey === sortKey;
-  return (
-    <th className={`text-${align} px-5 py-3 cursor-pointer select-none hover:bg-muted/50 transition-colors`} onClick={() => onSort(sortKey)}>
-      <span className={`inline-flex items-center gap-1 ${active ? "text-primary" : ""}`}>
-        {label}
-        {active
-          ? (dir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />)
-          : <ArrowUpDown className="h-3 w-3 opacity-30" />}
-      </span>
-    </th>
-  );
+  return <SortTh label={label} sortKey={sortKey} sort={{ key: currentKey, dir }} onSort={(k) => onSort(k as SortKey)} align={align} className="px-5 py-3 hover:bg-muted/50 transition-colors" />;
 }
 
 const RISK_ORDER: Record<string, number> = { high: 3, medium: 2, low: 1 };
@@ -218,7 +210,7 @@ export default function AgentHealth() {
               <div className="px-5 py-8 text-sm text-muted-foreground text-center">Bu grupta danışman yok.</div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="w-full text-sm [&_td]:whitespace-nowrap">
                   <thead className="bg-muted/30 text-xs text-muted-foreground uppercase">
                     <tr>
                       <SortHeader label="Danışman" sortKey="name" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
@@ -240,7 +232,7 @@ export default function AgentHealth() {
                     {hadClosings.map((r) => (
                       <tr key={r.employeeId} className={rowCls(r.risk)}>
                         <td className="px-5 py-3">
-                          <p className="font-medium">{r.name}</p>
+                          <p className="font-medium max-w-[220px] truncate" title={r.name}>{r.name}</p>
                           {r.kwuid && <p className="text-xs text-muted-foreground font-mono">{r.kwuid}</p>}
                         </td>
                         <td className="px-5 py-3 text-xs">
@@ -290,7 +282,7 @@ export default function AgentHealth() {
               <div className="px-5 py-8 text-sm text-muted-foreground text-center">Bu grupta danışman yok.</div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="w-full text-sm [&_td]:whitespace-nowrap">
                   <thead className="bg-muted/30 text-xs text-muted-foreground uppercase">
                     <tr>
                       <SortHeader label="Danışman" sortKey="name" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
@@ -308,7 +300,7 @@ export default function AgentHealth() {
                     {neverClosed.map((r) => (
                       <tr key={r.employeeId} className={rowCls(r.risk)}>
                         <td className="px-5 py-3">
-                          <p className="font-medium">{r.name}</p>
+                          <p className="font-medium max-w-[220px] truncate" title={r.name}>{r.name}</p>
                           {r.kwuid && <p className="text-xs text-muted-foreground font-mono">{r.kwuid}</p>}
                         </td>
                         <td className="px-5 py-3 text-xs">

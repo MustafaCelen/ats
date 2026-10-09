@@ -18,6 +18,8 @@ import {
 import { Plus, Trash2, User, Shield, Briefcase, KeyRound, X, Check, ClipboardList, BarChart2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
+import { useSortable } from "@/lib/sort";
+import { SortHead } from "@/components/SortTh";
 import type { PublicUser } from "@shared/schema";
 import { useJobs } from "@/hooks/use-jobs";
 import { formatDistanceToNow } from "date-fns";
@@ -37,9 +39,15 @@ function useJobAssignees(jobId: number) {
   });
 }
 
+const USER_SORT = {
+  name: (u: any) => u.name, email: (u: any) => u.email, role: (u: any) => u.role, createdAt: (u: any) => u.createdAt,
+};
+
 export default function Users() {
   const { data: currentUser } = useAuth();
   const { data: users, isLoading } = useUsers();
+  // Sütun sıralaması (ortak altyapı: @/lib/sort)
+  const { sorted: sortedUsers, sort, toggle: toggleSort } = useSortable(users ?? [], USER_SORT);
   const { data: jobs } = useJobs();
   const [addOpen, setAddOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<PublicUser | null>(null);
@@ -65,9 +73,13 @@ export default function Users() {
         </div>
 
         {/* Users Table */}
-        <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-          <div className="hidden md:grid grid-cols-[2fr_2fr_120px_140px_220px] gap-4 px-5 py-3 bg-muted/30 border-b border-border text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            <div>Kullanıcı</div><div>E-posta</div><div>Rol</div><div>Üyelik</div><div></div>
+        <div className="rounded-xl border border-border bg-card shadow-sm overflow-x-auto">
+          <div className="hidden md:grid grid-cols-[minmax(180px,2fr)_minmax(200px,2fr)_130px_140px_230px] md:min-w-[900px] gap-3 px-5 py-3 bg-muted/30 border-b border-border text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            <SortHead label="Kullanıcı" sortKey="name" sort={sort} onSort={toggleSort} />
+            <SortHead label="E-posta" sortKey="email" sort={sort} onSort={toggleSort} />
+            <SortHead label="Rol" sortKey="role" sort={sort} onSort={toggleSort} />
+            <SortHead label="Üyelik" sortKey="createdAt" sort={sort} onSort={toggleSort} firstDir="desc" />
+            <div></div>
           </div>
           {isLoading ? (
             <div className="p-8 text-center text-muted-foreground text-sm">Yükleniyor...</div>
@@ -75,20 +87,20 @@ export default function Users() {
             <div className="p-8 text-center text-muted-foreground text-sm">Kullanıcı bulunamadı.</div>
           ) : (
             <div className="divide-y divide-border">
-              {users.map((user) => (
-                <div key={user.id} className="grid grid-cols-1 md:grid-cols-[2fr_2fr_120px_140px_220px] gap-4 px-5 py-4 items-center hover:bg-muted/10 transition-colors" data-testid={`row-user-${user.id}`}>
-                  <div className="flex items-center gap-3">
+              {sortedUsers.map((user) => (
+                <div key={user.id} className="grid grid-cols-1 md:grid-cols-[minmax(180px,2fr)_minmax(200px,2fr)_130px_140px_230px] md:min-w-[900px] gap-3 px-5 py-4 items-center hover:bg-muted/10 transition-colors" data-testid={`row-user-${user.id}`}>
+                  <div className="flex items-center gap-3 min-w-0">
                     <div className="h-8 w-8 rounded-full bg-gradient-to-br from-primary to-accent flex items-center justify-center text-white text-xs font-bold shrink-0">
                       {user.name.slice(0, 2).toUpperCase()}
                     </div>
-                    <p className="font-medium text-sm">{user.name}</p>
+                    <p className="font-medium text-sm truncate" title={user.name}>{user.name}</p>
                   </div>
-                  <p className="text-sm text-muted-foreground">{user.email}</p>
+                  <p className="text-sm text-muted-foreground truncate" title={user.email}>{user.email}</p>
                   <RoleBadge role={user.role} />
                   <p className="text-xs text-muted-foreground whitespace-nowrap">
                     {user.createdAt ? formatDistanceToNow(new Date(user.createdAt), { addSuffix: true }) : "—"}
                   </p>
-                  <div className="flex items-center flex-wrap gap-1">
+                  <div className="flex items-center gap-1 whitespace-nowrap">
                     {(user.role === "hiring_manager" || user.role === "assistant") && (
                       <Button
                         size="sm" variant="outline"

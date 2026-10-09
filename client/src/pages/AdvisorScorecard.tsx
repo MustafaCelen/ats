@@ -1,3 +1,4 @@
+import { SortTh, SortableRows } from "@/components/SortTh";
 import { useEffect, useState } from "react";
 import { Layout } from "@/components/Layout";
 import { MapPin, Calendar, ChevronDown, ChevronRight, Building2, Check, X } from "lucide-react";
@@ -92,7 +93,7 @@ function AdvisorRowGroup({ row, extra, expandable = true }: { row: ScorecardAdvi
       </tr>
       {open && canExpand && row.rows.map((m, i) => (
         <tr key={i} className="border-b border-border/30 bg-muted/10 text-muted-foreground">
-          <td className="py-1.5 px-3 pl-9">{m.mahalle}</td>
+          <td className="py-1.5 px-3 pl-9 whitespace-nowrap max-w-[260px] truncate" title={m.mahalle}>{m.mahalle}</td>
           <td className="py-1.5 px-3 text-right tabular-nums">{fmtTRY(m.bhb)}</td>
           <td className="py-1.5 px-3 text-right tabular-nums">{fmtOran(m.oran)}</td>
           <td className="py-1.5 px-3 text-right tabular-nums">{fmtTRY(m.hacim)}</td>
@@ -102,7 +103,7 @@ function AdvisorRowGroup({ row, extra, expandable = true }: { row: ScorecardAdvi
               <td className="py-1.5 px-3 text-right tabular-nums">{m.oranPayi != null ? fmtPct(m.oranPayi) : "—"}</td>
               <td className="py-1.5 px-3 text-right tabular-nums">{m.bireyselHacimPayi != null ? fmtPct(m.bireyselHacimPayi) : "—"}</td>
               <td className="py-1.5 px-3 text-right tabular-nums">{m.bireyselOranPayi != null ? fmtPct(m.bireyselOranPayi) : "—"}</td>
-              <td className="py-1.5 px-3" colSpan={2} />
+              <td className="py-1.5 px-3 text-right" colSpan={2} />
             </>
           )}
         </tr>
@@ -178,26 +179,31 @@ export default function AdvisorScorecard() {
                 <span className="text-xs text-muted-foreground ml-1">{fromDate} – {toDate}</span>
               </div>
               <div className="overflow-x-auto">
-                <table className="w-full text-xs">
+                <SortableRows rows={officeRows} getters={{
+                    name: (r: any) => r.name, bhb: (r: any) => r.total.bhb, oran: (r: any) => r.total.oran, hacim: (r: any) => r.total.hacim,
+                    hacimPayi: (r: any) => r.hacimPayi, oranPayi: (r: any) => r.oranPayi, bireyselHacimPayi: (r: any) => r.bireyselHacimPayi,
+                    bireyselOranPayi: (r: any) => r.bireyselOranPayi, portfoyAdedi: (r: any) => r.portfoyAdedi, portfoyHacmi: (r: any) => r.portfoyHacmi,
+                  }} initial={{ key: "hacim", dir: "desc" }}>{({ sorted, sort, toggle }) => (
+                <table className="w-full text-xs [&_td]:whitespace-nowrap">
                   <thead className="bg-muted/30">
-                    <tr className="border-b border-border text-muted-foreground">
-                      <th className="text-left px-3 py-2 font-medium">Danışman</th>
-                      <th className="text-right px-3 py-2 font-medium">BHB</th>
-                      <th className="text-right px-3 py-2 font-medium">İşlem Adedi</th>
-                      <th className="text-right px-3 py-2 font-medium">İşlem Hacmi</th>
-                      <th className="text-right px-3 py-2 font-medium">{officeLabel} Hacim Payı{hasMahalleFilter ? " (mahalle)" : ""}</th>
-                      <th className="text-right px-3 py-2 font-medium">{officeLabel} Adedi Payı{hasMahalleFilter ? " (mahalle)" : ""}</th>
-                      <th className="text-right px-3 py-2 font-medium">Bireysel Hacim Payı</th>
-                      <th className="text-right px-3 py-2 font-medium">Bireysel Adedi Payı</th>
-                      <th className="text-right px-3 py-2 font-medium">Portföy Adedi</th>
-                      <th className="text-right px-3 py-2 font-medium">Portföy Hacmi</th>
+                    <tr className="border-b border-border text-muted-foreground [&_th]:px-3 [&_th]:py-2">
+                      <SortTh label="Danışman" sortKey="name" sort={sort} onSort={toggle} />
+                      <SortTh label="BHB" sortKey="bhb" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                      <SortTh label="İşlem Adedi" sortKey="oran" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                      <SortTh label="İşlem Hacmi" sortKey="hacim" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                      <SortTh label={`${officeLabel} Hacim Payı${hasMahalleFilter ? " (mahalle)" : ""}`} sortKey="hacimPayi" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                      <SortTh label={`${officeLabel} Adedi Payı${hasMahalleFilter ? " (mahalle)" : ""}`} sortKey="oranPayi" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                      <SortTh label="Bireysel Hacim Payı" sortKey="bireyselHacimPayi" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                      <SortTh label="Bireysel Adedi Payı" sortKey="bireyselOranPayi" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                      <SortTh label="Portföy Adedi" sortKey="portfoyAdedi" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                      <SortTh label="Portföy Hacmi" sortKey="portfoyHacmi" sort={sort} onSort={toggle} align="right" firstDir="desc" />
                     </tr>
                   </thead>
                   <tbody>
-                    {officeRows.length === 0 && (
+                    {sorted.length === 0 && (
                       <tr><td colSpan={10} className="py-6 text-center text-muted-foreground">Bu dönemde {officeLabel}{hasMahalleFilter ? ` / ${mahalleLabel}` : ""} için işlem bulunamadı.</td></tr>
                     )}
-                    {officeRows.map((row) => (
+                    {sorted.map((row) => (
                       <AdvisorRowGroup key={row.employeeId} row={row} extra={row} expandable={mahalle.length !== 1} />
                     ))}
                   </tbody>
@@ -218,6 +224,7 @@ export default function AdvisorScorecard() {
                     </tfoot>
                   )}
                 </table>
+                )}</SortableRows>
               </div>
               <div className="px-5 py-2 border-t border-border text-[11px] text-muted-foreground space-y-0.5">
                 {!office && (
@@ -249,18 +256,23 @@ export default function AdvisorScorecard() {
                 </button>
                 {showCompany && (
                   <div className="overflow-x-auto">
-                    <table className="w-full text-xs">
+                    <SortableRows rows={companyRows} getters={{
+                    name: (r: any) => r.name, bhb: (r: any) => r.total.bhb, oran: (r: any) => r.total.oran, hacim: (r: any) => r.total.hacim,
+                    hacimPayi: (r: any) => r.hacimPayi, oranPayi: (r: any) => r.oranPayi, bireyselHacimPayi: (r: any) => r.bireyselHacimPayi,
+                    bireyselOranPayi: (r: any) => r.bireyselOranPayi, portfoyAdedi: (r: any) => r.portfoyAdedi, portfoyHacmi: (r: any) => r.portfoyHacmi,
+                  }} initial={{ key: "hacim", dir: "desc" }}>{({ sorted, sort, toggle }) => (
+                    <table className="w-full text-xs [&_td]:whitespace-nowrap">
                       <thead className="bg-muted/30">
-                        <tr className="border-b border-border text-muted-foreground">
-                          <th className="text-left px-3 py-2 font-medium">Danışman</th>
-                          <th className="text-right px-3 py-2 font-medium">BHB</th>
-                          <th className="text-right px-3 py-2 font-medium">İşlem Adedi</th>
-                          <th className="text-right px-3 py-2 font-medium">İşlem Hacmi</th>
-                          <th className="text-right px-3 py-2 font-medium">Şirket Hacim Payı</th>
+                        <tr className="border-b border-border text-muted-foreground [&_th]:px-3 [&_th]:py-2">
+                          <SortTh label="Danışman" sortKey="name" sort={sort} onSort={toggle} />
+                          <SortTh label="BHB" sortKey="bhb" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                          <SortTh label="İşlem Adedi" sortKey="oran" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                          <SortTh label="İşlem Hacmi" sortKey="hacim" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                          <SortTh label="Şirket Hacim Payı" sortKey="hacimPayi" sort={sort} onSort={toggle} align="right" firstDir="desc" />
                         </tr>
                       </thead>
                       <tbody>
-                        {companyRows.map((row) => (
+                        {sorted.map((row) => (
                           <AdvisorRowGroup key={row.employeeId} row={row} expandable={mahalle.length !== 1} />
                         ))}
                       </tbody>
@@ -274,6 +286,7 @@ export default function AdvisorScorecard() {
                         </tr>
                       </tfoot>
                     </table>
+                    )}</SortableRows>
                   </div>
                 )}
               </div>

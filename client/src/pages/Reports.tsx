@@ -1,3 +1,4 @@
+import { SortTh, SortableRows } from "@/components/SortTh";
 import { useState } from "react";
 import { Layout } from "@/components/Layout";
 import { useReportStats, useEmployeeTrend } from "@/hooks/use-stats";
@@ -390,32 +391,33 @@ export default function Reports() {
             </div>
             {/* Desktop table */}
             <div className="hidden md:block overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/30 text-muted-foreground uppercase text-xs">
+              <SortableRows rows={(stats?.hiringManagerEfficiency ?? []) as any[]}>{({ sorted, sort, toggle }) => (
+              <table className="w-full text-sm min-w-[960px] [&_td]:whitespace-nowrap">
+                <thead className="bg-muted/30 text-muted-foreground uppercase text-xs [&_th]:p-4">
                   <tr>
-                    <th className="text-left p-4">Yönetici</th>
-                    <th className="text-left p-4">Ort. Sözleşme Süresi</th>
-                    <th className="text-left p-4">Ort. İşe Giriş Süresi</th>
-                    <th className="text-left p-4">Randevu</th>
-                    <th className="text-left p-4">K0</th>
-                    <th className="text-left p-4">K1</th>
-                    <th className="text-left p-4">K2</th>
-                    <th className="text-left p-4">Sözleşme</th>
-                    <th className="text-left p-4">Giriş</th>
+                    <SortTh label="Yönetici" sortKey="name" sort={sort} onSort={toggle} />
+                    <SortTh label="Ort. Sözleşme Süresi" sortKey="avgTimeToContractSign" sort={sort} onSort={toggle} align="right" />
+                    <SortTh label="Ort. İşe Giriş Süresi" sortKey="avgTimeToEmploy" sort={sort} onSort={toggle} align="right" />
+                    <SortTh label="Randevu" sortKey="interviews" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                    <SortTh label="K0" sortKey="k0" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                    <SortTh label="K1" sortKey="k1" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                    <SortTh label="K2" sortKey="k2" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                    <SortTh label="Sözleşme" sortKey="totalHires" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                    <SortTh label="Giriş" sortKey="employedCount" sort={sort} onSort={toggle} align="right" firstDir="desc" />
                   </tr>
                 </thead>
                 <tbody>
-                  {(stats?.hiringManagerEfficiency ?? []).map((m: any) => (
+                  {sorted.map((m: any) => (
                     <tr key={m.userId} className="border-t border-border">
                       <td className="p-4 font-medium">{m.name}</td>
-                      <td className="p-4">{m.avgTimeToContractSign} gün</td>
-                      <td className="p-4">{m.avgTimeToEmploy} gün</td>
-                      <td className="p-4">{m.interviews}</td>
-                      <td className="p-4">{m.k0 ?? 0}</td>
-                      <td className="p-4">{m.k1 ?? 0}</td>
-                      <td className="p-4">{m.k2 ?? 0}</td>
-                      <td className="p-4">{m.totalHires}</td>
-                      <td className="p-4">
+                      <td className="p-4 text-right tabular-nums">{m.avgTimeToContractSign} gün</td>
+                      <td className="p-4 text-right tabular-nums">{m.avgTimeToEmploy} gün</td>
+                      <td className="p-4 text-right tabular-nums">{m.interviews}</td>
+                      <td className="p-4 text-right tabular-nums">{m.k0 ?? 0}</td>
+                      <td className="p-4 text-right tabular-nums">{m.k1 ?? 0}</td>
+                      <td className="p-4 text-right tabular-nums">{m.k2 ?? 0}</td>
+                      <td className="p-4 text-right tabular-nums">{m.totalHires}</td>
+                      <td className="p-4 text-right tabular-nums">
                         <span className={`inline-flex items-center gap-1 font-medium ${m.employedCount > 0 ? "text-emerald-600" : "text-muted-foreground"}`}>
                           {m.employedCount ?? 0}
                         </span>
@@ -424,6 +426,7 @@ export default function Reports() {
                   ))}
                 </tbody>
               </table>
+              )}</SortableRows>
             </div>
           </div>
         </div>
@@ -474,40 +477,47 @@ export default function Reports() {
 
             return (
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/30 text-muted-foreground uppercase text-xs">
+                <SortableRows
+                  rows={stats.passiveEmployees as any[]}
+                  getters={{
+                    duration: (e: any) => (e.startDate && e.passiveAt ? new Date(e.passiveAt).getTime() - new Date(e.startDate).getTime() : null),
+                    ...Object.fromEntries(allYears.map((y: number) => [`bhb_${y}`, (e: any) => (e.bhbByYear ?? []).find((b: any) => b.year === y)?.bhb ?? null])),
+                  } as any}
+                >{({ sorted, sort, toggle }) => (
+                <table className="w-full text-sm [&_td]:whitespace-nowrap">
+                  <thead className="bg-muted/30 text-muted-foreground uppercase text-xs [&_th]:p-4">
                     <tr>
-                      <th className="text-left p-4">Çalışan</th>
-                      <th className="text-left p-4">Ünvan</th>
-                      <th className="text-left p-4">Giriş Tarihi</th>
-                      <th className="text-left p-4">Şirkette Süre</th>
+                      <SortTh label="Çalışan" sortKey="name" sort={sort} onSort={toggle} />
+                      <SortTh label="Ünvan" sortKey="title" sort={sort} onSort={toggle} />
+                      <SortTh label="Giriş Tarihi" sortKey="startDate" sort={sort} onSort={toggle} />
+                      <SortTh label="Şirkette Süre" sortKey="duration" sort={sort} onSort={toggle} firstDir="desc" />
                       {allYears.map((y) => (
-                        <th key={y} className="text-right p-4">{y} BHB</th>
+                        <SortTh key={y} label={`${y} BHB`} sortKey={`bhb_${y}`} sort={sort} onSort={toggle} align="right" firstDir="desc" />
                       ))}
-                      <th className="text-left p-4">Pasife Alınma Tarihi</th>
+                      <SortTh label="Pasife Alınma Tarihi" sortKey="passiveAt" sort={sort} onSort={toggle} firstDir="desc" />
                     </tr>
                   </thead>
                   <tbody>
-                    {(stats.passiveEmployees as any[]).map((emp: any) => {
+                    {sorted.map((emp: any) => {
                       const bhbMap = new Map((emp.bhbByYear ?? []).map((b: any) => [b.year, b.bhb]));
                       return (
                         <tr key={emp.id} className="border-t border-border" data-testid={`passive-employee-row-${emp.id}`}>
-                          <td className="p-4 font-medium text-foreground">{emp.name}</td>
-                          <td className="p-4 text-muted-foreground">{emp.title ?? "—"}</td>
-                          <td className="p-4 text-muted-foreground whitespace-nowrap">
+                          <td className="p-4 font-medium text-foreground max-w-[260px] truncate" title={emp.name}>{emp.name}</td>
+                          <td className="p-4 text-muted-foreground max-w-[200px] truncate" title={emp.title ?? undefined}>{emp.title ?? "—"}</td>
+                          <td className="p-4 text-muted-foreground tabular-nums">
                             {emp.startDate ? new Date(emp.startDate).toLocaleDateString("tr-TR") : "—"}
                           </td>
-                          <td className="p-4 text-muted-foreground whitespace-nowrap">
+                          <td className="p-4 text-muted-foreground">
                             {fmtDuration(emp.startDate, emp.passiveAt)}
                           </td>
                           {allYears.map((y) => (
-                            <td key={y} className="p-4 text-right font-mono text-foreground whitespace-nowrap">
+                            <td key={y} className="p-4 text-right font-mono text-foreground tabular-nums">
                               {bhbMap.has(y)
                                 ? new Intl.NumberFormat("tr-TR", { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(bhbMap.get(y) as number) + " ₺"
                                 : "—"}
                             </td>
                           ))}
-                          <td className="p-4 text-muted-foreground whitespace-nowrap">
+                          <td className="p-4 text-muted-foreground tabular-nums">
                             {emp.passiveAt ? new Date(emp.passiveAt).toLocaleDateString("tr-TR") : "—"}
                           </td>
                         </tr>
@@ -515,6 +525,7 @@ export default function Reports() {
                     })}
                   </tbody>
                 </table>
+                )}</SortableRows>
               </div>
             );
           })()}
@@ -570,23 +581,24 @@ export default function Reports() {
               </div>
               {/* Desktop table */}
               <div className="hidden md:block overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/30 text-muted-foreground uppercase text-xs">
+                <SortableRows rows={stats.newEmployees as any[]}>{({ sorted, sort, toggle }) => (
+                <table className="w-full text-sm [&_td]:whitespace-nowrap">
+                  <thead className="bg-muted/30 text-muted-foreground uppercase text-xs [&_th]:p-4">
                     <tr>
-                      <th className="text-left p-4">Danışman</th>
-                      <th className="text-left p-4">Üretim Bandı</th>
-                      <th className="text-left p-4">Şehir</th>
-                      <th className="text-left p-4">Kategori</th>
-                      <th className="text-left p-4">Sözleşme</th>
-                      <th className="text-left p-4">KWUID</th>
-                      <th className="text-left p-4">Başlangıç Tarihi</th>
+                      <SortTh label="Danışman" sortKey="name" sort={sort} onSort={toggle} />
+                      <SortTh label="Üretim Bandı" sortKey="jobTitle" sort={sort} onSort={toggle} />
+                      <SortTh label="Şehir" sortKey="city" sort={sort} onSort={toggle} />
+                      <SortTh label="Kategori" sortKey="category" sort={sort} onSort={toggle} />
+                      <SortTh label="Sözleşme" sortKey="contractType" sort={sort} onSort={toggle} />
+                      <SortTh label="KWUID" sortKey="kwuid" sort={sort} onSort={toggle} />
+                      <SortTh label="Başlangıç Tarihi" sortKey="startDate" sort={sort} onSort={toggle} firstDir="desc" />
                     </tr>
                   </thead>
                   <tbody>
-                    {stats.newEmployees.map((emp: any) => (
+                    {sorted.map((emp: any) => (
                       <tr key={emp.id} className="border-t border-border">
-                        <td className="p-4 font-medium text-foreground">{emp.name}</td>
-                        <td className="p-4 text-muted-foreground">{emp.jobTitle ?? "—"}</td>
+                        <td className="p-4 font-medium text-foreground max-w-[260px] truncate" title={emp.name}>{emp.name}</td>
+                        <td className="p-4 text-muted-foreground max-w-[220px] truncate" title={emp.jobTitle ?? undefined}>{emp.jobTitle ?? "—"}</td>
                         <td className="p-4 text-muted-foreground">{emp.city ?? "—"}</td>
                         <td className="p-4">
                           {emp.category ? (
@@ -599,13 +611,14 @@ export default function Reports() {
                         </td>
                         <td className="p-4 text-muted-foreground">{emp.contractType ?? "—"}</td>
                         <td className="p-4 font-mono text-xs text-muted-foreground">{emp.kwuid ?? "—"}</td>
-                        <td className="p-4 text-muted-foreground">
+                        <td className="p-4 text-muted-foreground tabular-nums">
                           {emp.startDate ? new Date(emp.startDate).toLocaleDateString("tr-TR") : "—"}
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                )}</SortableRows>
               </div>
             </>
           )}
@@ -659,21 +672,22 @@ export default function Reports() {
               </div>
               {/* Desktop table */}
               <div className="hidden md:block overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/30 text-muted-foreground uppercase text-xs">
+                <SortableRows rows={stats.newContractSigners as any[]}>{({ sorted, sort, toggle }) => (
+                <table className="w-full text-sm [&_td]:whitespace-nowrap">
+                  <thead className="bg-muted/30 text-muted-foreground uppercase text-xs [&_th]:p-4">
                     <tr>
-                      <th className="text-left p-4">Danışman</th>
-                      <th className="text-left p-4">Üretim Bandı</th>
-                      <th className="text-left p-4">Şehir</th>
-                      <th className="text-left p-4">Kategori</th>
-                      <th className="text-left p-4">Sözleşme Tarihi</th>
+                      <SortTh label="Danışman" sortKey="candidateName" sort={sort} onSort={toggle} />
+                      <SortTh label="Üretim Bandı" sortKey="jobTitle" sort={sort} onSort={toggle} />
+                      <SortTh label="Şehir" sortKey="city" sort={sort} onSort={toggle} />
+                      <SortTh label="Kategori" sortKey="category" sort={sort} onSort={toggle} />
+                      <SortTh label="Sözleşme Tarihi" sortKey="signedAt" sort={sort} onSort={toggle} firstDir="desc" />
                     </tr>
                   </thead>
                   <tbody>
-                    {stats.newContractSigners.map((s: any) => (
+                    {sorted.map((s: any) => (
                       <tr key={s.applicationId} className="border-t border-border">
-                        <td className="p-4 font-medium text-foreground">{s.candidateName}</td>
-                        <td className="p-4 text-muted-foreground">{s.jobTitle ?? "—"}</td>
+                        <td className="p-4 font-medium text-foreground max-w-[260px] truncate" title={s.candidateName}>{s.candidateName}</td>
+                        <td className="p-4 text-muted-foreground max-w-[220px] truncate" title={s.jobTitle ?? undefined}>{s.jobTitle ?? "—"}</td>
                         <td className="p-4 text-muted-foreground">{s.city ?? "—"}</td>
                         <td className="p-4">
                           {s.category ? (
@@ -684,13 +698,14 @@ export default function Reports() {
                             }`}>{s.category}</span>
                           ) : "—"}
                         </td>
-                        <td className="p-4 text-muted-foreground">
+                        <td className="p-4 text-muted-foreground tabular-nums">
                           {s.signedAt ? new Date(s.signedAt).toLocaleDateString("tr-TR") : "—"}
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                )}</SortableRows>
               </div>
             </>
           )}
@@ -714,28 +729,30 @@ export default function Reports() {
           </div>
           {/* Desktop table */}
           <div className="hidden md:block overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/30 text-muted-foreground uppercase text-xs">
+            <SortableRows rows={(stats?.activeJobPerformance ?? []) as any[]}>{({ sorted, sort, toggle }) => (
+            <table className="w-full text-sm [&_td]:whitespace-nowrap">
+              <thead className="bg-muted/30 text-muted-foreground uppercase text-xs [&_th]:p-4">
                 <tr>
-                  <th className="text-left p-4">İlan Başlığı</th>
-                  <th className="text-left p-4">Başvuranlar</th>
-                  <th className="text-left p-4">K0</th>
-                  <th className="text-left p-4">K1</th>
-                  <th className="text-left p-4">K2</th>
+                  <SortTh label="İlan Başlığı" sortKey="title" sort={sort} onSort={toggle} />
+                  <SortTh label="Başvuranlar" sortKey="applicants" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                  <SortTh label="K0" sortKey="k0" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                  <SortTh label="K1" sortKey="k1" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                  <SortTh label="K2" sortKey="k2" sort={sort} onSort={toggle} align="right" firstDir="desc" />
                 </tr>
               </thead>
               <tbody>
-                {(stats?.activeJobPerformance ?? []).map((job: any) => (
+                {sorted.map((job: any) => (
                   <tr key={job.jobId} className="border-t border-border">
-                    <td className="p-4 font-medium">{job.title}</td>
-                    <td className="p-4">{job.applicants}</td>
-                    <td className="p-4">{job.k0}</td>
-                    <td className="p-4">{job.k1}</td>
-                    <td className="p-4">{job.k2}</td>
+                    <td className="p-4 font-medium max-w-[320px] truncate" title={job.title}>{job.title}</td>
+                    <td className="p-4 text-right tabular-nums">{job.applicants}</td>
+                    <td className="p-4 text-right tabular-nums">{job.k0}</td>
+                    <td className="p-4 text-right tabular-nums">{job.k1}</td>
+                    <td className="p-4 text-right tabular-nums">{job.k2}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            )}</SortableRows>
           </div>
         </div>
         </>)} {/* end ise-alim */}

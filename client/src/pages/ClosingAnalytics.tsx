@@ -1,3 +1,4 @@
+import { SortTh, SortableRows } from "@/components/SortTh";
 import { useState, useMemo, Fragment } from "react";
 import { Layout } from "@/components/Layout";
 import { useClosingAnalytics, useClosingLocations, usePeriodComparison, type Currency, type PeriodComparisonScope } from "@/hooks/use-stats";
@@ -132,15 +133,16 @@ function TrendTable({ years, rows, footer, formatValue }: {
   if (years.length === 0 || rows.length === 0) return null;
   return (
     <div className="mt-4 overflow-x-auto rounded-lg border border-border">
-      <table className="w-full text-xs">
+      <SortableRows rows={rows} getters={{ label: (r: any) => r.label, ...Object.fromEntries(years.map((y) => [y, (r: any) => r.values[y] ?? 0])) }}>{({ sorted, sort, toggle }) => (
+      <table className="w-full text-xs [&_td]:whitespace-nowrap">
         <thead className="bg-muted/40">
-          <tr>
-            <th className="text-left px-3 py-2 font-medium text-muted-foreground">{rows.length === 1 ? "" : "Kategori"}</th>
-            {years.map((y) => <th key={y} className="text-right px-3 py-2 font-medium text-muted-foreground">{y}</th>)}
+          <tr className="text-muted-foreground [&_th]:px-3 [&_th]:py-2">
+            <SortTh label={rows.length === 1 ? "" : "Kategori"} sortKey={rows.length === 1 ? undefined : "label"} sort={sort} onSort={toggle} />
+            {years.map((y) => <SortTh key={y} label={y} sortKey={rows.length === 1 ? undefined : y} sort={sort} onSort={toggle} align="right" firstDir="desc" />)}
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
-          {rows.map((r) => (
+          {sorted.map((r) => (
             <tr key={r.label}>
               <td className="px-3 py-1.5 font-medium whitespace-nowrap">{r.label}</td>
               {years.map((y) => <td key={y} className="text-right px-3 py-1.5 tabular-nums">{formatValue(r.values[y] ?? 0)}</td>)}
@@ -156,6 +158,7 @@ function TrendTable({ years, rows, footer, formatValue }: {
           </tfoot>
         )}
       </table>
+      )}</SortableRows>
     </div>
   );
 }

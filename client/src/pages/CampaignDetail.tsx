@@ -1,3 +1,4 @@
+import { SortTh, SortableRows } from "@/components/SortTh";
 import { useState } from "react";
 import { useRoute, Link } from "wouter";
 import { Layout } from "@/components/Layout";
@@ -326,20 +327,21 @@ export default function CampaignDetail() {
               {expenses.length === 0 ? (
                 <p className="text-xs text-muted-foreground italic">Henüz masraf kaydı yok</p>
               ) : (
-                <Table>
+                <SortableRows rows={expenses} getters={{ amount: (e: any) => parseFloat(e.amount) }} initial={{ key: "date", dir: "desc" }}>{({ sorted, sort, toggle }) => (
+                <Table className="[&_td]:whitespace-nowrap">
                   <TableHeader>
-                    <TableRow>
-                      <TableHead>Tarih</TableHead>
-                      <TableHead>Not</TableHead>
-                      <TableHead className="text-right">Tutar</TableHead>
+                    <TableRow className="text-muted-foreground [&_th]:h-12 [&_th]:px-4">
+                      <SortTh label="Tarih" sortKey="date" sort={sort} onSort={toggle} firstDir="desc" />
+                      <SortTh label="Not" sortKey="notes" sort={sort} onSort={toggle} />
+                      <SortTh label="Tutar" sortKey="amount" sort={sort} onSort={toggle} align="right" firstDir="desc" />
                       <TableHead className="w-10" />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {expenses.map((e) => (
+                    {sorted.map((e) => (
                       <TableRow key={e.id}>
                         <TableCell className="text-xs">{e.date}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground">{e.notes ?? "—"}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground max-w-[320px] truncate" title={e.notes ?? undefined}>{e.notes ?? "—"}</TableCell>
                         <TableCell className="text-right font-medium text-red-600">{fmtTRY(parseFloat(e.amount))}</TableCell>
                         <TableCell>
                           <button
@@ -353,6 +355,7 @@ export default function CampaignDetail() {
                     ))}
                   </TableBody>
                 </Table>
+                )}</SortableRows>
               )}
             </CardContent>
           </Card>
@@ -370,19 +373,20 @@ export default function CampaignDetail() {
             {leads.length === 0 ? (
               <p className="text-sm text-muted-foreground p-4">Bu kampanyaya henüz lead eklenmedi.</p>
             ) : (
-              <Table>
+              <SortableRows rows={leads} getters={{ status: (l: any) => (l.employee_id ? (l.employee_status === "active" ? "1-aktif" : "2-pasif") : "3-aday") }} initial={{ key: "created_at", dir: "desc" }}>{({ sorted, sort, toggle }) => (
+              <Table className="[&_td]:whitespace-nowrap">
                 <TableHeader>
-                  <TableRow>
-                    <TableHead>Ad Soyad</TableHead>
-                    <TableHead>Telefon</TableHead>
-                    <TableHead>Kategori</TableHead>
-                    <TableHead>Ofis</TableHead>
-                    <TableHead>Eklenme Tarihi</TableHead>
-                    <TableHead>Durum</TableHead>
+                  <TableRow className="text-muted-foreground [&_th]:h-12 [&_th]:px-4">
+                    <SortTh label="Ad Soyad" sortKey="name" sort={sort} onSort={toggle} />
+                    <SortTh label="Telefon" sortKey="phone" sort={sort} onSort={toggle} />
+                    <SortTh label="Kategori" sortKey="category" sort={sort} onSort={toggle} />
+                    <SortTh label="Ofis" sortKey="office" sort={sort} onSort={toggle} />
+                    <SortTh label="Eklenme Tarihi" sortKey="created_at" sort={sort} onSort={toggle} firstDir="desc" />
+                    <SortTh label="Durum" sortKey="status" sort={sort} onSort={toggle} />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {leads.map((l) => (
+                  {sorted.map((l) => (
                     <TableRow key={l.id}>
                       <TableCell className="font-medium">
                         <Link href={`/candidates/${l.id}`} className="hover:underline text-primary">{l.name}</Link>
@@ -404,6 +408,7 @@ export default function CampaignDetail() {
                   ))}
                 </TableBody>
               </Table>
+              )}</SortableRows>
             )}
           </CardContent>
         </Card>

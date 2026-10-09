@@ -1,3 +1,5 @@
+import { useSortable } from "@/lib/sort";
+import { SortTh } from "@/components/SortTh";
 import { useState, useEffect, useRef, useMemo, useCallback, memo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Layout } from "@/components/Layout";
@@ -89,6 +91,7 @@ interface NotifyStatusRow {
 
 // ── Sortable table header ───────────────────────────────────────────────────────
 
+// Bildirim tablosu başlığı: ortak SortTh üzerine ince sarmalayıcı (mevcut sıralama durumu korunur)
 function SortableTh<K extends string>({
   label, sortKey, activeKey, dir, onClick, align,
 }: {
@@ -99,23 +102,21 @@ function SortableTh<K extends string>({
   onClick: (k: K) => void;
   align?: "left" | "center" | "right";
 }) {
-  const isActive = sortKey === activeKey;
-  const alignCls = align === "center" ? "text-center" : align === "right" ? "text-right" : "text-left";
-  return (
-    <th className={`px-3 py-2.5 font-medium ${alignCls}`}>
-      <button
-        type="button"
-        onClick={() => onClick(sortKey)}
-        className={`inline-flex items-center gap-1 hover:text-foreground transition-colors ${isActive ? "text-foreground" : ""}`}
-      >
-        {label}
-        {isActive
-          ? (dir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />)
-          : <ArrowUpDown className="h-3 w-3 opacity-40" />}
-      </button>
-    </th>
-  );
+  return <SortTh label={label} sortKey={sortKey} sort={{ key: activeKey, dir }} onSort={(k) => onClick(k)} align={align ?? "left"} className="px-3 py-2.5" />;
 }
+
+const LISTING_SORT = {
+  listingNumber: (l: any) => l.listingNumber,
+  advisor: (l: any) => l.employeeName ?? l.advisorName,
+  phone: (l: any) => l.employeePhone,
+  price: (l: any) => (l.price == null || l.price === "" ? null : Number(l.price)),
+  publishedDate: (l: any) => l.publishedDate,
+  age: (l: any) => { const d = l.publishedDate ? new Date(l.publishedDate) : null; return d && !isNaN(d.getTime()) ? Math.floor((Date.now() - d.getTime()) / 86400000) : null; },
+  status: (l: any) => l.status,
+  passiveAt: (l: any) => l.passiveAt,
+  agreement: (l: any) => (l.agreementUploadedAt ? "1-yuklendi" : l.noAgreementAt ? "2-yok" : l.agreementRequestedAt ? "3-istendi" : "4-bekliyor"),
+  closeReason: (l: any) => l.closeReason ?? l.passiveReason ?? null,
+};
 
 // ── CSV helpers ─────────────────────────────────────────────────────────────────
 
@@ -577,7 +578,9 @@ export default function Listings() {
   useEffect(() => { setPage(0); }, [mainTab, listFilter, search, dateFrom, dateTo]);
 
   const pageCount = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
-  const pageRows = filteredRows.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
+  // Sütun sıralaması (ortak altyapı: @/lib/sort)
+  const { sorted: sortedListingRows, sort: listSort, toggle: toggleListSort } = useSortable(filteredRows, LISTING_SORT);
+  const pageRows = sortedListingRows.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
 
   const filteredNotifyRows = (() => {
     const nameQ = notifyNameFilter.trim().toLowerCase();
@@ -1265,17 +1268,17 @@ export default function Listings() {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b border-border bg-muted/40 text-left text-xs text-muted-foreground">
-                      <th className="px-3 py-2.5 font-medium">İlan No</th>
-                      <th className="px-3 py-2.5 font-medium">Danışman</th>
-                      <th className="px-3 py-2.5 font-medium">Telefon</th>
-                      <th className="px-3 py-2.5 font-medium">Fiyat</th>
-                      <th className="px-3 py-2.5 font-medium">Yayın</th>
-                      <th className="px-3 py-2.5 font-medium">Yaş</th>
-                      <th className="px-3 py-2.5 font-medium">Durum</th>
-                      <th className="px-3 py-2.5 font-medium">Pasife Geçiş</th>
-                      <th className="px-3 py-2.5 font-medium">Yetki Sözleşmesi</th>
-                      <th className="px-3 py-2.5 font-medium">Kalkış Sebebi</th>
+                    <tr className="border-b border-border bg-muted/40 text-xs text-muted-foreground [&_th]:px-3 [&_th]:py-2.5">
+                      <SortTh label="İlan No" sortKey="listingNumber" sort={listSort} onSort={toggleListSort} />
+                      <SortTh label="Danışman" sortKey="advisor" sort={listSort} onSort={toggleListSort} />
+                      <SortTh label="Telefon" sortKey="phone" sort={listSort} onSort={toggleListSort} />
+                      <SortTh label="Fiyat" sortKey="price" sort={listSort} onSort={toggleListSort} firstDir="desc" />
+                      <SortTh label="Yayın" sortKey="publishedDate" sort={listSort} onSort={toggleListSort} firstDir="desc" />
+                      <SortTh label="Yaş" sortKey="age" sort={listSort} onSort={toggleListSort} firstDir="desc" />
+                      <SortTh label="Durum" sortKey="status" sort={listSort} onSort={toggleListSort} />
+                      <SortTh label="Pasife Geçiş" sortKey="passiveAt" sort={listSort} onSort={toggleListSort} firstDir="desc" />
+                      <SortTh label="Yetki Sözleşmesi" sortKey="agreement" sort={listSort} onSort={toggleListSort} />
+                      <SortTh label="Kalkış Sebebi" sortKey="closeReason" sort={listSort} onSort={toggleListSort} />
                     </tr>
                   </thead>
                   <tbody>
@@ -1311,7 +1314,7 @@ export default function Listings() {
                         <td className="px-3 py-2.5">
                           {l.employeeId ? (
                             <>
-                              <div className="font-medium">{l.employeeName ?? l.advisorName ?? "—"}</div>
+                              <div className="font-medium whitespace-nowrap max-w-[200px] truncate" title={l.employeeName ?? l.advisorName ?? undefined}>{l.employeeName ?? l.advisorName ?? "—"}</div>
                               {l.office && <div className="text-[11px] text-muted-foreground truncate max-w-[160px]">{l.office}</div>}
                               <div className="flex items-center gap-1 mt-1">
                                 <button onClick={() => openAdvisorLink(l.employeeId!)} disabled={linkLoadingIds.has(l.employeeId!)} title="Danışman toplu sayfasını aç (/a/token)" className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-50">
@@ -1503,12 +1506,12 @@ export default function Listings() {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b border-border bg-muted/40 text-left text-xs text-muted-foreground">
-                      <th className="px-3 py-2.5 font-medium">İlan No</th>
-                      <th className="px-3 py-2.5 font-medium">Danışman (CSV)</th>
-                      <th className="px-3 py-2.5 font-medium">Fiyat</th>
-                      <th className="px-3 py-2.5 font-medium">Yayın</th>
-                      <th className="px-3 py-2.5 font-medium">Durum</th>
+                    <tr className="border-b border-border bg-muted/40 text-xs text-muted-foreground [&_th]:px-3 [&_th]:py-2.5">
+                      <SortTh label="İlan No" sortKey="listingNumber" sort={listSort} onSort={toggleListSort} />
+                      <SortTh label="Danışman (CSV)" sortKey="advisor" sort={listSort} onSort={toggleListSort} />
+                      <SortTh label="Fiyat" sortKey="price" sort={listSort} onSort={toggleListSort} firstDir="desc" />
+                      <SortTh label="Yayın" sortKey="publishedDate" sort={listSort} onSort={toggleListSort} firstDir="desc" />
+                      <SortTh label="Durum" sortKey="status" sort={listSort} onSort={toggleListSort} />
                     </tr>
                   </thead>
                   <tbody>
@@ -1519,7 +1522,7 @@ export default function Listings() {
                     ) : pageRows.map((l) => (
                       <tr key={l.id} className="border-b border-border last:border-0 hover:bg-muted/30">
                         <td className="px-3 py-2.5 font-mono text-xs">{l.listingNumber}</td>
-                        <td className="px-3 py-2.5 text-xs text-muted-foreground">{l.advisorName ?? "—"}</td>
+                        <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap max-w-[220px] truncate" title={l.advisorName ?? undefined}>{l.advisorName ?? "—"}</td>
                         <td className="px-3 py-2.5 whitespace-nowrap">{fmtPrice(l.price)}</td>
                         <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap">{l.publishedDate ?? "—"}</td>
                         <td className="px-3 py-2.5">
@@ -1626,7 +1629,7 @@ export default function Listings() {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b border-border bg-muted/40 text-left text-xs text-muted-foreground">
+                    <tr className="border-b border-border bg-muted/40 text-xs text-muted-foreground [&_th]:px-3 [&_th]:py-2.5">
                       <SortableTh label="Danışman" sortKey="name"                 activeKey={notifySortKey} dir={notifySortDir} onClick={toggleNotifySort} />
                       <th className="px-3 py-2.5 font-medium">Telefon</th>
                       <th className="px-3 py-2.5 font-medium">Email</th>
@@ -1664,7 +1667,7 @@ export default function Listings() {
                       };
                       return (
                         <tr key={row.id} className="border-b border-border last:border-0 hover:bg-muted/30">
-                          <td className="px-3 py-2.5"><div className="font-medium text-sm">{row.name}</div></td>
+                          <td className="px-3 py-2.5"><div className="font-medium text-sm whitespace-nowrap max-w-[220px] truncate" title={row.name}>{row.name}</div></td>
                           <td className="px-3 py-2.5 text-xs text-muted-foreground">{row.phone ?? <span className="text-red-500 font-medium">Eksik</span>}</td>
                           <td className="px-3 py-2.5 text-xs text-muted-foreground">{row.email ? <span className="truncate max-w-[160px] block">{row.email}</span> : <span className="text-red-500 font-medium">Eksik</span>}</td>
                           <td className="px-3 py-2.5 text-center">

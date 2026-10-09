@@ -27,6 +27,8 @@ import { PhoneInput } from "@/components/PhoneInput";
 import { ReferralField, useReferralConfirm } from "@/components/ReferralField";
 import { composePhone, isValidPhoneForCountry } from "@/lib/phone";
 import { DEFAULT_COUNTRY, COUNTRY_CODES } from "@/lib/countryCodes";
+import { useSortable } from "@/lib/sort";
+import { SortHead } from "@/components/SortTh";
 
 // ─── Category display meta ────────────────────────────────────────────────────
 
@@ -99,8 +101,15 @@ export default function Candidates() {
     return matchSearch && matchCat && matchOffice;
   });
 
+  // Sütun sıralaması (ortak altyapı: @/lib/sort)
+  const sortGetters = {
+    category: (c: any) => c.category, name: (c: any) => c.name, contact: (c: any) => c.email ?? c.phone,
+    jobs: (c: any) => candidateJobsMap.get(c.id)?.[0]?.jobTitle ?? null,
+    city: (c: any) => c.city, office: (c: any) => c.office, experience: (c: any) => c.experience ?? 0,
+  };
+  const { sorted: sortedCandidates, sort, toggle: toggleSort } = useSortable(filtered ?? [], sortGetters);
   const totalPages = Math.ceil((filtered?.length ?? 0) / PAGE_SIZE);
-  const paginated = filtered?.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  const paginated = sortedCandidates.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   return (
     <Layout>
@@ -169,15 +178,15 @@ export default function Candidates() {
         </div>
 
         {/* Table */}
-        <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-          <div className="hidden md:grid grid-cols-[56px_2fr_180px_1.5fr_100px_100px_72px_160px] gap-4 px-5 py-3 bg-muted/30 border-b border-border text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            <div>Kat.</div>
-            <div>Aday</div>
-            <div>İletişim</div>
-            <div>Üretim Bandı</div>
-            <div>Konum</div>
-            <div>Ofis</div>
-            <div>Deneyim</div>
+        <div className="rounded-xl border border-border bg-card shadow-sm overflow-x-auto">
+          <div className="hidden md:grid grid-cols-[48px_minmax(190px,2fr)_180px_minmax(150px,1.5fr)_100px_96px_72px_160px] md:min-w-[1080px] gap-3 px-5 py-3 bg-muted/30 border-b border-border text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            <SortHead label="Kat." sortKey="category" sort={sort} onSort={toggleSort} />
+            <SortHead label="Aday" sortKey="name" sort={sort} onSort={toggleSort} />
+            <SortHead label="İletişim" sortKey="contact" sort={sort} onSort={toggleSort} />
+            <SortHead label="Üretim Bandı" sortKey="jobs" sort={sort} onSort={toggleSort} />
+            <SortHead label="Konum" sortKey="city" sort={sort} onSort={toggleSort} />
+            <SortHead label="Ofis" sortKey="office" sort={sort} onSort={toggleSort} />
+            <SortHead label="Deneyim" sortKey="experience" sort={sort} onSort={toggleSort} firstDir="desc" />
             <div className="text-right">Eylemler</div>
           </div>
 
@@ -208,7 +217,7 @@ export default function Candidates() {
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     transition={{ delay: idx * 0.03 }}
-                    className="grid grid-cols-1 md:grid-cols-[56px_2fr_180px_1.5fr_100px_100px_72px_160px] gap-4 px-5 py-3 items-start hover:bg-muted/20 transition-colors group"
+                    className="grid grid-cols-1 md:grid-cols-[48px_minmax(190px,2fr)_180px_minmax(150px,1.5fr)_100px_96px_72px_160px] md:min-w-[1080px] gap-3 px-5 py-3 items-center hover:bg-muted/20 transition-colors group"
                     data-testid={`row-candidate-${candidate.id}`}
                   >
                     {/* Category badge */}
@@ -224,10 +233,10 @@ export default function Candidates() {
                         {(candidate.name || "?").slice(0, 2).toUpperCase()}
                       </div>
                       <div className="min-w-0">
-                        <p className="font-semibold text-sm text-foreground truncate">{candidate.name || <span className="italic text-muted-foreground">İsimsiz</span>}</p>
+                        <p className="font-semibold text-sm text-foreground truncate" title={candidate.name}>{candidate.name || <span className="italic text-muted-foreground">İsimsiz</span>}</p>
                         {candidate.currentBrand && (
-                          <p className="text-xs text-muted-foreground flex items-center gap-1">
-                            <Building2 className="h-2.5 w-2.5" />{candidate.currentBrand}
+                          <p className="text-xs text-muted-foreground flex items-center gap-1 min-w-0">
+                            <Building2 className="h-2.5 w-2.5 shrink-0" /><span className="truncate">{candidate.currentBrand}</span>
                           </p>
                         )}
                       </div>
@@ -250,7 +259,7 @@ export default function Candidates() {
                     </div>
 
                     {/* Assigned jobs */}
-                    <div className="flex flex-wrap gap-1" data-testid={`jobs-candidate-${candidate.id}`}>
+                    <div className="flex gap-1 min-w-0 overflow-hidden whitespace-nowrap" data-testid={`jobs-candidate-${candidate.id}`}>
                       {candidateJobs.length === 0 ? (
                         <span className="text-xs text-muted-foreground italic">—</span>
                       ) : (
@@ -264,7 +273,7 @@ export default function Candidates() {
                         ))
                       )}
                       {candidateJobs.length > 2 && (
-                        <span className="text-xs text-muted-foreground">+{candidateJobs.length - 2}</span>
+                        <span className="text-xs text-muted-foreground shrink-0">+{candidateJobs.length - 2}</span>
                       )}
                     </div>
 
@@ -294,7 +303,7 @@ export default function Candidates() {
                     </div>
 
                     {/* Actions */}
-                    <div className="flex items-center justify-end gap-2">
+                    <div className="flex items-center justify-end gap-2 text-right whitespace-nowrap">
                       <Link href={`/candidates/${candidate.id}`}>
                         <Button size="sm" variant="outline" className="h-8 text-xs" data-testid={`btn-view-candidate-${candidate.id}`}>
                           <ExternalLink className="mr-1 h-3 w-3" /> Profil

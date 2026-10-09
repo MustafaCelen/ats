@@ -8,6 +8,8 @@ import { UkWelcomeEmailDialog } from "@/components/UkWelcomeEmailDialog";
 import { Layout } from "@/components/Layout";
 import { Route as RouteIcon, Search, CheckCircle2, ChevronRight, UserPlus, Mail, Send } from "lucide-react";
 import { UK_PROGRAM_WEEKS } from "@shared/uk-program";
+import { useSortable } from "@/lib/sort";
+import { SortTh } from "@/components/SortTh";
 
 type Row = {
   employeeId: number; name: string; kwuid: string | null; status: string;
@@ -73,6 +75,15 @@ export default function UkBasariRotasi() {
       return [r.name, r.kwuid, r.coachName].some((v) => v?.toLocaleLowerCase("tr").includes(needle));
     });
   }, [byCoach, q, phase]);
+
+  // Sütun sıralaması (ortak altyapı: @/lib/sort)
+  const sortGetters = useMemo(() => ({
+    name: (r: Row) => r.name, coachName: (r: Row) => r.coachName, programStart: (r: Row) => r.programStart,
+    currentWeek: (r: Row) => r.currentWeek, progress: (r: Row) => (r.total ? r.done / r.total : 0),
+    score: (r: Row) => r.score, targetScore: (r: Row) => r.targetScore ?? 0,
+    lastConfirmedWeek: (r: Row) => r.lastConfirmedWeek, welcomeSentAt: (r: Row) => r.welcomeSentAt,
+  }), []);
+  const { sorted: sortedRows, sort, toggle: toggleSort } = useSortable(rows, sortGetters);
 
   const counts = useMemo(() => ({
     all: byCoach.length,
@@ -145,18 +156,18 @@ export default function UkBasariRotasi() {
         </div>
 
         <div className="bg-card rounded-xl border border-border overflow-x-auto [contain:inline-size]">
-          <table className="w-full text-sm min-w-[880px]">
-            <thead className="bg-muted/40 text-muted-foreground text-xs">
+          <table className="w-full text-sm min-w-[1040px] [&_td]:whitespace-nowrap">
+            <thead className="bg-muted/40 text-muted-foreground text-xs [&_th]:px-2 [&_th]:py-2.5">
               <tr>
-                <th className="text-left font-medium px-4 py-2.5">Danışman</th>
-                <th className="text-left font-medium px-4 py-2.5">Koç</th>
-                <th className="text-left font-medium px-4 py-2.5">Program Başlangıcı</th>
-                <th className="text-left font-medium px-4 py-2.5">Durum</th>
-                <th className="text-left font-medium px-4 py-2.5 w-48">Aktivite İlerlemesi</th>
-                <th className="text-right font-medium px-4 py-2.5">Aktivite Puanı</th>
-                <th className="text-right font-medium px-4 py-2.5">Hedef Puanı</th>
-                <th className="text-left font-medium px-4 py-2.5">Koç Onayı</th>
-                <th className="text-left font-medium px-4 py-2.5">Hoş Geldin Maili</th>
+                <SortTh label="Danışman" sortKey="name" sort={sort} onSort={toggleSort} />
+                <SortTh label="Koç" sortKey="coachName" sort={sort} onSort={toggleSort} />
+                <SortTh label="Program Başlangıcı" sortKey="programStart" sort={sort} onSort={toggleSort} />
+                <SortTh label="Durum" sortKey="currentWeek" sort={sort} onSort={toggleSort} />
+                <SortTh label="Aktivite İlerlemesi" sortKey="progress" sort={sort} onSort={toggleSort} firstDir="desc" className="w-36" />
+                <SortTh label="Aktivite Puanı" sortKey="score" sort={sort} onSort={toggleSort} align="right" firstDir="desc" />
+                <SortTh label="Hedef Puanı" sortKey="targetScore" sort={sort} onSort={toggleSort} align="right" firstDir="desc" />
+                <SortTh label="Koç Onayı" sortKey="lastConfirmedWeek" sort={sort} onSort={toggleSort} />
+                <SortTh label="Hoş Geldin Maili" sortKey="welcomeSentAt" sort={sort} onSort={toggleSort} />
                 <th className="w-8" />
               </tr>
             </thead>
@@ -171,20 +182,22 @@ export default function UkBasariRotasi() {
                     : "Bu filtrede danışman yok."}
                 </td></tr>
               )}
-              {rows.map((r) => {
+              {sortedRows.map((r) => {
                 const pct = r.total > 0 ? Math.round((r.done / r.total) * 100) : 0;
                 return (
                   <tr key={r.employeeId} className="border-t border-border hover:bg-muted/20">
-                    <td className="px-4 py-2.5">
-                      <Link href={`/uk-basari-rotasi/${r.employeeId}`} className="font-semibold hover:text-primary">{r.name}</Link>
-                      {r.kwuid && <span className="ml-2 text-xs text-muted-foreground font-mono">{r.kwuid}</span>}
-                      {r.status !== "active" && <span className="ml-2 text-[10px] text-muted-foreground">(pasif)</span>}
-                      {r.manual && <span className="ml-2 text-[10px] font-medium px-1.5 py-0.5 rounded bg-sky-50 text-sky-700 ring-1 ring-sky-200" title="Programa manuel eklendi (ÜK işareti yok)">Manuel</span>}
+                    <td className="px-2 py-2.5 max-w-[300px]">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Link href={`/uk-basari-rotasi/${r.employeeId}`} className="font-semibold hover:text-primary truncate" title={r.name}>{r.name}</Link>
+                        {r.kwuid && <span className="text-xs text-muted-foreground font-mono shrink-0">{r.kwuid}</span>}
+                        {r.status !== "active" && <span className="text-[10px] text-muted-foreground shrink-0">(pasif)</span>}
+                        {r.manual && <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-sky-50 text-sky-700 ring-1 ring-sky-200 shrink-0" title="Programa manuel eklendi (ÜK işareti yok)">Manuel</span>}
+                      </div>
                     </td>
-                    <td className="px-4 py-2.5 text-muted-foreground">{r.coachName ?? "—"}</td>
-                    <td className="px-4 py-2.5">{fmtDate(r.programStart)}</td>
-                    <td className="px-4 py-2.5"><WeekBadge week={r.currentWeek} /></td>
-                    <td className="px-4 py-2.5">
+                    <td className="px-2 py-2.5 text-muted-foreground max-w-[200px] truncate" title={r.coachName ?? undefined}>{r.coachName ?? "—"}</td>
+                    <td className="px-2 py-2.5 tabular-nums">{fmtDate(r.programStart)}</td>
+                    <td className="px-2 py-2.5"><WeekBadge week={r.currentWeek} /></td>
+                    <td className="px-2 py-2.5">
                       <div className="flex items-center gap-2">
                         <div className="h-1.5 flex-1 rounded-full bg-muted overflow-hidden">
                           <div className="h-full bg-primary" style={{ width: `${pct}%` }} />
@@ -192,14 +205,14 @@ export default function UkBasariRotasi() {
                         <span className="text-xs text-muted-foreground w-16 text-right">{r.done}/{r.total}</span>
                       </div>
                     </td>
-                    <td className="px-4 py-2.5 text-right font-semibold">{r.score.toLocaleString("tr-TR")} <span className="text-muted-foreground font-normal">/ 50</span></td>
-                    <td className="px-4 py-2.5 text-right font-semibold">{(r.targetScore ?? 0).toLocaleString("tr-TR")} <span className="text-muted-foreground font-normal">/ 50</span></td>
-                    <td className="px-4 py-2.5">
+                    <td className="px-2 py-2.5 text-right font-semibold tabular-nums">{r.score.toLocaleString("tr-TR")} <span className="text-muted-foreground font-normal">/ 50</span></td>
+                    <td className="px-2 py-2.5 text-right font-semibold tabular-nums">{(r.targetScore ?? 0).toLocaleString("tr-TR")} <span className="text-muted-foreground font-normal">/ 50</span></td>
+                    <td className="px-2 py-2.5">
                       {r.lastConfirmedWeek
                         ? <span className="inline-flex items-center gap-1 text-xs text-emerald-700"><CheckCircle2 className="h-3.5 w-3.5" /> {r.lastConfirmedWeek}. hafta</span>
                         : <span className="text-xs text-muted-foreground">—</span>}
                     </td>
-                    <td className="px-4 py-2.5">
+                    <td className="px-2 py-2.5">
                       <div className="flex items-center gap-2">
                         {r.welcomeSentAt
                           ? <span className="inline-flex items-center gap-1 text-xs text-emerald-700"><Mail className="h-3.5 w-3.5" /> {new Date(r.welcomeSentAt).toLocaleDateString("tr-TR")}</span>

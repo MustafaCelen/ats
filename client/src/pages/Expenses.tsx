@@ -1,3 +1,4 @@
+import { SortHead, SortableRows } from "@/components/SortTh";
 import { useState, useRef } from "react";
 import * as XLSX from "xlsx";
 import { Layout } from "@/components/Layout";
@@ -342,7 +343,7 @@ function CreditCardImportDialog({
             )}
 
             <div className="overflow-auto flex-1 border border-border rounded-lg">
-              <table className="w-full text-sm min-w-[750px]">
+              <table className="w-full text-sm min-w-[750px] [&_td]:whitespace-nowrap">
                 <thead className="bg-muted/30 sticky top-0 z-10">
                   <tr>
                     <th className="px-2 py-2 text-left w-8">
@@ -610,7 +611,7 @@ function BankStatementImportDialog({
             )}
 
             <div className="overflow-auto flex-1 border border-border rounded-lg">
-              <table className="w-full text-sm min-w-[700px]">
+              <table className="w-full text-sm min-w-[700px] [&_td]:whitespace-nowrap">
                 <thead className="bg-muted/30 sticky top-0 z-10">
                   <tr>
                     <th className="px-2 py-2 text-left w-8">
@@ -1232,13 +1233,14 @@ export default function Expenses() {
         </div>
 
         {/* Table */}
-        <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
-          <div className="grid grid-cols-[1fr_2fr_auto_auto_1fr_auto] gap-4 px-4 py-2.5 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            <div>Tarih</div>
-            <div>Kategori</div>
-            <div>Ofis</div>
-            <div>Tür</div>
-            <div className="text-right">Tutar</div>
+        <SortableRows rows={filtered as any[]} getters={{ amount: (r: any) => parseFloat(r.amount) * (r.type === "income" ? 1 : -1) }}>{({ sorted, sort, toggle }) => (
+        <div className="rounded-xl border border-border bg-card overflow-x-auto shadow-sm">
+          <div className="grid grid-cols-[110px_minmax(220px,2fr)_150px_96px_150px_64px] min-w-[800px] gap-4 px-4 py-2.5 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            <SortHead label="Tarih" sortKey="date" sort={sort} onSort={toggle} firstDir="desc" />
+            <SortHead label="Kategori" sortKey="category" sort={sort} onSort={toggle} />
+            <SortHead label="Ofis" sortKey="office" sort={sort} onSort={toggle} />
+            <SortHead label="Tür" sortKey="type" sort={sort} onSort={toggle} />
+            <SortHead label="Tutar" sortKey="amount" sort={sort} onSort={toggle} align="right" firstDir="desc" />
             <div />
           </div>
 
@@ -1256,13 +1258,13 @@ export default function Expenses() {
 
           {!isLoading && filtered.length > 0 && (
             <div className="divide-y divide-border">
-              {filtered.map((row: any) => (
-                <div key={row.id} className="grid grid-cols-[1fr_2fr_auto_auto_1fr_auto] gap-4 px-4 py-3 items-center hover:bg-muted/20 transition-colors group">
-                  <div className="text-sm text-muted-foreground">
+              {sorted.map((row: any) => (
+                <div key={row.id} className="grid grid-cols-[110px_minmax(220px,2fr)_150px_96px_150px_64px] min-w-[800px] gap-4 px-4 py-3 items-center hover:bg-muted/20 transition-colors group">
+                  <div className="text-sm text-muted-foreground whitespace-nowrap tabular-nums">
                     {row.date ? format(new Date(row.date + "T12:00:00"), "dd.MM.yyyy") : "—"}
                   </div>
-                  <div>
-                    <p className="text-sm font-medium">{row.category}</p>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate" title={row.category}>{row.category}</p>
                     {row.employeeName && (
                       <p className="text-xs text-blue-700 font-medium truncate">{row.employeeName}</p>
                     )}
@@ -1288,7 +1290,7 @@ export default function Expenses() {
                       </span>
                     )}
                   </div>
-                  <div className={`text-right text-sm font-semibold ${row.type === "income" ? "text-emerald-700" : "text-red-700"}`}>
+                  <div className={`text-right text-sm font-semibold whitespace-nowrap tabular-nums ${row.type === "income" ? "text-emerald-700" : "text-red-700"}`}>
                     {row.type === "income" ? "+" : "-"}{fmtTRY(adj(parseFloat(row.amount)))}
                   </div>
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1321,6 +1323,7 @@ export default function Expenses() {
             </div>
           )}
         </div>
+        )}</SortableRows>
       </div>
 
       {dialogOpen && (

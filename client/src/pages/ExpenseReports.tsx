@@ -1,3 +1,4 @@
+import { SortTh, SortableRows } from "@/components/SortTh";
 import { useMemo, useState } from "react";
 import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
@@ -373,17 +374,18 @@ export default function ExpenseReports() {
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
-              <Table>
+              <SortableRows rows={categoryTotals.filter(c => c.group === expandedGroup)} initial={{ key: "total", dir: "desc" }}>{({ sorted, sort, toggle }) => (
+              <Table className="[&_td]:whitespace-nowrap">
                 <TableHeader>
-                  <TableRow>
-                    <TableHead>Kategori</TableHead>
-                    <TableHead className="text-right">Adet</TableHead>
-                    <TableHead className="text-right">Toplam</TableHead>
-                    <TableHead className="text-right">% (Grup içi)</TableHead>
+                  <TableRow className="text-muted-foreground [&_th]:h-12 [&_th]:px-4">
+                    <SortTh label="Kategori" sortKey="category" sort={sort} onSort={toggle} />
+                    <SortTh label="Adet" sortKey="count" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                    <SortTh label="Toplam" sortKey="total" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                    <SortTh label="% (Grup içi)" sortKey="total" sort={sort} onSort={toggle} align="right" firstDir="desc" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {categoryTotals.filter(c => c.group === expandedGroup).map((c) => {
+                  {sorted.map((c) => {
                     const groupTotal = groupTotals.find(g => g.group === expandedGroup)?.total ?? 1;
                     return (
                       <TableRow
@@ -405,6 +407,7 @@ export default function ExpenseReports() {
                   })}
                 </TableBody>
               </Table>
+              )}</SortableRows>
             </CardContent>
           </Card>
         )}
@@ -548,19 +551,20 @@ export default function ExpenseReports() {
             <p className="text-xs text-muted-foreground">Bir satıra tıklayınca "En Yüksek İşlemler" o kategoriye filtreler</p>
           </CardHeader>
           <CardContent className="p-0">
-            <Table>
+            <SortableRows rows={categoryTotals} getters={{ avg: (r: any) => (r.monthCount > 0 ? r.total / r.monthCount : null) }} initial={{ key: "total", dir: "desc" }}>{({ sorted, sort, toggle }) => (
+            <Table className="[&_td]:whitespace-nowrap">
               <TableHeader>
-                <TableRow>
-                  <TableHead>Kategori</TableHead>
-                  <TableHead>Grup</TableHead>
-                  <TableHead className="text-right">İşlem Sayısı</TableHead>
-                  <TableHead className="text-right">Toplam</TableHead>
-                  <TableHead className="text-right">Ort. / Ay</TableHead>
-                  <TableHead className="text-right">%</TableHead>
+                <TableRow className="text-muted-foreground [&_th]:h-12 [&_th]:px-4">
+                  <SortTh label="Kategori" sortKey="category" sort={sort} onSort={toggle} />
+                  <SortTh label="Grup" sortKey="group" sort={sort} onSort={toggle} />
+                  <SortTh label="İşlem Sayısı" sortKey="count" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                  <SortTh label="Toplam" sortKey="total" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                  <SortTh label="Ort. / Ay" sortKey="avg" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                  <SortTh label="%" sortKey="total" sort={sort} onSort={toggle} align="right" firstDir="desc" />
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {categoryTotals.map((r) => (
+                {sorted.map((r) => (
                   <TableRow
                     key={r.category}
                     onClick={() => setSelectedCategory(selectedCategory === r.category ? null : r.category)}
@@ -585,6 +589,7 @@ export default function ExpenseReports() {
                 ))}
               </TableBody>
             </Table>
+            )}</SortableRows>
           </CardContent>
         </Card>
 
@@ -605,18 +610,19 @@ export default function ExpenseReports() {
             {topTransactions.length === 0 ? (
               <p className="text-sm text-muted-foreground p-4">Kayıt yok</p>
             ) : (
-              <Table>
+              <SortableRows rows={topTransactions} getters={{ amount: (t: any) => parseFloat(t.amount) }}>{({ sorted, sort, toggle }) => (
+              <Table className="[&_td]:whitespace-nowrap">
                 <TableHeader>
-                  <TableRow>
-                    <TableHead>Tarih</TableHead>
-                    <TableHead>Kategori</TableHead>
-                    <TableHead>Ofis</TableHead>
-                    <TableHead>Açıklama</TableHead>
-                    <TableHead className="text-right">Tutar</TableHead>
+                  <TableRow className="text-muted-foreground [&_th]:h-12 [&_th]:px-4">
+                    <SortTh label="Tarih" sortKey="date" sort={sort} onSort={toggle} firstDir="desc" />
+                    <SortTh label="Kategori" sortKey="category" sort={sort} onSort={toggle} />
+                    <SortTh label="Ofis" sortKey="office" sort={sort} onSort={toggle} />
+                    <SortTh label="Açıklama" sortKey="notes" sort={sort} onSort={toggle} />
+                    <SortTh label="Tutar" sortKey="amount" sort={sort} onSort={toggle} align="right" firstDir="desc" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {topTransactions.map((t) => (
+                  {sorted.map((t) => (
                     <TableRow key={t.id}>
                       <TableCell className="text-xs">{new Date(t.date).toLocaleDateString("tr-TR")}</TableCell>
                       <TableCell className="text-xs">{t.category}</TableCell>
@@ -629,6 +635,7 @@ export default function ExpenseReports() {
                   ))}
                 </TableBody>
               </Table>
+              )}</SortableRows>
             )}
           </CardContent>
         </Card>

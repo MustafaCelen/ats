@@ -1,3 +1,4 @@
+import { SortTh, SortableRows } from "@/components/SortTh";
 import { useState } from "react";
 import { useRoute, Link } from "wouter";
 import { Layout } from "@/components/Layout";
@@ -1026,21 +1027,22 @@ export default function CandidateDetail() {
                     </div>
                   </div>
                   <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
+                    <SortableRows rows={employeeClosings as any[]} getters={{ saleValue: (c: any) => parseFloat(c.saleValue), bhbShare: (c: any) => parseFloat(c.bhbShare || "0") }} initial={{ key: "closingDate", dir: "desc" }}>{({ sorted, sort, toggle }) => (
+                    <table className="w-full text-sm [&_td]:whitespace-nowrap">
                       <thead>
-                        <tr className="bg-muted/50 text-xs text-muted-foreground font-medium border-b border-border">
-                          <th className="text-left px-4 py-3">Mülk Adresi</th>
-                          <th className="text-left px-4 py-3">Kategori</th>
-                          <th className="text-left px-4 py-3">Tür</th>
-                          <th className="text-right px-4 py-3">Satış Bedeli</th>
-                          <th className="text-right px-4 py-3">BHB</th>
-                          <th className="text-left px-4 py-3">Taraf</th>
-                          <th className="text-left px-4 py-3">Durum</th>
-                          <th className="text-left px-4 py-3">Kapanış Tarihi</th>
+                        <tr className="bg-muted/50 text-xs text-muted-foreground font-medium border-b border-border [&_th]:px-4 [&_th]:py-3">
+                          <SortTh label="Mülk Adresi" sortKey="propertyAddress" sort={sort} onSort={toggle} />
+                          <SortTh label="Kategori" sortKey="dealCategory" sort={sort} onSort={toggle} />
+                          <SortTh label="Tür" sortKey="dealType" sort={sort} onSort={toggle} />
+                          <SortTh label="Satış Bedeli" sortKey="saleValue" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                          <SortTh label="BHB" sortKey="bhbShare" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                          <SortTh label="Taraf" sortKey="sideType" sort={sort} onSort={toggle} />
+                          <SortTh label="Durum" sortKey="status" sort={sort} onSort={toggle} />
+                          <SortTh label="Kapanış Tarihi" sortKey="closingDate" sort={sort} onSort={toggle} firstDir="desc" />
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border">
-                        {employeeClosings.map((c: any, i: number) => (
+                        {sorted.map((c: any, i: number) => (
                           <tr key={`${c.closingId}-${c.sideType}-${i}`} className="hover:bg-muted/20 transition-colors">
                             <td className="px-4 py-3">
                               <p className="font-medium max-w-[200px] truncate" title={c.propertyAddress}>{c.propertyAddress || "—"}</p>
@@ -1087,6 +1089,7 @@ export default function CandidateDetail() {
                         </tr>
                       </tfoot>
                     </table>
+                    )}</SortableRows>
                   </div>
                 </div>
               </>

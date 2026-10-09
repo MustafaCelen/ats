@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { EmployeePicker } from "@/components/EmployeePicker";
 import { useToast } from "@/hooks/use-toast";
 import { Link2, Loader2, Search, Sparkles, Undo2, UserX } from "lucide-react";
+import { useSortable } from "@/lib/sort";
+import { SortTh } from "@/components/SortTh";
 
 // Bağlanmamış aday referanslarını danışmanlarla eşleştirme (admin + hiring manager).
 // Karar metin bazındadır: aynı metne sahip tüm adaylar birlikte bağlanır; dış referans
@@ -46,6 +48,11 @@ export default function ReferansEslestirme() {
       (!onlySuggested || g.suggestions.length > 0) &&
       (!term || g.text.toLocaleLowerCase("tr-TR").includes(term) || g.candidates.some((c) => c.name.toLocaleLowerCase("tr-TR").includes(term))));
   }, [data, onlySuggested, q]);
+
+  // Sütun sıralaması (ortak altyapı: @/lib/sort)
+  const { sorted: sortedGroups, sort, toggle: toggleSort } = useSortable(groups, {
+    text: (g: Group) => g.text, count: (g: Group) => g.count, suggestion: (g: Group) => g.suggestions[0]?.score ?? null,
+  });
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["/api/referrals/unmatched"] });
@@ -121,11 +128,11 @@ export default function ReferansEslestirme() {
         <div className="rounded-xl border border-border bg-card overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-muted/40 text-muted-foreground text-xs">
-              <tr>
-                <th className="text-left font-medium px-4 py-2.5">Referans metni</th>
-                <th className="text-left font-medium px-4 py-2.5">Adaylar</th>
-                <th className="text-left font-medium px-4 py-2.5 min-w-[280px]">Danışman önerisi</th>
-                <th className="text-left font-medium px-4 py-2.5 min-w-[240px]">Başka danışman / dış referans</th>
+              <tr className="[&_th]:px-4 [&_th]:py-2.5">
+                <SortTh label="Referans metni" sortKey="text" sort={sort} onSort={toggleSort} />
+                <SortTh label="Adaylar" sortKey="count" sort={sort} onSort={toggleSort} firstDir="desc" />
+                <SortTh label="Danışman önerisi" sortKey="suggestion" sort={sort} onSort={toggleSort} firstDir="desc" className="min-w-[280px]" />
+                <th className="text-left min-w-[240px]">Başka danışman / dış referans</th>
               </tr>
             </thead>
             <tbody>
@@ -135,10 +142,10 @@ export default function ReferansEslestirme() {
                   {onlySuggested ? "Önerisi olan bekleyen referans yok." : "Bağlanmamış referans yok."}
                 </td></tr>
               )}
-              {groups.map((g) => (
+              {sortedGroups.map((g) => (
                 <tr key={g.norm} className="border-t border-border align-top">
                   <td className="px-4 py-3">
-                    <p className="font-semibold">{g.text}</p>
+                    <p className="font-semibold whitespace-nowrap max-w-[260px] truncate" title={g.text}>{g.text}</p>
                     {g.variants.length > 1 && <p className="text-[11px] text-muted-foreground mt-0.5">Yazımlar: {g.variants.join(" · ")}</p>}
                   </td>
                   <td className="px-4 py-3">

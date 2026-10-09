@@ -1,3 +1,5 @@
+import { useSortable } from "@/lib/sort";
+import { SortHead } from "@/components/SortTh";
 import { useState, useEffect, useMemo } from "react";
 import { useRoute, Link } from "wouter";
 import { Layout } from "@/components/Layout";
@@ -546,6 +548,12 @@ export default function JobDetails() {
 
 // ─── List view ────────────────────────────────────────────────────────────────
 
+const APPLICATION_SORT = {
+  name: (a: any) => a.candidate?.name, status: (a: any) => a.status, score: (a: any) => a.score ?? 0,
+  contact: (a: any) => a.candidate?.phone, summary: (a: any) => a.candidate?.resumeText,
+  lastNote: (a: any) => a.lastNote?.content ?? a.notes?.[0]?.content ?? null, date: (a: any) => a.appliedAt ?? a.createdAt,
+};
+
 function ApplicationListView({
   applications,
   completingHiring,
@@ -569,6 +577,8 @@ function ApplicationListView({
   onCompleteInterview: (iv: Interview, app: ApplicationWithRelations) => void;
   onUndoInterview: (iv: Interview) => void;
 }) {
+  // Sütun sıralaması (ortak altyapı: @/lib/sort)
+  const { sorted: sortedApplications, sort, toggle: toggleSort } = useSortable(applications, APPLICATION_SORT);
   if (applications.length === 0) {
     return (
       <div className="rounded-xl border border-border bg-card p-12 text-center text-sm text-muted-foreground">
@@ -578,22 +588,22 @@ function ApplicationListView({
   }
 
   return (
-    <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
+    <div className="rounded-xl border border-border bg-card overflow-x-auto shadow-sm">
       {/* Desktop Header */}
-      <div className="hidden md:grid grid-cols-[2fr_130px_72px_150px_2fr_2fr_100px_148px] gap-3 px-4 py-2.5 bg-muted/40 border-b border-border text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-        <div>Aday</div>
-        <div>Aşama</div>
-        <div>Puan</div>
-        <div>İletişim</div>
-        <div>Özet</div>
-        <div>Son Not</div>
-        <div>Tarih</div>
+      <div className="hidden md:grid grid-cols-[minmax(180px,2fr)_130px_72px_150px_minmax(150px,2fr)_minmax(150px,2fr)_100px_140px] md:min-w-[1060px] gap-3 px-4 py-2.5 bg-muted/40 border-b border-border text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+        <SortHead label="Aday" sortKey="name" sort={sort} onSort={toggleSort} />
+        <SortHead label="Aşama" sortKey="status" sort={sort} onSort={toggleSort} />
+        <SortHead label="Puan" sortKey="score" sort={sort} onSort={toggleSort} firstDir="desc" />
+        <SortHead label="İletişim" sortKey="contact" sort={sort} onSort={toggleSort} />
+        <SortHead label="Özet" sortKey="summary" sort={sort} onSort={toggleSort} />
+        <SortHead label="Son Not" sortKey="lastNote" sort={sort} onSort={toggleSort} />
+        <SortHead label="Tarih" sortKey="date" sort={sort} onSort={toggleSort} firstDir="desc" />
         <div />
       </div>
 
       {/* Rows */}
       <div className="divide-y divide-border">
-        {applications.map((app) => {
+        {sortedApplications.map((app) => {
           const meta = COLUMN_META[app.status] ?? { color: "text-gray-600", bg: "bg-gray-50", dot: "bg-gray-400" };
           return (
             <div key={app.id} data-testid={`list-row-${app.id}`}>
@@ -690,7 +700,7 @@ function ApplicationListView({
               </div>
 
               {/* Desktop row */}
-              <div className="hidden md:grid grid-cols-[2fr_130px_72px_150px_2fr_2fr_100px_148px] gap-3 px-4 py-3 items-start hover:bg-muted/20 transition-colors group">
+              <div className="hidden md:grid grid-cols-[minmax(180px,2fr)_130px_72px_150px_minmax(150px,2fr)_minmax(150px,2fr)_100px_140px] md:min-w-[1060px] gap-3 px-4 py-3 items-center hover:bg-muted/20 transition-colors group">
                 {/* Candidate */}
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center text-primary text-[11px] font-bold shrink-0">
@@ -752,7 +762,7 @@ function ApplicationListView({
                 {/* Özet */}
                 <div className="min-w-0 overflow-hidden">
                   {app.candidate?.resumeText ? (
-                    <p className="text-xs text-muted-foreground line-clamp-2" title={app.candidate.resumeText}>
+                    <p className="text-xs text-muted-foreground truncate" title={app.candidate.resumeText}>
                       {app.candidate.resumeText}
                     </p>
                   ) : (

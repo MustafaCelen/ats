@@ -1,3 +1,4 @@
+import { SortTh, SortableRows } from "@/components/SortTh";
 import { useState, useMemo } from "react";
 import { Link } from "wouter";
 import { Layout } from "@/components/Layout";
@@ -1122,16 +1123,17 @@ export default function FinancialReports() {
               </Button>
             )}
           </div>
-          <table className="w-full text-sm">
+          <SortableRows rows={(yearStats?.monthlyTrend ?? []) as { month: string; bhb: number; bm: number }[]}>{({ sorted, sort, toggle }) => (
+          <table className="w-full text-sm [&_td]:whitespace-nowrap">
             <thead>
-              <tr className="border-b border-border bg-muted/40">
-                <th className="text-left text-xs font-medium text-muted-foreground py-2 px-4">Ay</th>
-                <th className="text-right text-xs font-medium text-muted-foreground py-2 px-4">BHB</th>
-                <th className="text-right text-xs font-medium text-muted-foreground py-2 px-4">BM Payı</th>
+              <tr className="border-b border-border bg-muted/40 text-xs text-muted-foreground [&_th]:py-2 [&_th]:px-4">
+                <SortTh label="Ay" sortKey="month" sort={sort} onSort={toggle} />
+                <SortTh label="BHB" sortKey="bhb" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                <SortTh label="BM Payı" sortKey="bm" sort={sort} onSort={toggle} align="right" firstDir="desc" />
               </tr>
             </thead>
             <tbody>
-              {(yearStats?.monthlyTrend ?? []).map((m: { month: string; bhb: number; bm: number }) => (
+              {sorted.map((m) => (
                 <tr key={m.month} className="border-b border-border/50">
                   <td className="py-2 px-4 text-xs font-medium">
                     {format(new Date(m.month + "-01T00:00:00"), "MMMM yyyy", { locale: tr })}
@@ -1145,6 +1147,7 @@ export default function FinancialReports() {
               )}
             </tbody>
           </table>
+          )}</SortableRows>
         </div>
 
         {/* ── Metric Cards ── */}
@@ -1525,14 +1528,16 @@ export default function FinancialReports() {
                       <thead>
                         <tr className="bg-muted/40 border-b border-border">
                           {agentCols.map((col) => (
-                            <th
+                            // Ortak sıralanabilir başlık (SortTh); "#" sıra numarası sıralanmaz
+                            <SortTh
                               key={col.key}
-                              onClick={() => handleAgentSort(col.key)}
-                              className={`text-xs font-medium text-muted-foreground py-2 px-4 ${col.align === "right" ? "text-right" : "text-left"} ${col.key !== "#" ? "cursor-pointer select-none hover:text-foreground" : ""}`}
-                            >
-                              {col.label}
-                              {col.key !== "#" && <SortIcon col={col.key} />}
-                            </th>
+                              label={col.label}
+                              sortKey={col.key === "#" ? undefined : col.key}
+                              sort={{ key: agentSort.key, dir: agentSort.dir }}
+                              onSort={(k) => handleAgentSort(k)}
+                              align={col.align}
+                              className="text-xs text-muted-foreground py-2 px-4"
+                            />
                           ))}
                         </tr>
                       </thead>
@@ -1540,9 +1545,9 @@ export default function FinancialReports() {
                         {sortedAgents.map((a: any, i: number) => (
                           <tr key={a.name} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
                             <td className="py-2 px-4 text-xs text-muted-foreground">{i + 1}</td>
-                            <td className="py-2 px-4 font-medium">{a.name}</td>
-                            <td className="py-2 px-4 text-xs text-muted-foreground">{a.kwuid || "—"}</td>
-                            <td className="py-2 px-4 text-right">{a.count}</td>
+                            <td className="py-2 px-4 font-medium whitespace-nowrap max-w-[240px] truncate" title={a.name}>{a.name}</td>
+                            <td className="py-2 px-4 text-xs text-muted-foreground whitespace-nowrap">{a.kwuid || "—"}</td>
+                            <td className="py-2 px-4 text-right tabular-nums">{a.count}</td>
                             <td className="py-2 px-4 text-right font-medium">{fmtTRY(a.bhb)}</td>
                             <td className="py-2 px-4 text-right text-blue-700">{fmtTRY(a.bm)}</td>
                             <td className="py-2 px-4 text-right text-muted-foreground">{a.count > 0 ? fmtTRY(a.bhb / a.count) : "—"}</td>
@@ -1594,20 +1599,21 @@ export default function FinancialReports() {
               }
               return (
                 <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
+                  <SortableRows rows={teamRows} initial={{ key: "bhb", dir: "desc" }}>{({ sorted, sort, toggle }) => (
+                  <table className="w-full text-sm [&_td]:whitespace-nowrap">
                     <thead>
-                      <tr className="bg-muted/40 border-b border-border text-xs font-medium text-muted-foreground">
-                        <th className="text-left py-2 px-4">Takım</th>
-                        <th className="text-right py-2 px-4">Üye</th>
-                        <th className="text-right py-2 px-4">Üreten</th>
-                        <th className="text-right py-2 px-4">Kapanış</th>
-                        <th className="text-right py-2 px-4">BHB Toplam</th>
-                        <th className="text-right py-2 px-4">BM Toplam</th>
-                        <th className="text-right py-2 px-4">Net Toplam</th>
+                      <tr className="bg-muted/40 border-b border-border text-xs text-muted-foreground [&_th]:py-2 [&_th]:px-4">
+                        <SortTh label="Takım" sortKey="name" sort={sort} onSort={toggle} />
+                        <SortTh label="Üye" sortKey="memberCount" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                        <SortTh label="Üreten" sortKey="activeCount" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                        <SortTh label="Kapanış" sortKey="count" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                        <SortTh label="BHB Toplam" sortKey="bhb" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                        <SortTh label="BM Toplam" sortKey="bm" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                        <SortTh label="Net Toplam" sortKey="net" sort={sort} onSort={toggle} align="right" firstDir="desc" />
                       </tr>
                     </thead>
                     <tbody>
-                      {teamRows.map((t, i) => (
+                      {sorted.map((t, i) => (
                         <tr key={i} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
                           <td className="py-2 px-4 font-medium">{t.name}</td>
                           <td className="py-2 px-4 text-right text-muted-foreground">{t.memberCount}</td>
@@ -1629,6 +1635,7 @@ export default function FinancialReports() {
                       </tr>
                     </tfoot>
                   </table>
+                  )}</SortableRows>
                 </div>
               );
             })()}

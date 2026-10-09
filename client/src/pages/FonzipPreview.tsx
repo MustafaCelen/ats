@@ -1,3 +1,4 @@
+import { SortTh, SortableRows } from "@/components/SortTh";
 import { useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Layout } from "@/components/Layout";
@@ -480,18 +481,19 @@ export default function FonzipPreview() {
                   {!userFinancials?.length ? (
                     <p className="text-sm text-muted-foreground p-4">Henüz borç verisi yok. "Toplam Borç Sync" butonuna basın.</p>
                   ) : (
-                    <Table>
+                    <SortableRows rows={userFinancials as any[]} getters={{ debt: (r: any) => parseFloat(r.total_financial), contact: (r: any) => r.phone ?? r.email }} initial={{ key: "debt", dir: "desc" }}>{({ sorted, sort, toggle }) => (
+                    <Table className="[&_td]:whitespace-nowrap">
                       <TableHeader>
-                        <TableRow>
-                          <TableHead>Fonzip Adı</TableHead>
-                          <TableHead>Danışman (Sistemde)</TableHead>
-                          <TableHead>KW UID</TableHead>
-                          <TableHead className="text-right">Borç Tutarı</TableHead>
-                          <TableHead>İletişim</TableHead>
+                        <TableRow className="text-muted-foreground [&_th]:h-12 [&_th]:px-4">
+                          <SortTh label="Fonzip Adı" sortKey="user_name" sort={sort} onSort={toggle} />
+                          <SortTh label="Danışman (Sistemde)" sortKey="employee_name" sort={sort} onSort={toggle} />
+                          <SortTh label="KW UID" sortKey="membership_no" sort={sort} onSort={toggle} />
+                          <SortTh label="Borç Tutarı" sortKey="debt" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                          <SortTh label="İletişim" sortKey="contact" sort={sort} onSort={toggle} />
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {userFinancials.map((r: any) => (
+                        {sorted.map((r: any) => (
                           <TableRow key={r.fonzip_user_id}>
                             <TableCell className="font-medium">{r.user_name}</TableCell>
                             <TableCell>
@@ -512,6 +514,7 @@ export default function FonzipPreview() {
                         ))}
                       </TableBody>
                     </Table>
+                    )}</SortableRows>
                   )}
                 </CardContent>
               </Card>
@@ -527,20 +530,21 @@ export default function FonzipPreview() {
                   {!duesReport?.length ? (
                     <p className="text-sm text-muted-foreground p-4">Eşleşmiş kayıt yok.</p>
                   ) : (
-                    <Table>
+                    <SortableRows rows={duesReport} getters={{ status: (r: any) => (r.pendingTotal > 0 ? 1 : 0) }} initial={{ key: "pendingTotal", dir: "desc" }}>{({ sorted, sort, toggle }) => (
+                    <Table className="[&_td]:whitespace-nowrap">
                       <TableHeader>
-                        <TableRow>
-                          <TableHead>Danışman</TableHead>
-                          <TableHead>KW UID</TableHead>
-                          <TableHead className="text-right">Ödendi</TableHead>
-                          <TableHead className="text-right">Bekliyor</TableHead>
-                          <TableHead className="text-right">Ödeme Sayısı</TableHead>
-                          <TableHead>Son Ödeme</TableHead>
-                          <TableHead>Durum</TableHead>
+                        <TableRow className="text-muted-foreground [&_th]:h-12 [&_th]:px-4">
+                          <SortTh label="Danışman" sortKey="employeeName" sort={sort} onSort={toggle} />
+                          <SortTh label="KW UID" sortKey="kwuid" sort={sort} onSort={toggle} />
+                          <SortTh label="Ödendi" sortKey="paidTotal" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                          <SortTh label="Bekliyor" sortKey="pendingTotal" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                          <SortTh label="Ödeme Sayısı" sortKey="paidCount" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                          <SortTh label="Son Ödeme" sortKey="lastPaymentDate" sort={sort} onSort={toggle} firstDir="desc" />
+                          <SortTh label="Durum" sortKey="status" sort={sort} onSort={toggle} firstDir="desc" />
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {duesReport.map(r => (
+                        {sorted.map(r => (
                           <TableRow key={r.employeeId}>
                             <TableCell className="font-medium">{r.employeeName}</TableCell>
                             <TableCell className="text-muted-foreground text-xs">{r.kwuid ?? "—"}</TableCell>
@@ -565,6 +569,7 @@ export default function FonzipPreview() {
                         ))}
                       </TableBody>
                     </Table>
+                    )}</SortableRows>
                   )}
                 </CardContent>
               </Card>
@@ -583,19 +588,20 @@ export default function FonzipPreview() {
                   {!unmatched?.length ? (
                     <p className="text-sm text-muted-foreground p-4">Eşleşmeyen kayıt yok.</p>
                   ) : (
-                    <Table>
+                    <SortableRows rows={unmatched.slice(0, 100) as any[]} getters={{ amount: (d: any) => parseFloat(d.amount) }}>{({ sorted, sort, toggle }) => (
+                    <Table className="[&_td]:whitespace-nowrap">
                       <TableHeader>
-                        <TableRow>
-                          <TableHead>Fonzip Adı</TableHead>
-                          <TableHead>Üye No</TableHead>
-                          <TableHead className="text-right">Tutar</TableHead>
-                          <TableHead>Detay</TableHead>
-                          <TableHead>Tarih</TableHead>
-                          <TableHead>Durum</TableHead>
+                        <TableRow className="text-muted-foreground [&_th]:h-12 [&_th]:px-4">
+                          <SortTh label="Fonzip Adı" sortKey="userName" sort={sort} onSort={toggle} />
+                          <SortTh label="Üye No" sortKey="membershipNo" sort={sort} onSort={toggle} />
+                          <SortTh label="Tutar" sortKey="amount" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                          <SortTh label="Detay" sortKey="details" sort={sort} onSort={toggle} />
+                          <SortTh label="Tarih" sortKey="operationDate" sort={sort} onSort={toggle} firstDir="desc" />
+                          <SortTh label="Durum" sortKey="status" sort={sort} onSort={toggle} />
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {unmatched.slice(0, 100).map((d: any) => (
+                        {sorted.map((d: any) => (
                           <TableRow key={d.id}>
                             <TableCell className="font-medium">{d.userName}</TableCell>
                             <TableCell className="text-muted-foreground text-xs">{d.membershipNo ?? "—"}</TableCell>
@@ -613,6 +619,7 @@ export default function FonzipPreview() {
                         ))}
                       </TableBody>
                     </Table>
+                    )}</SortableRows>
                   )}
                 </CardContent>
               </Card>

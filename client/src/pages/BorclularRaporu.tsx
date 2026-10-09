@@ -1,3 +1,4 @@
+import { SortTh, SortableRows } from "@/components/SortTh";
 import { Layout } from "@/components/Layout";
 import { useQuery } from "@tanstack/react-query";
 import { AlertCircle, FileSpreadsheet } from "lucide-react";
@@ -80,28 +81,34 @@ export default function BorclularRaporu() {
               <h2 className="text-sm font-semibold text-red-700">{rows.length} danışman</h2>
               <span className="text-sm font-bold text-red-700">Toplam: {fmtTRY(total)}</span>
             </div>
-            <table className="w-full text-sm">
+            <SortableRows
+              rows={rows}
+              getters={{ name: (r: DebtorRow) => r.employee_name ?? r.user_name, debt: (r: DebtorRow) => parseFloat(r.total_financial), membership_no: (r: DebtorRow) => r.membership_no, synced_at: (r: DebtorRow) => r.synced_at }}
+              initial={{ key: "debt", dir: "desc" }}
+            >{({ sorted, sort, toggle }) => (
+            <table className="w-full text-sm [&_td]:whitespace-nowrap">
               <thead>
-                <tr className="border-b border-border bg-muted/40">
-                  <th className="text-left text-xs font-medium text-muted-foreground py-2 px-4">Danışman</th>
-                  <th className="text-left text-xs font-medium text-muted-foreground py-2 px-4">Üye No</th>
-                  <th className="text-right text-xs font-medium text-muted-foreground py-2 px-4">Borç</th>
-                  <th className="text-right text-xs font-medium text-muted-foreground py-2 px-4">Son Senkron</th>
+                <tr className="border-b border-border bg-muted/40 text-xs text-muted-foreground [&_th]:py-2 [&_th]:px-4">
+                  <SortTh label="Danışman" sortKey="name" sort={sort} onSort={toggle} />
+                  <SortTh label="Üye No" sortKey="membership_no" sort={sort} onSort={toggle} />
+                  <SortTh label="Borç" sortKey="debt" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                  <SortTh label="Son Senkron" sortKey="synced_at" sort={sort} onSort={toggle} align="right" firstDir="desc" />
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r) => (
+                {sorted.map((r) => (
                   <tr key={r.fonzip_user_id} className="border-b border-border/50 last:border-0">
-                    <td className="py-2.5 px-4 font-medium">{r.employee_name ?? r.user_name}</td>
-                    <td className="py-2.5 px-4 text-muted-foreground">{r.membership_no ?? "—"}</td>
-                    <td className="py-2.5 px-4 text-right font-semibold text-red-700">{fmtTRY(parseFloat(r.total_financial))}</td>
-                    <td className="py-2.5 px-4 text-right text-xs text-muted-foreground">
+                    <td className="py-2.5 px-4 font-medium max-w-[320px] truncate" title={r.employee_name ?? r.user_name}>{r.employee_name ?? r.user_name}</td>
+                    <td className="py-2.5 px-4 text-muted-foreground font-mono text-xs">{r.membership_no ?? "—"}</td>
+                    <td className="py-2.5 px-4 text-right font-semibold text-red-700 tabular-nums">{fmtTRY(parseFloat(r.total_financial))}</td>
+                    <td className="py-2.5 px-4 text-right text-xs text-muted-foreground tabular-nums">
                       {r.synced_at ? format(new Date(r.synced_at), "d MMM yyyy", { locale: tr }) : "—"}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            )}</SortableRows>
           </div>
         )}
       </div>

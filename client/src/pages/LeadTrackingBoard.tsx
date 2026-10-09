@@ -1,3 +1,5 @@
+import { useSortable } from "@/lib/sort";
+import { SortTh } from "@/components/SortTh";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -449,6 +451,18 @@ export default function LeadTrackingBoard() {
     return [...unassigned, ...assigned].sort((a, b) => b.sortKey - a.sortKey);
   }, [unassignedLeads, boardApps]);
 
+  // Sütun sıralaması (ortak altyapı: @/lib/sort); varsayılan sıra: en yeni lead üstte.
+  const leadGetters = useMemo(() => {
+    const iv = (r: LeadRow) => (r.application ? interviewByApplicationRef.current.get(r.application.id) : undefined);
+    return {
+      name: (r: LeadRow) => r.candidate?.name, date: (r: LeadRow) => r.sortKey,
+      stage: (r: LeadRow) => (r.application ? (STAGE_LABELS as any)[r.application.status] ?? r.application.status : null),
+      interviewStatus: (r: LeadRow) => iv(r)?.status ?? null, interviewDate: (r: LeadRow) => iv(r)?.startTime ?? null,
+      job: (r: LeadRow) => r.application?.job?.title ?? null,
+    };
+  }, []);
+  const { sorted: sortedLeadRows, sort: leadSort, toggle: toggleLeadSort } = useSortable(leadRows, leadGetters);
+
   const interviewByApplication = useMemo(() => {
     const grouped = new Map<number, InterviewWithRelations[]>();
     for (const interview of interviews ?? []) {
@@ -468,6 +482,8 @@ export default function LeadTrackingBoard() {
     });
     return selected;
   }, [interviews]);
+  // getter'lar memo dışından güncel haritaya erişsin
+  const interviewByApplicationRef = { current: interviewByApplication };
 
   const updateLeadTracking = useMutation({
     mutationFn: async ({ candidateId, field, value }: { candidateId: number; field: LeadTrackingField; value: boolean | string }) => {
@@ -587,20 +603,22 @@ export default function LeadTrackingBoard() {
             <table className="min-w-[2400px] w-full border-collapse text-xs">
               <thead>
                 <tr className="border-b border-border bg-slate-50 text-slate-600">
-                  <th className="sticky left-0 z-20 min-w-[190px] bg-slate-50 px-4 py-3 text-left font-semibold">
-                    <span className="inline-flex items-center gap-1.5"><UsersRound className="h-4 w-4" /> Lead</span>
-                  </th>
+                  <SortTh
+                    label={<span className="inline-flex items-center gap-1.5"><UsersRound className="h-4 w-4" /> Lead</span>}
+                    sortKey="name" sort={leadSort} onSort={toggleLeadSort}
+                    className="sticky left-0 z-20 min-w-[190px] bg-slate-50 px-4 py-3 font-semibold"
+                  />
                   <th className="min-w-[125px] px-3 py-3 text-left font-semibold">İletişim</th>
                   <th className="min-w-[90px] px-3 py-3 text-center font-semibold">WhatsApp</th>
                   <th className="min-w-[90px] px-3 py-3 text-center font-semibold">Telefon Gör.</th>
                   <th className="min-w-[160px] px-3 py-3 text-left font-semibold">Telefon Notu</th>
                   <th className="min-w-[140px] px-3 py-3 text-left font-semibold">Meslek</th>
-                  <th className="min-w-[135px] px-3 py-3 text-left font-semibold">Aşama</th>
-                  <th className="min-w-[135px] bg-blue-50/70 px-3 py-3 text-left font-semibold text-blue-700">Randevu Durumu</th>
-                  <th className="min-w-[165px] bg-blue-50/70 px-3 py-3 text-left font-semibold text-blue-700">Randevu Tarihi</th>
+                  <SortTh label="Aşama" sortKey="stage" sort={leadSort} onSort={toggleLeadSort} className="min-w-[135px] px-3 py-3 font-semibold" />
+                  <SortTh label="Randevu Durumu" sortKey="interviewStatus" sort={leadSort} onSort={toggleLeadSort} className="min-w-[135px] bg-blue-50/70 px-3 py-3 font-semibold text-blue-700" />
+                  <SortTh label="Randevu Tarihi" sortKey="interviewDate" sort={leadSort} onSort={toggleLeadSort} className="min-w-[165px] bg-blue-50/70 px-3 py-3 font-semibold text-blue-700" />
                   <th className="min-w-[145px] bg-blue-50/70 px-3 py-3 text-left font-semibold text-blue-700">Randevu Lideri</th>
                   <th className="min-w-[110px] bg-blue-50/70 px-3 py-3 text-center font-semibold text-blue-700">Randevu Oluşturmadı</th>
-                  <th className="min-w-[220px] bg-violet-50/70 px-3 py-3 text-left font-semibold text-violet-700">Üretim Bandı</th>
+                  <SortTh label="Üretim Bandı" sortKey="job" sort={leadSort} onSort={toggleLeadSort} className="min-w-[220px] bg-violet-50/70 px-3 py-3 font-semibold text-violet-700" />
                   <th className="min-w-[90px] px-3 py-3 text-center font-semibold">Tekrar Arama</th>
                   <th className="min-w-[160px] px-3 py-3 text-left font-semibold">Tekrar Arama Notu</th>
                   <th className="min-w-[280px] bg-emerald-50/70 px-3 py-3 text-left font-semibold text-emerald-700">Ekip Notları</th>
@@ -622,7 +640,7 @@ export default function LeadTrackingBoard() {
                     </td>
                   </tr>
                 )}
-                {!isLoading && leadRows.map((row) => {
+                {!isLoading && sortedLeadRows.map((row) => {
                   const { candidate, application } = row;
                   const interview = application ? interviewByApplication.get(application.id) : undefined;
                   const status = interview ? INTERVIEW_STATUS[interview.status] : null;
@@ -694,7 +712,7 @@ export default function LeadTrackingBoard() {
                         {candidate && (
                           <button
                             type="button"
-                            className="line-clamp-2 w-full rounded-lg px-2 py-1.5 text-left leading-relaxed text-slate-600 hover:bg-slate-100"
+                            className="block w-full truncate rounded-lg px-2 py-1.5 text-left text-slate-600 hover:bg-slate-100"
                             onClick={() => setFieldNoteTarget({ candidate, field: "leadCallNotes", title: "Telefon Görüşmesi Notu", description: "telefon görüşmesi notları" })}
                           >
                             {(candidate as any).leadCallNotes || <span className="text-slate-400">Not ekle...</span>}
@@ -811,7 +829,7 @@ export default function LeadTrackingBoard() {
                         {candidate && (
                           <button
                             type="button"
-                            className="line-clamp-2 w-full rounded-lg px-2 py-1.5 text-left leading-relaxed text-slate-600 hover:bg-slate-100"
+                            className="block w-full truncate rounded-lg px-2 py-1.5 text-left text-slate-600 hover:bg-slate-100"
                             onClick={() => setFieldNoteTarget({ candidate, field: "leadCallbackNotes", title: "Tekrar Arama Notu", description: "tekrar arama notları" })}
                           >
                             {(candidate as any).leadCallbackNotes || <span className="text-slate-400">Not ekle...</span>}
@@ -826,7 +844,7 @@ export default function LeadTrackingBoard() {
                             onClick={() => setNoteTarget({ candidateId: candidate.id, candidateName: candidate.name, latestNote: application?.latestNote })}
                           >
                             <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" />
-                            <span className="line-clamp-2 leading-relaxed text-slate-600">
+                            <span className="block truncate text-slate-600">
                               {(application?.latestNote) || "Not eklemek için tıklayın"}
                             </span>
                           </button>

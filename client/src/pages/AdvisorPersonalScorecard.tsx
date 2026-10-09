@@ -1,3 +1,4 @@
+import { SortTh, SortableRows } from "@/components/SortTh";
 import { useState, useMemo } from "react";
 import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
@@ -229,19 +230,20 @@ function ListingsTable({ title, listings, isKiralik }: { title: string; listings
         <div className="p-6 text-center text-sm text-muted-foreground">Aktif ilan yok.</div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-xs">
+          <SortableRows rows={listings} getters={{ mahalle: (l: any) => [l.ilce, l.mahalle].filter(Boolean).join(" / "), tip: (l: any) => [l.emlakTipi, l.odaSayisi].filter(Boolean).join(" · "), m2: (l: any) => (l.m2Net == null ? null : Number(l.m2Net)), price: (l: any) => (l.price == null ? null : Number(l.price)), date: (l: any) => l.publishedDate ?? l.firstSeenAt }}>{({ sorted, sort, toggle }) => (
+          <table className="w-full text-xs [&_td]:whitespace-nowrap">
             <thead className="bg-muted/30">
-              <tr className="border-b border-border text-muted-foreground">
-                <th className="text-left px-3 py-2 font-medium">İlan No</th>
-                <th className="text-left px-3 py-2 font-medium">Mahalle</th>
-                <th className="text-left px-3 py-2 font-medium">Tip / Oda</th>
-                <th className="text-right px-3 py-2 font-medium">m²</th>
-                <th className="text-right px-3 py-2 font-medium">Fiyat</th>
-                <th className="text-right px-3 py-2 font-medium">Yayın Tarihi</th>
+              <tr className="border-b border-border text-muted-foreground [&_th]:px-3 [&_th]:py-2">
+                <SortTh label="İlan No" sortKey="listingNumber" sort={sort} onSort={toggle} />
+                <SortTh label="Mahalle" sortKey="mahalle" sort={sort} onSort={toggle} />
+                <SortTh label="Tip / Oda" sortKey="tip" sort={sort} onSort={toggle} />
+                <SortTh label="m²" sortKey="m2" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                <SortTh label="Fiyat" sortKey="price" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                <SortTh label="Yayın Tarihi" sortKey="date" sort={sort} onSort={toggle} align="right" firstDir="desc" />
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {listings.map((l) => (
+              {sorted.map((l) => (
                 <tr key={l.id} className="hover:bg-muted/20">
                   <td className="px-3 py-1.5 font-medium">{l.listingNumber ?? `#${l.id}`}</td>
                   <td className="px-3 py-1.5 text-muted-foreground">{[l.ilce, l.mahalle].filter(Boolean).join(" / ") || "—"}</td>
@@ -253,6 +255,7 @@ function ListingsTable({ title, listings, isKiralik }: { title: string; listings
               ))}
             </tbody>
           </table>
+          )}</SortableRows>
         </div>
       )}
     </div>
@@ -450,22 +453,23 @@ function AdvisorNotesSection({ employeeId }: { employeeId: number }) {
             <div className="text-center py-6 text-muted-foreground text-sm">Henüz not yok.</div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-xs">
+              <SortableRows rows={notes as AdvisorNote[]} getters={{ meetingDate: (n: any) => n.meetingDate, agenda: (n: any) => n.agenda, coachNote: (n: any) => n.coachNote, nextStep: (n: any) => n.nextStep }} initial={{ key: "createdAt", dir: "desc" }}>{({ sorted, sort, toggle }) => (
+              <table className="w-full text-xs [&_td]:whitespace-nowrap">
                 <thead className="bg-muted/30">
-                  <tr className="border-b border-border text-muted-foreground">
-                    <th className="text-left px-3 py-2 font-medium whitespace-nowrap">Tarih</th>
-                    <th className="text-left px-3 py-2 font-medium whitespace-nowrap">Görüşme Tarihi</th>
-                    <th className="text-left px-3 py-2 font-medium">Gündem</th>
-                    <th className="text-left px-3 py-2 font-medium">Koçun Notu</th>
-                    <th className="text-left px-3 py-2 font-medium">Sonraki Adım</th>
-                    <th className="text-left px-3 py-2 font-medium">Not</th>
-                    <th className="text-left px-3 py-2 font-medium whitespace-nowrap">Yazar</th>
+                  <tr className="border-b border-border text-muted-foreground [&_th]:px-3 [&_th]:py-2">
+                    <SortTh label="Tarih" sortKey="createdAt" sort={sort} onSort={toggle} firstDir="desc" />
+                    <SortTh label="Görüşme Tarihi" sortKey="meetingDate" sort={sort} onSort={toggle} firstDir="desc" />
+                    <SortTh label="Gündem" sortKey="agenda" sort={sort} onSort={toggle} />
+                    <SortTh label="Koçun Notu" sortKey="coachNote" sort={sort} onSort={toggle} />
+                    <SortTh label="Sonraki Adım" sortKey="nextStep" sort={sort} onSort={toggle} />
+                    <SortTh label="Not" sortKey="content" sort={sort} onSort={toggle} />
+                    <SortTh label="Yazar" sortKey="authorName" sort={sort} onSort={toggle} />
                     <th className="px-3 py-2" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {(notes as AdvisorNote[]).map((note) => (
-                    <tr key={note.id} className="hover:bg-muted/20 align-top">
+                  {sorted.map((note) => (
+                    <tr key={note.id} className="hover:bg-muted/20">
                       <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">
                         {note.createdAt ? formatDistanceToNow(new Date(note.createdAt), { addSuffix: true }) : "—"}
                       </td>
@@ -484,6 +488,7 @@ function AdvisorNotesSection({ employeeId }: { employeeId: number }) {
                   ))}
                 </tbody>
               </table>
+              )}</SortableRows>
             </div>
           )}
         </div>

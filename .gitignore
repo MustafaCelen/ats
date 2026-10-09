@@ -11,3 +11,5 @@ graphify-out
 # E2E test çıktıları
 e2e/report
 e2e/test-results
+e2e/audit-*.txt
+e2e/audit-report.json

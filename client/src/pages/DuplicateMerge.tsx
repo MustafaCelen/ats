@@ -1,3 +1,4 @@
+import { SortTh, SortableRows } from "@/components/SortTh";
 import { useState, useMemo } from "react";
 import { Layout } from "@/components/Layout";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -339,19 +340,20 @@ export default function DuplicateMerge() {
               {mergeLog.length === 0 ? (
                 <p className="text-sm text-muted-foreground p-4">Henüz merge yapılmadı</p>
               ) : (
-                <Table>
+                <SortableRows rows={mergeLog} getters={{ status: (l: any) => (l.undone_at ? 1 : 0) }} initial={{ key: "performed_at", dir: "desc" }}>{({ sorted, sort, toggle }) => (
+                <Table className="[&_td]:whitespace-nowrap">
                   <TableHeader>
-                    <TableRow>
-                      <TableHead>#</TableHead>
-                      <TableHead>Tarih</TableHead>
-                      <TableHead>Kaynak</TableHead>
-                      <TableHead>Hedef</TableHead>
-                      <TableHead>Durum</TableHead>
+                    <TableRow className="text-muted-foreground [&_th]:h-12 [&_th]:px-4">
+                      <SortTh label="#" sortKey="id" sort={sort} onSort={toggle} firstDir="desc" />
+                      <SortTh label="Tarih" sortKey="performed_at" sort={sort} onSort={toggle} firstDir="desc" />
+                      <SortTh label="Kaynak" sortKey="source_id" sort={sort} onSort={toggle} />
+                      <SortTh label="Hedef" sortKey="target_id" sort={sort} onSort={toggle} />
+                      <SortTh label="Durum" sortKey="status" sort={sort} onSort={toggle} />
                       <TableHead className="text-right">İşlem</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {mergeLog.map((log) => (
+                    {sorted.map((log) => (
                       <TableRow key={log.id}>
                         <TableCell className="font-mono text-xs">#{log.id}</TableCell>
                         <TableCell className="text-xs">{new Date(log.performed_at).toLocaleString("tr-TR")}</TableCell>
@@ -379,6 +381,7 @@ export default function DuplicateMerge() {
                     ))}
                   </TableBody>
                 </Table>
+                )}</SortableRows>
               )}
             </CardContent>
           </Card>

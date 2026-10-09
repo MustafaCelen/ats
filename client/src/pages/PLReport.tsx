@@ -1,3 +1,4 @@
+import { SortHead, SortableRows } from "@/components/SortTh";
 import { useState } from "react";
 import { Layout } from "@/components/Layout";
 import { useQuery } from "@tanstack/react-query";
@@ -157,13 +158,14 @@ export default function PLReport() {
 
         {/* Month-by-month table */}
         <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
+          <SortableRows rows={months} getters={{ month: (m: any) => m.month, income: (m: any) => m.totalIncome, expenses: (m: any) => m.totalExpenses, net: (m: any) => m.net }}>{({ sorted, sort, toggle }) => (
           <div className="overflow-x-auto">
           {/* Table header */}
           <div className="min-w-[420px] grid grid-cols-[2fr_1fr_1fr_1fr_auto] gap-2 md:gap-4 px-3 md:px-4 py-2.5 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            <div>Ay</div>
-            <div className="text-right text-emerald-700">Gelir</div>
-            <div className="text-right text-red-700">Gider</div>
-            <div className="text-right">Net</div>
+            <SortHead label="Ay" sortKey="month" sort={sort} onSort={toggle} />
+            <SortHead label="Gelir" sortKey="income" sort={sort} onSort={toggle} align="right" firstDir="desc" className="text-emerald-700" />
+            <SortHead label="Gider" sortKey="expenses" sort={sort} onSort={toggle} align="right" firstDir="desc" className="text-red-700" />
+            <SortHead label="Net" sortKey="net" sort={sort} onSort={toggle} align="right" firstDir="desc" />
             <div className="w-6" />
           </div>
 
@@ -173,7 +175,7 @@ export default function PLReport() {
 
           {!isLoading && (
             <div className="divide-y divide-border">
-              {months.map((m) => {
+              {sorted.map((m) => {
                 const isExpanded = expandedMonth === m.month;
                 const hasData = m.totalIncome > 0 || m.totalExpenses > 0;
 
@@ -185,7 +187,7 @@ export default function PLReport() {
                       className={`min-w-[420px] w-full grid grid-cols-[2fr_1fr_1fr_1fr_auto] gap-2 md:gap-4 px-3 md:px-4 py-3 items-center hover:bg-muted/20 transition-colors text-left ${!hasData ? "opacity-50" : ""}`}
                       onClick={() => hasData && toggleMonth(m.month)}
                     >
-                      <div className="font-medium text-sm">{MONTHS_TR[m.month - 1]} {year}</div>
+                      <div className="font-medium text-sm whitespace-nowrap">{MONTHS_TR[m.month - 1]} {year}</div>
                       <div className="text-right text-sm text-emerald-700 font-medium">
                         {m.totalIncome > 0 ? fmtTRY(m.totalIncome) : "—"}
                       </div>
@@ -333,7 +335,8 @@ export default function PLReport() {
               <div className="w-6" />
             </div>
           )}
-          </div>{/* /overflow-x-auto */}
+          </div>
+          )}</SortableRows>
         </div>
       </div>
     </Layout>

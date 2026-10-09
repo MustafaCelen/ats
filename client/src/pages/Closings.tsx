@@ -1,3 +1,4 @@
+import { SortTh, SortableRows } from "@/components/SortTh";
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { Layout } from "@/components/Layout";
 import { EmployeePicker } from "@/components/EmployeePicker";
@@ -1266,19 +1267,31 @@ function EmployeeCapStatusPanel({
         </CardTitle>
       </CardHeader>
       <CardContent className="p-0">
-        <Table>
+        <SortableRows
+          rows={active}
+          getters={{
+            name: (e: any) => e.candidate?.name ?? `Danışman #${e.id}`,
+            periodStart: (e: any) => capStatuses[e.id]?.periodStart ?? null,
+            capAmount: (e: any) => capStatuses[e.id]?.capAmount ?? null,
+            capUsed: (e: any) => capStatuses[e.id]?.capUsed ?? null,
+            capRemaining: (e: any) => capStatuses[e.id]?.capRemaining ?? null,
+            pct: (e: any) => { const s = capStatuses[e.id]; return s?.capAmount ? s.capUsed / s.capAmount : null; },
+          }}
+          initial={{ key: "name", dir: "asc" }}
+        >{({ sorted, sort, toggle }) => (
+        <Table className="[&_td]:whitespace-nowrap">
           <TableHeader>
-            <TableRow>
-              <TableHead className="text-xs pl-4">Danışman</TableHead>
-              <TableHead className="text-xs">Dönem Başı</TableHead>
-              <TableHead className="text-xs text-right">Cap Tutarı</TableHead>
-              <TableHead className="text-xs text-right">Ödenen</TableHead>
-              <TableHead className="text-xs text-right">Kalan</TableHead>
-              <TableHead className="text-xs text-center">Durum</TableHead>
+            <TableRow className="text-muted-foreground text-xs [&_th]:h-12 [&_th]:px-4">
+              <SortTh label="Danışman" sortKey="name" sort={sort} onSort={toggle} className="pl-4" />
+              <SortTh label="Dönem Başı" sortKey="periodStart" sort={sort} onSort={toggle} />
+              <SortTh label="Cap Tutarı" sortKey="capAmount" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+              <SortTh label="Ödenen" sortKey="capUsed" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+              <SortTh label="Kalan" sortKey="capRemaining" sort={sort} onSort={toggle} align="right" />
+              <SortTh label="Durum" sortKey="pct" sort={sort} onSort={toggle} align="center" firstDir="desc" />
             </TableRow>
           </TableHeader>
           <TableBody>
-            {active.map((emp) => {
+            {sorted.map((emp) => {
               const status = capStatuses[emp.id];
               const name = emp.candidate?.name ?? `Danışman #${emp.id}`;
               if (!status) {
@@ -1338,6 +1351,7 @@ function EmployeeCapStatusPanel({
             })}
           </TableBody>
         </Table>
+        )}</SortableRows>
       </CardContent>
     </Card>
   );
@@ -3015,7 +3029,7 @@ export default function Closings() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/40">
-                  <th className="text-left text-xs font-medium text-muted-foreground py-2 px-4 w-32"></th>
+                  <th className="text-left text-xs font-medium text-muted-foreground py-2 px-4"></th>
                   <th className="text-right text-xs font-medium text-muted-foreground py-2 px-4">
                     <span className="flex items-center justify-end gap-1"><Handshake className="h-3 w-3" />Kapanış</span>
                   </th>
@@ -3032,21 +3046,21 @@ export default function Closings() {
               </thead>
               <tbody>
                 <tr className="border-b border-border/50">
-                  <td className="py-2.5 px-4 text-xs font-medium text-emerald-700">İşlem Kapanışı</td>
+                  <td className="py-2.5 px-4 text-xs font-medium whitespace-nowrap text-emerald-700">İşlem Kapanışı</td>
                   <td className="py-2.5 px-4 text-right font-semibold">{Math.round(completedSides)}</td>
                   <td className="py-2.5 px-4 text-right font-semibold">{fmtTRY(completedVolume)}</td>
                   <td className="py-2.5 px-4 text-right font-semibold">{fmtTRY(completedBHB)}</td>
                   <td className="py-2.5 px-4 text-right font-semibold text-blue-700">{fmtTRY(completedBM)}</td>
                 </tr>
                 <tr className="border-b border-border/50">
-                  <td className="py-2.5 px-4 text-xs font-medium text-amber-600">GBHB / Bekleyen</td>
+                  <td className="py-2.5 px-4 text-xs font-medium whitespace-nowrap text-amber-600">GBHB / Bekleyen</td>
                   <td className="py-2.5 px-4 text-right text-amber-600 font-semibold">{Math.round(expectedSides)}</td>
                   <td className="py-2.5 px-4 text-right text-amber-600 font-semibold">{fmtTRY(expectedVolume)}</td>
                   <td className="py-2.5 px-4 text-right text-amber-600 font-semibold">{fmtTRY(expectedBHB)}</td>
                   <td className="py-2.5 px-4 text-right text-amber-600 font-semibold">{fmtTRY(expectedBM)}</td>
                 </tr>
                 <tr className="border-b border-border/50">
-                  <td className="py-2.5 px-4 text-xs font-medium text-sky-700">
+                  <td className="py-2.5 px-4 text-xs font-medium whitespace-nowrap text-sky-700">
                     Yaklaşık Projeksiyon <span className="text-muted-foreground font-normal">(Tamamlanan + Bekleyenin %80'i)</span>
                   </td>
                   <td className="py-2.5 px-4 text-right text-sky-700 font-semibold">{Math.round(completedSides + expectedSides * 0.8)}</td>
@@ -3055,7 +3069,7 @@ export default function Closings() {
                   <td className="py-2.5 px-4 text-right text-sky-700 font-semibold">{fmtTRY(completedBM + expectedBM * 0.8)}</td>
                 </tr>
                 <tr className="bg-muted/30">
-                  <td className="py-2.5 px-4 text-xs font-semibold">En İyi Senaryo</td>
+                  <td className="py-2.5 px-4 text-xs font-semibold whitespace-nowrap">En İyi Senaryo</td>
                   <td className="py-2.5 px-4 text-right font-bold">{Math.round(completedSides + expectedSides)}</td>
                   <td className="py-2.5 px-4 text-right font-bold">{fmtTRY(completedVolume + expectedVolume)}</td>
                   <td className="py-2.5 px-4 text-right font-bold">{fmtTRY(completedBHB + expectedBHB)}</td>
@@ -3063,7 +3077,7 @@ export default function Closings() {
                 </tr>
                 {targetsSummary.hasAny && (
                   <tr className="border-t border-border/50">
-                    <td className="py-2.5 px-4 text-xs font-medium text-muted-foreground">Hedefe Kalan</td>
+                    <td className="py-2.5 px-4 text-xs font-medium whitespace-nowrap text-muted-foreground">Hedefe Kalan</td>
                     <td className="py-2.5 px-4 text-right text-muted-foreground">—</td>
                     <td className="py-2.5 px-4 text-right text-muted-foreground">—</td>
                     <td className="py-2.5 px-4 text-right font-semibold">
@@ -3078,7 +3092,7 @@ export default function Closings() {
                 )}
                 {targetsSummary.hasAny && (
                   <tr className="border-t border-border/50">
-                    <td className="py-2.5 px-4 text-xs font-medium text-orange-600">
+                    <td className="py-2.5 px-4 text-xs font-medium whitespace-nowrap text-orange-600">
                       Reforecast Hedefi <span className="text-muted-foreground font-normal">({targetYear})</span>
                     </td>
                     <td className="py-2.5 px-4 text-right text-muted-foreground">—</td>
@@ -3088,7 +3102,7 @@ export default function Closings() {
                   </tr>
                 )}
                 <tr className="border-t border-border/50">
-                  <td className="py-2.5 px-4 text-xs font-medium text-muted-foreground">Geçen Yıl (Aynı Dönem)</td>
+                  <td className="py-2.5 px-4 text-xs font-medium whitespace-nowrap text-muted-foreground">Geçen Yıl (Aynı Dönem)</td>
                   <td className="py-2.5 px-4 text-right text-muted-foreground">{Math.round(prevYearSides)}</td>
                   <td className="py-2.5 px-4 text-right text-muted-foreground">{fmtTRY(prevYearVolume)}</td>
                   <td className="py-2.5 px-4 text-right text-muted-foreground">{fmtTRY(prevYearBHB)}</td>
@@ -3258,7 +3272,7 @@ export default function Closings() {
                       { label: "Ay",                  sk: "ilgiliAy" },
                       { label: "İşlem Değeri",        sk: "saleValue" },
                       { label: "BHB",                 sk: "bhbShare" },
-                      { label: "İşlem Adedi",         sk: "islemAdedi" },
+                      { label: "İşlem Adedi",         sk: "islemAdedi", align: "center" },
                       { label: "KWTR",                sk: "mainBranchShare" },
                       { label: "KWTR (+KDV)",         sk: "kwtrKdv" },
                       { label: "PlatinKarma",         sk: "marketCenterActual" },
@@ -3273,7 +3287,7 @@ export default function Closings() {
                       { label: "Adres",               sk: "propertyAddress" },
                       { label: "Mülkle İlgili Detay", sk: "propertyDetails" },
                       { label: "Açılış Rakamı",       sk: "openingPrice" },
-                      { label: "İndirim Oranı",       sk: "discountPct" },
+                      { label: "İndirim Oranı",       sk: "discountPct", align: "right" },
                       { label: "Pay%",                sk: "splitPercentage" },
                       { label: "Süre/Gün",            sk: "durationDays" },
                       { label: "Söz. Başlangıç",      sk: "contractStartDate" },
@@ -3281,21 +3295,18 @@ export default function Closings() {
                       { label: "Müşteri Kaynağı",     sk: "customerSource" },
                       { label: "Yönlendirme",         sk: "referralInfo" },
                       { label: "" },
-                    ] as Array<{ label: string; sk?: string }>).map((col, i) => {
-                      const isActive = col.sk && sortKey === col.sk;
-                      const arrow = !col.sk ? null : isActive
-                        ? (sortDir === "asc" ? <ChevronUp className="ml-0.5 h-3 w-3 inline opacity-80" /> : <ChevronDown className="ml-0.5 h-3 w-3 inline opacity-80" />)
-                        : <ChevronUp className="ml-0.5 h-3 w-3 inline opacity-20" />;
-                      return (
-                        <th
-                          key={`${col.label}-${i}`}
-                          onClick={col.sk ? () => handleColumnSort(col.sk!) : undefined}
-                          className={`text-left font-medium py-2 px-2 text-muted-foreground whitespace-nowrap text-[11px] ${col.sk ? "cursor-pointer select-none hover:text-foreground" : ""} ${isActive ? "text-foreground" : ""}`}
-                        >
-                          {col.label}{arrow}
-                        </th>
-                      );
-                    })}
+                    ] as Array<{ label: string; sk?: string; align?: "left" | "center" | "right" }>).map((col, i) => (
+                      // Ortak sıralanabilir başlık (SortTh); hizalama gövde hücresiyle aynı.
+                      <SortTh
+                        key={`${col.label}-${i}`}
+                        label={col.label}
+                        sortKey={col.sk}
+                        sort={{ key: sortKey, dir: sortDir }}
+                        onSort={(k) => handleColumnSort(k)}
+                        align={col.align ?? "left"}
+                        className="py-2 px-2 text-muted-foreground text-[11px]"
+                      />
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
@@ -3306,35 +3317,40 @@ export default function Closings() {
                     return (
                       <tr key={row.agentId} className={`border-b border-border/50 hover:bg-muted/30 ${row.isFirstOfClosing ? "border-t-2 border-t-border" : ""}`}>
                         <td className="px-2 py-1 whitespace-nowrap">
+                          {/* Sabit genişlikli yuvalar: onay kutusu | durum | tahsilat | WhatsApp | düzenle | tahsilat gir */}
                           <div className="flex items-center gap-1">
-                            {row.status === "expected" && (
-                              <input
-                                type="checkbox"
-                                checked={selectedAgentIds.has(row.agentId)}
-                                onChange={(e) => {
-                                  const next = new Set(selectedAgentIds);
-                                  if (e.target.checked) next.add(row.agentId); else next.delete(row.agentId);
-                                  setSelectedAgentIds(next);
-                                }}
-                                className="h-3.5 w-3.5 shrink-0"
-                              />
-                            )}
-                            {row.status === "expected" ? (
-                              <button
-                                onClick={() => handleApproveAgent(row.agentId, row.closingDate)}
-                                className="inline-flex items-center gap-1 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1 text-[11px] font-semibold transition-colors"
-                                title="Danışmanı onayla"
-                              >
-                                <CheckCircle2 className="h-3 w-3" /> Onayla
-                              </button>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 text-[10px] font-medium" title="Onaylı">
-                                <CheckCircle2 className="h-2.5 w-2.5" /> Onaylı
-                              </span>
-                            )}
+                            <span className="w-4 shrink-0 flex items-center justify-center">
+                              {row.status === "expected" && (
+                                <input
+                                  type="checkbox"
+                                  checked={selectedAgentIds.has(row.agentId)}
+                                  onChange={(e) => {
+                                    const next = new Set(selectedAgentIds);
+                                    if (e.target.checked) next.add(row.agentId); else next.delete(row.agentId);
+                                    setSelectedAgentIds(next);
+                                  }}
+                                  className="h-3.5 w-3.5 shrink-0"
+                                />
+                              )}
+                            </span>
+                            <span className="w-[74px] shrink-0 flex items-center">
+                              {row.status === "expected" ? (
+                                <button
+                                  onClick={() => handleApproveAgent(row.agentId, row.closingDate)}
+                                  className="inline-flex w-full items-center justify-center gap-1 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-1 text-[11px] font-semibold transition-colors"
+                                  title="Danışmanı onayla"
+                                >
+                                  <CheckCircle2 className="h-3 w-3" /> Onayla
+                                </button>
+                              ) : (
+                                <span className="inline-flex w-full items-center justify-center gap-1 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-1 text-[10px] font-medium" title="Onaylı">
+                                  <CheckCircle2 className="h-2.5 w-2.5" /> Onaylı
+                                </span>
+                              )}
+                            </span>
                             <button
                               onClick={() => saveAgentField(row.agentId, "paymentCollected", String(!row.paymentCollected))}
-                              className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
+                              className={`inline-flex w-7 shrink-0 items-center justify-center rounded-md border py-0.5 text-[10px] font-medium transition-colors ${
                                 row.paymentCollected
                                   ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
                                   : "bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100"
@@ -3345,23 +3361,25 @@ export default function Closings() {
                             </button>
                             <button
                               onClick={() => handleNotifyAgent(row.agentId, row.employeeName)}
-                              className="text-muted-foreground hover:text-emerald-600 transition-colors p-1 rounded"
+                              className="w-6 shrink-0 flex items-center justify-center text-muted-foreground hover:text-emerald-600 transition-colors p-1 rounded"
                               title="Bu danışmana WhatsApp gönder"
                             >
                               <MessageCircle className="h-3.5 w-3.5" />
                             </button>
-                            {row.isFirstOfClosing && (
-                              <button
-                                onClick={() => handleEdit(row.closingId)}
-                                className="text-muted-foreground hover:text-primary transition-colors p-1 rounded"
-                                title="Kapanışı düzenle"
-                              >
-                                <Pencil className="h-3.5 w-3.5" />
-                              </button>
-                            )}
+                            <span className="w-6 shrink-0 flex items-center justify-center">
+                              {row.isFirstOfClosing && (
+                                <button
+                                  onClick={() => handleEdit(row.closingId)}
+                                  className="text-muted-foreground hover:text-primary transition-colors p-1 rounded"
+                                  title="Kapanışı düzenle"
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </button>
+                              )}
+                            </span>
                             <button
                               onClick={() => openCollectionDialog(row.agentId)}
-                              className={`transition-colors p-1 rounded ${row.paymentCollected ? "text-emerald-600" : "text-muted-foreground hover:text-emerald-600"}`}
+                              className={`w-6 shrink-0 flex items-center justify-center transition-colors p-1 rounded ${row.paymentCollected ? "text-emerald-600" : "text-muted-foreground hover:text-emerald-600"}`}
                               title="Tahsilat gir (danışman bazlı, banka/nakit)"
                             >
                               <Landmark className="h-3.5 w-3.5" />

@@ -1,3 +1,4 @@
+import { SortTh, SortableRows } from "@/components/SortTh";
 import { useMemo } from "react";
 import { Layout } from "@/components/Layout";
 import { useQuery } from "@tanstack/react-query";
@@ -218,22 +219,26 @@ function YearSection({ year, rows, isLoading }: { year: number; rows: CapRow[]; 
             </div>
             {/* Desktop table */}
             <div className="hidden md:block overflow-x-auto">
-              <table className="w-full text-sm">
+              <SortableRows
+                rows={rows}
+                getters={{ pct: (r: any) => (r.capAmount > 0 ? r.capUsed / r.capAmount : 0) }}
+              >{({ sorted, sort, toggle }) => (
+              <table className="w-full text-sm [&_td]:whitespace-nowrap">
                 <thead>
-                  <tr className="bg-muted/40 border-b border-border">
-                    <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-left">#</th>
-                    <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-left">Danışman</th>
-                    <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-left">KWUID</th>
-                    <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-right">Cap Hedefi</th>
-                    <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-right">Kullanılan</th>
-                    <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-right">İlerleme</th>
-                    <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-left">Periyot Başlangıcı</th>
-                    <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-right">Cap Tarihi</th>
-                    <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-right">Süre</th>
+                  <tr className="bg-muted/40 border-b border-border text-xs text-muted-foreground [&_th]:py-2 [&_th]:px-4">
+                    <th className="text-left">#</th>
+                    <SortTh label="Danışman" sortKey="name" sort={sort} onSort={toggle} />
+                    <SortTh label="KWUID" sortKey="kwuid" sort={sort} onSort={toggle} />
+                    <SortTh label="Cap Hedefi" sortKey="capAmount" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                    <SortTh label="Kullanılan" sortKey="capUsed" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                    <SortTh label="İlerleme" sortKey="pct" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                    <SortTh label="Periyot Başlangıcı" sortKey="periodStart" sort={sort} onSort={toggle} />
+                    <SortTh label="Cap Tarihi" sortKey="achievedAt" sort={sort} onSort={toggle} align="right" />
+                    <SortTh label="Süre" sortKey="achievementDays" sort={sort} onSort={toggle} align="right" />
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((r, i) => {
+                  {sorted.map((r, i) => {
                     const pct = r.capAmount > 0 ? Math.min(100, Math.round((r.capUsed / r.capAmount) * 100)) : 0;
                     return (
                       <tr key={r.employeeId} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
@@ -248,9 +253,9 @@ function YearSection({ year, rows, isLoading }: { year: number; rows: CapRow[]; 
                           </div>
                         </td>
                         <td className="py-2 px-4 text-xs text-muted-foreground">{r.kwuid || "—"}</td>
-                        <td className="py-2 px-4 text-right">{fmtTRY(r.capAmount)}</td>
-                        <td className="py-2 px-4 text-right font-medium">{fmtTRY(r.capUsed)}</td>
-                        <td className="py-2 px-4">
+                        <td className="py-2 px-4 text-right tabular-nums">{fmtTRY(r.capAmount)}</td>
+                        <td className="py-2 px-4 text-right font-medium tabular-nums">{fmtTRY(r.capUsed)}</td>
+                        <td className="py-2 px-4 text-right">
                           <div className="flex items-center gap-2 justify-end">
                             <div className="w-20 h-1.5 rounded-full bg-muted overflow-hidden">
                               <div
@@ -300,6 +305,7 @@ function YearSection({ year, rows, isLoading }: { year: number; rows: CapRow[]; 
                   </tfoot>
                 )}
               </table>
+              )}</SortableRows>
             </div>
           </>
         )}

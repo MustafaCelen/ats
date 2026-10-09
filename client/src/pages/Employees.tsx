@@ -25,6 +25,8 @@ import { useToast } from "@/hooks/use-toast";
 import { EmployeeEditDialog, AuditLogSection } from "@/components/EmployeeEditDialog";
 import { EmployeeDebtPanel, EmployeeDebtSummaryLine, useEmployeeFonzipDebt, hasDebt } from "@/components/EmployeeDebtPanel";
 import { useAuth } from "@/hooks/use-auth";
+import { useSortable } from "@/lib/sort";
+import { SortHead, SortTh, SortableRows } from "@/components/SortTh";
 
 
 function fmtTRY(n: number) {
@@ -184,6 +186,18 @@ function parseCsv(text: string): Record<string, string>[] {
 }
 
 
+const EMPLOYEE_SORT = {
+  name: (e: any) => e.candidate?.name,
+  contact: (e: any) => e.candidate?.email ?? e.candidate?.phone,
+  title: (e: any) => e.title ?? e.job?.title,
+  category: (e: any) => e.candidate?.category,
+  coaching: (e: any) => e.uretkenlikKoclugu ? "ÜK" : e.dua ? "DÜA" : e.performansKariyerKoclugu ? "Performans" : null,
+  office: (e: any) => e.candidate?.office,
+  kwuid: (e: any) => e.kwuid,
+  startDate: (e: any) => e.startDate,
+  status: (e: any) => e.status,
+};
+
 export default function Employees() {
   const { data: employees, isLoading } = useEmployees();
   const { mutate: updateEmployee, isPending: updating } = useUpdateEmployee();
@@ -267,8 +281,10 @@ export default function Employees() {
     return matchesSearch && matchesStatus && matchesOffice;
   });
 
+  // Sütun sıralaması (ortak altyapı: @/lib/sort). Sayfalama sıralanmış listeye uygulanır.
+  const { sorted: sortedEmployees, sort, toggle: toggleSort } = useSortable(filtered, EMPLOYEE_SORT);
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
-  const paginated = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  const paginated = sortedEmployees.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   const activeCount = (employees ?? []).filter((e: any) => e.status === "active").length;
   const inactiveCount = (employees ?? []).filter((e: any) => e.status === "inactive").length;
@@ -482,18 +498,18 @@ export default function Employees() {
 
         {/* List table */}
         {!isLoading && filtered.length > 0 && (
-          <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
+          <div className="rounded-xl border border-border bg-card overflow-x-auto shadow-sm">
             {/* Table header */}
-            <div className="grid grid-cols-[2fr_2fr_1.5fr_1fr_1.2fr_1fr_1fr_1fr_1fr_auto] gap-4 px-4 py-2.5 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              <div>Çalışan</div>
-              <div>İletişim</div>
-              <div>Üretim Bandı</div>
-              <div>Kategori</div>
-              <div>Koçluk</div>
-              <div>Ofis</div>
-              <div>KWUID</div>
-              <div>Başlangıç</div>
-              <div>Durum</div>
+            <div className="grid grid-cols-[minmax(160px,2fr)_minmax(150px,1.6fr)_minmax(120px,1.2fr)_84px_minmax(130px,1fr)_96px_112px_96px_70px_32px] min-w-[1160px] gap-3 px-4 py-2.5 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              <SortHead label="Çalışan" sortKey="name" sort={sort} onSort={toggleSort} />
+              <SortHead label="İletişim" sortKey="contact" sort={sort} onSort={toggleSort} />
+              <SortHead label="Üretim Bandı" sortKey="title" sort={sort} onSort={toggleSort} />
+              <SortHead label="Kategori" sortKey="category" sort={sort} onSort={toggleSort} />
+              <SortHead label="Koçluk" sortKey="coaching" sort={sort} onSort={toggleSort} />
+              <SortHead label="Ofis" sortKey="office" sort={sort} onSort={toggleSort} />
+              <SortHead label="KWUID" sortKey="kwuid" sort={sort} onSort={toggleSort} />
+              <SortHead label="Başlangıç" sortKey="startDate" sort={sort} onSort={toggleSort} firstDir="desc" />
+              <SortHead label="Durum" sortKey="status" sort={sort} onSort={toggleSort} />
               <div />
             </div>
 
@@ -507,7 +523,7 @@ export default function Employees() {
                 return (
                   <div
                     key={emp.id}
-                    className="grid grid-cols-[2fr_2fr_1.5fr_1fr_1.2fr_1fr_1fr_1fr_1fr_auto] gap-4 px-4 py-3 items-center hover:bg-muted/20 transition-colors group"
+                    className="grid grid-cols-[minmax(160px,2fr)_minmax(150px,1.6fr)_minmax(120px,1.2fr)_84px_minmax(130px,1fr)_96px_112px_96px_70px_32px] min-w-[1160px] gap-3 px-4 py-3 items-center hover:bg-muted/20 transition-colors group"
                     data-testid={`row-employee-${emp.id}`}
                   >
                     {/* Name + avatar */}
@@ -516,7 +532,7 @@ export default function Employees() {
                         {initials}
                       </div>
                       <div className="min-w-0">
-                        <p className="font-semibold text-sm text-foreground leading-tight truncate">{cand?.name ?? "—"}</p>
+                        <p className="font-semibold text-sm text-foreground leading-tight truncate" title={cand?.name ?? undefined}>{cand?.name ?? "—"}</p>
                         {cand?.city && (
                           <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
                             <MapPin className="h-3 w-3 shrink-0" />
@@ -535,9 +551,9 @@ export default function Employees() {
                         </a>
                       )}
                       {cand?.phone && (
-                        <a href={`tel:${cand.phone}`} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
+                        <a href={`tel:${cand.phone}`} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors whitespace-nowrap">
                           <Phone className="h-3 w-3 shrink-0" />
-                          <span>{cand.phone}</span>
+                          <span className="truncate">{cand.phone}</span>
                         </a>
                       )}
                       {emp.kwMail && (
@@ -560,7 +576,7 @@ export default function Employees() {
                     </div>
 
                     {/* Category */}
-                    <div className="flex items-center gap-1.5 flex-wrap">
+                    <div className="flex items-center gap-1.5 whitespace-nowrap">
                       <CategoryBadge category={cand?.category} />
                       {cand?.licenseStatus === "licensed" && (
                         <span title="Lisanslı">
@@ -592,7 +608,7 @@ export default function Employees() {
                     {/* KWUID */}
                     <div className="min-w-0">
                       {emp.kwuid ? (
-                        <span className="inline-flex items-center gap-1 text-xs font-mono bg-muted px-1.5 py-0.5 rounded text-foreground">
+                        <span className="inline-flex items-center gap-1 text-xs font-mono bg-muted px-1.5 py-0.5 rounded text-foreground whitespace-nowrap">
                           <Key className="h-3 w-3 text-muted-foreground" />
                           {emp.kwuid}
                         </span>
@@ -602,11 +618,11 @@ export default function Employees() {
                     </div>
 
                     {/* Start date */}
-                    <div className="text-xs text-muted-foreground flex items-center gap-1">
+                    <div className="text-xs text-muted-foreground flex items-center gap-1 whitespace-nowrap tabular-nums">
                       {emp.startDate ? (
                         <>
                           <CalendarDays className="h-3.5 w-3.5 shrink-0" />
-                          {format(new Date(emp.startDate), "dd MMM yyyy")}
+                          {format(new Date(emp.startDate), "dd.MM.yyyy")}
                         </>
                       ) : "—"}
                     </div>
@@ -979,19 +995,20 @@ export default function Employees() {
                   </div>
                 ) : (
                   <div className="overflow-x-auto rounded-lg border border-border">
-                    <table className="w-full text-sm">
+                    <SortableRows rows={employeeClosings as any[]} getters={{ type: (c: any) => `${c.dealCategory} · ${c.dealType}`, saleValue: (c: any) => parseFloat(c.saleValue), employeeNet: (c: any) => parseFloat(c.employeeNet) }} initial={{ key: "closingDate", dir: "desc" }}>{({ sorted, sort, toggle }) => (
+                    <table className="w-full text-sm [&_td]:whitespace-nowrap">
                       <thead>
-                        <tr className="bg-muted/50 text-xs text-muted-foreground font-medium">
-                          <th className="text-left px-3 py-2">Mülk</th>
-                          <th className="text-left px-3 py-2">Tür</th>
-                          <th className="text-right px-3 py-2">Satış Bedeli</th>
-                          <th className="text-right px-3 py-2">Net Kazanç</th>
-                          <th className="text-left px-3 py-2">Taraf</th>
-                          <th className="text-left px-3 py-2">Tarih</th>
+                        <tr className="bg-muted/50 text-xs text-muted-foreground font-medium [&_th]:px-3 [&_th]:py-2">
+                          <SortTh label="Mülk" sortKey="propertyAddress" sort={sort} onSort={toggle} />
+                          <SortTh label="Tür" sortKey="type" sort={sort} onSort={toggle} />
+                          <SortTh label="Satış Bedeli" sortKey="saleValue" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                          <SortTh label="Net Kazanç" sortKey="employeeNet" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                          <SortTh label="Taraf" sortKey="sideType" sort={sort} onSort={toggle} />
+                          <SortTh label="Tarih" sortKey="closingDate" sort={sort} onSort={toggle} firstDir="desc" />
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border">
-                        {employeeClosings.map((c: any) => (
+                        {sorted.map((c: any) => (
                           <tr key={`${c.closingId}-${c.sideType}`} className="hover:bg-muted/30 transition-colors">
                             <td className="px-3 py-2 max-w-[140px] truncate" title={c.propertyAddress}>{c.propertyAddress || "—"}</td>
                             <td className="px-3 py-2 whitespace-nowrap">
@@ -1024,6 +1041,7 @@ export default function Employees() {
                         </tr>
                       </tfoot>
                     </table>
+                    )}</SortableRows>
                   </div>
                 )}
                 </div>

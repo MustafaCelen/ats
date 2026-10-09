@@ -93,7 +93,7 @@ function FinansalHedefEditor({ year }: { year: number }) {
   };
 
   const inp = (month: number, field: keyof FinancialTargetDraft, wide?: boolean) => (
-    <td key={field} className={`py-1 px-1.5 ${["bhb", "bm", "satilik", "kiralik"].includes(field) ? "border-l border-border/40" : ""}`}>
+    <td key={field} className={`py-1 px-1.5 text-right ${["bhb", "bm", "satilik", "kiralik"].includes(field) ? "border-l border-border/40" : ""}`}>
       <Input
         type="number"
         value={rowFor(month)[field]}
@@ -139,7 +139,7 @@ function FinansalHedefEditor({ year }: { year: number }) {
           <tbody>
             {Array.from({ length: 12 }, (_, i) => i + 1).map((month) => (
               <tr key={month} className="border-b border-border/50 hover:bg-muted/20">
-                <td className="py-1.5 px-4 font-medium text-xs">{MONTHS[month - 1]}</td>
+                <td className="py-1.5 px-4 font-medium text-xs whitespace-nowrap">{MONTHS[month - 1]}</td>
                 {inp(month, "bhb", true)}{inp(month, "bhbHigh", true)}
                 {inp(month, "bm", true)}{inp(month, "bmHigh", true)}
                 {inp(month, "satilik")}{inp(month, "satilikHigh")}
@@ -232,7 +232,7 @@ function RandevuHedefEditor({ year, month }: { year: number; month: number }) {
                 const total = APPT_CATS.reduce((s, cat) => s + (t[cat] ?? 0), 0);
                 return (
                   <tr key={j.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
-                    <td className="py-3 px-4 font-medium text-sm text-foreground">{j.title}</td>
+                    <td className="py-3 px-4 font-medium text-sm text-foreground whitespace-nowrap max-w-[320px] truncate" title={j.title}>{j.title}</td>
                     {APPT_CATS.map((cat) => (
                       <td key={cat} className="py-3 px-4 text-center">
                         <GrowthTargetCell
@@ -375,7 +375,7 @@ function BuyumeHedefEditor({ year, month }: { year: number; month: number }) {
                 const t = byUser.get(hm.id) ?? emptyGrowthTarget;
                 return (
                   <tr key={hm.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
-                    <td className="py-3 px-4 font-medium text-sm text-foreground">{hm.name}</td>
+                    <td className="py-3 px-4 font-medium text-sm text-foreground whitespace-nowrap">{hm.name}</td>
                     {K0K1K2.map((cat) => (
                       <td key={cat} className="py-3 px-4 text-center">
                         <GrowthTargetCell
@@ -610,12 +610,12 @@ function MasrafHedefEditor({ year }: { year: number }) {
                       )}
                       {g.items.map((cat) => (
                         <tr key={cat} className="border-b border-border/50 hover:bg-muted/20">
-                          <td className="py-1.5 px-4 text-xs sticky left-0 bg-card">{cat}</td>
+                          <td className="py-1.5 px-4 text-xs sticky left-0 bg-card whitespace-nowrap">{cat}</td>
                           {MONTHS.map((_, i) => {
                             const month = i + 1;
                             const k = `${t.type}|${cat}|${month}`;
                             return (
-                              <td key={month} className="py-1 px-1">
+                              <td key={month} className="py-1 px-1 text-right">
                                 <Input
                                   type="number"
                                   value={valueFor(t.type, cat, month)}
