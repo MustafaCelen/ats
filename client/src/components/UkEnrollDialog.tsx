@@ -29,16 +29,18 @@ export function UkEnrollDialog({
   const [saving, setSaving] = useState(false);
   const [sendWelcome, setSendWelcome] = useState(true);
 
-  const { data: employees = [] } = useQuery<any[]>({
-    queryKey: ["/api/employees"],
-    queryFn: () => fetch("/api/employees", { credentials: "include" }).then((r) => r.json()),
-    enabled: open,
-  });
-  const { data: coaches = [] } = useQuery<{ id: number; name: string }[]>({
-    queryKey: ["/api/hiring-managers"],
-    queryFn: () => fetch("/api/hiring-managers", { credentials: "include" }).then((r) => r.json()),
-    enabled: open,
-  });
+  // Liste beklenirken sunucu hata döndürürse pencere çökmesin; hata mesajı gösterilsin.
+  const fetchList = async (url: string) => {
+    const r = await fetch(url, { credentials: "include" });
+    const d = await r.json().catch(() => null);
+    if (!r.ok || !Array.isArray(d)) throw new Error(`${url}: ${d?.message ?? d?.error ?? `HTTP ${r.status}`}`);
+    return d;
+  };
+  const empQ = useQuery<any[]>({ queryKey: ["/api/employees"], queryFn: () => fetchList("/api/employees"), enabled: open });
+  const coachQ = useQuery<{ id: number; name: string }[]>({ queryKey: ["/api/hiring-managers"], queryFn: () => fetchList("/api/hiring-managers"), enabled: open });
+  const employees = Array.isArray(empQ.data) ? empQ.data : [];
+  const coaches = Array.isArray(coachQ.data) ? coachQ.data : [];
+  const loadError = (empQ.error ?? coachQ.error) as Error | null;
 
   // Danışmanın profilinde ÜK koçu varsa koç odur; burada değiştirilemez (profilden değişir).
   const selectedEmp = employeeId != null ? employees.find((e) => e.id === employeeId) : null;
@@ -95,7 +97,8 @@ export function UkEnrollDialog({
         <div className="space-y-4 pt-1">
           <div className="space-y-1.5">
             <label className="text-sm font-medium">Danışman</label>
-            <EmployeePicker employees={options} value={employeeId} onChange={setEmployeeId} placeholder="Aktif danışman seçin…" />
+            <EmployeePicker employees={options} value={employeeId} onChange={setEmployeeId} placeholder={empQ.isLoading ? "Danışmanlar yükleniyor…" : "Aktif danışman seçin…"} />
+            {loadError && <p className="text-xs text-red-600">Liste alınamadı — {loadError.message}</p>}
           </div>
           <div className="space-y-1.5">
             <label className="text-sm font-medium">Koç</label>

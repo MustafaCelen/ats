@@ -33,7 +33,7 @@ export default function ReferansEslestirme() {
   });
   const { data: employees = [] } = useQuery<any[]>({
     queryKey: ["/api/employees"],
-    queryFn: () => fetch("/api/employees", { credentials: "include" }).then((r) => r.json()),
+    queryFn: () => fetch("/api/employees", { credentials: "include" }).then((r) => r.json()).then((d) => (Array.isArray(d) ? d : [])),
     staleTime: 5 * 60 * 1000,
   });
   const empOptions = useMemo(() => employees
