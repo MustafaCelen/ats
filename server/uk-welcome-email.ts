@@ -77,7 +77,7 @@ export function buildUkWelcomeEmail(opts: {
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
         ${step(1, "Linke tıklayın", "Yukarıdaki butonla size özel rota sayfanızı açın. Telefonunuzdan da kullanabilirsiniz.")}
         ${step(2, "Google ile giriş yapın", `Güvenliğiniz için ${login} hesabınızla giriş yapmanız istenir.`)}
-        ${step(3, "Günlük aktivitelerinizi işaretleyin", "Her gün tamamladığınız aktiviteleri listeden ya da takvim görünümünden işaretleyin. Yalnızca içinde bulunduğunuz hafta düzenlenebilir.")}
+        ${step(3, "Günlük aktivitelerinizi işaretleyin", "Her gün tamamladığınız aktiviteleri listeden ya da takvim görünümünden işaretleyin. Her hafta pazartesi açılır; girişlerinizi o haftanın <b>pazar 23:59</b>’una kadar yapabilirsiniz.")}
         ${step(4, "Haftanızı koçunuzla teyit edin", "Hafta sonunda arama, randevu ve tek yetki sayılarınızı girin; koçunuz haftanızı değerlendirip onaylar.")}
       </table>
     </td></tr>

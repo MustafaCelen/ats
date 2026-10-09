@@ -4,8 +4,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { UkEnrollDialog } from "@/components/UkEnrollDialog";
+import { UkWelcomeEmailDialog } from "@/components/UkWelcomeEmailDialog";
 import { Layout } from "@/components/Layout";
-import { Route as RouteIcon, Search, CheckCircle2, ChevronRight, UserPlus, Mail } from "lucide-react";
+import { Route as RouteIcon, Search, CheckCircle2, ChevronRight, UserPlus, Mail, Send } from "lucide-react";
 import { UK_PROGRAM_WEEKS } from "@shared/uk-program";
 
 type Row = {
@@ -34,6 +35,7 @@ export default function UkBasariRotasi() {
   const [includePassive, setIncludePassive] = useState(false);
   const [phase, setPhase] = useState<"all" | "active" | "done">("active");
   const [enrollOpen, setEnrollOpen] = useState(false);
+  const [mailFor, setMailFor] = useState<number | null>(null);
   const { data: me } = useAuth();
   const isAdmin = me?.role === "admin";
   const qc = useQueryClient();
@@ -193,9 +195,20 @@ export default function UkBasariRotasi() {
                         : <span className="text-xs text-muted-foreground">—</span>}
                     </td>
                     <td className="px-4 py-2.5">
-                      {r.welcomeSentAt
-                        ? <span className="inline-flex items-center gap-1 text-xs text-emerald-700"><Mail className="h-3.5 w-3.5" /> {new Date(r.welcomeSentAt).toLocaleDateString("tr-TR")}</span>
-                        : <span className="text-xs text-amber-700">Gönderilmedi</span>}
+                      <div className="flex items-center gap-2">
+                        {r.welcomeSentAt
+                          ? <span className="inline-flex items-center gap-1 text-xs text-emerald-700"><Mail className="h-3.5 w-3.5" /> {new Date(r.welcomeSentAt).toLocaleDateString("tr-TR")}</span>
+                          : <span className="text-xs text-amber-700">Gönderilmedi</span>}
+                        {r.canEdit && (
+                          <Button
+                            size="sm" variant="outline" className="h-7 px-2 gap-1 text-xs"
+                            onClick={() => setMailFor(r.employeeId)}
+                            title="Hoş geldin mailini önizle ve gönder"
+                          >
+                            <Send className="h-3.5 w-3.5" /> {r.welcomeSentAt ? "Tekrar" : "Gönder"}
+                          </Button>
+                        )}
+                      </div>
                     </td>
                     <td className="px-2">
                       <Link href={`/uk-basari-rotasi/${r.employeeId}`} className="text-muted-foreground hover:text-primary">
@@ -209,6 +222,9 @@ export default function UkBasariRotasi() {
           </table>
         </div>
       </div>
+      {mailFor != null && (
+        <UkWelcomeEmailDialog employeeId={mailFor} open onOpenChange={(v) => { if (!v) setMailFor(null); }} />
+      )}
     </Layout>
   );
 }
