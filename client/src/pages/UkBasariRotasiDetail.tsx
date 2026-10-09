@@ -4,7 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Layout } from "@/components/Layout";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, CheckCircle2, Route as RouteIcon, Trophy, Lock, Link2, Eye } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Route as RouteIcon, Trophy, Lock, Link2, Eye, Mail } from "lucide-react";
+import { UkWelcomeEmailDialog } from "@/components/UkWelcomeEmailDialog";
 import { UK_PROGRAM_WEEKS, UK_TARGET_ITEMS } from "@shared/uk-program";
 import { UkWeekGrid, UkGridLegend } from "@/components/UkWeekGrid";
 
@@ -283,6 +284,7 @@ export default function UkBasariRotasiDetail() {
   // Manuel katılım: koç değiştir / programdan çıkar (admin).
   const [, navigate] = useLocation();
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const [welcomeOpen, setWelcomeOpen] = useState(false);
   const { data: coaches = [] } = useQuery<{ id: number; name: string }[]>({
     queryKey: ["/api/hiring-managers"],
     queryFn: () => fetch("/api/hiring-managers", { credentials: "include" }).then((r) => r.json()),
@@ -337,9 +339,14 @@ export default function UkBasariRotasiDetail() {
               <Button variant="outline" size="sm" className="gap-1.5" onClick={copyAdvisorLink}>
                 <Link2 className="h-4 w-4" /> Danışman Linkini Kopyala
               </Button>
+              <Button size="sm" className="gap-1.5" onClick={() => setWelcomeOpen(true)}>
+                <Mail className="h-4 w-4" /> Hoş Geldin Maili
+                {(p as any).welcomeSentAt && <CheckCircle2 className="h-3.5 w-3.5 opacity-80" />}
+              </Button>
             </div>
           )}
         </div>
+        {data.canEdit && <UkWelcomeEmailDialog employeeId={employeeId} open={welcomeOpen} onOpenChange={setWelcomeOpen} />}
 
         {/* Başlık */}
         <div className="rounded-xl overflow-hidden border border-border bg-[#24064f] text-white">

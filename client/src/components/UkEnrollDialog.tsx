@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { EmployeePicker } from "@/components/EmployeePicker";
 import { useToast } from "@/hooks/use-toast";
 import { Info, Loader2 } from "lucide-react";
+import { sendUkWelcomeEmail } from "@/components/UkWelcomeEmailDialog";
 
 // 45+45 Başarı Rotası'na manuel danışman ekleme (admin). ÜK işaretine ve ÜK payına
 // dokunmaz; katılım uk_program_enrollments'ta tutulur (bkz. server/uk-program.ts).
@@ -21,6 +22,7 @@ export function UkEnrollDialog({
   const [coachId, setCoachId] = useState<string>("");
   const [startDate, setStartDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [saving, setSaving] = useState(false);
+  const [sendWelcome, setSendWelcome] = useState(true);
 
   const { data: employees = [] } = useQuery<any[]>({
     queryKey: ["/api/employees"],
@@ -51,7 +53,16 @@ export function UkEnrollDialog({
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error ?? "Eklenemedi");
-      toast({ title: "Danışman programa eklendi" });
+      if (sendWelcome) {
+        const m = await sendUkWelcomeEmail(employeeId);
+        toast({
+          title: m.ok ? "Danışman eklendi, hoş geldin maili gönderildi" : "Danışman eklendi, mail gönderilemedi",
+          description: m.ok ? m.message : `${m.message} Rota sayfasından tekrar gönderebilirsiniz.`,
+          variant: m.ok ? undefined : "destructive",
+        });
+      } else {
+        toast({ title: "Danışman programa eklendi", description: "Hoş geldin maili rota sayfasından gönderilebilir." });
+      }
       onOpenChange(false);
       setEmployeeId(null);
       setCoachId("");
@@ -93,6 +104,10 @@ export function UkEnrollDialog({
             />
             <p className="text-[11px] text-muted-foreground">1. hafta bu tarihin haftasının pazartesi günü başlar.</p>
           </div>
+          <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+            <input type="checkbox" checked={sendWelcome} onChange={(e) => setSendWelcome(e.target.checked)} />
+            Hoş geldin mailini (erişim linkiyle) hemen gönder
+          </label>
           <div className="flex gap-2 rounded-lg bg-muted/50 px-3 py-2 text-[11px] text-muted-foreground">
             <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
             Danışmanın profilindeki Üretkenlik Koçluğu işareti ve ÜK payı değişmez; yalnızca 45+45 programına eklenir.

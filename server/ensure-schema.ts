@@ -368,6 +368,9 @@ export async function ensureSchema(): Promise<void> {
     -- manual: admin ekledi | auto: profilde ÜK koçu atandı (sonraki pazartesi başlar)
     -- | backfill: eski sürümün toplu aktarımı (artık üretilmiyor; kullanılmayanlar aşağıda temizlenir).
     ALTER TABLE uk_program_enrollments ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'manual';
+    -- Hoş geldin maili (manuel tetiklenir): son gönderim.
+    ALTER TABLE uk_program_enrollments ADD COLUMN IF NOT EXISTS welcome_sent_at TIMESTAMP;
+    ALTER TABLE uk_program_enrollments ADD COLUMN IF NOT EXISTS welcome_sent_by_user_id INTEGER;
 
     -- ÜK işaretli danışmanlar programa toplu taşınmaz (onaylı karar, 2026-10-09): katılım
     -- yalnızca koç ataması veya manuel ekleme ile olur. Önceki sürümün tek seferlik

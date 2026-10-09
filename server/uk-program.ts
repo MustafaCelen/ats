@@ -8,6 +8,9 @@ import type { Express, Request, Response } from "express";
 import { pool } from "./db";
 import { requireAuth, requireHiringManagerOrAdmin } from "./auth";
 import { storage } from "./storage";
+import { sendEmail } from "./email";
+import { buildUkWelcomeEmail } from "./uk-welcome-email";
+import { publicBaseUrl } from "./whatsapp";
 import {
   UK_ACTIVITIES, UK_ACTIVITY_IDS, UK_PROGRAM_WEEKS, computeUkActivityScore,
   ukProgramWeek1Monday, ukAddDays, ukCurrentWeek, type UkScoreKey,
@@ -29,6 +32,7 @@ type Participant = {
   source: "manual" | "auto" | "backfill" | null;
   manual: boolean;          // admin elle ekledi (koçu programa özel olabilir)
   inProgram: boolean;
+  welcomeSentAt: string | null;
 };
 
 // Katılım yalnızca uk_program_enrollments'tan gelir:
@@ -44,7 +48,7 @@ const PARTICIPANT_FROM = `
        LEFT JOIN users u ON u.id = COALESCE(en.coach_user_id, e.uretkenlik_koclugu_manager_id)`;
 const PARTICIPANT_COLS = `e.id, c.name, e.kwuid, e.status, u.id AS coach_id, u.name AS coach_name,
        (en.employee_id IS NOT NULL) AS enrolled, en.source,
-       en.start_date AS en_start, to_char(e.start_date, 'YYYY-MM-DD') AS start_date`;
+       en.start_date AS en_start, to_char(e.start_date, 'YYYY-MM-DD') AS start_date, en.welcome_sent_at`;
 
 export async function isInUkProgram(employeeId: number): Promise<boolean> {
   const r = await pool.query(
@@ -66,6 +70,7 @@ async function loadParticipant(employeeId: number): Promise<Participant | null> 
     source: row.enrolled ? row.source : null,
     manual: !!row.enrolled && row.source === "manual",
     inProgram: !!row.enrolled,
+    welcomeSentAt: row.welcome_sent_at ?? null,
   };
 }
 
@@ -310,7 +315,59 @@ function registerAdvisorUkRoutes(app: Express) {
   });
 }
 
+// Hoş geldin maili: alıcılar = giriş yapabildiği e-postalar (KW + kişisel), link = portal Rotam.
+async function welcomeEmailFor(req: Request, p: Participant) {
+  const emp = await storage.getEmployee(p.employeeId);
+  const loginEmails = Array.from(new Set(
+    [(emp as any)?.kwMail, (emp as any)?.candidate?.email].map((m) => (m ?? "").trim().toLowerCase()).filter(Boolean),
+  ));
+  const token = await storage.ensureAdvisorToken(p.employeeId);
+  const base = (publicBaseUrl() || `${req.protocol}://${req.get("host")}`).replace(/\/$/, "");
+  const link = `${base}/a/${token}?tab=rota`;
+  const week1Monday = p.programStart ? ukProgramWeek1Monday(p.programStart) : null;
+  const { subject, html } = buildUkWelcomeEmail({ name: p.name, coachName: p.coachName, week1Monday, link, loginEmails });
+  return { to: loginEmails, subject, html, link };
+}
+
 export function registerUkProgramRoutes(app: Express) {
+  // Önizleme (koç/admin): alıcılar, konu, HTML, son gönderim.
+  app.get("/api/uk-program/:employeeId/welcome-email", requireAuth, requireHiringManagerOrAdmin, async (req: Request, res: Response) => {
+    try {
+      const p = await loadParticipant(Number(req.params.employeeId));
+      if (!p?.inProgram) return res.status(404).json({ error: "Bu danışman programda değil." });
+      if (!canEdit(req, p)) return res.status(403).json({ error: "Yalnızca danışmanın ÜK koçu veya admin." });
+      const m = await welcomeEmailFor(req, p);
+      res.json({ to: m.to, subject: m.subject, html: m.html, lastSentAt: p.welcomeSentAt });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Manuel gönderim (koç/admin). Çift tıklamaya karşı 60 sn bekleme.
+  app.post("/api/uk-program/:employeeId/welcome-email", requireAuth, requireHiringManagerOrAdmin, async (req: Request, res: Response) => {
+    try {
+      const p = await loadParticipant(Number(req.params.employeeId));
+      if (!p?.inProgram) return res.status(404).json({ error: "Bu danışman programda değil." });
+      if (!canEdit(req, p)) return res.status(403).json({ error: "Yalnızca danışmanın ÜK koçu veya admin." });
+      if (p.welcomeSentAt && Date.now() - new Date(p.welcomeSentAt).getTime() < 60_000) {
+        return res.status(429).json({ error: "Mail az önce gönderildi; tekrar göndermek için biraz bekleyin." });
+      }
+      const m = await welcomeEmailFor(req, p);
+      if (m.to.length === 0) {
+        return res.status(400).json({ error: "Danışmanın kayıtlı e-postası yok (KW e-posta veya kişisel e-posta girin)." });
+      }
+      const sent = await sendEmail(m.to.join(", "), m.subject, m.html);
+      if (!sent) return res.status(502).json({ error: "Mail gönderilemedi (mail ayarlarını veya adresi kontrol edin)." });
+      await pool.query(
+        "UPDATE uk_program_enrollments SET welcome_sent_at = NOW(), welcome_sent_by_user_id = $2 WHERE employee_id = $1 AND removed_at IS NULL",
+        [p.employeeId, (req as any).user.id],
+      );
+      res.json({ ok: true, to: m.to });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   registerAdvisorUkRoutes(app);
 
   // Manuel ekleme (admin). ÜK işaretine/ÜK payına dokunmaz; yeniden eklemede önceki
@@ -399,7 +456,7 @@ export function registerUkProgramRoutes(app: Express) {
       const emp = await storage.getEmployee(p.employeeId);
       const emails = [(emp as any)?.kwMail, (emp as any)?.candidate?.email].map((m) => (m ?? "").trim()).filter(Boolean);
       const token = await storage.ensureAdvisorToken(p.employeeId);
-      const base = process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get("host")}`;
+      const base = publicBaseUrl() || `${req.protocol}://${req.get("host")}`;
       res.json({ url: `${base.replace(/\/$/, "")}/a/${token}?tab=rota`, loginEmails: emails });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -439,6 +496,7 @@ export function registerUkProgramRoutes(app: Express) {
           done: row.done, total: UK_ACTIVITIES.length,
           score: computeUkActivityScore(done).total,
           lastConfirmedWeek: row.last_confirmed ?? null,
+          welcomeSentAt: row.welcome_sent_at ?? null,
           manual: row.source === "manual",
           source: row.source,
           canEdit: (req as any).user?.role === "admin" || (req as any).user?.id === row.coach_id,

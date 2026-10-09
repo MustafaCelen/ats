@@ -5,14 +5,14 @@ import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { UkEnrollDialog } from "@/components/UkEnrollDialog";
 import { Layout } from "@/components/Layout";
-import { Route as RouteIcon, Search, CheckCircle2, ChevronRight, UserPlus } from "lucide-react";
+import { Route as RouteIcon, Search, CheckCircle2, ChevronRight, UserPlus, Mail } from "lucide-react";
 import { UK_PROGRAM_WEEKS } from "@shared/uk-program";
 
 type Row = {
   employeeId: number; name: string; kwuid: string | null; status: string;
   coachId: number | null; coachName: string | null;
   programStart: string | null; week1Monday: string | null; currentWeek: number;
-  done: number; total: number; score: number; lastConfirmedWeek: number | null; canEdit: boolean; manual: boolean;
+  done: number; total: number; score: number; lastConfirmedWeek: number | null; canEdit: boolean; manual: boolean; welcomeSentAt: string | null;
 };
 
 function fmtDate(ymd: string | null) {
@@ -140,7 +140,7 @@ export default function UkBasariRotasi() {
         </div>
 
         <div className="bg-card rounded-xl border border-border overflow-x-auto [contain:inline-size]">
-          <table className="w-full text-sm min-w-[760px]">
+          <table className="w-full text-sm min-w-[880px]">
             <thead className="bg-muted/40 text-muted-foreground text-xs">
               <tr>
                 <th className="text-left font-medium px-4 py-2.5">Danışman</th>
@@ -150,15 +150,16 @@ export default function UkBasariRotasi() {
                 <th className="text-left font-medium px-4 py-2.5 w-48">Aktivite İlerlemesi</th>
                 <th className="text-right font-medium px-4 py-2.5">Aktivite Puanı</th>
                 <th className="text-left font-medium px-4 py-2.5">Koç Onayı</th>
+                <th className="text-left font-medium px-4 py-2.5">Hoş Geldin Maili</th>
                 <th className="w-8" />
               </tr>
             </thead>
             <tbody>
               {isLoading && (
-                <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">Yükleniyor…</td></tr>
+                <tr><td colSpan={9} className="px-4 py-8 text-center text-muted-foreground">Yükleniyor…</td></tr>
               )}
               {!isLoading && rows.length === 0 && (
-                <tr><td colSpan={8} className="px-4 py-10 text-center text-muted-foreground">
+                <tr><td colSpan={9} className="px-4 py-10 text-center text-muted-foreground">
                   {data.length === 0
                     ? "Programda danışman yok. Danışman profilinde ÜK koçu atandığında bir sonraki pazartesiden otomatik eklenir; \"Danışman Ekle\" ile manuel de eklenebilir."
                     : "Bu filtrede danışman yok."}
@@ -190,6 +191,11 @@ export default function UkBasariRotasi() {
                       {r.lastConfirmedWeek
                         ? <span className="inline-flex items-center gap-1 text-xs text-emerald-700"><CheckCircle2 className="h-3.5 w-3.5" /> {r.lastConfirmedWeek}. hafta</span>
                         : <span className="text-xs text-muted-foreground">—</span>}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      {r.welcomeSentAt
+                        ? <span className="inline-flex items-center gap-1 text-xs text-emerald-700"><Mail className="h-3.5 w-3.5" /> {new Date(r.welcomeSentAt).toLocaleDateString("tr-TR")}</span>
+                        : <span className="text-xs text-amber-700">Gönderilmedi</span>}
                     </td>
                     <td className="px-2">
                       <Link href={`/uk-basari-rotasi/${r.employeeId}`} className="text-muted-foreground hover:text-primary">
