@@ -38,6 +38,7 @@ export default function UkBasariRotasi() {
   const [mailFor, setMailFor] = useState<number | null>(null);
   const { data: me } = useAuth();
   const isAdmin = me?.role === "admin";
+  const canEnroll = isAdmin || me?.role === "hiring_manager";
   const qc = useQueryClient();
   const [, navigate] = useLocation();
 
@@ -91,13 +92,15 @@ export default function UkBasariRotasi() {
               Üretkenlik Koçluğu programındaki danışmanların 6 haftalık rota ilerlemesi ve aktivite puanı
             </p>
           </div>
-          {isAdmin && (
+          {canEnroll && (
             <Button className="gap-1.5" onClick={() => setEnrollOpen(true)}>
               <UserPlus className="h-4 w-4" /> Danışman Ekle
             </Button>
           )}
         </div>
         <UkEnrollDialog
+          isAdmin={isAdmin}
+          meId={me?.id ?? null}
           open={enrollOpen}
           onOpenChange={setEnrollOpen}
           excludeIds={data.map((r) => r.employeeId)}

@@ -388,13 +388,16 @@ export function registerUkProgramRoutes(app: Express) {
 
   registerAdvisorUkRoutes(app);
 
-  // Manuel ekleme (admin). ÜK işaretine/ÜK payına dokunmaz; yeniden eklemede önceki
-  // işaretler ve haftalık kayıtlar korunur.
+  // Manuel ekleme (admin + hiring manager). ÜK işaretine/ÜK payına dokunmaz; yeniden
+  // eklemede önceki işaretler ve haftalık kayıtlar korunur. Hiring manager koç seçmek
+  // zorunda (koçsuz kaydı yalnızca admin yönetebilir).
   app.post("/api/uk-program/enrollments", requireAuth, async (req: Request, res: Response) => {
     try {
-      if ((req as any).user?.role !== "admin") return res.status(403).json({ error: "Yalnızca admin danışman ekleyebilir." });
+      const role = (req as any).user?.role;
+      if (role !== "admin" && role !== "hiring_manager") return res.status(403).json({ error: "Yalnızca admin veya hiring manager danışman ekleyebilir." });
       const employeeId = Number(req.body?.employeeId);
       const coachUserId = req.body?.coachUserId ? Number(req.body.coachUserId) : null;
+      if (role !== "admin" && coachUserId == null) return res.status(400).json({ error: "Koç seçin." });
       const startDate = String(req.body?.startDate ?? "");
       if (!Number.isInteger(employeeId)) return res.status(400).json({ error: "Danışman seçin." });
       if (!ukIsMonday(startDate)) return res.status(400).json({ error: "Program başlangıcı pazartesi olmalı." });
