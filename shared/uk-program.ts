@@ -53,22 +53,22 @@ export const UK_SCORE_ITEMS: { key: UkScoreKey; label: string; points: number }[
 // (hedefle aynı: 6 hafta sonunda 2 referans aday).
 export const UK_KATKI_PLANNED = 2;
 
-// Skor tablosu — hedef tarafı (2026-10-09 onaylı hedefler ve puan dağılımı, toplam 50).
+// Skor tablosu — hedef tarafı (hedefler 2026-10-09, puan dağılımı 2026-10-12 onaylı; toplam 50).
+// BHB hedef puanlamasında yok (yalnızca bilgi olarak gösterilir).
 //  weekly: her hafta ayrı değerlendirilir (haftalık oran 1'de kesilir), 6 haftanın ortalaması.
 //  total : 6 haftanın toplamı program hedefiyle karşılaştırılır.
 // target null: tutar hedefi yok, gerçekleşen > 0 ise tam puan (BHB — 2026-10-09 onaylı).
-export type UkTargetKey = "arama" | "randevu" | "tekYetki" | "kapanis" | "bhb" | "katkiPayi";
+export type UkTargetKey = "arama" | "randevu" | "tekYetki" | "kapanis" | "katkiPayi";
 export type UkTargetItem = {
   key: UkTargetKey; label: string; points: number;
   source: "manual" | "auto"; mode: "weekly" | "total"; target: number | null; hint: string;
 };
 export const UK_TARGET_ITEMS: readonly UkTargetItem[] = [
-  { key: "arama",     label: "Arama",               points: 10, source: "manual", mode: "weekly", target: 50, hint: "Günde 10 arama (haftada 50)" },
+  { key: "arama",     label: "Arama",               points: 20, source: "manual", mode: "weekly", target: 50, hint: "Günde 10 arama (haftada 50)" },
   { key: "randevu",   label: "Randevu",             points: 8,  source: "manual", mode: "weekly", target: 1,  hint: "Haftada 1 randevu" },
   { key: "tekYetki",  label: "Tek Yetki (Satılık)", points: 8,  source: "manual", mode: "total",  target: 1,  hint: "6 hafta sonunda 1 satılık tek yetki" },
   { key: "kapanis",   label: "Kapanış",             points: 8,  source: "auto",   mode: "total",  target: 1,  hint: "6 hafta sonunda 1 kapanış (satılık veya kiralık)" },
-  { key: "bhb",       label: "BHB",                 points: 8,  source: "auto",   mode: "total",  target: null, hint: "6 hafta içinde BHB oluşursa (0 ₺ üzeri) tam puan" },
-  { key: "katkiPayi", label: "Katkı Payı",          points: 8,  source: "auto",   mode: "total",  target: 2,  hint: "6 hafta sonunda 2 referans aday" },
+  { key: "katkiPayi", label: "Katkı Payı",          points: 6,  source: "auto",   mode: "total",  target: 2,  hint: "6 hafta sonunda 2 referans aday" },
 ];
 
 export type UkActivity = {

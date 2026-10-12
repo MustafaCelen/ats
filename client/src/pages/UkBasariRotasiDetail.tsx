@@ -206,9 +206,7 @@ function ScoreTable({ data }: { data: ProgramData }) {
                     <div className="mt-1 h-1 rounded-full bg-muted overflow-hidden"><div className="h-full bg-primary" style={{ width: `${pct}%` }} /></div>
                   </td>
                   <td className="px-3 py-2 text-right text-muted-foreground whitespace-nowrap">
-                    {r.key === "bhb"
-                      ? <>{fmtTRY(r.done)} / {r.targetTotal == null ? "—" : fmtTRY(r.targetTotal)}</>
-                      : <>{r.done.toLocaleString("tr-TR")} / {r.targetTotal?.toLocaleString("tr-TR") ?? "—"}</>}
+                    {r.done.toLocaleString("tr-TR")} / {r.targetTotal?.toLocaleString("tr-TR") ?? "—"}
                     {r.weeksMet != null && <p className="text-[10px]">{r.weeksMet}/{UK_PROGRAM_WEEKS} hafta tuttu</p>}
                   </td>
                   <td className="px-3 py-2 text-right">{r.points}</td>

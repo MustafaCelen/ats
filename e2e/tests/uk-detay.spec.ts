@@ -78,7 +78,7 @@ test("haftalık gerçekleşen kaydet, haftayı onayla, onayı kaldır", async ({
   await expect(summary).toContainText("Koç onayı bekliyor");
 });
 
-test("skor tablosu: hedef dağılımı 10/8/8/8/8/8 ve hesap", async ({ page }) => {
+test("skor tablosu: hedef dağılımı 20/8/8/8/6 ve hesap", async ({ page }) => {
   await q(`INSERT INTO uk_program_weeks (employee_id, week, arama, randevu, tek_yetki) VALUES ($1, 1, 50, 2, 1), ($1, 2, 25, 0, 0)`, [a.employeeId]);
   await loginAs(page, "admin");
   await page.goto(`/uk-basari-rotasi/${a.employeeId}`);
@@ -86,18 +86,19 @@ test("skor tablosu: hedef dağılımı 10/8/8/8/8/8 ve hesap", async ({ page }) 
 
   const hedef = page.locator("div.rounded-xl").filter({ has: page.getByRole("heading", { name: "Hedef" }) }).first();
   const rowOf = (label: string) => hedef.locator("tbody tr").filter({ hasText: label });
-  const expected: [string, string][] = [["Arama", "10"], ["Randevu", "8"], ["Tek Yetki (Satılık)", "8"], ["Kapanış", "8"], ["BHB", "8"], ["Katkı Payı", "8"]];
+  const expected: [string, string][] = [["Arama", "20"], ["Randevu", "8"], ["Tek Yetki (Satılık)", "8"], ["Kapanış", "8"], ["Katkı Payı", "6"]];
   for (const [label, pts] of expected) await expect(rowOf(label).locator("td").nth(2)).toHaveText(pts);
 
   // Arama: hafta1 50/50 + hafta2 25/50 → 10 × 1,5/6 = 2,5
   await expect(rowOf("Arama")).toContainText("75 / 300");
   await expect(rowOf("Arama")).toContainText("1/6 hafta tuttu");
-  await expect(rowOf("Arama").locator("td").nth(3)).toHaveText("2,5");
+  await expect(rowOf("Arama").locator("td").nth(3)).toHaveText("5");   // 20 × 1,5/6
   // Randevu: haftada 1, fazlası taşınmaz → 8 × 1/6 = 1,3
   await expect(rowOf("Randevu").locator("td").nth(3)).toHaveText("1,3");
   await expect(rowOf("Tek Yetki (Satılık)").locator("td").nth(3)).toHaveText("8");
   await expect(hedef.locator("tfoot")).toContainText("50");
-  await expect(hedef.locator("tfoot td").last()).toHaveText("11,8");
+  await expect(hedef.locator("tfoot td").last()).toHaveText("14,3");
+  await expect(hedef.locator("tbody tr").filter({ hasText: "BHB" })).toHaveCount(0);
   await expect(page.getByText("Hedef puanı")).toBeVisible();
 
   const akt = page.locator("div.rounded-xl").filter({ has: page.getByRole("heading", { name: "Aktivite" }) }).first();
