@@ -74,13 +74,16 @@ export async function createAdvisor(name: string, opts: { status?: "active" | "i
   return { employeeId: e.id, candidateId: c.id, name: full, kwuid, token, email: email ?? "" };
 }
 
+// Koç programda değil profilde tutulur: enroll() profildeki ÜK koçunu da yazar
+// (koçu olmayan danışman programda sayılmaz).
 export async function enroll(employeeId: number, coachId: number | null, startDate: string, source: "manual" | "auto" = "manual") {
+  await q(`UPDATE employees SET uretkenlik_koclugu = TRUE, uretkenlik_koclugu_manager_id = $2 WHERE id = $1`, [employeeId, coachId]);
   await q(
     `INSERT INTO uk_program_enrollments (employee_id, coach_user_id, start_date, added_at, source)
-     VALUES ($1, $2, $3, NOW(), $4)
-     ON CONFLICT (employee_id) DO UPDATE SET coach_user_id = EXCLUDED.coach_user_id, start_date = EXCLUDED.start_date,
+     VALUES ($1, NULL, $2, NOW(), $3)
+     ON CONFLICT (employee_id) DO UPDATE SET coach_user_id = NULL, start_date = EXCLUDED.start_date,
        removed_at = NULL, source = EXCLUDED.source`,
-    [employeeId, coachId, startDate, source],
+    [employeeId, startDate, source],
   );
 }
 

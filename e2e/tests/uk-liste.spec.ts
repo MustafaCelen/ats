@@ -54,67 +54,54 @@ test("liste: koç filtresi süzer ve hatırlanır", async ({ page }) => {
   await expect(row(page, zeynepinki.name)).toBeVisible();
 });
 
-test("admin: Danışman Ekle → pazartesi seçimi, koç, rota sayfasına gider", async ({ page }) => {
+test("Danışman Ekle: koç profilden gelir, pazartesi seçimi, rota sayfasına gider", async ({ page }) => {
   const yeni = await createAdvisor("Admin Ekler");
+  await q(`UPDATE employees SET uretkenlik_koclugu = TRUE, uretkenlik_koclugu_manager_id = $2 WHERE id = $1`, [yeni.employeeId, USERS.zeynep.id]);
   await loginAs(page, "admin");
   await page.goto("/uk-basari-rotasi");
   await page.getByRole("button", { name: "Danışman Ekle" }).click();
   const dlg = page.getByRole("dialog");
   await expect(dlg.getByText("45+45 Başarı Rotası'na Danışman Ekle")).toBeVisible();
+  await expect(dlg.locator("select")).toHaveCount(1);   // yalnız pazartesi seçici; koç seçimi yok
 
   await pickEmployee(page, "Aktif danışman seçin", yeni.name, dlg);
-  const [coachSel, mondaySel] = [dlg.locator("select").nth(0), dlg.locator("select").nth(1)];
-  await expect(coachSel.locator("option", { hasText: "Koç atanmasın" })).toHaveCount(1);   // yalnız admin
-  await coachSel.selectOption({ label: "Zeynep Yilmaz" });
-
-  // Başlangıç yalnızca pazartesi; varsayılan gelecek pazartesi
+  await expect(dlg.getByText("Zeynep Yilmaz")).toBeVisible();   // profildeki koç salt bilgi
+  const mondaySel = dlg.locator("select").first();
   await expect(mondaySel).toHaveValue(nextMonday());
   const labels = await mondaySel.locator("option").allTextContents();
   expect(labels.every((l) => l.includes("Pazartesi"))).toBeTruthy();
-  await expect(mondaySel.locator("option:checked")).toContainText("gelecek hafta");
 
   await dlg.getByLabel(/Hoş geldin mailini/).uncheck();   // yerelde Gmail yok
   await dlg.getByRole("button", { name: "Programa Ekle" }).click();
-
   await expect(page).toHaveURL(new RegExp(`/uk-basari-rotasi/${yeni.employeeId}$`));
-  await expect(page.getByText(yeni.name).first()).toBeVisible();
+  await expect(page.getByText("Koç:").locator("..")).toContainText("Zeynep Yilmaz");
   const [en] = await q(`SELECT source, start_date, coach_user_id FROM uk_program_enrollments WHERE employee_id = $1`, [yeni.employeeId]);
-  expect(en).toMatchObject({ source: "manual", start_date: nextMonday(), coach_user_id: USERS.zeynep.id });
+  expect(en).toMatchObject({ source: "manual", start_date: nextMonday(), coach_user_id: null });
 });
 
-test("HM: Danışman Ekle → varsayılan koç kendisi, koçsuz seçenek yok, başka koçta mail kapalı", async ({ page }) => {
-  const yeni = await createAdvisor("HM Ekler");
+test("HM de ekleyebilir; koçu olmayan danışman listelenmez ve API reddeder", async ({ page }) => {
+  const kocsuz = await createAdvisor("Kocsuz Danisman");
   await loginAs(page, "zeynep");
   await page.goto("/uk-basari-rotasi");
   await page.getByRole("button", { name: "Danışman Ekle" }).click();
   const dlg = page.getByRole("dialog");
-  const coachSel = dlg.locator("select").nth(0);
-  const mail = dlg.getByLabel(/Hoş geldin mailini/);
+  await dlg.getByRole("combobox").filter({ hasText: "Aktif danışman seçin" }).first().click();
+  await page.getByPlaceholder("Ara: ad veya KWUID...").fill(kocsuz.name);
+  await expect(page.getByText("Sonuç yok.")).toBeVisible();
+  await page.keyboard.press("Escape");
 
-  await expect(coachSel).toHaveValue(String(USERS.zeynep.id));
-  await expect(coachSel.locator("option:checked")).toContainText("(ben)");
-  await expect(coachSel.locator("option", { hasText: "Koç atanmasın" })).toHaveCount(0);
-
-  await coachSel.selectOption({ label: "Mehmet Ozkan" });
-  await expect(mail).toBeDisabled();
-  await expect(dlg.getByText("hoş geldin mailini o koç gönderir")).toBeVisible();
-  await coachSel.selectOption(String(USERS.zeynep.id));
-  await expect(mail).toBeEnabled();
-
-  await pickEmployee(page, "Aktif danışman seçin", yeni.name, dlg);
-  await mail.uncheck();
-  await dlg.getByRole("button", { name: "Programa Ekle" }).click();
-  await expect(page).toHaveURL(new RegExp(`/uk-basari-rotasi/${yeni.employeeId}$`));
-  const [en] = await q(`SELECT source, coach_user_id, added_by_user_id FROM uk_program_enrollments WHERE employee_id = $1`, [yeni.employeeId]);
-  expect(en).toMatchObject({ source: "manual", coach_user_id: USERS.zeynep.id, added_by_user_id: USERS.zeynep.id });
+  const r = await page.request.post("/api/uk-program/enrollments", { data: { employeeId: kocsuz.employeeId, startDate: nextMonday() } });
+  expect(r.status()).toBe(400);
+  expect((await r.json()).error).toContain("ÜK koçu yok");
+  expect(await q(`SELECT 1 FROM uk_program_enrollments WHERE employee_id = $1`, [kocsuz.employeeId])).toHaveLength(0);
 });
 
-test("hoş geldin maili: yalnız koçu olduğu satırda buton, önizleme açılır", async ({ page }) => {
+test("hoş geldin maili: her satırda buton (tüm personel), önizleme açılır", async ({ page }) => {
   await loginAs(page, "zeynep");
   await page.goto("/uk-basari-rotasi");
   await page.getByRole("button", { name: /^Tümü/ }).click();
 
-  await expect(row(page, mehmetinki.name).getByTitle("Hoş geldin mailini önizle ve gönder")).toHaveCount(0);
+  await expect(row(page, mehmetinki.name).getByTitle("Hoş geldin mailini önizle ve gönder")).toHaveCount(1);
   const r = row(page, zeynepinki.name);
   await expect(r).toContainText("Gönderilmedi");
   await r.getByTitle("Hoş geldin mailini önizle ve gönder").click();
@@ -144,38 +131,27 @@ test("hoş geldin maili: e-postası olmayan danışmanda gönder kapalı", async
   await expect(dlg.getByRole("button", { name: /^Gönder$/ })).toBeDisabled();
 });
 
-test("profilinde ÜK koçu olan danışman: koç profilden gelir, değiştirilemez", async ({ page }) => {
+test("koç profilden izlenir: profilde koç değişince program da değişir; koç kaldırılınca programdan düşer", async ({ page }) => {
   const kocu = await createAdvisor("Profil Koclu");
-  await q(`UPDATE employees SET uretkenlik_koclugu = true, uretkenlik_koclugu_manager_id = $2 WHERE id = $1`, [kocu.employeeId, USERS.mehmet.id]);
-
-  await loginAs(page, "zeynep");
-  await page.goto("/uk-basari-rotasi");
-  await page.getByRole("button", { name: "Danışman Ekle" }).click();
-  const dlg = page.getByRole("dialog");
-  const coachSel = dlg.locator("select").nth(0);
-  await expect(coachSel).toHaveValue(String(USERS.zeynep.id));   // seçim öncesi: HM kendisi
-
-  await pickEmployee(page, "Aktif danışman seçin", kocu.name, dlg);
-  await expect(coachSel).toHaveValue(String(USERS.mehmet.id));
-  await expect(coachSel).toBeDisabled();
-  await expect(dlg.getByText("Danışmanın profilindeki ÜK koçu")).toBeVisible();
-  await expect(dlg.getByLabel(/Hoş geldin mailini/)).toBeDisabled();   // koçu Mehmet → maili o gönderir
-  await dlg.getByRole("button", { name: "Programa Ekle" }).click();
-  await expect(page).toHaveURL(new RegExp(`/uk-basari-rotasi/${kocu.employeeId}$`));
-
-  const [en] = await q(`SELECT source, coach_user_id FROM uk_program_enrollments WHERE employee_id = $1`, [kocu.employeeId]);
-  expect(en).toMatchObject({ source: "manual", coach_user_id: null });   // koç profilden izlenir
-  await expect(page.getByText("Koç:").locator("..")).toContainText("Mehmet Ozkan");
-
-  // Admin rota sayfasında koç seçici çıkmaz (profilden gelir); API de reddeder
+  await enroll(kocu.employeeId, USERS.mehmet.id, startForWeek(2));
   await loginAs(page, "admin");
   await page.goto(`/uk-basari-rotasi/${kocu.employeeId}`);
-  await expect(page.getByText("Koç:").locator("..").locator("select")).toHaveCount(0);
+  await expect(page.getByText("Koç:").locator("..")).toContainText("Mehmet Ozkan");
+  await expect(page.getByText("Koç:").locator("..").locator("select")).toHaveCount(0);   // koç seçici yok
   const r = await page.request.put(`/api/uk-program/${kocu.employeeId}/coach`, { data: { coachUserId: USERS.zeynep.id } });
-  expect(r.status()).toBe(409);
+  expect(r.headers()["content-type"] ?? "").not.toContain("application/json");   // uç nokta kaldırıldı (SPA sayfası döner)
+  expect((await q(`SELECT uretkenlik_koclugu_manager_id AS c FROM employees WHERE id = $1`, [kocu.employeeId]))[0].c).toBe(USERS.mehmet.id);
 
-  // Profilde koç değişince program da onu izler
   await q(`UPDATE employees SET uretkenlik_koclugu_manager_id = $2 WHERE id = $1`, [kocu.employeeId, USERS.zeynep.id]);
   await page.reload();
   await expect(page.getByText("Koç:").locator("..")).toContainText("Zeynep Yilmaz");
+
+  // Profilden koç kaldırılınca: listede yok, detay 404, portalda Rotam yok
+  await q(`UPDATE employees SET uretkenlik_koclugu_manager_id = NULL WHERE id = $1`, [kocu.employeeId]);
+  const d = await page.request.get(`/api/uk-program/${kocu.employeeId}`);
+  expect(d.status()).toBe(404);
+  const list = await (await page.request.get("/api/uk-program?includePassive=true")).json();
+  expect(list.some((x: any) => x.employeeId === kocu.employeeId)).toBe(false);
+  const portal = await (await page.request.get(`/api/public/advisor/${kocu.token}`)).json();
+  expect(portal.isUk).toBe(false);
 });

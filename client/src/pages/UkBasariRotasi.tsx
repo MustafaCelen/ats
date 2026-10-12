@@ -39,8 +39,6 @@ export default function UkBasariRotasi() {
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [mailFor, setMailFor] = useState<number | null>(null);
   const { data: me } = useAuth();
-  const isAdmin = me?.role === "admin";
-  const canEnroll = isAdmin || me?.role === "hiring_manager";
   const qc = useQueryClient();
   const [, navigate] = useLocation();
 
@@ -49,7 +47,7 @@ export default function UkBasariRotasi() {
     queryFn: () => fetch(`/api/uk-program?includePassive=${includePassive}`, { credentials: "include" }).then((r) => r.json()),
   });
 
-  // Koç (hiring manager) filtresi: "all" | "none" (koçu atanmamış) | kullanıcı id'si.
+  // Koç (hiring manager) filtresi: "all" | kullanıcı id'si.
   const [coach, setCoach] = useState<string>(() => {
     try { return localStorage.getItem("ukRotaCoachFilter") ?? "all"; } catch { return "all"; }
   });
@@ -62,7 +60,7 @@ export default function UkBasariRotasi() {
     queryFn: () => fetch("/api/hiring-managers", { credentials: "include" }).then((r) => r.json()),
   });
   const byCoach = useMemo(() => data.filter((r) =>
-    coach === "all" ? true : coach === "none" ? r.coachId == null : String(r.coachId) === coach,
+    coach === "all" ? true : String(r.coachId) === coach,
   ), [data, coach]);
 
   const rows = useMemo(() => {
@@ -103,15 +101,11 @@ export default function UkBasariRotasi() {
               Üretkenlik Koçluğu programındaki danışmanların 6 haftalık rota ilerlemesi ve aktivite puanı
             </p>
           </div>
-          {canEnroll && (
-            <Button className="gap-1.5" onClick={() => setEnrollOpen(true)}>
-              <UserPlus className="h-4 w-4" /> Danışman Ekle
-            </Button>
-          )}
+          <Button className="gap-1.5" onClick={() => setEnrollOpen(true)}>
+            <UserPlus className="h-4 w-4" /> Danışman Ekle
+          </Button>
         </div>
         <UkEnrollDialog
-          isAdmin={isAdmin}
-          meId={me?.id ?? null}
           open={enrollOpen}
           onOpenChange={setEnrollOpen}
           excludeIds={data.map((r) => r.employeeId)}
@@ -138,7 +132,6 @@ export default function UkBasariRotasi() {
             {coaches.map((c) => (
               <option key={c.id} value={String(c.id)}>{c.name}{me?.id === c.id ? " (ben)" : ""}</option>
             ))}
-            <option value="none">Koçu atanmamış</option>
           </select>
           <label className="flex items-center gap-1.5 text-sm text-muted-foreground ml-2">
             <input type="checkbox" checked={includePassive} onChange={(e) => setIncludePassive(e.target.checked)} />

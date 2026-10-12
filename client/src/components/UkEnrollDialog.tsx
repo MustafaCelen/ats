@@ -8,13 +8,12 @@ import { Info, Loader2 } from "lucide-react";
 import { sendUkWelcomeEmail } from "@/components/UkWelcomeEmailDialog";
 import { UkMondaySelect, nextMondayYmd } from "@/components/UkMondaySelect";
 
-// 45+45 Başarı Rotası'na manuel danışman ekleme (admin + hiring manager). ÜK işaretine ve ÜK payına
-// dokunmaz; katılım uk_program_enrollments'ta tutulur (bkz. server/uk-program.ts).
+// 45+45 Başarı Rotası'na manuel danışman ekleme (tüm personel). Koç her zaman danışman
+// profilindeki ÜK koçudur; koçu olmayan danışman listelenmez ve eklenemez. ÜK işaretine ve
+// ÜK payına dokunmaz; katılım uk_program_enrollments'ta tutulur (bkz. server/uk-program.ts).
 export function UkEnrollDialog({
-  open, onOpenChange, excludeIds, onEnrolled, isAdmin, meId,
+  open, onOpenChange, excludeIds, onEnrolled,
 }: {
-  isAdmin: boolean;
-  meId: number | null;
   open: boolean;
   onOpenChange: (v: boolean) => void;
   excludeIds: number[];
@@ -22,9 +21,6 @@ export function UkEnrollDialog({
 }) {
   const { toast } = useToast();
   const [employeeId, setEmployeeId] = useState<number | null>(null);
-  // Hiring manager için varsayılan koç kendisi; koçsuz kayıt yalnızca admin.
-  const defaultCoach = isAdmin || meId == null ? "" : String(meId);
-  const [coachId, setCoachId] = useState<string>(defaultCoach);
   const [startDate, setStartDate] = useState(() => nextMondayYmd());
   const [saving, setSaving] = useState(false);
   const [sendWelcome, setSendWelcome] = useState(true);
@@ -42,17 +38,17 @@ export function UkEnrollDialog({
   const coaches = Array.isArray(coachQ.data) ? coachQ.data : [];
   const loadError = (empQ.error ?? coachQ.error) as Error | null;
 
-  // Danışmanın profilinde ÜK koçu varsa koç odur; burada değiştirilemez (profilden değişir).
+  // Koç = danışman profilindeki ÜK koçu (salt bilgi; değişiklik danışman profilinden).
   const selectedEmp = employeeId != null ? employees.find((e) => e.id === employeeId) : null;
   const profileCoachId: number | null = selectedEmp?.uretkenlikKocluguManagerId ?? null;
-  const effectiveCoach = profileCoachId != null ? String(profileCoachId) : coachId;
-  // Hoş geldin mailini yalnızca danışmanın koçu veya admin gönderebilir (sunucu kuralı).
-  const canMail = isAdmin || (effectiveCoach !== "" && effectiveCoach === String(meId));
+  const profileCoachName = profileCoachId != null ? coaches.find((c) => c.id === profileCoachId)?.name ?? `#${profileCoachId}` : null;
+  const kocsuzSayisi = employees.filter((e) => e.status === "active" && !e.uretkenlikKocluguManagerId && !excludeIds.includes(e.id)).length;
 
+  // Yalnız profilinde ÜK koçu olan aktif danışmanlar listelenir.
   const options = useMemo(() => {
     const ex = new Set(excludeIds);
     return employees
-      .filter((e) => e.status === "active" && !ex.has(e.id))
+      .filter((e) => e.status === "active" && !ex.has(e.id) && !!e.uretkenlikKocluguManagerId)
       .map((e) => ({ id: e.id, name: e.candidate?.name ?? `Çalışan #${e.id}`, kwuid: e.kwuid }))
       .sort((a, b) => a.name.localeCompare(b.name, "tr"));
   }, [employees, excludeIds]);
@@ -63,11 +59,11 @@ export function UkEnrollDialog({
     try {
       const r = await fetch("/api/uk-program/enrollments", {
         method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ employeeId, coachUserId: effectiveCoach ? Number(effectiveCoach) : null, startDate }),
+        body: JSON.stringify({ employeeId, startDate }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error ?? "Eklenemedi");
-      if (sendWelcome && canMail) {
+      if (sendWelcome) {
         const m = await sendUkWelcomeEmail(employeeId);
         toast({
           title: m.ok ? "Danışman eklendi, hoş geldin maili gönderildi" : "Danışman eklendi, mail gönderilemedi",
@@ -75,11 +71,10 @@ export function UkEnrollDialog({
           variant: m.ok ? undefined : "destructive",
         });
       } else {
-        toast({ title: "Danışman programa eklendi", description: canMail ? "Hoş geldin maili rota sayfasından gönderilebilir." : "Hoş geldin mailini danışmanın koçu gönderebilir." });
+        toast({ title: "Danışman programa eklendi", description: "Hoş geldin maili rota sayfasından gönderilebilir." });
       }
       onOpenChange(false);
       setEmployeeId(null);
-      setCoachId(defaultCoach);
       onEnrolled(employeeId);
     } catch (e: any) {
       toast({ title: "Hata", description: e.message, variant: "destructive" });
@@ -102,20 +97,13 @@ export function UkEnrollDialog({
           </div>
           <div className="space-y-1.5">
             <label className="text-sm font-medium">Koç</label>
-            <select
-              value={effectiveCoach}
-              disabled={profileCoachId != null}
-              onChange={(e) => setCoachId(e.target.value)}
-              className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-80 disabled:bg-muted/40"
-            >
-              {isAdmin
-                ? <option value="">Koç atanmasın (yalnızca admin yönetir)</option>
-                : effectiveCoach === "" && <option value="">Koç seçin…</option>}
-              {coaches.map((c) => <option key={c.id} value={c.id}>{c.name}{String(c.id) === String(meId) ? " (ben)" : ""}</option>)}
-            </select>
-            {profileCoachId != null && (
-              <p className="text-[11px] text-muted-foreground">Danışmanın profilindeki ÜK koçu. Değiştirmek için danışman profilini düzenleyin.</p>
-            )}
+            <div className="w-full border border-input rounded-md px-3 py-2 text-sm bg-muted/40 min-h-[38px]">
+              {profileCoachName ?? <span className="text-muted-foreground">Danışman seçince profilindeki ÜK koçu görünür</span>}
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Koç danışman profilinden gelir; buradan değiştirilemez.
+              {kocsuzSayisi > 0 && ` Profilinde ÜK koçu olmayan ${kocsuzSayisi} aktif danışman listelenmiyor; önce profilden koç atayın.`}
+            </p>
           </div>
           <div className="space-y-1.5">
             <label className="text-sm font-medium">Program başlangıcı</label>
@@ -126,18 +114,17 @@ export function UkEnrollDialog({
             />
             <p className="text-[11px] text-muted-foreground">Program her zaman pazartesi başlar; haftalar pazar 23:59'da kapanır.</p>
           </div>
-          <label className={`flex items-center gap-2 text-sm select-none ${canMail ? "cursor-pointer" : "opacity-60"}`}>
-            <input type="checkbox" checked={sendWelcome && canMail} disabled={!canMail} onChange={(e) => setSendWelcome(e.target.checked)} />
+          <label className="flex items-center gap-2 text-sm select-none cursor-pointer">
+            <input type="checkbox" checked={sendWelcome} onChange={(e) => setSendWelcome(e.target.checked)} />
             Hoş geldin mailini (erişim linkiyle) hemen gönder
           </label>
-          {!canMail && <p className="-mt-2 text-[11px] text-muted-foreground">Danışmanın koçu başka biri; hoş geldin mailini o koç gönderir.</p>}
           <div className="flex gap-2 rounded-lg bg-muted/50 px-3 py-2 text-[11px] text-muted-foreground">
             <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
             Danışmanın profilindeki Üretkenlik Koçluğu işareti ve ÜK payı değişmez; yalnızca 45+45 programına eklenir.
           </div>
           <div className="flex gap-2">
             <Button variant="outline" className="flex-1" onClick={() => onOpenChange(false)}>İptal</Button>
-            <Button className="flex-1 gap-1.5" disabled={!employeeId || !startDate || saving || (!isAdmin && !effectiveCoach)} onClick={submit}>
+            <Button className="flex-1 gap-1.5" disabled={!employeeId || !startDate || saving || profileCoachId == null} onClick={submit}>
               {saving && <Loader2 className="h-4 w-4 animate-spin" />} Programa Ekle
             </Button>
           </div>

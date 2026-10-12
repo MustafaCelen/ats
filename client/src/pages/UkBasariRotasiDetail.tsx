@@ -308,24 +308,10 @@ export default function UkBasariRotasiDetail() {
     }
   };
 
-  // Manuel katılım: koç değiştir / programdan çıkar (admin).
+  // Programdan çıkar (tüm personel). Koç yalnızca danışman profilinden değişir.
   const [, navigate] = useLocation();
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [welcomeOpen, setWelcomeOpen] = useState(false);
-  const { data: coaches = [] } = useQuery<{ id: number; name: string }[]>({
-    queryKey: ["/api/hiring-managers"],
-    queryFn: () => fetch("/api/hiring-managers", { credentials: "include" }).then((r) => r.json()),
-    enabled: !!data?.isAdmin && !!data?.participant.manual,
-  });
-  const changeCoach = useMutation({
-    mutationFn: (coachUserId: string) =>
-      fetch(`/api/uk-program/${employeeId}/coach`, {
-        method: "PUT", credentials: "include", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ coachUserId: coachUserId ? Number(coachUserId) : null }),
-      }).then(async (r) => { if (!r.ok) throw new Error((await r.json()).error ?? "Kaydedilemedi"); }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/uk-program"] }); toast({ title: "Koç güncellendi" }); },
-    onError: (e: any) => toast({ title: "Hata", description: e.message, variant: "destructive" }),
-  });
   const removeEnrollment = useMutation({
     mutationFn: () =>
       fetch(`/api/uk-program/${employeeId}/enrollment`, { method: "DELETE", credentials: "include" })
@@ -384,16 +370,7 @@ export default function UkBasariRotasiDetail() {
               <p className="mt-2 text-lg font-semibold">{p.name}{p.kwuid && <span className="ml-2 text-sm font-mono text-white/60">{p.kwuid}</span>}</p>
               <div className="text-sm text-white/70 flex items-center gap-2 flex-wrap">
                 Koç:
-                {data.isAdmin && p.manual && !p.profileCoach ? (
-                  <select
-                    value={p.coachId ?? ""}
-                    onChange={(e) => changeCoach.mutate(e.target.value)}
-                    className="bg-white/90 text-foreground rounded px-1.5 py-0.5 text-sm"
-                  >
-                    <option value="">atanmamış</option>
-                    {coaches.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
-                ) : <span>{p.coachName ?? "atanmamış"}</span>}
+                <span>{p.coachName ?? "atanmamış"}</span>
                 {p.source === "manual" && (
                   <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-sky-400/20 text-sky-100 ring-1 ring-sky-300/40">Manuel eklendi</span>
                 )}
@@ -401,7 +378,7 @@ export default function UkBasariRotasiDetail() {
                   <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-300/20 text-amber-100 ring-1 ring-amber-200/40" title="Profilde ÜK koçu atandığında bir sonraki pazartesiden başladı">Koç atamasıyla eklendi</span>
                 )}
               </div>
-              {data.isAdmin && (
+              {data.canEdit && (
                 confirmRemove ? (
                   <div className="mt-2 flex items-center gap-2 text-xs">
                     <span className="text-white/80">Programdan çıkarılsın mı?</span>

@@ -104,24 +104,21 @@ test("skor tablosu: hedef dağılımı 10/8/8/8/8/8 ve hesap", async ({ page }) 
   await expect(akt.locator("tbody tr").filter({ hasText: "Katkı Payı Yönlendirme" })).toContainText("0 / 2");
 });
 
-test("başka koçun danışmanı: görüntüleme modu, düzenleme yok", async ({ page }) => {
+test("başka koç da tam yetkili: işaretler, onaylar, mail/çıkar butonları görünür", async ({ page }) => {
   await loginAs(page, "mehmet");
   await page.goto(`/uk-basari-rotasi/${a.employeeId}`);
-  await expect(page.getByText(/Görüntüleme modu/)).toBeVisible();
-  await expect(page.getByTestId("uk-grid-w2-d0-r0")).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Kaydet ve Haftayı Onayla" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: /Hoş Geldin Maili/ })).toHaveCount(0);
-  await expect(page.getByText("Programdan çıkar")).toHaveCount(0);
-  await expect(startSel(page)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /2\. Hafta/ })).toBeVisible();
+  await expect(page.getByText(/Görüntüleme modu/)).toHaveCount(0);
+  await page.getByTestId("uk-grid-w2-d0-r0").click();
+  await expect(page.getByTestId("uk-grid-w2-d0-r0")).toHaveAttribute("data-done", "1");
+  await expect(page.getByRole("button", { name: "Kaydet ve Haftayı Onayla" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Hoş Geldin Maili/ })).toBeVisible();
+  await expect(page.getByText("Programdan çıkar")).toBeVisible();
+  await expect(startSel(page)).toHaveCount(1);
 });
 
-test("HM programdan çıkaramaz; admin onaylı çıkarır", async ({ page }) => {
+test("hiring manager programdan çıkarır (onaylı)", async ({ page }) => {
   await loginAs(page, "zeynep");
-  await page.goto(`/uk-basari-rotasi/${a.employeeId}`);
-  await expect(page.getByRole("button", { name: /2\. Hafta/ })).toBeVisible();
-  await expect(page.getByText("Programdan çıkar")).toHaveCount(0);
-
-  await loginAs(page, "admin");
   await page.goto(`/uk-basari-rotasi/${a.employeeId}`);
   await page.getByText("Programdan çıkar").click();
   await page.getByRole("button", { name: "Vazgeç" }).click();

@@ -6,7 +6,7 @@
 // (employees.uretkenlik_koclugu_manager_id).
 import type { Express, Request, Response } from "express";
 import { pool } from "./db";
-import { requireAuth, requireHiringManagerOrAdmin } from "./auth";
+import { requireAuth } from "./auth";
 import { storage } from "./storage";
 import { sendEmail } from "./email";
 import { buildUkWelcomeEmail } from "./uk-welcome-email";
@@ -39,24 +39,26 @@ type Participant = {
 // Katılım yalnızca uk_program_enrollments'tan gelir:
 //  - auto: profilde ÜK koçu atandığında, bir sonraki haftanın pazartesisinden başlar
 //    (autoEnrollOnCoachAssigned). Koç profildekini izler (coach_user_id NULL).
-//  - manual: "Danışman Ekle" ile; profilde ÜK koçu varsa koç odur, yoksa programa özel koç.
+//  - manual: "Danışman Ekle" ile; koç yine profildeki ÜK koçu (profilde koç yoksa eklenemez).
 //  - backfill: eski sürümün toplu aktarımı; artık üretilmez (ÜK işaretliler toplu taşınmaz).
 // employees.uretkenlik_koclugu ÜK payını etkilediği için programda kullanılmaz.
 const PARTICIPANT_FROM = `
        FROM employees e
        JOIN candidates c ON c.id = e.candidate_id
        LEFT JOIN uk_program_enrollments en ON en.employee_id = e.id AND en.removed_at IS NULL
-       LEFT JOIN users u ON u.id = COALESCE(e.uretkenlik_koclugu_manager_id, en.coach_user_id)`;
-// Koç önceliği: danışman profilindeki ÜK koçu her zaman esastır; programa özel koç
-// (en.coach_user_id) yalnızca profilde koç yoksa kullanılır.
+       LEFT JOIN users u ON u.id = e.uretkenlik_koclugu_manager_id`;
+// Koç yalnızca danışman profilindeki ÜK koçudur (programda koç seçimi/değişimi yok).
+// Profilde koç yoksa danışman programda sayılmaz: listede görünmez, portalda Rotam açılmaz.
 const PARTICIPANT_COLS = `e.id, c.name, e.kwuid, e.status, u.id AS coach_id, u.name AS coach_name,
-       (en.employee_id IS NOT NULL) AS enrolled, en.source,
+       (en.employee_id IS NOT NULL AND e.uretkenlik_koclugu_manager_id IS NOT NULL) AS enrolled, en.source,
        en.start_date AS en_start, to_char(e.start_date, 'YYYY-MM-DD') AS start_date, en.welcome_sent_at,
        e.uretkenlik_koclugu_manager_id AS profile_coach_id`;
 
 export async function isInUkProgram(employeeId: number): Promise<boolean> {
+  // Koçu olmayan danışman programa giremez (profildeki ÜK koçu şart).
   const r = await pool.query(
-    "SELECT 1 FROM uk_program_enrollments WHERE employee_id = $1 AND removed_at IS NULL",
+    `SELECT 1 FROM uk_program_enrollments en JOIN employees e ON e.id = en.employee_id
+      WHERE en.employee_id = $1 AND en.removed_at IS NULL AND e.uretkenlik_koclugu_manager_id IS NOT NULL`,
     [employeeId],
   );
   return r.rows.length > 0;
@@ -108,9 +110,9 @@ export async function autoEnrollOnCoachAssigned(
   return true;
 }
 
-function canEdit(req: Request, p: Participant): boolean {
-  const u = (req as any).user;
-  return !!u && (u.role === "admin" || (p.coachId != null && u.id === p.coachId));
+// Tüm personel (admin, hiring manager, asistan) programda tam yetkili (onaylı karar, 2026-10-12).
+function canEdit(req: Request, _p: Participant): boolean {
+  return !!(req as any).user;
 }
 
 // Program penceresindeki otomatik gerçekleşenler: hafta → { kapanis, bhb, katkiPayi }.
@@ -354,11 +356,11 @@ async function welcomeEmailFor(req: Request, p: Participant) {
 
 export function registerUkProgramRoutes(app: Express) {
   // Önizleme (koç/admin): alıcılar, konu, HTML, son gönderim.
-  app.get("/api/uk-program/:employeeId/welcome-email", requireAuth, requireHiringManagerOrAdmin, async (req: Request, res: Response) => {
+  app.get("/api/uk-program/:employeeId/welcome-email", requireAuth, async (req: Request, res: Response) => {
     try {
       const p = await loadParticipant(Number(req.params.employeeId));
       if (!p?.inProgram) return res.status(404).json({ error: "Bu danışman programda değil." });
-      if (!canEdit(req, p)) return res.status(403).json({ error: "Yalnızca danışmanın ÜK koçu veya admin." });
+      if (!canEdit(req, p)) return res.status(403).json({ error: "Yetkisiz." });
       const m = await welcomeEmailFor(req, p);
       res.json({ to: m.to, subject: m.subject, html: m.html, lastSentAt: p.welcomeSentAt });
     } catch (err: any) {
@@ -367,11 +369,11 @@ export function registerUkProgramRoutes(app: Express) {
   });
 
   // Manuel gönderim (koç/admin). Çift tıklamaya karşı 60 sn bekleme.
-  app.post("/api/uk-program/:employeeId/welcome-email", requireAuth, requireHiringManagerOrAdmin, async (req: Request, res: Response) => {
+  app.post("/api/uk-program/:employeeId/welcome-email", requireAuth, async (req: Request, res: Response) => {
     try {
       const p = await loadParticipant(Number(req.params.employeeId));
       if (!p?.inProgram) return res.status(404).json({ error: "Bu danışman programda değil." });
-      if (!canEdit(req, p)) return res.status(403).json({ error: "Yalnızca danışmanın ÜK koçu veya admin." });
+      if (!canEdit(req, p)) return res.status(403).json({ error: "Yetkisiz." });
       if (p.welcomeSentAt && Date.now() - new Date(p.welcomeSentAt).getTime() < 60_000) {
         return res.status(429).json({ error: "Mail az önce gönderildi; tekrar göndermek için biraz bekleyin." });
       }
@@ -393,62 +395,35 @@ export function registerUkProgramRoutes(app: Express) {
 
   registerAdvisorUkRoutes(app);
 
-  // Manuel ekleme (admin + hiring manager). ÜK işaretine/ÜK payına dokunmaz; yeniden
-  // eklemede önceki işaretler ve haftalık kayıtlar korunur. Hiring manager koç seçmek
-  // zorunda (koçsuz kaydı yalnızca admin yönetebilir).
+  // Manuel ekleme (tüm personel). Koç her zaman danışman profilindeki ÜK koçudur; profilde
+  // koç yoksa eklenemez. ÜK işaretine/ÜK payına dokunmaz; yeniden eklemede önceki
+  // işaretler ve haftalık kayıtlar korunur.
   app.post("/api/uk-program/enrollments", requireAuth, async (req: Request, res: Response) => {
     try {
-      const role = (req as any).user?.role;
-      if (role !== "admin" && role !== "hiring_manager") return res.status(403).json({ error: "Yalnızca admin veya hiring manager danışman ekleyebilir." });
       const employeeId = Number(req.body?.employeeId);
-      const coachUserId = req.body?.coachUserId ? Number(req.body.coachUserId) : null;
-      // Danışmanın profilinde ÜK koçu varsa koç odur (seçim yok sayılır). Kayda koç yazılmaz;
-      // böylece profilde koç değişirse program da onu izler (coachId = COALESCE(en, profil)).
-      const prof = await pool.query("SELECT uretkenlik_koclugu_manager_id AS mid FROM employees WHERE id = $1", [employeeId]);
-      const profileCoachId: number | null = prof.rows[0]?.mid ?? null;
-      const storeCoach = profileCoachId != null ? null : coachUserId;
-      if (role !== "admin" && profileCoachId == null && coachUserId == null) return res.status(400).json({ error: "Koç seçin." });
       const startDate = String(req.body?.startDate ?? "");
       if (!Number.isInteger(employeeId)) return res.status(400).json({ error: "Danışman seçin." });
       if (!ukIsMonday(startDate)) return res.status(400).json({ error: "Program başlangıcı pazartesi olmalı." });
       const p = await loadParticipant(employeeId);
       if (!p) return res.status(404).json({ error: "Danışman bulunamadı." });
+      if (!p.profileCoach) return res.status(400).json({ error: "Danışmanın profilinde ÜK koçu yok. Önce danışman profilinden koç atayın." });
       if (p.inProgram) return res.status(409).json({ error: `${p.name} zaten programda.` });
-      if (storeCoach != null) {
-        const c = await pool.query("SELECT 1 FROM users WHERE id = $1 AND role IN ('admin', 'hiring_manager')", [storeCoach]);
-        if (!c.rows.length) return res.status(400).json({ error: "Geçersiz koç." });
-      }
       await pool.query(
         `INSERT INTO uk_program_enrollments (employee_id, coach_user_id, start_date, added_by_user_id, added_at, removed_at, source)
-         VALUES ($1, $2, $3, $4, NOW(), NULL, 'manual')
-         ON CONFLICT (employee_id) DO UPDATE SET coach_user_id = EXCLUDED.coach_user_id, start_date = EXCLUDED.start_date,
+         VALUES ($1, NULL, $2, $3, NOW(), NULL, 'manual')
+         ON CONFLICT (employee_id) DO UPDATE SET coach_user_id = NULL, start_date = EXCLUDED.start_date,
            added_by_user_id = EXCLUDED.added_by_user_id, added_at = NOW(), removed_at = NULL, source = 'manual'`,
-        [employeeId, storeCoach, startDate, (req as any).user.id],
+        [employeeId, startDate, (req as any).user.id],
       );
-      res.json({ ok: true, employeeId, coachUserId: profileCoachId ?? storeCoach });
+      res.json({ ok: true, employeeId, coachUserId: p.coachId });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
 
-  // Manuel eklenen danışmanın koçunu değiştir (admin).
-  app.put("/api/uk-program/:employeeId/coach", requireAuth, async (req: Request, res: Response) => {
-    try {
-      if ((req as any).user?.role !== "admin") return res.status(403).json({ error: "Yalnızca admin." });
-      const p = await loadParticipant(Number(req.params.employeeId));
-      if (!p?.manual || p.profileCoach) return res.status(409).json({ error: "Bu danışmanın koçu profilinden gelir; danışman profilinden değiştirin." });
-      const coachUserId = req.body?.coachUserId ? Number(req.body.coachUserId) : null;
-      await pool.query("UPDATE uk_program_enrollments SET coach_user_id = $2 WHERE employee_id = $1 AND removed_at IS NULL", [p.employeeId, coachUserId]);
-      res.json({ ok: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Programdan çıkar (admin). Kayıtlar silinmez; yeniden eklenirse geri gelir.
+  // Programdan çıkar (tüm personel). Kayıtlar silinmez; yeniden eklenirse geri gelir.
   app.delete("/api/uk-program/:employeeId/enrollment", requireAuth, async (req: Request, res: Response) => {
     try {
-      if ((req as any).user?.role !== "admin") return res.status(403).json({ error: "Yalnızca admin çıkarabilir." });
       const p = await loadParticipant(Number(req.params.employeeId));
       if (!p) return res.status(404).json({ error: "Danışman bulunamadı." });
       if (!p.inProgram) return res.status(404).json({ error: "Bu danışman programda değil." });
@@ -461,11 +436,11 @@ export function registerUkProgramRoutes(app: Express) {
 
   // "Danışman Gözüyle Gör": personel oturumuna bu danışman için salt okunur önizleme
   // izni ekler ve portala yönlendirir (Google girişi gerekmez, değişiklik yapılamaz).
-  app.get("/api/uk-program/:employeeId/preview-as-advisor", requireAuth, requireHiringManagerOrAdmin, async (req: Request, res: Response) => {
+  app.get("/api/uk-program/:employeeId/preview-as-advisor", requireAuth, async (req: Request, res: Response) => {
     try {
       const p = await loadParticipant(Number(req.params.employeeId));
       if (!p) return res.status(404).send("Danışman bulunamadı.");
-      if (!canEdit(req, p)) return res.status(403).send("Yalnızca danışmanın ÜK koçu veya admin önizleyebilir.");
+      if (!canEdit(req, p)) return res.status(403).send("Yetkisiz.");
       const token = await storage.ensureAdvisorToken(p.employeeId);
       const ids = new Set<number>((req.session as any).advisorPreviewIds ?? []);
       ids.add(p.employeeId);
@@ -479,11 +454,11 @@ export function registerUkProgramRoutes(app: Express) {
 
   // Danışmanın portal linki (rotasını doldurması için). Giriş, kayıtlı KW / kişisel
   // e-postası ile Google üzerinden yapılır; e-posta yoksa giriş mümkün değildir.
-  app.get("/api/uk-program/:employeeId/advisor-link", requireAuth, requireHiringManagerOrAdmin, async (req: Request, res: Response) => {
+  app.get("/api/uk-program/:employeeId/advisor-link", requireAuth, async (req: Request, res: Response) => {
     try {
       const p = await loadParticipant(Number(req.params.employeeId));
       if (!p) return res.status(404).json({ error: "Danışman bulunamadı." });
-      if (!canEdit(req, p)) return res.status(403).json({ error: "Yalnızca danışmanın ÜK koçu veya admin." });
+      if (!canEdit(req, p)) return res.status(403).json({ error: "Yetkisiz." });
       const emp = await storage.getEmployee(p.employeeId);
       const emails = [(emp as any)?.kwMail, (emp as any)?.candidate?.email].map((m) => (m ?? "").trim()).filter(Boolean);
       const token = await storage.ensureAdvisorToken(p.employeeId);
@@ -495,7 +470,7 @@ export function registerUkProgramRoutes(app: Express) {
   });
 
   // Katılımcılar: ÜK bayrağı olan danışmanlar + ilerleme özeti.
-  app.get("/api/uk-program", requireAuth, requireHiringManagerOrAdmin, async (req: Request, res: Response) => {
+  app.get("/api/uk-program", requireAuth, async (req: Request, res: Response) => {
     try {
       const includePassive = req.query.includePassive === "true";
       const r = await pool.query(
@@ -505,7 +480,7 @@ export function registerUkProgramRoutes(app: Express) {
                 (SELECT MAX(w.week) FROM uk_program_weeks w WHERE w.employee_id = e.id AND w.confirmed_at IS NOT NULL) AS last_confirmed,
                 (SELECT COUNT(*)::int FROM candidates rc WHERE rc.referred_by_employee_id = e.id) AS referrals
            ${PARTICIPANT_FROM}
-          WHERE en.employee_id IS NOT NULL ${includePassive ? "" : "AND e.status = 'active'"}
+          WHERE en.employee_id IS NOT NULL AND e.uretkenlik_koclugu_manager_id IS NOT NULL ${includePassive ? "" : "AND e.status = 'active'"}
           ORDER BY en.start_date DESC NULLS LAST, c.name`,
       );
       const today = todayYmd();
@@ -547,7 +522,7 @@ export function registerUkProgramRoutes(app: Express) {
           welcomeSentAt: row.welcome_sent_at ?? null,
           manual: row.source === "manual",
           source: row.source,
-          canEdit: (req as any).user?.role === "admin" || (req as any).user?.id === row.coach_id,
+          canEdit: true,
         };
       }));
     } catch (err: any) {
@@ -556,12 +531,12 @@ export function registerUkProgramRoutes(app: Express) {
     }
   });
 
-  app.get("/api/uk-program/:employeeId", requireAuth, requireHiringManagerOrAdmin, async (req: Request, res: Response) => {
+  app.get("/api/uk-program/:employeeId", requireAuth, async (req: Request, res: Response) => {
     try {
       const p = await loadParticipant(Number(req.params.employeeId));
       if (!p) return res.status(404).json({ error: "Danışman bulunamadı." });
       if (!p.inProgram) return res.status(404).json({ error: "Bu danışman 45+45 programında değil." });
-      res.json({ ...(await buildProgram(p)), canEdit: canEdit(req, p), isAdmin: (req as any).user?.role === "admin" });
+      res.json({ ...(await buildProgram(p)), canEdit: canEdit(req, p), isAdmin: true });
     } catch (err: any) {
       console.error("[GET /api/uk-program/:id]", err);
       res.status(500).json({ error: err.message });
@@ -569,11 +544,11 @@ export function registerUkProgramRoutes(app: Express) {
   });
 
   // Kutucuk işaretle / kaldır.
-  app.put("/api/uk-program/:employeeId/checks/:activityId", requireAuth, requireHiringManagerOrAdmin, async (req: Request, res: Response) => {
+  app.put("/api/uk-program/:employeeId/checks/:activityId", requireAuth, async (req: Request, res: Response) => {
     try {
       const p = await loadParticipant(Number(req.params.employeeId));
       if (!p) return res.status(404).json({ error: "Danışman bulunamadı." });
-      if (!canEdit(req, p)) return res.status(403).json({ error: "Yalnızca danışmanın ÜK koçu veya admin işaretleyebilir." });
+      if (!canEdit(req, p)) return res.status(403).json({ error: "Yetkisiz." });
       const activityId = String(req.params.activityId);
       if (!UK_ACTIVITY_IDS.has(activityId)) return res.status(400).json({ error: "Geçersiz aktivite." });
       if (req.body?.done) {
@@ -593,11 +568,11 @@ export function registerUkProgramRoutes(app: Express) {
   });
 
   // Haftalık gerçekleşenler (manuel: arama, randevu, tek yetki) + koç notu + onay.
-  app.put("/api/uk-program/:employeeId/weeks/:week", requireAuth, requireHiringManagerOrAdmin, async (req: Request, res: Response) => {
+  app.put("/api/uk-program/:employeeId/weeks/:week", requireAuth, async (req: Request, res: Response) => {
     try {
       const p = await loadParticipant(Number(req.params.employeeId));
       if (!p) return res.status(404).json({ error: "Danışman bulunamadı." });
-      if (!canEdit(req, p)) return res.status(403).json({ error: "Yalnızca danışmanın ÜK koçu veya admin güncelleyebilir." });
+      if (!canEdit(req, p)) return res.status(403).json({ error: "Yetkisiz." });
       const week = Number(req.params.week);
       if (!Number.isInteger(week) || week < 1 || week > UK_PROGRAM_WEEKS) return res.status(400).json({ error: "Geçersiz hafta." });
       const num = (v: any) => (v === null || v === undefined || v === "" ? null : Math.max(0, Math.floor(Number(v))) || 0);
@@ -625,11 +600,11 @@ export function registerUkProgramRoutes(app: Express) {
   });
 
   // Program başlangıç tarihi (uk_program_enrollments.start_date).
-  app.put("/api/uk-program/:employeeId/start", requireAuth, requireHiringManagerOrAdmin, async (req: Request, res: Response) => {
+  app.put("/api/uk-program/:employeeId/start", requireAuth, async (req: Request, res: Response) => {
     try {
       const p = await loadParticipant(Number(req.params.employeeId));
       if (!p) return res.status(404).json({ error: "Danışman bulunamadı." });
-      if (!canEdit(req, p)) return res.status(403).json({ error: "Yalnızca danışmanın ÜK koçu veya admin değiştirebilir." });
+      if (!canEdit(req, p)) return res.status(403).json({ error: "Yetkisiz." });
       const v = String(req.body?.ukStartDate ?? "");
       if (v && !ukIsMonday(v)) return res.status(400).json({ error: "Program başlangıcı pazartesi olmalı." });
       if (!p.inProgram) return res.status(404).json({ error: "Bu danışman programda değil." });
