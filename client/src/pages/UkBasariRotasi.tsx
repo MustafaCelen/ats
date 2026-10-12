@@ -15,7 +15,7 @@ type Row = {
   employeeId: number; name: string; kwuid: string | null; status: string;
   coachId: number | null; coachName: string | null;
   programStart: string | null; week1Monday: string | null; currentWeek: number;
-  done: number; total: number; score: number; targetScore: number; lastConfirmedWeek: number | null; canEdit: boolean; manual: boolean; welcomeSentAt: string | null;
+  done: number; total: number; score: number; targetScore: number; lastConfirmedWeek: number | null; canEdit: boolean; manual: boolean; welcomeSentAt: string | null; hasEmail: boolean;
 };
 
 function fmtDate(ymd: string | null) {
@@ -185,6 +185,7 @@ export default function UkBasariRotasi() {
                         {r.kwuid && <span className="text-xs text-muted-foreground font-mono shrink-0">{r.kwuid}</span>}
                         {r.status !== "active" && <span className="text-[10px] text-muted-foreground shrink-0">(pasif)</span>}
                         {r.manual && <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-sky-50 text-sky-700 ring-1 ring-sky-200 shrink-0" title="Programa manuel eklendi (ÜK işareti yok)">Manuel</span>}
+                        {!r.hasEmail && <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 ring-1 ring-amber-200 shrink-0" title="Profilde KW veya kişisel e-posta yok: danışman portala giriş yapamaz, hoş geldin maili gönderilemez">E-posta yok</span>}
                       </div>
                     </td>
                     <td className="px-2 py-2.5 text-muted-foreground max-w-[200px] truncate" title={r.coachName ?? undefined}>{r.coachName ?? "—"}</td>

@@ -55,10 +55,10 @@ const PARTICIPANT_COLS = `e.id, c.name, e.kwuid, e.status, u.id AS coach_id, u.n
        e.uretkenlik_koclugu_manager_id AS profile_coach_id`;
 
 export async function isInUkProgram(employeeId: number): Promise<boolean> {
-  // Koçu olmayan danışman programa giremez (profildeki ÜK koçu şart).
+  // Koçu olmayan veya pasife alınmış danışman programa giremez (profildeki ÜK koçu ve aktif durum şart).
   const r = await pool.query(
     `SELECT 1 FROM uk_program_enrollments en JOIN employees e ON e.id = en.employee_id
-      WHERE en.employee_id = $1 AND en.removed_at IS NULL AND e.uretkenlik_koclugu_manager_id IS NOT NULL`,
+      WHERE en.employee_id = $1 AND en.removed_at IS NULL AND e.uretkenlik_koclugu_manager_id IS NOT NULL AND e.status = 'active'`,
     [employeeId],
   );
   return r.rows.length > 0;
@@ -478,7 +478,8 @@ export function registerUkProgramRoutes(app: Express) {
                 (SELECT COUNT(*)::int FROM uk_program_checks k WHERE k.employee_id = e.id) AS done,
                 (SELECT array_agg(k.activity_id) FROM uk_program_checks k WHERE k.employee_id = e.id) AS ids,
                 (SELECT MAX(w.week) FROM uk_program_weeks w WHERE w.employee_id = e.id AND w.confirmed_at IS NOT NULL) AS last_confirmed,
-                (SELECT COUNT(*)::int FROM candidates rc WHERE rc.referred_by_employee_id = e.id) AS referrals
+                (SELECT COUNT(*)::int FROM candidates rc WHERE rc.referred_by_employee_id = e.id) AS referrals,
+                (coalesce(e.kw_mail, '') <> '' OR coalesce(c.email, '') <> '') AS has_email
            ${PARTICIPANT_FROM}
           WHERE en.employee_id IS NOT NULL AND e.uretkenlik_koclugu_manager_id IS NOT NULL ${includePassive ? "" : "AND e.status = 'active'"}
           ORDER BY en.start_date DESC NULLS LAST, c.name`,
@@ -520,6 +521,7 @@ export function registerUkProgramRoutes(app: Express) {
           targetScore,
           lastConfirmedWeek: row.last_confirmed ?? null,
           welcomeSentAt: row.welcome_sent_at ?? null,
+          hasEmail: !!row.has_email,   // yoksa danışman portala giremez (Google girişi e-postayla eşleşir)
           manual: row.source === "manual",
           source: row.source,
           canEdit: true,

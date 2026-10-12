@@ -42,6 +42,7 @@ export function UkEnrollDialog({
   const selectedEmp = employeeId != null ? employees.find((e) => e.id === employeeId) : null;
   const profileCoachId: number | null = selectedEmp?.uretkenlikKocluguManagerId ?? null;
   const profileCoachName = profileCoachId != null ? coaches.find((c) => c.id === profileCoachId)?.name ?? `#${profileCoachId}` : null;
+  const hasEmail = !!selectedEmp && (!!(selectedEmp.kwMail || "").trim() || !!(selectedEmp.candidate?.email || "").trim());
   const kocsuzSayisi = employees.filter((e) => e.status === "active" && !e.uretkenlikKocluguManagerId && !excludeIds.includes(e.id)).length;
 
   // Yalnız profilinde ÜK koçu olan aktif danışmanlar listelenir.
@@ -63,7 +64,7 @@ export function UkEnrollDialog({
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error ?? "Eklenemedi");
-      if (sendWelcome) {
+      if (sendWelcome && hasEmail) {
         const m = await sendUkWelcomeEmail(employeeId);
         toast({
           title: m.ok ? "Danışman eklendi, hoş geldin maili gönderildi" : "Danışman eklendi, mail gönderilemedi",
@@ -114,10 +115,15 @@ export function UkEnrollDialog({
             />
             <p className="text-[11px] text-muted-foreground">Program her zaman pazartesi başlar; haftalar pazar 23:59'da kapanır.</p>
           </div>
-          <label className="flex items-center gap-2 text-sm select-none cursor-pointer">
-            <input type="checkbox" checked={sendWelcome} onChange={(e) => setSendWelcome(e.target.checked)} />
+          <label className={`flex items-center gap-2 text-sm select-none ${selectedEmp && !hasEmail ? "opacity-60" : "cursor-pointer"}`}>
+            <input type="checkbox" checked={sendWelcome && (!selectedEmp || hasEmail)} disabled={!!selectedEmp && !hasEmail} onChange={(e) => setSendWelcome(e.target.checked)} />
             Hoş geldin mailini (erişim linkiyle) hemen gönder
           </label>
+          {selectedEmp && !hasEmail && (
+            <div className="-mt-2 rounded-lg bg-amber-50 ring-1 ring-amber-200 px-3 py-2 text-[11px] text-amber-800">
+              Bu danışmanın profilinde KW veya kişisel e-posta yok. Portal girişi Google hesabıyla e-posta eşleşmesine dayanır; e-posta eklenmeden danışman rotasına giremez ve mail gönderilemez.
+            </div>
+          )}
           <div className="flex gap-2 rounded-lg bg-muted/50 px-3 py-2 text-[11px] text-muted-foreground">
             <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
             Danışmanın profilindeki Üretkenlik Koçluğu işareti ve ÜK payı değişmez; yalnızca 45+45 programına eklenir.
