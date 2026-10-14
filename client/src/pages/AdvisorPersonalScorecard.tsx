@@ -2,7 +2,8 @@ import { SortTh, SortableRows } from "@/components/SortTh";
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Layout } from "@/components/Layout";
-import { User, ChevronDown, Check, Wallet, CalendarClock, Target, Award, Timer, PieChartIcon, MessageSquare, Send, Trash2, CalendarPlus, CalendarCheck, Plus, Eye, EyeOff, Home, Building2 } from "lucide-react";
+import { User, ChevronDown, Check, Wallet, CalendarClock, Target, Award, Timer, PieChartIcon, MessageSquare, Send, Trash2, CalendarPlus, CalendarCheck, Plus, Eye, EyeOff, Home, Building2, Phone, Mail, Cake, CalendarDays, Key, MapPin, ExternalLink, UserCheck } from "lucide-react";
+import { Link } from "wouter";
 import { SiGoogle } from "react-icons/si";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 import { Button } from "@/components/ui/button";
@@ -681,6 +682,85 @@ function AdvisorAppointmentsSection({ employeeId }: { employeeId: number }) {
   );
 }
 
+// ── Danışman bilgileri: kimlik, iletişim, tarihler (profil verisinden, salt okunur) ──
+function AdvisorInfoCard({ employeeId }: { employeeId: number }) {
+  const { data: employees = [] } = useEmployees();
+  const { data: managers = [] } = useQuery<{ id: number; name: string }[]>({
+    queryKey: ["/api/hiring-managers"],
+    queryFn: () => fetch("/api/hiring-managers", { credentials: "include" }).then((r) => r.json()),
+    staleTime: 5 * 60 * 1000,
+  });
+  const emp = (employees as any[]).find((e) => e.id === employeeId);
+  if (!emp) return null;
+  const c = emp.candidate ?? {};
+  const coachId = emp.uretkenlikKoclugu ? emp.uretkenlikKocluguManagerId : emp.dua ? emp.duaManagerId : emp.performansKariyerKoclugu ? emp.performansKariyerKocluguManagerId : null;
+  const coachType = emp.uretkenlikKoclugu ? "ÜK" : emp.dua ? "DÜA" : emp.performansKariyerKoclugu ? "Performans Kariyer" : null;
+  const coachName = coachId ? (managers.find((m) => m.id === coachId)?.name ?? "—") : null;
+
+  const d = (v?: string | null) => { if (!v) return null; const x = new Date(String(v).length === 10 ? v + "T00:00:00" : v); return isNaN(x.getTime()) ? null : x; };
+  const fmt = (x: Date | null) => (x ? x.toLocaleDateString("tr-TR") : "—");
+  const start = d(emp.startDate);
+  const birth = d(emp.birthDate);
+  const now = new Date();
+  // Şirkette süre
+  let tenure = "";
+  if (start) {
+    const months = Math.max(0, (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth()) - (now.getDate() < start.getDate() ? 1 : 0));
+    tenure = months < 12 ? `${months} ay` : `${Math.floor(months / 12)} yıl ${months % 12 ? `${months % 12} ay` : ""}`.trim();
+  }
+  // Yaş ve yaklaşan doğum günü
+  let age: number | null = null, bdayHint: string | null = null;
+  if (birth) {
+    age = now.getFullYear() - birth.getFullYear() - ((now.getMonth() < birth.getMonth() || (now.getMonth() === birth.getMonth() && now.getDate() < birth.getDate())) ? 1 : 0);
+    const next = new Date(now.getFullYear(), birth.getMonth(), birth.getDate());
+    if (next < new Date(now.getFullYear(), now.getMonth(), now.getDate())) next.setFullYear(now.getFullYear() + 1);
+    const days = Math.round((next.getTime() - new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()) / 86400000);
+    bdayHint = days === 0 ? "🎂 Bugün doğum günü!" : days <= 14 ? `🎂 ${days} gün sonra doğum günü` : null;
+  }
+  const initials = String(c.name ?? "?").split(/\s+/).slice(0, 2).map((w: string) => w[0]).join("").toLocaleUpperCase("tr-TR");
+
+  const Field = ({ icon, label, children }: { icon: React.ReactNode; label: string; children: React.ReactNode }) => (
+    <div className="min-w-0">
+      <p className="text-[11px] text-muted-foreground flex items-center gap-1">{icon}{label}</p>
+      <div className="text-sm font-medium truncate">{children}</div>
+    </div>
+  );
+
+  return (
+    <div className="rounded-xl border border-border bg-card shadow-sm p-4">
+      <div className="flex items-start gap-4 flex-wrap">
+        <div className="h-12 w-12 rounded-full bg-gradient-to-br from-primary/80 to-primary text-primary-foreground flex items-center justify-center font-bold shrink-0">{initials}</div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2 className="text-lg font-semibold truncate">{c.name ?? `Danışman #${emp.id}`}</h2>
+            {c.category && <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary ring-1 ring-primary/20">{c.category}</span>}
+            {c.office && <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-muted ring-1 ring-border">{c.office}</span>}
+            <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ring-1 ${emp.status === "active" ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-slate-100 text-slate-600 ring-slate-200"}`}>{emp.status === "active" ? "Aktif" : "Pasif"}</span>
+            {bdayHint && <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-pink-50 text-pink-700 ring-1 ring-pink-200">{bdayHint}</span>}
+          </div>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {emp.title ?? "Danışman"}{coachType ? ` · ${coachType}${coachName ? ` koçu: ${coachName}` : ""}` : ""}
+          </p>
+        </div>
+        <Link href={c.id ? `/candidates/${c.id}` : "/employees"} className="text-xs text-primary hover:underline inline-flex items-center gap-1 shrink-0">
+          <ExternalLink className="h-3.5 w-3.5" /> Profili aç
+        </Link>
+      </div>
+      <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-x-4 gap-y-3">
+        <Field icon={<CalendarDays className="h-3 w-3" />} label="Giriş tarihi">{fmt(start)}{tenure && <span className="text-xs text-muted-foreground font-normal"> · {tenure}</span>}</Field>
+        <Field icon={<Cake className="h-3 w-3" />} label="Doğum günü">{fmt(birth)}{age != null && <span className="text-xs text-muted-foreground font-normal"> · {age} yaş</span>}</Field>
+        <Field icon={<Phone className="h-3 w-3" />} label="Telefon">{c.phone ? <a href={`tel:${c.phone}`} className="hover:text-primary">{c.phone}</a> : "—"}</Field>
+        <Field icon={<Mail className="h-3 w-3" />} label="KW e-posta">{emp.kwMail ? <a href={`mailto:${emp.kwMail}`} className="hover:text-primary" title={emp.kwMail}>{emp.kwMail}</a> : "—"}</Field>
+        <Field icon={<Mail className="h-3 w-3" />} label="Kişisel e-posta">{c.email ? <a href={`mailto:${c.email}`} className="hover:text-primary" title={c.email}>{c.email}</a> : "—"}</Field>
+        <Field icon={<Key className="h-3 w-3" />} label="KWUID"><span className="font-mono">{emp.kwuid ?? "—"}</span></Field>
+        <Field icon={<UserCheck className="h-3 w-3" />} label="Sözleşme">{emp.contractType ?? "—"}</Field>
+        <Field icon={<Award className="h-3 w-3" />} label={coachType ? `${coachType} başlangıcı` : "Koçluk"}>{coachType ? fmt(d(emp.ukStartDate)) : "—"}</Field>
+        <Field icon={<MapPin className="h-3 w-3" />} label="Konum">{[c.city, c.district].filter(Boolean).join(" / ") || "—"}</Field>
+      </div>
+    </div>
+  );
+}
+
 export default function AdvisorPersonalScorecard() {
   const [employeeId, setEmployeeId] = useState<number | null>(null);
   const { data, isLoading } = useAdvisorPersonalScorecard(employeeId);
@@ -718,6 +798,8 @@ export default function AdvisorPersonalScorecard() {
 
         {employeeId && !isLoading && data && (
           <>
+            <AdvisorInfoCard employeeId={employeeId} />
+
             {/* ── Cap + ÜK ── */}
             <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-3">
               <StatTile
