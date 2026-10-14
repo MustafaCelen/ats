@@ -400,6 +400,17 @@ export async function ensureSchema(): Promise<void> {
        AND NOT EXISTS (SELECT 1 FROM uk_program_checks k WHERE k.employee_id = en.employee_id)
        AND NOT EXISTS (SELECT 1 FROM uk_program_weeks w WHERE w.employee_id = en.employee_id);
     ALTER TABLE candidates ADD COLUMN IF NOT EXISTS referral_external BOOLEAN NOT NULL DEFAULT FALSE;
+    -- Danışman Karnesi: ay bazlı elle girilen alınan sözleşme sayıları
+    CREATE TABLE IF NOT EXISTS advisor_contract_counts (
+      id SERIAL PRIMARY KEY,
+      employee_id INTEGER NOT NULL,
+      year INTEGER NOT NULL,
+      month INTEGER NOT NULL,
+      count INTEGER NOT NULL DEFAULT 0,
+      updated_by_user_id INTEGER,
+      updated_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE (employee_id, year, month)
+    );
     -- Referans metni kararları (normalize metin → danışman / dış referans). Bkz. server/referral.ts
     CREATE TABLE IF NOT EXISTS referral_text_decisions (
       norm_text TEXT PRIMARY KEY,

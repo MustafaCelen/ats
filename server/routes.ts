@@ -2030,6 +2030,49 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // ── Advisor BHB Targets (çeyrek bazlı) ────────────────────────────────────────
 
+  // ── Danışman Karnesi: alınan sözleşme sayıları (ay bazlı, elle girilir) ──
+  app.get("/api/employees/:id/contract-counts", requireAuth, async (req, res) => {
+    try {
+      const employeeId = Number(req.params.id);
+      if (isNaN(employeeId)) return res.status(400).json({ message: "Geçersiz danışman id" });
+      const r = await pool.query(
+        "SELECT year, month, count FROM advisor_contract_counts WHERE employee_id = $1 ORDER BY year, month",
+        [employeeId],
+      );
+      const byYear: Record<number, { total: number; months: number[] }> = {};
+      for (const row of r.rows) {
+        const y = byYear[row.year] ?? (byYear[row.year] = { total: 0, months: Array(12).fill(0) });
+        y.months[row.month - 1] = row.count;
+        y.total += row.count;
+      }
+      res.json(byYear);
+    } catch (err) {
+      console.error("[GET /api/employees/:id/contract-counts]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.put("/api/employees/:id/contract-counts", requireAuth, async (req, res) => {
+    try {
+      const employeeId = Number(req.params.id);
+      if (isNaN(employeeId)) return res.status(400).json({ message: "Geçersiz danışman id" });
+      const year = Number(req.body?.year), month = Number(req.body?.month), count = Number(req.body?.count ?? 0);
+      if (!Number.isInteger(year) || year < 2000 || year > 2100) return res.status(400).json({ message: "Geçersiz yıl" });
+      if (!Number.isInteger(month) || month < 1 || month > 12) return res.status(400).json({ message: "Geçersiz ay" });
+      if (!Number.isInteger(count) || count < 0 || count > 1000) return res.status(400).json({ message: "Sayı 0-1000 arasında olmalı" });
+      await pool.query(
+        `INSERT INTO advisor_contract_counts (employee_id, year, month, count, updated_by_user_id, updated_at)
+         VALUES ($1, $2, $3, $4, $5, NOW())
+         ON CONFLICT (employee_id, year, month) DO UPDATE SET count = EXCLUDED.count, updated_by_user_id = EXCLUDED.updated_by_user_id, updated_at = NOW()`,
+        [employeeId, year, month, count, req.user!.id],
+      );
+      res.json({ ok: true });
+    } catch (err) {
+      console.error("[PUT /api/employees/:id/contract-counts]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   app.get("/api/employees/:id/bhb-targets", requireAuth, requireFinancialsAccess, async (req, res) => {
     try {
       const employeeId = parseInt(req.params.id);

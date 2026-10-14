@@ -1,6 +1,6 @@
 import { SortTh, SortableRows } from "@/components/SortTh";
 import { useState, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Layout } from "@/components/Layout";
 import { User, ChevronDown, Check, Wallet, CalendarClock, Target, Award, Timer, PieChartIcon, MessageSquare, Send, Trash2, CalendarPlus, CalendarCheck, Plus, Eye, EyeOff, Home, Building2, Phone, Mail, Cake, CalendarDays, Key, MapPin, ExternalLink, UserCheck } from "lucide-react";
 import { Link } from "wouter";
@@ -172,6 +172,82 @@ function MonthTable({ title, years, byYear, format }: {
                 <td className="px-3 py-1.5">{label}</td>
                 {years.map((y) => (
                   <td key={y} className="text-right px-3 py-1.5 font-mono">{format(byYear[y]?.months?.[i] ?? 0)}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// Alınan sözleşme sayıları: yıl × ay hücreleri elle girilir, alandan çıkınca kaydedilir.
+function ContractCountTable({ employeeId, years }: { employeeId: number; years: number[] }) {
+  const qc = useQueryClient();
+  const { data: byYear = {} } = useQuery<Record<number, MonthBucket>>({
+    queryKey: ["/api/employees", employeeId, "contract-counts"],
+    queryFn: () => fetch(`/api/employees/${employeeId}/contract-counts`, { credentials: "include" }).then((r) => r.json()),
+  });
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState<string | null>(null);
+  const key = (y: number, m: number) => `${y}-${m}`;
+  const valueFor = (y: number, m: number) => draft[key(y, m)] ?? String(byYear[y]?.months?.[m - 1] ?? "");
+  const totalFor = (y: number) => Array.from({ length: 12 }, (_, i) => Number(valueFor(y, i + 1)) || 0).reduce((s, v) => s + v, 0);
+
+  const saveCell = async (y: number, m: number) => {
+    const raw = draft[key(y, m)];
+    if (raw === undefined) return;
+    const count = raw === "" ? 0 : Number(raw);
+    if (!Number.isInteger(count) || count < 0) return;
+    if (count === (byYear[y]?.months?.[m - 1] ?? 0)) { setDraft((d) => { const n = { ...d }; delete n[key(y, m)]; return n; }); return; }
+    setSaving(key(y, m));
+    const r = await fetch(`/api/employees/${employeeId}/contract-counts`, {
+      method: "PUT", credentials: "include", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ year: y, month: m, count }),
+    });
+    setSaving(null);
+    if (r.ok) {
+      setDraft((d) => { const n = { ...d }; delete n[key(y, m)]; return n; });
+      qc.invalidateQueries({ queryKey: ["/api/employees", employeeId, "contract-counts"] });
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+      <div className="px-4 py-2.5 border-b border-border flex items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold">Alınan Sözleşme Sayıları</h3>
+        <span className="text-[11px] text-muted-foreground">Ay bazlı elle girilir; alandan çıkınca kaydedilir</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead className="bg-muted/30">
+            <tr className="border-b border-border text-muted-foreground">
+              <th className="text-left px-3 py-2 font-medium"></th>
+              {years.map((y) => <th key={y} className="text-right px-3 py-2 font-medium">{y}</th>)}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            <tr className="border-y border-emerald-300 bg-emerald-100 font-semibold text-emerald-900 dark:border-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-200">
+              <td className="px-3 py-1.5">Toplam</td>
+              {years.map((y) => <td key={y} className="text-right px-3 py-1.5 font-mono tabular-nums">{totalFor(y).toLocaleString("tr-TR")}</td>)}
+            </tr>
+            {MONTH_LABELS.map((label, i) => (
+              <tr key={label}>
+                <td className="px-3 py-1 whitespace-nowrap">{label}</td>
+                {years.map((y) => (
+                  <td key={y} className="text-right px-3 py-1">
+                    <Input
+                      type="number" min={0} inputMode="numeric"
+                      value={valueFor(y, i + 1)}
+                      onChange={(e) => setDraft((d) => ({ ...d, [key(y, i + 1)]: e.target.value }))}
+                      onBlur={() => saveCell(y, i + 1)}
+                      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                      disabled={saving === key(y, i + 1)}
+                      placeholder="0"
+                      className="h-7 w-20 ml-auto text-right text-xs font-mono tabular-nums"
+                    />
+                  </td>
                 ))}
               </tr>
             ))}
@@ -874,8 +950,11 @@ export default function AdvisorPersonalScorecard() {
               <MonthTable title="Kiralık İşlem" years={data.years} byYear={data.islemByYear.kiralik} format={(n) => n.toLocaleString("tr-TR")} />
             </div>
 
-            {/* ── Alınan Sözleşme Sayıları (aylık, portföye eklenen yeni ilan) ── */}
-            <MonthTable title="Alınan Sözleşme Sayıları" years={data.years} byYear={data.sozlesmeByYear} format={(n) => n.toLocaleString("tr-TR")} />
+            {/* ── Aktif İlan Sayısı (aylık, portföye eklenen yeni ilan; ilan kayıtlarından otomatik) ── */}
+            <MonthTable title="Aktif İlan Sayısı" years={data.years} byYear={data.sozlesmeByYear} format={(n) => n.toLocaleString("tr-TR")} />
+
+            {/* ── Alınan Sözleşme Sayıları (aylık, bu ekrandan elle girilir) ── */}
+            <ContractCountTable employeeId={employeeId} years={data.years} />
 
             {/* ── Yıllık satılık ve kiralık özet ── */}
             <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
