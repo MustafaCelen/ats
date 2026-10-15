@@ -246,6 +246,13 @@ export default function CandidateDetail() {
   // Fonzip borcu (admin): aday aynı zamanda danışmansa Borç sekmesi + çalışan kartında özet.
   const canSeeBorc = !!employeeRecord && user?.role === "admin";
   const { data: fonzipDebt } = useEmployeeFonzipDebt(employeeRecord?.id, canSeeBorc);
+  // Adayın geldiği kampanya (aday eklerken seçilen / Meta-Google Form ile otomatik bağlanan)
+  const { data: campaignsList = [] } = useQuery<{ id: number; name: string; platform?: string; status: string }[]>({
+    queryKey: ["/api/campaigns"],
+    queryFn: () => fetch("/api/campaigns", { credentials: "include" }).then((r) => (r.ok ? r.json() : [])),
+    staleTime: 60_000,
+  });
+  const candidateCampaign = campaignsList.find((c) => c.id === (candidate as any)?.campaignId);
   const canSeeIslemler = !!employeeRecord && (
     user?.role !== "hiring_manager" ||
     employeeRecord.uretkenlikKocluguManagerId === user.id ||
@@ -755,9 +762,19 @@ export default function CandidateDetail() {
                 </div>
               )}
 
-              {(candidate.referredBy || candidate.socialMedia) && (
+              {(candidate.referredBy || candidate.socialMedia || (candidate as any).campaignId) && (
                 <div className="rounded-xl border border-border bg-card p-5 shadow-sm space-y-3">
                   <h2 className="text-sm font-semibold flex items-center gap-2"><Users className="h-4 w-4 text-primary" />Diğer</h2>
+                  {(candidate as any).campaignId && (
+                    <InfoRow icon={<Users className="h-3.5 w-3.5" />} label="Kampanya">
+                      {candidateCampaign ? <Link href={`/campaigns/${candidateCampaign.id}`} className="text-primary hover:underline">{candidateCampaign.name}</Link> : `#${(candidate as any).campaignId}`}
+                      {candidateCampaign?.platform && (
+                        <span className="ml-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded bg-muted ring-1 ring-border">
+                          {candidateCampaign.platform === "meta" ? "Sosyal medya" : candidateCampaign.platform === "google_forms" ? "Google Form" : "Manuel"}
+                        </span>
+                      )}
+                    </InfoRow>
+                  )}
                   {candidate.referredBy && (
                     <InfoRow icon={<Users className="h-3.5 w-3.5" />} label="Referans">
                       {candidate.referredBy}
@@ -1492,6 +1509,12 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
     socialMedia: candidate.socialMedia ?? "",
     resumeText: candidate.resumeText ?? "",
     expectedStartMonth: candidate.expectedStartMonth ?? "",
+    campaignId: (candidate as any).campaignId ? String((candidate as any).campaignId) : "",
+  });
+  const { data: editCampaigns = [] } = useQuery<{ id: number; name: string; status: string }[]>({
+    queryKey: ["/api/campaigns"],
+    queryFn: () => fetch("/api/campaigns", { credentials: "include" }).then((r) => (r.ok ? r.json() : [])),
+    staleTime: 60_000,
   });
   const [specialization, setSpecialization] = useState<string[]>(candidate.specialization ?? []);
   const [languages, setLanguages] = useState<string[]>(candidate.languages ?? []);
@@ -1538,6 +1561,7 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
         referredBy: form.referredBy || undefined,
         referredByEmployeeId: ref.employeeId,
         referralExternal: ref.external,
+        campaignId: form.campaignId ? Number(form.campaignId) : null,
         socialMedia: form.socialMedia || undefined,
         resumeText: form.resumeText || undefined,
         expectedStartMonth: form.expectedStartMonth || undefined,
@@ -1681,6 +1705,17 @@ function EditCandidateDialog({ candidate, employeeRecord, open, onOpenChange }: 
             <div className="grid grid-cols-2 gap-3">
               <Field label="Beklenen Başlangıç Ayı">
                 <Input type="month" value={form.expectedStartMonth} onChange={(e) => f("expectedStartMonth", e.target.value)} data-testid="input-edit-expected-start-month" />
+              </Field>
+              <Field label="Kampanya (geldiği kaynak)">
+                <Select value={form.campaignId || "none"} onValueChange={(v) => f("campaignId", v === "none" ? "" : v)}>
+                  <SelectTrigger><SelectValue placeholder="Kampanya seçin (opsiyonel)..." /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">— Yok —</SelectItem>
+                    {editCampaigns
+                      .filter((c) => c.status !== "ended" || String(c.id) === form.campaignId)
+                      .map((c) => <SelectItem key={c.id} value={String(c.id)}>{c.name}{c.status === "ended" ? " (bitti)" : ""}</SelectItem>)}
+                  </SelectContent>
+                </Select>
               </Field>
               <Field label="Referans (kim tanıttı?)">
                 <ReferralField

@@ -187,6 +187,13 @@ export function EmployeeEditDialog({ emp, open, onOpenChange }: Props) {
   // ── 8. Diğer ──
   const [referredBy, setReferredBy] = useState<string>(c.referredBy ?? "");
   const [resumeText, setResumeText] = useState<string>(c.resumeText ?? "");
+  // Geldiği kampanya (aday eklerken seçilen / otomatik bağlanan) — danışman olsa da düzenlenebilir
+  const [campaignId, setCampaignId] = useState<string>(c.campaignId ? String(c.campaignId) : "");
+  const { data: campaignsList = [] } = useQuery<{ id: number; name: string; status: string }[]>({
+    queryKey: ["/api/campaigns"],
+    queryFn: () => fetch("/api/campaigns", { credentials: "include" }).then((r) => (r.ok ? r.json() : [])),
+    staleTime: 60_000,
+  });
 
   const handleSave = () => {
     if (!name.trim()) {
@@ -252,6 +259,7 @@ export function EmployeeEditDialog({ emp, open, onOpenChange }: Props) {
           specialization,
           languages,
           referredBy: referredBy || undefined,
+          campaignId: campaignId ? Number(campaignId) : null,
           resumeText: resumeText || undefined,
         },
       },
@@ -603,6 +611,17 @@ export function EmployeeEditDialog({ emp, open, onOpenChange }: Props) {
             <div className="grid grid-cols-2 gap-3">
               <Field label="Referans (kim tanıttı?)">
                 <Input value={referredBy} onChange={(e) => setReferredBy(e.target.value)} placeholder="Ad Soyad veya kaynak" />
+              </Field>
+              <Field label="Kampanya (geldiği kaynak)">
+                <Select value={campaignId || "none"} onValueChange={(v) => setCampaignId(v === "none" ? "" : v)}>
+                  <SelectTrigger><SelectValue placeholder="Kampanya seçin (opsiyonel)..." /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">— Yok —</SelectItem>
+                    {campaignsList
+                      .filter((k) => k.status !== "ended" || String(k.id) === campaignId)
+                      .map((k) => <SelectItem key={k.id} value={String(k.id)}>{k.name}{k.status === "ended" ? " (bitti)" : ""}</SelectItem>)}
+                  </SelectContent>
+                </Select>
               </Field>
               <div className="col-span-2">
                 <Field label="Notlar / Özet">
