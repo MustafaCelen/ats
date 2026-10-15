@@ -143,6 +143,7 @@ const assistantNavItems: NavEntry[] = [
   { icon: UserCheck,     label: "Danışmanlar",    href: "/employees"  },
   { icon: Calendar,      label: "Randevular",     href: "/interviews" },
   { icon: KanbanSquare,  label: "Onboarding",     href: "/onboarding" },
+  { icon: Megaphone,     label: "Kampanyalar",    href: "/campaigns" },
   { icon: Target,        label: "Lead Takibi",    href: "/lead-tracking" },
   { icon: UserPlus,      label: "ÜK Giriş/Çıkış", href: "/uk-entry-exit" },
   { icon: RouteIcon,     label: "45+45 Başarı Rotası", href: "/uk-basari-rotasi" },

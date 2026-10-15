@@ -3528,7 +3528,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     } catch (err: any) { console.error("[GET /api/campaigns/:id]", err); res.status(500).json({ message: err.message }); }
   });
 
-  app.post("/api/campaigns", requireAuth, requireAdmin, async (req, res) => {
+  // Kampanya oluşturma tüm personele açık (2026-10-15); düzenleme/silme/masraf admin.
+  app.post("/api/campaigns", requireAuth, async (req, res) => {
     try {
       const { name, description, status, startDate, endDate } = req.body ?? {};
       if (!name || !String(name).trim()) return res.status(400).json({ message: "Kampanya adı gerekli" });

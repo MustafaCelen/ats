@@ -153,9 +153,8 @@ export default function Campaigns() {
               Pazarlama / işe alım kampanyaları — lead ve masraf takibi
             </p>
           </div>
-          {isAdmin && (
-            <div className="flex items-center gap-2">
-              {metaStatus?.configured && (
+          <div className="flex items-center gap-2">
+              {isAdmin && metaStatus?.configured && (
                 <>
                   <Button variant="outline" onClick={() => metaSync.mutate()} disabled={metaSync.isPending} className="gap-1.5" title="Meta kampanyalarını ve harcamalarını senkronla">
                     <RefreshCw className={`h-4 w-4 ${metaSync.isPending ? "animate-spin" : ""}`} /> Meta Senkronla
@@ -182,7 +181,7 @@ export default function Campaigns() {
                   <RefreshCw className={`h-4 w-4 ${googleFormsSync.isPending ? "animate-spin" : ""}`} /> Google Form Lead'lerini Senkronla
                 </Button>
               )}
-              <Button
+              {isAdmin && <Button
                 variant="outline"
                 onClick={() => relinkOrphans.mutate()}
                 disabled={relinkOrphans.isPending}
@@ -190,12 +189,11 @@ export default function Campaigns() {
                 title="Kampanya bağlantısı boş kalmış (Lead Takip'te görünmeyen) geçmiş lead'leri yeniden bağla"
               >
                 <Link2 className={`h-4 w-4 ${relinkOrphans.isPending ? "animate-spin" : ""}`} /> Kopan Lead'leri Bağla
-              </Button>
+              </Button>}
               <Button onClick={() => setCreateOpen(true)} className="gap-1.5">
                 <Plus className="h-4 w-4" /> Yeni Kampanya
               </Button>
-            </div>
-          )}
+          </div>
         </div>
 
         {/* Özet kartları */}
@@ -234,7 +232,7 @@ export default function Campaigns() {
             <CardContent className="flex flex-col items-center justify-center py-12 text-muted-foreground gap-3">
               <Megaphone className="h-8 w-8 opacity-30" />
               <p className="text-sm">Henüz kampanya eklenmedi.</p>
-              {isAdmin && (
+              {(
                 <Button size="sm" onClick={() => setCreateOpen(true)} className="gap-1.5">
                   <Plus className="h-4 w-4" /> İlk Kampanyayı Ekle
                 </Button>
