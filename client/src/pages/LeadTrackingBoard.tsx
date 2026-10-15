@@ -385,6 +385,25 @@ export default function LeadTrackingBoard() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [search, setSearch] = useState("");
+  // Kampanya (kaynak) filtresi: "social" = sosyal medya (Meta) kampanyaları, "all" = tüm
+  // kampanyalar, sayı = tek kampanya. Varsayılan sosyal medya; seçim hatırlanır.
+  const { data: campaigns = [] } = useQuery<{ id: number; name: string; platform: string; status: string }[]>({
+    queryKey: ["/api/campaigns"],
+    queryFn: () => fetch("/api/campaigns", { credentials: "include" }).then((r) => r.json()).then((d) => (Array.isArray(d) ? d : [])),
+    staleTime: 60_000,
+  });
+  const [campaignFilter, setCampaignFilter] = useState<string>(() => {
+    try { return localStorage.getItem("leadCampaignFilter") ?? "social"; } catch { return "social"; }
+  });
+  const changeCampaignFilter = (v: string) => { setCampaignFilter(v); try { localStorage.setItem("leadCampaignFilter", v); } catch {} };
+  const campaignById = useMemo(() => new Map(campaigns.map((c) => [c.id, c])), [campaigns]);
+  const matchesCampaign = (campaignId: number | null | undefined) => {
+    if (campaignId == null) return false;
+    if (campaignFilter === "all") return true;
+    if (campaignFilter === "social") return campaignById.get(campaignId)?.platform === "meta";
+    return String(campaignId) === campaignFilter;
+  };
+  const platformLabel = (pl?: string) => (pl === "meta" ? "Sosyal medya" : pl === "google_forms" ? "Google Form" : "Manuel");
   const [newLeadJobIds, setNewLeadJobIds] = useState<Record<number, string>>({});
   const [appointmentTarget, setAppointmentTarget] = useState<ApplicationWithRelations | null>(null);
   const [noteTarget, setNoteTarget] = useState<{ candidateId: number; candidateName: string; latestNote?: string | null } | null>(null);
@@ -408,7 +427,7 @@ export default function LeadTrackingBoard() {
   const boardApps = useMemo(() => {
     const query = search.trim().toLocaleLowerCase("tr-TR");
     return (allApplications ?? [])
-      .filter((application) => application.candidate?.campaignId != null)
+      .filter((application) => matchesCampaign(application.candidate?.campaignId))
       .filter((application) => {
         if (!query) return true;
         return [
@@ -420,20 +439,20 @@ export default function LeadTrackingBoard() {
         ].some((value) => value?.toLocaleLowerCase("tr-TR").includes(query));
       })
       .sort((a, b) => new Date(b.appliedAt ?? 0).getTime() - new Date(a.appliedAt ?? 0).getTime());
-  }, [allApplications, search]);
+  }, [allApplications, search, campaignFilter, campaignById]);
 
   const unassignedLeads = useMemo(() => {
     const assignedCandidateIds = new Set((allApplications ?? []).map((application) => application.candidateId));
     const query = search.trim().toLocaleLowerCase("tr-TR");
     return (allCandidates ?? [])
-      .filter((candidate) => candidate.campaignId != null && !assignedCandidateIds.has(candidate.id))
+      .filter((candidate) => matchesCampaign(candidate.campaignId) && !assignedCandidateIds.has(candidate.id))
       .filter((candidate) => {
         if (!query) return true;
         return [candidate.name, candidate.phone, candidate.city]
           .some((value) => value?.toLocaleLowerCase("tr-TR").includes(query));
       })
       .sort((a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime());
-  }, [allApplications, allCandidates, search]);
+  }, [allApplications, allCandidates, search, campaignFilter, campaignById]);
 
   type LeadRow =
     | { kind: "unassigned"; candidate: Candidate; application: null; sortKey: number }
@@ -572,6 +591,19 @@ export default function LeadTrackingBoard() {
                 <p className="text-sm text-slate-500">Randevu, üretim bandı ve ekip notlarını tek ekrandan takip edin</p>
               </div>
             </div>
+            <div className="flex w-full flex-col gap-2 sm:flex-row lg:w-auto">
+            <select
+              value={campaignFilter}
+              onChange={(e) => changeCampaignFilter(e.target.value)}
+              aria-label="Kampanya filtresi"
+              className="h-10 rounded-md border border-white/80 bg-white px-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-300 lg:w-64"
+            >
+              <option value="social">Sosyal medya kampanyaları</option>
+              <option value="all">Tüm kampanyalar</option>
+              {campaigns.map((c) => (
+                <option key={c.id} value={String(c.id)}>{c.name} · {platformLabel(c.platform)}{c.status !== "active" ? " (pasif)" : ""}</option>
+              ))}
+            </select>
             <div className="relative w-full lg:w-80">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <Input
@@ -580,6 +612,7 @@ export default function LeadTrackingBoard() {
                 placeholder="Lead, telefon, şehir veya not ara..."
                 className="border-white/80 bg-white pl-9 shadow-sm"
               />
+            </div>
             </div>
           </div>
           <div className="grid grid-cols-3 border-t border-violet-100/80 bg-white/65">
@@ -661,7 +694,7 @@ export default function LeadTrackingBoard() {
                               <ExternalLink className="h-3 w-3 shrink-0 text-slate-400" />
                             </span>
                             <span className="mt-0.5 block text-[11px] text-slate-500">
-                              {[candidate?.city, formatDate(application ? application.appliedAt : candidate?.createdAt)].filter(Boolean).join(" · ")}
+                              {[candidate?.city, formatDate(application ? application.appliedAt : candidate?.createdAt), campaignById.get(candidate?.campaignId ?? -1)?.name].filter(Boolean).join(" · ")}
                             </span>
                           </span>
                         </Link>
