@@ -209,7 +209,7 @@ async function buildProgram(p: Participant) {
 // Danışman kendi linkinden Google ile giriş yapar (session.advisorEmployeeIds, bkz.
 // routes.ts authedAdvisor). Yalnızca kendi rotasını görür/doldurur:
 // - koçun onayladığı hafta kilitlidir,
-// - henüz gelmemiş günlerin aktiviteleri işaretlenemez,
+// - içinde bulunulan haftanın tüm günleri (gelecek günler dahil) işaretlenebilir (2026-10-19),
 // - koç notu / onay / program başlangıcı danışmana kapalıdır.
 // write=true: personel önizlemesi (advisorPreviewIds) salt okunurdur → 403.
 async function advisorParticipant(req: Request, res: Response, write = false): Promise<Participant | null> {
@@ -289,8 +289,6 @@ function registerAdvisorUkRoutes(app: Express) {
       if (!p.programStart) return res.status(409).json({ message: "Program başlangıç tarihi tanımlı değil, koçunuzla görüşün." });
       const weekErr = advisorWeekError(p.programStart, activity.week);
       if (weekErr) return res.status(409).json({ message: weekErr });
-      const date = ukAddDays(ukProgramWeek1Monday(p.programStart), (activity.week - 1) * 7 + activity.day);
-      if (date > todayYmd()) return res.status(409).json({ message: "Henüz gelmemiş bir günün aktivitesi işaretlenemez." });
       if (await isWeekConfirmed(p.employeeId, activity.week)) {
         return res.status(409).json({ message: "Bu hafta koçunuz tarafından onaylandı; değişiklik için koçunuzla görüşün." });
       }

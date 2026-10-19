@@ -290,7 +290,7 @@ function WeekView({ token, data, week, onToggle, onSaved, readOnly = false, view
             week1Monday={data.week1Monday}
             today={data.today}
             checks={data.checks}
-            canToggle={(_a, date) => !readOnly && !locked && !!date && date <= data.today}
+            canToggle={(_a, date) => !readOnly && !locked && !!date}
             onToggle={onToggle}
           />
         </>
@@ -299,7 +299,7 @@ function WeekView({ token, data, week, onToggle, onSaved, readOnly = false, view
       {view === "liste" && UK_DAYS.map((dayName, d) => {
         const date = monday ? ukAddDays(monday, d) : null;
         const isToday = date === data.today;
-        const future = !date || date > data.today;
+        const future = !date;   // haftanın tüm günleri açık; yalnız tarihsiz durumda kapalı
         const dayActs = acts.filter((a) => a.day === d).sort((a, b) => a.from - b.from);
         const dayDone = dayActs.filter((a) => data.checks[a.id]).length;
         return (

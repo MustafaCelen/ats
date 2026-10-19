@@ -45,15 +45,12 @@ test("kutucuk işaretle / kaldır (danışman adına kaydedilir)", async ({ page
   await expect(page.getByTestId("uk-act-w2-d0-r0")).toHaveAttribute("data-done", "0");
 });
 
-test("gelecek günler kapalı, geçmiş/bugün açık", async ({ page }) => {
+test("haftanın tüm günleri açık (gelecek günler dahil), başka hafta kapalı", async ({ page }) => {
   await openRota(page);
-  const today = todayIst();
-  for (let d = 0; d < 5; d++) {
-    const date = ukAddDays(thisMonday(), d);
-    const btn = page.getByTestId(`uk-act-w2-d${d}-r0`);
-    if (date > today) await expect(btn, `${date} gelecek`).toBeDisabled();
-    else await expect(btn, `${date} geçmiş/bugün`).toBeEnabled();
-  }
+  for (let d = 0; d < 5; d++) await expect(page.getByTestId(`uk-act-w2-d${d}-r0`), `gün ${d}`).toBeEnabled();
+  // Haftanın son günü (cuma) sunucuda da işaretlenebilir
+  const fri = await page.request.put(`/api/public/advisor/${a.token}/uk-program/checks/w2-d4-r0`, { data: { done: true } });
+  expect(fri.ok()).toBeTruthy();
   // Sunucu da gelecek günü ve başka haftayı reddeder
   const otherWeek = await page.request.put(`/api/public/advisor/${a.token}/uk-program/checks/w1-d0-r0`, { data: { done: true } });
   expect(otherWeek.status()).toBeGreaterThanOrEqual(400);
