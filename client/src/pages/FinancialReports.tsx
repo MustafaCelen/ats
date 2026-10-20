@@ -184,18 +184,6 @@ function AvgDurationCard({
 }
 
 // ── Hooks ─────────────────────────────────────────────────────────────────────
-function useCapStatuses() {
-  return useQuery<Record<string, any>>({
-    queryKey: ["/api/employees/cap-statuses"],
-    queryFn: async () => {
-      const res = await fetch("/api/employees/cap-statuses", { credentials: "include" });
-      if (!res.ok) throw new Error("Failed");
-      return res.json();
-    },
-    staleTime: 5 * 60 * 1000,
-  });
-}
-
 function useClosingStats(startDate: string, endDate: string, office?: string, dealCategory?: string, dealType?: string, employeeIds?: number[]) {
   return useQuery<any>({
     queryKey: ["/api/closings/stats", startDate, endDate, office ?? "all", dealCategory ?? "all", dealType ?? "all", employeeIds?.join(",") ?? ""],
@@ -437,7 +425,7 @@ function EntryExitList({ startDate, endDate, office }: { startDate: string; endD
           {entries.length === 0 ? (
             <p className="text-xs text-muted-foreground/50 italic">Bu dönemde giriş yok</p>
           ) : (
-            <ul className="space-y-1">
+            <ul className="space-y-1 max-h-72 overflow-y-auto pr-1">
               {entries.map(e => (
                 <li key={e.employeeId} className="flex items-center justify-between text-xs">
                   <span className="truncate">{e.name}</span>
@@ -452,7 +440,7 @@ function EntryExitList({ startDate, endDate, office }: { startDate: string; endD
           {exits.length === 0 ? (
             <p className="text-xs text-muted-foreground/50 italic">Bu dönemde çıkış yok</p>
           ) : (
-            <ul className="space-y-1">
+            <ul className="space-y-1 max-h-72 overflow-y-auto pr-1">
               {exits.map(e => (
                 <li key={e.employeeId} className="flex items-center justify-between text-xs">
                   <span className="truncate">{e.name}</span>
@@ -680,7 +668,6 @@ export default function FinancialReports() {
   }, [computedEnd]);
   const { data: prevStats } = useClosingStats(prevYearStart, prevYearEnd, officeFilter, categoryFilter, dealTypeFilter, ukEmployeeIds);
 
-  const { data: capStatuses = {} } = useCapStatuses();
 
   // ── Randevu (interview) queries ─────────────────────────────────────────────
   const { data: allInterviews = [] } = useQuery<any[]>({
@@ -770,60 +757,7 @@ export default function FinancialReports() {
     return rows;
   }, [stats?.byAgent, agentSort]);
 
-  const capList = useMemo(() => {
-    const ukSet = ukEmployeeIds ? new Set(ukEmployeeIds) : null;
-    return Object.values(capStatuses as Record<string, any>)
-      .filter((s: any) => s.capAmount !== null)
-      .filter((s: any) => !ukSet || ukSet.has(s.employeeId))
-      .map((s: any) => ({
-        ...s,
-        pct: s.capAmount > 0 ? Math.min(100, Math.round((s.capUsed / s.capAmount) * 100)) : 0,
-      }))
-      .sort((a: any, b: any) => b.pct - a.pct);
-  }, [capStatuses, ukEmployeeIds]);
-
-  const cappers       = capList.filter((s: any) => s.pct >= 100);
-  const almostCappers = capList.filter((s: any) => s.pct >= 75 && s.pct < 100);
-
-  const probableCappers = useMemo(() => {
-    const today = new Date();
-    return capList.filter((s: any) => {
-      if (s.pct >= 75 || !s.periodStart || s.capAmount <= 0) return false;
-      const start = new Date(s.periodStart);
-      const monthsElapsed = (today.getFullYear() - start.getFullYear()) * 12 + (today.getMonth() - start.getMonth());
-      if (monthsElapsed <= 0) return false;
-      const monthsRemaining = 12 - monthsElapsed;
-      if (monthsRemaining <= 0) return false;
-      const ratePerMonth = s.capUsed / monthsElapsed;
-      const projected = s.capUsed + ratePerMonth * monthsRemaining;
-      return projected >= s.capAmount;
-    });
-  }, [capList]);
-
   const MONTH_NAMES_TR = ["Oca", "Şub", "Mar", "Nis", "May", "Haz", "Tem", "Ağu", "Eyl", "Eki", "Kas", "Ara"];
-  const capResetMonth = (s: any): string | null => {
-    if (!s.periodStart) return null;
-    return MONTH_NAMES_TR[new Date(s.periodStart).getMonth()];
-  };
-
-  // Group productive + probable agents by their reset month (0-indexed)
-  const resetByMonth = useMemo(() => {
-    const map: Record<number, any[]> = {};
-    for (let i = 0; i < 12; i++) map[i] = [];
-    const currentMonthIdx = new Date().getMonth();
-    const productiveSet = new Set([...cappers, ...almostCappers, ...probableCappers].map((s: any) => s.employeeId));
-    for (const s of capList) {
-      if (!s.periodStart) continue;
-      const resetMonth = new Date(s.periodStart).getMonth();
-      const isCurrentMonthReset = resetMonth === currentMonthIdx;
-      const prevPct = s.capAmount > 0 ? (s.prevCapUsed ?? 0) / s.capAmount * 100 : 0;
-      if (productiveSet.has(s.employeeId) || (isCurrentMonthReset && prevPct >= 75)) {
-        map[resetMonth].push(s);
-      }
-    }
-    return map;
-  }, [capList, cappers, almostCappers, probableCappers]);
-
   const fmtMonthKey = (key: string) => {
     const [y, m] = key.split("-");
     return format(new Date(+y, +m - 1, 1), "MMM yy", { locale: tr });
@@ -1105,7 +1039,7 @@ export default function FinancialReports() {
         </div>
 
 
-        {/* ── Özet (aylık BHB / BM Payı) ── */}
+        {/* ── Özet (aylık BHB / Şirket Parası) ── */}
         <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
           <div className="px-5 py-3 border-b border-border flex items-center gap-2">
             <Target className="h-4 w-4 text-primary" />
@@ -1129,7 +1063,7 @@ export default function FinancialReports() {
               <tr className="border-b border-border bg-muted/40 text-xs text-muted-foreground [&_th]:py-2 [&_th]:px-4">
                 <SortTh label="Ay" sortKey="month" sort={sort} onSort={toggle} />
                 <SortTh label="BHB" sortKey="bhb" sort={sort} onSort={toggle} align="right" firstDir="desc" />
-                <SortTh label="BM Payı" sortKey="bm" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                <SortTh label="Şirket Parası" sortKey="bm" sort={sort} onSort={toggle} align="right" firstDir="desc" />
               </tr>
             </thead>
             <tbody>
@@ -1161,7 +1095,7 @@ export default function FinancialReports() {
           />
           <MetricCard
             icon={Users} color="bg-purple-50 text-purple-600"
-            label="BM Geliri (Ofis)"
+            label="Şirket Parası (Ofis)"
             value={stats ? fmtTRY(stats.completedBM) : "—"}
             sub={stats?.expectedBM ? `+ ${fmtTRY(stats.expectedBM)} beklenen` : undefined}
             yoy={yoyDelta?.bm}
@@ -1256,7 +1190,7 @@ export default function FinancialReports() {
                   <Tooltip content={<TRYTooltip />} />
                   <Legend iconSize={10} wrapperStyle={{ fontSize: 10 }} />
                   {showPrevYear && <Bar dataKey="prevBm" name="Geçen Yıl BM" fill="#c4b5fd" fillOpacity={0.6} radius={[3, 3, 0, 0]} />}
-                  <Bar dataKey="bm" name="BM Geliri" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="bm" name="Şirket Parası" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
                   {showReelTarget   && <Line type="monotone" dataKey="bmTarget"     name="BM Forecast"    stroke="#8b5cf6" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#8b5cf6" }} connectNulls={false} />}
                   {showYuksekTarget && <Line type="monotone" dataKey="bmHighTarget" name="BM Re-Forecast"  stroke="#f59e0b" strokeWidth={2} strokeDasharray="7 3" dot={{ r: 2.5, fill: "#f59e0b" }} connectNulls={false} />}
                 </ComposedChart>
@@ -1367,7 +1301,7 @@ export default function FinancialReports() {
                   <XAxis dataKey="category" tick={{ fontSize: 11 }} />
                   <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
                   <Tooltip content={<CountTooltip />} />
-                  <Bar dataKey="count" name="Kapanış" radius={[4, 4, 0, 0]} barSize={40}>
+                  <Bar dataKey="count" name="İşlem Adedi" radius={[4, 4, 0, 0]} barSize={40}>
                     {byCategory.map((_: any, i: number) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
                   </Bar>
                 </BarChart>
@@ -1470,10 +1404,10 @@ export default function FinancialReports() {
             { key: "#",    label: "#",            align: "left"  },
             { key: "name", label: "Danışman",     align: "left"  },
             { key: "kwuid",label: "KWUID",        align: "left"  },
-            { key: "count",label: "Kapanış",      align: "right" },
+            { key: "count",label: "İşlem Adedi",  align: "right" },
             { key: "bhb",  label: "BHB",          align: "right" },
-            { key: "bm",   label: "BM Payı",      align: "right" },
-            { key: "bhbpc",label: "BHB/Kapanış",  align: "right" },
+            { key: "bm",   label: "Şirket Parası",align: "right" },
+            { key: "bhbpc",label: "BHB/İşlem",    align: "right" },
           ];
           const handleAgentSort = (key: string) => {
             if (key === "#") return;
@@ -1509,23 +1443,23 @@ export default function FinancialReports() {
                           <span className="text-xs text-muted-foreground">{a.kwuid || "—"}</span>
                         </div>
                         <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                          <div><span className="text-muted-foreground">Kapanış: </span>{a.count}</div>
+                          <div><span className="text-muted-foreground">İşlem Adedi: </span>{a.count}</div>
                           <div><span className="text-muted-foreground">Ort. BHB: </span>{a.count > 0 ? fmtTRY(a.bhb / a.count) : "—"}</div>
                           <div><span className="text-muted-foreground">BHB: </span><span className="font-medium">{fmtTRY(a.bhb)}</span></div>
-                          <div><span className="text-muted-foreground">BM: </span><span className="text-blue-700">{fmtTRY(a.bm)}</span></div>
+                          <div><span className="text-muted-foreground">Şirket Parası: </span><span className="text-blue-700">{fmtTRY(a.bm)}</span></div>
                         </div>
                       </div>
                     ))}
                     <div className="p-4 bg-muted/30 text-xs font-semibold grid grid-cols-2 gap-x-4 gap-y-1">
-                      <div>Toplam kapanış: {(stats?.byAgent ?? []).reduce((s: number, a: any) => s + a.count, 0)}</div>
+                      <div>Toplam işlem adedi: {(stats?.byAgent ?? []).reduce((s: number, a: any) => s + a.count, 0)}</div>
                       <div>BHB: {fmtTRY((stats?.byAgent ?? []).reduce((s: number, a: any) => s + a.bhb, 0))}</div>
-                      <div>BM: <span className="text-blue-700">{fmtTRY((stats?.byAgent ?? []).reduce((s: number, a: any) => s + a.bm, 0))}</span></div>
+                      <div>Şirket Parası: <span className="text-blue-700">{fmtTRY((stats?.byAgent ?? []).reduce((s: number, a: any) => s + a.bm, 0))}</span></div>
                     </div>
                   </div>
-                  {/* Desktop table */}
-                  <div className="hidden md:block overflow-x-auto">
+                  {/* Desktop table — sabit yükseklik, başlık yapışkan, kendi içinde kayar */}
+                  <div className="hidden md:block overflow-auto max-h-[520px]">
                     <table className="w-full text-sm">
-                      <thead>
+                      <thead className="sticky top-0 z-10">
                         <tr className="bg-muted/40 border-b border-border">
                           {agentCols.map((col) => (
                             // Ortak sıralanabilir başlık (SortTh); "#" sıra numarası sıralanmaz
@@ -1598,17 +1532,17 @@ export default function FinancialReports() {
                 return <div className="p-10 text-center text-sm text-muted-foreground">Bu dönem için takım verisi yok</div>;
               }
               return (
-                <div className="overflow-x-auto">
+                <div className="overflow-auto max-h-[520px]">
                   <SortableRows rows={teamRows} initial={{ key: "bhb", dir: "desc" }}>{({ sorted, sort, toggle }) => (
                   <table className="w-full text-sm [&_td]:whitespace-nowrap">
-                    <thead>
+                    <thead className="sticky top-0 z-10">
                       <tr className="bg-muted/40 border-b border-border text-xs text-muted-foreground [&_th]:py-2 [&_th]:px-4">
                         <SortTh label="Takım" sortKey="name" sort={sort} onSort={toggle} />
                         <SortTh label="Üye" sortKey="memberCount" sort={sort} onSort={toggle} align="right" firstDir="desc" />
                         <SortTh label="Üreten" sortKey="activeCount" sort={sort} onSort={toggle} align="right" firstDir="desc" />
-                        <SortTh label="Kapanış" sortKey="count" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                        <SortTh label="İşlem Adedi" sortKey="count" sort={sort} onSort={toggle} align="right" firstDir="desc" />
                         <SortTh label="BHB Toplam" sortKey="bhb" sort={sort} onSort={toggle} align="right" firstDir="desc" />
-                        <SortTh label="BM Toplam" sortKey="bm" sort={sort} onSort={toggle} align="right" firstDir="desc" />
+                        <SortTh label="Şirket Parası" sortKey="bm" sort={sort} onSort={toggle} align="right" firstDir="desc" />
                         <SortTh label="Net Toplam" sortKey="net" sort={sort} onSort={toggle} align="right" firstDir="desc" />
                       </tr>
                     </thead>
@@ -1667,10 +1601,10 @@ export default function FinancialReports() {
                     <li key={p.employeeId} className="px-5 py-2.5 flex items-center gap-3 text-sm hover-elevate transition-colors">
                       <span className="font-medium flex-1 truncate">{p.name}</span>
                       {p.bhb > 0 && (
-                        <span className="text-xs font-medium text-emerald-600 tabular-nums" title="BHB Payı">{fmtTRY(p.bhb)}</span>
+                        <span className="text-xs font-medium text-emerald-600 tabular-nums" title="BHB">{fmtTRY(p.bhb)}</span>
                       )}
                       {p.bm > 0 && (
-                        <span className="text-xs font-medium text-blue-600 tabular-nums" title="BM Payı">{fmtTRY(p.bm)}</span>
+                        <span className="text-xs font-medium text-blue-600 tabular-nums" title="Şirket Parası">{fmtTRY(p.bm)}</span>
                       )}
                       <span className="text-xs text-muted-foreground tabular-nums">
                         {format(new Date(p.firstDate), "d MMM yyyy", { locale: tr })}
@@ -1715,145 +1649,7 @@ export default function FinancialReports() {
           </div>
         </div>
 
-        {/* ── Cap Reset Calendar ── */}
-        <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-          <div className="px-5 py-4 border-b border-border">
-            <h2 className="text-base font-semibold">Cap Yenileme Takvimi</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">Her danışmanın cap döneminin başladığı ay</p>
-          </div>
-          <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 divide-x divide-y divide-border/50">
-            {["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"].map((monthName, i) => {
-              const agents = resetByMonth[i] ?? [];
-              const now = new Date();
-              const isCurrentMonth = i === now.getMonth();
-              return (
-                <div key={i} className={`p-3 min-h-[110px] ${isCurrentMonth ? "bg-blue-50/60 dark:bg-blue-950/20" : ""}`}>
-                  <div className={`text-xs font-semibold mb-2 ${isCurrentMonth ? "text-blue-600" : "text-muted-foreground"}`}>
-                    {monthName}
-                  </div>
-                  {agents.length === 0 ? (
-                    <div className="text-xs text-muted-foreground/50">—</div>
-                  ) : (
-                    <div className="space-y-1">
-                      {agents.map((s: any) => (
-                        <div key={s.employeeId} className="flex items-center gap-1">
-                          <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${s.pct >= 100 ? "bg-emerald-500" : s.pct >= 75 ? "bg-amber-500" : "bg-muted-foreground/40"}`} />
-                          <span className="text-xs truncate leading-tight">{s.name}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* ── Capper Lists ── */}
-        <div className="grid lg:grid-cols-2 gap-6">
-          {/* Current Cappers */}
-          <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-            <div className="px-5 py-4 border-b border-border flex items-center gap-2">
-              <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold">✓</span>
-              <h2 className="text-base font-semibold">Cap Yapanlar</h2>
-              <span className="ml-auto text-xs bg-emerald-100 text-emerald-700 font-semibold px-2 py-0.5 rounded-full">{cappers.length} danışman</span>
-            </div>
-            {cappers.length === 0 ? (
-              <div className="p-8 text-center text-sm text-muted-foreground">Henüz cap yapan danışman yok</div>
-            ) : (
-              <div className="divide-y divide-border/50">
-                {cappers.map((s: any) => (
-                  <div key={s.employeeId} className="px-5 py-3 flex items-center gap-3">
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-sm truncate">{s.name}</div>
-                      <div className="text-xs text-muted-foreground">{s.kwuid || "—"}</div>
-                    </div>
-                    {capResetMonth(s) && (
-                      <span className="text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full shrink-0">{capResetMonth(s)}</span>
-                    )}
-                    <div className="text-right shrink-0">
-                      <div className="text-xs font-semibold text-emerald-600">{fmtTRY(s.capUsed)} / {fmtTRY(s.capAmount)}</div>
-                      <div className="text-xs text-muted-foreground">{s.pct}% kullanıldı</div>
-                    </div>
-                    <div className="w-2 h-8 rounded-full bg-emerald-500 shrink-0" />
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Almost Cappers */}
-          <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-            <div className="px-5 py-4 border-b border-border flex items-center gap-2">
-              <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-100 text-amber-700 text-xs font-bold">!</span>
-              <h2 className="text-base font-semibold">Cap'e Yaklaşanlar</h2>
-              <span className="ml-auto text-xs bg-amber-100 text-amber-700 font-semibold px-2 py-0.5 rounded-full">{almostCappers.length} danışman</span>
-            </div>
-            {almostCappers.length === 0 ? (
-              <div className="p-8 text-center text-sm text-muted-foreground">75% eşiğinde danışman yok</div>
-            ) : (
-              <div className="divide-y divide-border/50">
-                {almostCappers.map((s: any) => (
-                  <div key={s.employeeId} className="px-5 py-3 flex items-center gap-3">
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-sm truncate">{s.name}</div>
-                      <div className="text-xs text-muted-foreground">{s.kwuid || "—"}</div>
-                    </div>
-                    {capResetMonth(s) && (
-                      <span className="text-xs bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full shrink-0">{capResetMonth(s)}</span>
-                    )}
-                    <div className="text-right shrink-0">
-                      <div className="text-xs font-semibold text-amber-600">{fmtTRY(s.capUsed)} / {fmtTRY(s.capAmount)}</div>
-                      <div className="text-xs text-muted-foreground">{fmtTRY(s.capRemaining ?? 0)} kaldı · {s.pct}%</div>
-                    </div>
-                    <div className="w-2 h-8 rounded-full shrink-0" style={{ backgroundColor: s.pct >= 90 ? "#f97316" : "#f59e0b" }} />
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Probable Cappers */}
-          <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-            <div className="px-5 py-4 border-b border-border flex items-center gap-2">
-              <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-700 text-xs font-bold">~</span>
-              <h2 className="text-base font-semibold">Cap Yapabilecekler</h2>
-              <span className="ml-auto text-xs bg-blue-100 text-blue-700 font-semibold px-2 py-0.5 rounded-full">{probableCappers.length} danışman</span>
-            </div>
-            {probableCappers.length === 0 ? (
-              <div className="p-8 text-center text-sm text-muted-foreground">Mevcut hızda cap yapabilecek danışman yok</div>
-            ) : (
-              <div className="divide-y divide-border/50">
-                {probableCappers.map((s: any) => {
-                  const today = new Date();
-                  const start = new Date(s.periodStart);
-                  const monthsElapsed = (today.getFullYear() - start.getFullYear()) * 12 + (today.getMonth() - start.getMonth());
-                  const monthsRemaining = 12 - monthsElapsed;
-                  const ratePerMonth = monthsElapsed > 0 ? s.capUsed / monthsElapsed : 0;
-                  const projected = s.capUsed + ratePerMonth * monthsRemaining;
-                  const projPct = s.capAmount > 0 ? Math.round((projected / s.capAmount) * 100) : 0;
-                  return (
-                    <div key={s.employeeId} className="px-5 py-3 flex items-center gap-3">
-                      <div className="flex-1 min-w-0">
-                        <div className="font-medium text-sm truncate">{s.name}</div>
-                        <div className="text-xs text-muted-foreground">{s.kwuid || "—"}</div>
-                      </div>
-                      {capResetMonth(s) && (
-                        <span className="text-xs bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full shrink-0">{capResetMonth(s)}</span>
-                      )}
-                      <div className="text-right shrink-0">
-                        <div className="text-xs font-semibold text-blue-600">{s.pct}% → proj. {projPct}%</div>
-                        <div className="text-xs text-muted-foreground">{fmtTRY(s.capUsed)} / {fmtTRY(s.capAmount)}</div>
-                      </div>
-                      <div className="w-2 h-8 rounded-full bg-blue-400 shrink-0" />
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-
+        {/* Cap Yenileme Takvimi ve capper listeleri Cap Analizi sayfasına taşındı (CapOverview) */}
       </div>
     </Layout>
   );

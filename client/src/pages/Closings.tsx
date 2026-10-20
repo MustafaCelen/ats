@@ -1,5 +1,6 @@
 import { SortTh, SortableRows } from "@/components/SortTh";
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { Link } from "wouter";
 import { Layout } from "@/components/Layout";
 import { EmployeePicker } from "@/components/EmployeePicker";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -921,7 +922,7 @@ function SideSection({
                         ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
                         : "bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100"
                     }`}
-                    title="BM payı tahsil edildi mi?"
+                    title="Şirket parası tahsil edildi mi?"
                   >
                     {agent.paymentCollected ? "💰 Tahsil Edildi" : "💸 Bekliyor"}
                   </button>
@@ -949,10 +950,10 @@ function SideSection({
                         </button>
                       </div>
                     </div>
-                    <BreakdownField label="BHB Payı" value={agent.bhbShare} onChange={(v) => updateField("bhbShare", v)} />
+                    <BreakdownField label="BHB" value={agent.bhbShare} onChange={(v) => updateField("bhbShare", v)} />
                     <BreakdownField label="KWTR (10%)" prefix=" " value={agent.mainBranchShare} onChange={(v) => updateField("mainBranchShare", v)} />
                     <BreakdownField label="KWTR + KDV (toplam)" prefix="−" value={agent.kwtrKdv} onChange={(v) => updateField("kwtrKdv", v)} />
-                    <BreakdownField label="BM (27%)" prefix="−" value={agent.marketCenterActual} onChange={(v) => updateField("marketCenterActual", v)} />
+                    <BreakdownField label="Şirket Parası (27%)" prefix="−" value={agent.marketCenterActual} onChange={(v) => updateField("marketCenterActual", v)} />
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-muted-foreground">BM KDV Oranı (% BM)</span>
                       <div className="flex items-center gap-1">
@@ -1068,7 +1069,7 @@ function SummaryTable({ rows }: { rows: SummaryRow[] }) {
             <TableHead className="text-xs text-right">Pay %</TableHead>
             <TableHead className="text-xs text-right">BHB</TableHead>
             <TableHead className="text-xs text-right">KWTR+KDV</TableHead>
-            <TableHead className="text-xs text-right">BM</TableHead>
+            <TableHead className="text-xs text-right">Şirket Parası</TableHead>
             <TableHead className="text-xs text-right text-amber-600">BM KDV</TableHead>
             <TableHead className="text-xs text-right">UK</TableHead>
             <TableHead className="text-xs text-right font-semibold">Toplam Tahsilat</TableHead>
@@ -2170,6 +2171,11 @@ export default function Closings() {
 
   const { data: closings = [], isLoading: closingsLoading } = useClosings();
   const { data: employees = [] } = useEmployees();
+  // Kapanış listesinde danışman adını profiline (aday kaydı) bağlamak için
+  const candidateIdByEmployee = useMemo(
+    () => new Map<number, number | null>(employees.map((e: any) => [e.id, e.candidate?.id ?? e.candidateId ?? null])),
+    [employees],
+  );
   const { data: capStatuses = {} } = useCapStatuses();
   const deleteClosing = useDeleteClosing();
 
@@ -3031,16 +3037,13 @@ export default function Closings() {
                 <tr className="border-b border-border bg-muted/40">
                   <th className="text-left text-xs font-medium text-muted-foreground py-2 px-4"></th>
                   <th className="text-right text-xs font-medium text-muted-foreground py-2 px-4">
-                    <span className="flex items-center justify-end gap-1"><Handshake className="h-3 w-3" />Kapanış</span>
-                  </th>
-                  <th className="text-right text-xs font-medium text-muted-foreground py-2 px-4">
-                    <span className="flex items-center justify-end gap-1"><TrendingUp className="h-3 w-3" />İşlem Hacmi</span>
+                    <span className="flex items-center justify-end gap-1"><Handshake className="h-3 w-3" />İşlem Adedi</span>
                   </th>
                   <th className="text-right text-xs font-medium text-muted-foreground py-2 px-4">
                     <span className="flex items-center justify-end gap-1"><DollarSign className="h-3 w-3" />BHB</span>
                   </th>
                   <th className="text-right text-xs font-medium text-muted-foreground py-2 px-4">
-                    <span className="flex items-center justify-end gap-1"><Users className="h-3 w-3" />BM Payı</span>
+                    <span className="flex items-center justify-end gap-1"><Users className="h-3 w-3" />Şirket Parası</span>
                   </th>
                 </tr>
               </thead>
@@ -3048,14 +3051,12 @@ export default function Closings() {
                 <tr className="border-b border-border/50">
                   <td className="py-2.5 px-4 text-xs font-medium whitespace-nowrap text-emerald-700">İşlem Kapanışı</td>
                   <td className="py-2.5 px-4 text-right font-semibold">{Math.round(completedSides)}</td>
-                  <td className="py-2.5 px-4 text-right font-semibold">{fmtTRY(completedVolume)}</td>
                   <td className="py-2.5 px-4 text-right font-semibold">{fmtTRY(completedBHB)}</td>
                   <td className="py-2.5 px-4 text-right font-semibold text-blue-700">{fmtTRY(completedBM)}</td>
                 </tr>
                 <tr className="border-b border-border/50">
                   <td className="py-2.5 px-4 text-xs font-medium whitespace-nowrap text-amber-600">GBHB / Bekleyen</td>
                   <td className="py-2.5 px-4 text-right text-amber-600 font-semibold">{Math.round(expectedSides)}</td>
-                  <td className="py-2.5 px-4 text-right text-amber-600 font-semibold">{fmtTRY(expectedVolume)}</td>
                   <td className="py-2.5 px-4 text-right text-amber-600 font-semibold">{fmtTRY(expectedBHB)}</td>
                   <td className="py-2.5 px-4 text-right text-amber-600 font-semibold">{fmtTRY(expectedBM)}</td>
                 </tr>
@@ -3064,21 +3065,18 @@ export default function Closings() {
                     Yaklaşık Projeksiyon <span className="text-muted-foreground font-normal">(Tamamlanan + Bekleyenin %80'i)</span>
                   </td>
                   <td className="py-2.5 px-4 text-right text-sky-700 font-semibold">{Math.round(completedSides + expectedSides * 0.8)}</td>
-                  <td className="py-2.5 px-4 text-right text-sky-700 font-semibold">{fmtTRY(completedVolume + expectedVolume * 0.8)}</td>
                   <td className="py-2.5 px-4 text-right text-sky-700 font-semibold">{fmtTRY(completedBHB + expectedBHB * 0.8)}</td>
                   <td className="py-2.5 px-4 text-right text-sky-700 font-semibold">{fmtTRY(completedBM + expectedBM * 0.8)}</td>
                 </tr>
                 <tr className="bg-muted/30">
                   <td className="py-2.5 px-4 text-xs font-semibold whitespace-nowrap">En İyi Senaryo</td>
                   <td className="py-2.5 px-4 text-right font-bold">{Math.round(completedSides + expectedSides)}</td>
-                  <td className="py-2.5 px-4 text-right font-bold">{fmtTRY(completedVolume + expectedVolume)}</td>
                   <td className="py-2.5 px-4 text-right font-bold">{fmtTRY(completedBHB + expectedBHB)}</td>
                   <td className="py-2.5 px-4 text-right font-bold text-blue-700">{fmtTRY(completedBM + expectedBM)}</td>
                 </tr>
                 {targetsSummary.hasAny && (
                   <tr className="border-t border-border/50">
-                    <td className="py-2.5 px-4 text-xs font-medium whitespace-nowrap text-muted-foreground">Hedefe Kalan</td>
-                    <td className="py-2.5 px-4 text-right text-muted-foreground">—</td>
+                    <td className="py-2.5 px-4 text-xs font-medium whitespace-nowrap text-muted-foreground">Hedefe Kalan <span className="font-normal">(gerçekleşen üzerinden)</span></td>
                     <td className="py-2.5 px-4 text-right text-muted-foreground">—</td>
                     <td className="py-2.5 px-4 text-right font-semibold">
                       {targetsSummary.bhb - completedBHB <= 0 ? (
@@ -3096,7 +3094,6 @@ export default function Closings() {
                       Reforecast Hedefi <span className="text-muted-foreground font-normal">({targetYear})</span>
                     </td>
                     <td className="py-2.5 px-4 text-right text-muted-foreground">—</td>
-                    <td className="py-2.5 px-4 text-right text-muted-foreground">—</td>
                     <td className="py-2.5 px-4 text-right font-semibold text-orange-600">{fmtTRY(targetsSummary.bhbHigh)}</td>
                     <td className="py-2.5 px-4 text-right font-semibold text-orange-600">{fmtTRY(targetsSummary.bmHigh)}</td>
                   </tr>
@@ -3104,7 +3101,6 @@ export default function Closings() {
                 <tr className="border-t border-border/50">
                   <td className="py-2.5 px-4 text-xs font-medium whitespace-nowrap text-muted-foreground">Geçen Yıl (Aynı Dönem)</td>
                   <td className="py-2.5 px-4 text-right text-muted-foreground">{Math.round(prevYearSides)}</td>
-                  <td className="py-2.5 px-4 text-right text-muted-foreground">{fmtTRY(prevYearVolume)}</td>
                   <td className="py-2.5 px-4 text-right text-muted-foreground">{fmtTRY(prevYearBHB)}</td>
                   <td className="py-2.5 px-4 text-right text-muted-foreground">{fmtTRY(prevYearBM)}</td>
                 </tr>
@@ -3388,7 +3384,11 @@ export default function Closings() {
                         </td>
                         <td className="px-2 py-1 whitespace-nowrap font-medium text-xs">
                           <div className="flex items-center gap-1">
-                            {row.employeeName}
+                            {candidateIdByEmployee.get(row.employeeId) ? (
+                              <Link href={`/candidates/${candidateIdByEmployee.get(row.employeeId)}`} className="hover:underline hover:text-primary" title="Danışman profilini aç">
+                                {row.employeeName}
+                              </Link>
+                            ) : row.employeeName}
                             {row.status === "expected" && (
                               <Badge className="text-[9px] px-1 py-0 bg-amber-100 text-amber-700 border-amber-200 border">Beklenen</Badge>
                             )}
@@ -3590,7 +3590,7 @@ function AgentCollectionDialog({ agentId, row, onClose }: {
           {/* Kasa = Banka + Nakit; her kalem kendi hedefine göre ayrı izlenir */}
           <div className="rounded-lg border border-border p-3 space-y-2">
             <div className="flex items-center justify-between text-xs">
-              <span className="text-muted-foreground">Kasa Toplamı (BM Alacağı)</span>
+              <span className="text-muted-foreground">Kasa Toplamı (Şirket Parası Alacağı)</span>
               <span className={`font-semibold ${allDone ? "text-emerald-600" : "text-foreground"}`}>
                 {fmtTRY(collected)} / {fmtTRY(receivable)}
               </span>

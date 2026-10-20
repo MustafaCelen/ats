@@ -125,7 +125,7 @@ function FinansalHedefEditor({ year }: { year: number }) {
             <tr className="bg-muted/40 border-b border-border">
               <th className="text-xs font-medium text-muted-foreground py-2 px-4 text-left w-16" rowSpan={2}>Ay</th>
               <th colSpan={2} className="text-xs font-medium text-muted-foreground py-1 px-2 text-center border-l border-border">BHB (₺)</th>
-              <th colSpan={2} className="text-xs font-medium text-muted-foreground py-1 px-2 text-center border-l border-border">BM Payı (₺)</th>
+              <th colSpan={2} className="text-xs font-medium text-muted-foreground py-1 px-2 text-center border-l border-border">Şirket Parası (₺)</th>
               <th colSpan={2} className="text-xs font-medium text-muted-foreground py-1 px-2 text-center border-l border-border">Satılık Adet</th>
               <th colSpan={2} className="text-xs font-medium text-muted-foreground py-1 px-2 text-center border-l border-border">Kiralık Adet</th>
               <th className="w-6" rowSpan={2}></th>

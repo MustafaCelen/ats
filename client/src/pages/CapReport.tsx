@@ -1,6 +1,7 @@
 import { SortTh, SortableRows } from "@/components/SortTh";
 import { useMemo } from "react";
 import { Layout } from "@/components/Layout";
+import { CapOverview } from "@/components/CapOverview";
 import { useQuery } from "@tanstack/react-query";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -348,6 +349,14 @@ export default function CapReport() {
             <YearSection year={2025} rows={rows2025} isLoading={isLoading} />
           </>
         )}
+
+        {/* ── Güncel cap durumu (Finansal Raporlar'dan taşındı) ── */}
+        <div className="border-t border-border pt-2" />
+        <div>
+          <h2 className="text-lg font-bold">Güncel Cap Durumu</h2>
+          <p className="text-sm text-muted-foreground mt-0.5">Cap yenileme takvimi, cap yapanlar, yaklaşanlar ve mevcut hızla yapabilecekler</p>
+        </div>
+        <CapOverview />
       </div>
     </Layout>
   );
