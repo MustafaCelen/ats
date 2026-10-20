@@ -34,6 +34,7 @@ const reportsGroupHM: NavGroup = {
     { icon: BarChart2,     label: "Üretim Bandı Raporları", href: "/reports"           },
     { icon: ShieldAlert,   label: "Danışman Sağlığı",       href: "/agent-health"      },
     { icon: GraduationCap, label: "ÜK & DÜA Raporları",    href: "/coaching"          },
+    { icon: UserPlus,      label: "Koçluk Giriş/Çıkış",     href: "/uk-entry-exit"     },
     { icon: Building2,     label: "İlan Raporları",         href: "/listings/reports"  },
     { icon: TrendingUp,    label: "Trend Raporları",        href: "/closing-analytics" },
     { icon: UserCheck,     label: "Danışman Karnesi",       href: "/advisor-personal-scorecard" },
@@ -52,6 +53,7 @@ const reportsGroupAdmin: NavGroup = {
     { icon: BarChart2,     label: "Üretim Bandı Raporları", href: "/reports"           },
     { icon: ShieldAlert,   label: "Danışman Sağlığı",       href: "/agent-health"      },
     { icon: GraduationCap, label: "ÜK & DÜA Raporları",    href: "/coaching"          },
+    { icon: UserPlus,      label: "Koçluk Giriş/Çıkış",     href: "/uk-entry-exit"     },
     { icon: Building2,     label: "İlan Raporları",         href: "/listings/reports"  },
     { icon: TrendingUp,    label: "Trend Raporları",        href: "/closing-analytics" },
   ],
@@ -95,7 +97,6 @@ const advisorsGroupHM: NavGroup = {
   label: "Danışmanlar",
   children: [
     { icon: UserCheck, label: "Danışmanlar",    href: "/employees"     },
-    { icon: UserPlus,  label: "ÜK Giriş/Çıkış", href: "/uk-entry-exit" },
     { icon: RouteIcon, label: "45+45 Başarı Rotası", href: "/uk-basari-rotasi" },
   ],
 };
@@ -105,7 +106,6 @@ const advisorsGroupAdmin: NavGroup = {
   label: "Danışmanlar",
   children: [
     { icon: UserCheck, label: "Danışmanlar",       href: "/employees"          },
-    { icon: UserPlus,  label: "ÜK Giriş/Çıkış",    href: "/uk-entry-exit"      },
     { icon: RouteIcon, label: "45+45 Başarı Rotası", href: "/uk-basari-rotasi" },
     { icon: Users2,    label: "Takımlar",          href: "/teams"              },
     { icon: Copy,      label: "Danışman Birleştir", href: "/duplicate-merge"   },
@@ -145,7 +145,7 @@ const assistantNavItems: NavEntry[] = [
   { icon: KanbanSquare,  label: "Onboarding",     href: "/onboarding" },
   { icon: Megaphone,     label: "Kampanyalar",    href: "/campaigns" },
   { icon: Target,        label: "Lead Takibi",    href: "/lead-tracking" },
-  { icon: UserPlus,      label: "ÜK Giriş/Çıkış", href: "/uk-entry-exit" },
+  { icon: UserPlus,      label: "Koçluk Giriş/Çıkış", href: "/uk-entry-exit" },
   { icon: RouteIcon,     label: "45+45 Başarı Rotası", href: "/uk-basari-rotasi" },
   { icon: ClipboardList, label: "Görevler",       href: "/tasks"      },
   { icon: Building2,     label: "Portal İlanları", href: "/listings"  },

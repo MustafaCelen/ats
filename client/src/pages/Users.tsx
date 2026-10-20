@@ -40,7 +40,7 @@ function useJobAssignees(jobId: number) {
 }
 
 const USER_SORT = {
-  name: (u: any) => u.name, email: (u: any) => u.email, role: (u: any) => u.role, createdAt: (u: any) => u.createdAt,
+  name: (u: any) => u.name, email: (u: any) => u.email, role: (u: any) => u.role, hmGroup: (u: any) => u.hmGroup ?? "", createdAt: (u: any) => u.createdAt,
 };
 
 export default function Users() {
@@ -74,10 +74,11 @@ export default function Users() {
 
         {/* Users Table */}
         <div className="rounded-xl border border-border bg-card shadow-sm overflow-x-auto">
-          <div className="hidden md:grid grid-cols-[minmax(180px,2fr)_minmax(200px,2fr)_130px_140px_230px] md:min-w-[900px] gap-3 px-5 py-3 bg-muted/30 border-b border-border text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <div className="hidden md:grid grid-cols-[minmax(180px,2fr)_minmax(200px,2fr)_130px_120px_140px_230px] md:min-w-[1020px] gap-3 px-5 py-3 bg-muted/30 border-b border-border text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             <SortHead label="Kullanıcı" sortKey="name" sort={sort} onSort={toggleSort} />
             <SortHead label="E-posta" sortKey="email" sort={sort} onSort={toggleSort} />
             <SortHead label="Rol" sortKey="role" sort={sort} onSort={toggleSort} />
+            <SortHead label="Grup" sortKey="hmGroup" sort={sort} onSort={toggleSort} />
             <SortHead label="Üyelik" sortKey="createdAt" sort={sort} onSort={toggleSort} firstDir="desc" />
             <div></div>
           </div>
@@ -88,7 +89,7 @@ export default function Users() {
           ) : (
             <div className="divide-y divide-border">
               {sortedUsers.map((user) => (
-                <div key={user.id} className="grid grid-cols-1 md:grid-cols-[minmax(180px,2fr)_minmax(200px,2fr)_130px_140px_230px] md:min-w-[900px] gap-3 px-5 py-4 items-center hover:bg-muted/10 transition-colors" data-testid={`row-user-${user.id}`}>
+                <div key={user.id} className="grid grid-cols-1 md:grid-cols-[minmax(180px,2fr)_minmax(200px,2fr)_130px_120px_140px_230px] md:min-w-[1020px] gap-3 px-5 py-4 items-center hover:bg-muted/10 transition-colors" data-testid={`row-user-${user.id}`}>
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="h-8 w-8 rounded-full bg-gradient-to-br from-primary to-accent flex items-center justify-center text-white text-xs font-bold shrink-0">
                       {user.name.slice(0, 2).toUpperCase()}
@@ -97,6 +98,7 @@ export default function Users() {
                   </div>
                   <p className="text-sm text-muted-foreground truncate" title={user.email}>{user.email}</p>
                   <RoleBadge role={user.role} />
+                  {user.role === "hiring_manager" ? <HmGroupField user={user} /> : <span className="text-xs text-muted-foreground">—</span>}
                   <p className="text-xs text-muted-foreground whitespace-nowrap">
                     {user.createdAt ? formatDistanceToNow(new Date(user.createdAt), { addSuffix: true }) : "—"}
                   </p>
@@ -162,6 +164,35 @@ export default function Users() {
 }
 
 // ─── Toggle Financials Button ─────────────────────────────────────────────────
+
+// HM grubu: Üretim Bandı raporunda "Sorumlu Yönetici Verimliliği" grup alt toplamları için.
+function HmGroupField({ user }: { user: PublicUser }) {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const current = (user as any).hmGroup ?? "";
+  const [draft, setDraft] = useState<string>(current);
+  const save = async () => {
+    if (draft.trim() === current) return;
+    const r = await fetch(`/api/users/${user.id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include",
+      body: JSON.stringify({ hmGroup: draft.trim() }),
+    });
+    if (r.ok) { qc.invalidateQueries({ queryKey: ["/api/users"] }); toast({ title: draft.trim() ? `${user.name} → ${draft.trim()}` : `${user.name} gruptan çıkarıldı` }); }
+    else toast({ title: "Grup kaydedilemedi", variant: "destructive" });
+  };
+  return (
+    <Input
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={save}
+      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+      placeholder="Grup"
+      title="HM grubu (raporlarda alt toplam)"
+      className="h-7 text-xs w-full"
+      data-testid={`hm-group-${user.id}`}
+    />
+  );
+}
 
 function ToggleFinancialsButton({ user }: { user: PublicUser }) {
   const qc = useQueryClient();

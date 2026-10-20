@@ -14,6 +14,7 @@ export const users = pgTable("users", {
   passwordHash: text("password_hash").notNull(),
   role: text("role").notNull().default("hiring_manager"), // admin | hiring_manager
   canViewFinancials: boolean("can_view_financials").notNull().default(false),
+  hmGroup: text("hm_group"),   // Hiring manager grubu (raporlarda grup alt toplamı) — serbest metin
   googleId: text("google_id").unique(),
   googleAccessToken: text("google_access_token"),
   googleRefreshToken: text("google_refresh_token"),
@@ -274,6 +275,11 @@ export const employees = pgTable("employees", {
   duaManagerId: integer("dua_manager_id"),
   performansKariyerKoclugu: boolean("performans_kariyer_koclugu").notNull().default(false),
   performansKariyerKocluguManagerId: integer("performans_kariyer_koclugu_manager_id"),
+  // PK / DÜA giriş-çıkış tarihleri (YYYY-MM-DD) — bayrak açılınca/kapanınca sunucu otomatik doldurur
+  pkStartDate: text("pk_start_date"),
+  pkEndDate: text("pk_end_date"),
+  duaStartDate: text("dua_start_date"),
+  duaEndDate: text("dua_end_date"),
   ukStartDate: text("uk_start_date"),
   ukEndDate: text("uk_end_date"),
   capMonth: text("cap_month"),  // e.g. "2025-03"
@@ -956,20 +962,26 @@ export type ExchangeRate = typeof exchangeRates.$inferSelect;
 export const teams = pgTable("teams", {
   id: serial("id").primaryKey(),
   name: text("name").notNull().unique(),
+  shareRate: text("share_rate"),   // takım paylaşım oranı — yalnız bilgi amaçlı, hesaba girmez
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// Üyelik tarihli tutulur: takımdan çıkarılan üye silinmez, left_at alır (aktif üye = left_at IS NULL).
 export const teamMembers = pgTable("team_members", {
   id: serial("id").primaryKey(),
   teamId: integer("team_id").notNull(),
   employeeId: integer("employee_id").notNull(),
+  joinedAt: text("joined_at"),   // YYYY-MM-DD
+  leftAt: text("left_at"),       // YYYY-MM-DD
 }, (t) => ({
   uniq: uniqueIndex("team_members_team_employee_idx").on(t.teamId, t.employeeId),
 }));
 
 export type Team = typeof teams.$inferSelect;
 export type TeamMember = typeof teamMembers.$inferSelect;
-export type TeamWithMembers = Team & { memberIds: number[] };
+export type TeamMembership = { employeeId: number; joinedAt: string | null; leftAt: string | null };
+// memberIds = aktif üyeler; members = tarihli tam üyelik geçmişi (ayrılanlar dahil)
+export type TeamWithMembers = Team & { memberIds: number[]; members: TeamMembership[] };
 
 // Insert schemas
 export const insertJobSchema = createInsertSchema(jobs).omit({ id: true, createdAt: true });

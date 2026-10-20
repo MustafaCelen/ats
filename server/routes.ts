@@ -2,6 +2,7 @@ import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import bcrypt from "bcrypt";
 import { storage } from "./storage";
+import { todayYmdIstanbul } from "./storage";
 import { db, pool } from "./db";
 import { sql } from "drizzle-orm";
 import { requireAuth, requireAdmin, requireHiringManagerOrAdmin, requireFinancialsAccess } from "./auth";
@@ -1276,12 +1277,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.patch("/api/users/:id", requireAuth, requireAdmin, async (req, res) => {
     try {
-      const { name, email, password, role, canViewFinancials } = req.body;
+      const { name, email, password, role, canViewFinancials, hmGroup } = req.body;
       const update: any = {};
       if (name) update.name = name;
       if (email) update.email = email;
       if (role) update.role = role;
       if (canViewFinancials !== undefined) update.canViewFinancials = canViewFinancials;
+      if (hmGroup !== undefined) update.hmGroup = typeof hmGroup === "string" && hmGroup.trim() ? hmGroup.trim() : null;
       if (password) update.passwordHash = await bcrypt.hash(password, 10);
       const user = await storage.updateUser(Number(req.params.id), update);
       if (!user) return res.status(404).json({ message: "User not found" });
@@ -2457,7 +2459,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.patch("/api/employees/:id", requireAuth, async (req, res) => {
     try {
       const id = Number(req.params.id);
-      const { status, passiveAt, exitReason, title, notes, startDate, kwuid, kwMail, contractType, uretkenlikKoclugu, uretkenlikKocluguManagerId, uretkenlikKocluguOran, dua, duaManagerId, performansKariyerKoclugu, performansKariyerKocluguManagerId, ukStartDate, ukEndDate, capMonth, capValue, billingName, billingAddress, billingDistrict, billingCity, billingCountry, taxOffice, taxId, birthDate } = req.body;
+      const { status, passiveAt, exitReason, title, notes, startDate, kwuid, kwMail, contractType, uretkenlikKoclugu, uretkenlikKocluguManagerId, uretkenlikKocluguOran, dua, duaManagerId, performansKariyerKoclugu, performansKariyerKocluguManagerId, ukStartDate, ukEndDate, pkStartDate, pkEndDate, duaStartDate, duaEndDate, capMonth, capValue, billingName, billingAddress, billingDistrict, billingCity, billingCountry, taxOffice, taxId, birthDate } = req.body;
+      const current = await storage.getEmployee(id);
+      if (!current) return res.status(404).json({ message: "Employee not found" });
       const update: any = {};
       if (status !== undefined) update.status = status;
       if (passiveAt !== undefined) update.passiveAt = passiveAt ? new Date(passiveAt) : null;
@@ -2477,7 +2481,51 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (performansKariyerKocluguManagerId !== undefined) update.performansKariyerKocluguManagerId = performansKariyerKocluguManagerId || null;
       if (ukStartDate !== undefined) update.ukStartDate = ukStartDate || null;
       if (ukEndDate !== undefined) update.ukEndDate = ukEndDate || null;
+      if (pkStartDate !== undefined) update.pkStartDate = pkStartDate || null;
+      if (pkEndDate !== undefined) update.pkEndDate = pkEndDate || null;
+      if (duaStartDate !== undefined) update.duaStartDate = duaStartDate || null;
+      if (duaEndDate !== undefined) update.duaEndDate = duaEndDate || null;
       if (capMonth !== undefined) update.capMonth = capMonth || null;
+
+      // ── Koçluk kuralları ──
+      // DÜA değişikliği yalnız admin (ÜK ve PK: HM + asistan + admin).
+      const duaChanged = (update.dua !== undefined && !!update.dua !== current.dua)
+        || (update.duaManagerId !== undefined && (update.duaManagerId ?? null) !== (current.duaManagerId ?? null))
+        || update.duaStartDate !== undefined || update.duaEndDate !== undefined;
+      if (duaChanged && req.user!.role !== "admin") {
+        return res.status(403).json({ message: "DÜA koçluğu değişikliği yalnız admin tarafından yapılabilir" });
+      }
+      // Tekillik: bir danışman ÜK / PK / DÜA'dan yalnız birinde olabilir. İstekte açıkça true
+      // gönderilen tip kazanır, diğerleri kapatılır; istekte iki tip birden true ise reddedilir.
+      const want = {
+        uk: update.uretkenlikKoclugu !== undefined ? !!update.uretkenlikKoclugu : current.uretkenlikKoclugu,
+        pk: update.performansKariyerKoclugu !== undefined ? !!update.performansKariyerKoclugu : current.performansKariyerKoclugu,
+        dua: update.dua !== undefined ? !!update.dua : current.dua,
+      };
+      const explicitlyOn = [
+        update.uretkenlikKoclugu === true && "uk",
+        update.performansKariyerKoclugu === true && "pk",
+        update.dua === true && "dua",
+      ].filter(Boolean) as ("uk" | "pk" | "dua")[];
+      if (explicitlyOn.length > 1) {
+        return res.status(400).json({ message: "Bir danışman aynı anda yalnız bir koçlukta (ÜK / PK / DÜA) olabilir" });
+      }
+      if (explicitlyOn.length === 1) {
+        const keep = explicitlyOn[0];
+        if (keep !== "uk" && want.uk) { want.uk = false; update.uretkenlikKoclugu = false; update.uretkenlikKocluguManagerId = null; update.uretkenlikKocluguOran = null; }
+        if (keep !== "pk" && want.pk) { want.pk = false; update.performansKariyerKoclugu = false; update.performansKariyerKocluguManagerId = null; }
+        if (keep !== "dua" && want.dua) {
+          if (req.user!.role !== "admin") return res.status(403).json({ message: "Danışman DÜA'da: DÜA'dan çıkarma yalnız admin tarafından yapılabilir" });
+          want.dua = false; update.dua = false; update.duaManagerId = null;
+        }
+      }
+      // Giriş/çıkış tarihleri: bayrak açılınca başlangıç (yoksa bugün), kapanınca çıkış (yoksa bugün).
+      const today = todayYmdIstanbul();
+      if (!current.performansKariyerKoclugu && want.pk) { if (!update.pkStartDate) update.pkStartDate = today; update.pkEndDate = update.pkEndDate ?? null; }
+      if (current.performansKariyerKoclugu && !want.pk && !update.pkEndDate) update.pkEndDate = today;
+      if (!current.dua && want.dua) { if (!update.duaStartDate) update.duaStartDate = today; update.duaEndDate = update.duaEndDate ?? null; }
+      if (current.dua && !want.dua && !update.duaEndDate) update.duaEndDate = today;
+      if (current.uretkenlikKoclugu && !want.uk && !update.ukEndDate) update.ukEndDate = current.ukEndDate ?? today;
 
       if (capValue !== undefined) update.capValue = capValue || null;
       if (billingName !== undefined) update.billingName = billingName || null;
@@ -2489,9 +2537,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (taxId !== undefined) update.taxId = taxId || null;
       if (birthDate !== undefined) update.birthDate = birthDate || null;
       // ÜK koçu atanıyorsa 45+45'e otomatik katılım için önceki koçu sakla.
-      const prevCoachId = update.uretkenlikKocluguManagerId !== undefined
-        ? (await storage.getEmployee(id))?.uretkenlikKocluguManagerId ?? null
-        : undefined;
+      const prevCoachId = update.uretkenlikKocluguManagerId !== undefined ? (current.uretkenlikKocluguManagerId ?? null) : undefined;
       const emp = await storage.updateEmployee(id, update);
       if (!emp) return res.status(404).json({ message: "Employee not found" });
       if (prevCoachId !== undefined) {
@@ -3471,9 +3517,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // — bilinçli olarak herkese açık (requireAuth yeterli, rol kısıtı yok).
   app.get("/api/coaching/uk-entry-exit", requireAuth, async (req: Request, res: Response) => {
     try {
-      const { startDate, endDate, includePassive } = req.query as { startDate?: string; endDate?: string; includePassive?: string };
+      const { startDate, endDate, includePassive, type } = req.query as { startDate?: string; endDate?: string; includePassive?: string; type?: string };
       if (!startDate || !endDate) return res.status(400).json({ message: "startDate ve endDate gerekli" });
-      res.json(await storage.getUkEntryExitReport(new Date(startDate), new Date(endDate), includePassive === "true"));
+      const t = type === "pk" || type === "dua" ? type : "uk";
+      res.json(await storage.getUkEntryExitReport(new Date(startDate), new Date(endDate), includePassive === "true", t));
     } catch (err) {
       console.error("[GET /api/coaching/uk-entry-exit]", err);
       res.status(500).json({ message: "Internal server error" });
@@ -4309,10 +4356,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.patch("/api/teams/:id", requireAuth, requireAdmin, async (req, res) => {
     try {
-      const { name } = req.body;
-      if (!name || typeof name !== "string" || !name.trim())
-        return res.status(400).json({ message: "name required" });
-      const team = await storage.renameTeam(Number(req.params.id), name.trim());
+      const { name, shareRate } = req.body;
+      const data: { name?: string; shareRate?: string | null } = {};
+      if (name !== undefined) {
+        if (typeof name !== "string" || !name.trim()) return res.status(400).json({ message: "name required" });
+        data.name = name.trim();
+      }
+      if (shareRate !== undefined) data.shareRate = typeof shareRate === "string" && shareRate.trim() ? shareRate.trim() : null;
+      if (Object.keys(data).length === 0) return res.status(400).json({ message: "name veya shareRate gerekli" });
+      const team = await storage.updateTeam(Number(req.params.id), data);
       res.json(team);
     } catch (err: any) {
       if (err?.code === "23505") return res.status(409).json({ message: "Bu isimde bir takım zaten var" });
@@ -4333,9 +4385,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/teams/:id/members", requireAuth, requireAdmin, async (req, res) => {
     try {
-      const { employeeId } = req.body;
+      const { employeeId, joinedAt } = req.body;
       if (!employeeId) return res.status(400).json({ message: "employeeId required" });
-      await storage.addTeamMember(Number(req.params.id), Number(employeeId));
+      await storage.addTeamMember(Number(req.params.id), Number(employeeId), typeof joinedAt === "string" && /^\d{4}-\d{2}-\d{2}$/.test(joinedAt) ? joinedAt : undefined);
       res.json({ ok: true });
     } catch (err) {
       console.error("[POST /api/teams/:id/members]", err);
@@ -4345,7 +4397,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.delete("/api/teams/:id/members/:employeeId", requireAuth, requireAdmin, async (req, res) => {
     try {
-      await storage.removeTeamMember(Number(req.params.id), Number(req.params.employeeId));
+      const leftAt = typeof req.query.leftAt === "string" && /^\d{4}-\d{2}-\d{2}$/.test(req.query.leftAt) ? req.query.leftAt : undefined;
+      await storage.removeTeamMember(Number(req.params.id), Number(req.params.employeeId), leftAt);
       res.status(204).send();
     } catch (err) {
       console.error("[DELETE /api/teams/:id/members/:employeeId]", err);

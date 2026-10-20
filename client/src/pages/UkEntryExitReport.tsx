@@ -16,21 +16,30 @@ interface UkEntryExitData {
   exits: { employeeId: number; name: string; kwuid: string | null; ukEndDate: string; office: string | null; status: string }[];
 }
 
-// Giriş tarihi olarak employees.startDate (şirkete giriş) kullanılıyor — ÜK koçluğu işe
-// başlamayla başlıyor, ayrı bir "ÜK giriş tarihi" alanı yok (kasıtlı, bkz. server tarafı).
+type CoachingType = "uk" | "pk" | "dua";
+const TYPE_META: Record<CoachingType, { label: string; long: string; entryNote: string }> = {
+  uk:  { label: "ÜK",  long: "Üretkenlik Koçluğu",          entryNote: "Giriş = şirkete giriş tarihi, çıkış = ÜK çıkış tarihi" },
+  pk:  { label: "PK",  long: "Performans Kariyer Koçluğu",  entryNote: "Giriş/çıkış = PK bayrağının açıldığı/kapandığı tarih" },
+  dua: { label: "DÜA", long: "DÜA Koçluğu",                 entryNote: "Giriş/çıkış = DÜA bayrağının açıldığı/kapandığı tarih" },
+};
+
+// ÜK girişi employees.startDate (şirkete giriş) — ÜK koçluğu işe başlamayla başlıyor. PK ve DÜA
+// için bayrak açılıp kapanınca sunucunun doldurduğu pk/dua_start_date ve _end_date kullanılır.
 export default function UkEntryExitReport() {
+  const [type, setType] = useState<CoachingType>("uk");
   const [from, setFrom] = useState(() => formatYMD(new Date(new Date().getFullYear(), new Date().getMonth(), 1)));
   const [to, setTo] = useState(() => formatYMD(new Date()));
   const [includePassive, setIncludePassive] = useState(false);
 
   const { data, isLoading } = useQuery<UkEntryExitData>({
-    queryKey: ["/api/coaching/uk-entry-exit", from, to, includePassive],
+    queryKey: ["/api/coaching/uk-entry-exit", type, from, to, includePassive],
     queryFn: () =>
-      fetch(`/api/coaching/uk-entry-exit?startDate=${from}&endDate=${to}&includePassive=${includePassive}`, { credentials: "include" }).then((r) =>
+      fetch(`/api/coaching/uk-entry-exit?type=${type}&startDate=${from}&endDate=${to}&includePassive=${includePassive}`, { credentials: "include" }).then((r) =>
         r.json()
       ),
     enabled: !!from && !!to,
   });
+  const meta = TYPE_META[type];
 
   const fmtDate = (d: string) => format(new Date(d), "d MMM yyyy", { locale: tr });
 
@@ -57,7 +66,7 @@ export default function UkEntryExitReport() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, entrySheet, "Giriş Yapanlar");
     XLSX.utils.book_append_sheet(wb, exitSheet, "Çıkış Yapanlar");
-    XLSX.writeFile(wb, `uk-giris-cikis-${from}_${to}.xlsx`);
+    XLSX.writeFile(wb, `${type}-giris-cikis-${from}_${to}.xlsx`);
   };
 
   return (
@@ -66,13 +75,23 @@ export default function UkEntryExitReport() {
         <div className="flex items-start justify-between flex-wrap gap-3">
           <div>
             <h1 className="text-2xl font-bold flex items-center gap-2">
-              <Users className="h-6 w-6 text-primary" /> ÜK Giriş / Çıkış Listesi
+              <Users className="h-6 w-6 text-primary" /> Koçluk Giriş / Çıkış Listesi
             </h1>
             <p className="text-sm text-muted-foreground mt-0.5">
-              Seçilen tarih aralığında Üretkenlik Koçluğu'na giriş yapan ve çıkış yapan danışmanlar
+              Seçilen tarih aralığında {meta.long}'na giriş yapan ve çıkış yapan danışmanlar · {meta.entryNote}
             </p>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-1 border rounded-md p-0.5 bg-muted/30" data-testid="coaching-type-tabs">
+              {(Object.keys(TYPE_META) as CoachingType[]).map((t) => (
+                <button
+                  key={t} type="button" onClick={() => setType(t)}
+                  className={`px-3 py-1 text-xs rounded font-medium transition-colors ${type === t ? "bg-white dark:bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  {TYPE_META[t].label}
+                </button>
+              ))}
+            </div>
             <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
               <input
                 type="checkbox"
@@ -118,7 +137,7 @@ export default function UkEntryExitReport() {
               </div>
               <div className="p-4">
                 {!data?.entries.length ? (
-                  <p className="text-sm text-muted-foreground text-center py-6">Bu aralıkta ÜK'ya giriş yapan yok.</p>
+                  <p className="text-sm text-muted-foreground text-center py-6">Bu aralıkta {meta.label}'ya giriş yapan yok.</p>
                 ) : (
                   <SortableRows rows={data.entries} getters={{ name: (e: any) => e.name, date: (e: any) => e.startDate }}>{({ sorted, sort, toggle }) => (
                   <div>
@@ -154,7 +173,7 @@ export default function UkEntryExitReport() {
               </div>
               <div className="p-4">
                 {!data?.exits.length ? (
-                  <p className="text-sm text-muted-foreground text-center py-6">Bu aralıkta ÜK'dan çıkış yapan yok.</p>
+                  <p className="text-sm text-muted-foreground text-center py-6">Bu aralıkta {meta.label}'dan çıkış yapan yok.</p>
                 ) : (
                   <SortableRows rows={data.exits} getters={{ name: (e: any) => e.name, date: (e: any) => e.ukEndDate }}>{({ sorted, sort, toggle }) => (
                   <div>

@@ -292,6 +292,28 @@ export async function ensureSchema(): Promise<void> {
     -- Performans Kariyer Koçluğu: ÜK/DÜA ile aynı mantıkta 3. bağımsız koçluk tipi (oran yok)
     ALTER TABLE employees ADD COLUMN IF NOT EXISTS performans_kariyer_koclugu BOOLEAN NOT NULL DEFAULT false;
     ALTER TABLE employees ADD COLUMN IF NOT EXISTS performans_kariyer_koclugu_manager_id INTEGER;
+    -- PK / DÜA giriş-çıkış tarihleri (Koçluk Giriş/Çıkış raporu)
+    ALTER TABLE employees ADD COLUMN IF NOT EXISTS pk_start_date TEXT;
+    ALTER TABLE employees ADD COLUMN IF NOT EXISTS pk_end_date TEXT;
+    ALTER TABLE employees ADD COLUMN IF NOT EXISTS dua_start_date TEXT;
+    ALTER TABLE employees ADD COLUMN IF NOT EXISTS dua_end_date TEXT;
+    -- Hiring manager grubu (Üretim Bandı raporunda grup alt toplamı)
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS hm_group TEXT;
+    -- Takımlar: tarihli üyelik + paylaşım oranı
+    CREATE TABLE IF NOT EXISTS teams (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS team_members (
+      id SERIAL PRIMARY KEY,
+      team_id INTEGER NOT NULL,
+      employee_id INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS team_members_team_employee_idx ON team_members(team_id, employee_id);
+    ALTER TABLE teams ADD COLUMN IF NOT EXISTS share_rate TEXT;
+    ALTER TABLE team_members ADD COLUMN IF NOT EXISTS joined_at TEXT;
+    ALTER TABLE team_members ADD COLUMN IF NOT EXISTS left_at TEXT;
 
     -- Danışman notları: yapılandırılmış 4 alan (Görüşme Tarihi/Gündem/Koçun Notu/Sonraki Adım),
     -- content serbest metin 5. alan olarak kalır

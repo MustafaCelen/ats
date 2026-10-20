@@ -1,5 +1,5 @@
 import { SortTh, SortableRows } from "@/components/SortTh";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { Layout } from "@/components/Layout";
 import { useReportStats, useEmployeeTrend } from "@/hooks/use-stats";
 import { STAGE_COLORS } from "@/components/StatusBadge";
@@ -372,12 +372,18 @@ export default function Reports() {
           </div>
 
           <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-            <div className="p-5 border-b border-border flex items-center gap-2"><Activity className="h-4 w-4 text-primary" /><h2 className="text-base font-semibold">Sorumlu Yönetici Verimliliği</h2></div>
+            <div className="p-5 border-b border-border flex items-center gap-2">
+              <Activity className="h-4 w-4 text-primary" />
+              <div>
+                <h2 className="text-base font-semibold">Sorumlu Yönetici Verimliliği</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">HM grupları alt toplamlı (grup ataması Kullanıcılar sayfasından)</p>
+              </div>
+            </div>
             {/* Mobile cards */}
             <div className="md:hidden divide-y divide-border">
               {(stats?.hiringManagerEfficiency ?? []).map((m: any) => (
                 <div key={m.userId} className="p-4 space-y-2">
-                  <div className="font-medium text-sm">{m.name}</div>
+                  <div className="font-medium text-sm">{m.name} {m.hmGroup && <span className="text-xs text-muted-foreground">· {m.hmGroup}</span>}</div>
                   <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
                     <span>Söz. Süresi: <span className="font-medium text-foreground">{m.avgTimeToContractSign} gün</span></span>
                     <span>Giriş Süresi: <span className="font-medium text-foreground">{m.avgTimeToEmploy} gün</span></span>
@@ -407,23 +413,56 @@ export default function Reports() {
                   </tr>
                 </thead>
                 <tbody>
-                  {sorted.map((m: any) => (
-                    <tr key={m.userId} className="border-t border-border">
-                      <td className="p-4 font-medium">{m.name}</td>
-                      <td className="p-4 text-right tabular-nums">{m.avgTimeToContractSign} gün</td>
-                      <td className="p-4 text-right tabular-nums">{m.avgTimeToEmploy} gün</td>
-                      <td className="p-4 text-right tabular-nums">{m.interviews}</td>
-                      <td className="p-4 text-right tabular-nums">{m.k0 ?? 0}</td>
-                      <td className="p-4 text-right tabular-nums">{m.k1 ?? 0}</td>
-                      <td className="p-4 text-right tabular-nums">{m.k2 ?? 0}</td>
-                      <td className="p-4 text-right tabular-nums">{m.totalHires}</td>
-                      <td className="p-4 text-right tabular-nums">
-                        <span className={`inline-flex items-center gap-1 font-medium ${m.employedCount > 0 ? "text-emerald-600" : "text-muted-foreground"}`}>
-                          {m.employedCount ?? 0}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
+                  {(() => {
+                    // Gruplara böl: grup adı alfabetik, grupsuzlar en sonda; grup içi sıralama tıklanan kolona göre
+                    const SUMS = ["interviews", "k0", "k1", "k2", "totalHires", "employedCount"] as const;
+                    const sumOf = (rows: any[], k: string) => rows.reduce((s, r) => s + (Number(r[k]) || 0), 0);
+                    const groups = new Map<string, any[]>();
+                    for (const m of sorted) { const g = (m.hmGroup ?? "").trim(); if (!groups.has(g)) groups.set(g, []); groups.get(g)!.push(m); }
+                    const keys = Array.from(groups.keys()).sort((a, b) => (a === "" ? 1 : b === "" ? -1 : a.localeCompare(b, "tr")));
+                    const multi = keys.length > 1 || (keys[0] ?? "") !== "";
+                    const Row = ({ m }: { m: any }) => (
+                      <tr key={m.userId} className="border-t border-border">
+                        <td className="p-4 font-medium">{m.name}</td>
+                        <td className="p-4 text-right tabular-nums">{m.avgTimeToContractSign} gün</td>
+                        <td className="p-4 text-right tabular-nums">{m.avgTimeToEmploy} gün</td>
+                        <td className="p-4 text-right tabular-nums">{m.interviews}</td>
+                        <td className="p-4 text-right tabular-nums">{m.k0 ?? 0}</td>
+                        <td className="p-4 text-right tabular-nums">{m.k1 ?? 0}</td>
+                        <td className="p-4 text-right tabular-nums">{m.k2 ?? 0}</td>
+                        <td className="p-4 text-right tabular-nums">{m.totalHires}</td>
+                        <td className="p-4 text-right tabular-nums">
+                          <span className={`inline-flex items-center gap-1 font-medium ${m.employedCount > 0 ? "text-emerald-600" : "text-muted-foreground"}`}>
+                            {m.employedCount ?? 0}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                    const SumRow = ({ label, rows, cls, testId }: { label: string; rows: any[]; cls: string; testId: string }) => (
+                      <tr className={`border-t border-border font-semibold ${cls}`} data-testid={testId}>
+                        <td className="p-4 text-xs">{label} <span className="font-normal text-muted-foreground">({rows.length} HM)</span></td>
+                        <td className="p-4 text-right text-muted-foreground">—</td>
+                        <td className="p-4 text-right text-muted-foreground">—</td>
+                        {SUMS.map((k) => <td key={k} className="p-4 text-right tabular-nums">{sumOf(rows, k)}</td>)}
+                      </tr>
+                    );
+                    return (
+                      <>
+                        {keys.map((g) => (
+                          <Fragment key={g || "__none"}>
+                            {multi && (
+                              <tr className="bg-muted/20" data-testid={`hm-group-${g || "none"}`}>
+                                <td colSpan={9} className="px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{g || "Grupsuz"}</td>
+                              </tr>
+                            )}
+                            {groups.get(g)!.map((m) => <Row key={m.userId} m={m} />)}
+                            {multi && <SumRow label={`${g || "Grupsuz"} toplamı`} rows={groups.get(g)!} cls="bg-muted/30" testId={`hm-group-sum-${g || "none"}`} />}
+                          </Fragment>
+                        ))}
+                        <SumRow label="Genel toplam" rows={sorted} cls="bg-primary/5" testId="hm-grand-total" />
+                      </>
+                    );
+                  })()}
                 </tbody>
               </table>
               )}</SortableRows>

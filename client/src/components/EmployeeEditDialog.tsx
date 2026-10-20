@@ -18,6 +18,7 @@ import {
 import { useUpdateEmployee } from "@/hooks/use-employees";
 import { useUpdateCandidate } from "@/hooks/use-candidates";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 
 const MONTHS_TR = [
   "Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran",
@@ -173,6 +174,13 @@ export function EmployeeEditDialog({ emp, open, onOpenChange }: Props) {
     return raw;
   });
   const [ukEndDate, setUkEndDate] = useState<string>((emp as any).ukEndDate ?? "");
+  const [pkStartDate, setPkStartDate] = useState<string>((emp as any).pkStartDate ?? "");
+  const [pkEndDate, setPkEndDate] = useState<string>((emp as any).pkEndDate ?? "");
+  const [duaStartDate, setDuaStartDate] = useState<string>((emp as any).duaStartDate ?? "");
+  const [duaEndDate, setDuaEndDate] = useState<string>((emp as any).duaEndDate ?? "");
+  // DÜA değişikliği yalnız admin; ÜK ve PK tüm personel
+  const { data: me } = useAuth();
+  const canEditDua = me?.role === "admin";
 
   // ── 7. Fatura & Vergi ──
   const [billingName, setBillingName] = useState<string>(emp.billingName ?? "");
@@ -279,10 +287,18 @@ export function EmployeeEditDialog({ emp, open, onOpenChange }: Props) {
               uretkenlikKocluguManagerId: coachingType === "uk" && coachId ? Number(coachId) : null,
               uretkenlikKocluguOran: coachingType === "uk" && coachRate ? coachRate : null,
               ukEndDate: coachingType === "uk" && ukEndDate ? ukEndDate : null,
-              dua: coachingType === "dua",
-              duaManagerId: coachingType === "dua" && duaCoachId ? Number(duaCoachId) : null,
+              ...(canEditDua ? {
+                dua: coachingType === "dua",
+                duaManagerId: coachingType === "dua" && duaCoachId ? Number(duaCoachId) : null,
+              } : {}),
               performansKariyerKoclugu: coachingType === "performans",
               performansKariyerKocluguManagerId: coachingType === "performans" && performansCoachId ? Number(performansCoachId) : null,
+              pkStartDate: coachingType === "performans" ? (pkStartDate || undefined) : undefined,
+              pkEndDate: coachingType === "performans" ? (pkEndDate || null) : undefined,
+              ...(canEditDua ? {
+                duaStartDate: coachingType === "dua" ? (duaStartDate || undefined) : undefined,
+                duaEndDate: coachingType === "dua" ? (duaEndDate || null) : undefined,
+              } : {}),
               billingName: billingName || undefined,
               billingAddress: billingAddress || undefined,
               billingDistrict: billingDistrict || undefined,
@@ -489,6 +505,9 @@ export function EmployeeEditDialog({ emp, open, onOpenChange }: Props) {
                   <button
                     key={val}
                     type="button"
+                    // DÜA: yalnız admin seçebilir / DÜA'daki danışmanı admin olmayan başka tipe alamaz
+                    disabled={!canEditDua && (val === "dua" || coachingType === "dua")}
+                    title={!canEditDua && (val === "dua" || coachingType === "dua") ? "DÜA koçluğu değişikliği yalnız admin yapabilir" : undefined}
                     onClick={() => setCoachingType(val)}
                     className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
                       coachingType === val
@@ -538,7 +557,7 @@ export function EmployeeEditDialog({ emp, open, onOpenChange }: Props) {
               {coachingType === "dua" && (
                 <div className="grid grid-cols-1 gap-3">
                   <Field label="DUA Koçu">
-                    <Select value={duaCoachId} onValueChange={setDuaCoachId}>
+                    <Select value={duaCoachId} onValueChange={setDuaCoachId} disabled={!canEditDua}>
                       <SelectTrigger data-testid="select-dua-manager">
                         <SelectValue placeholder="Koç seçin..." />
                       </SelectTrigger>
@@ -549,6 +568,11 @@ export function EmployeeEditDialog({ emp, open, onOpenChange }: Props) {
                       </SelectContent>
                     </Select>
                   </Field>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="DÜA Giriş Tarihi"><Input type="date" value={duaStartDate} onChange={(e) => setDuaStartDate(e.target.value)} disabled={!canEditDua} /></Field>
+                    <Field label="DÜA Çıkış Tarihi"><Input type="date" value={duaEndDate} onChange={(e) => setDuaEndDate(e.target.value)} disabled={!canEditDua} /></Field>
+                  </div>
+                  {!canEditDua && <p className="text-[11px] text-muted-foreground">DÜA koçluğu bilgileri yalnız admin tarafından değiştirilebilir.</p>}
                 </div>
               )}
               {coachingType === "performans" && (
@@ -565,6 +589,10 @@ export function EmployeeEditDialog({ emp, open, onOpenChange }: Props) {
                       </SelectContent>
                     </Select>
                   </Field>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="PK Giriş Tarihi"><Input type="date" value={pkStartDate} onChange={(e) => setPkStartDate(e.target.value)} placeholder="Boşsa bugün" /></Field>
+                    <Field label="PK Çıkış Tarihi"><Input type="date" value={pkEndDate} onChange={(e) => setPkEndDate(e.target.value)} /></Field>
+                  </div>
                 </div>
               )}
             </div>

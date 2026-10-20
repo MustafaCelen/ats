@@ -9,9 +9,12 @@ import { Users2, Plus, Trash2, Pencil, Check, X, UserMinus, UserPlus } from "luc
 interface TeamWithMembers {
   id: number;
   name: string;
+  shareRate: string | null;
   createdAt: string;
-  memberIds: number[];
+  memberIds: number[];   // aktif üyeler
+  members: { employeeId: number; joinedAt: string | null; leftAt: string | null }[];   // tarihli tam geçmiş
 }
+const fmtYmd = (d: string | null) => (d ? d.split("-").reverse().join(".") : "—");
 
 interface EmpRow {
   id: number;
@@ -30,6 +33,8 @@ export default function Teams() {
   const [editName, setEditName] = useState("");
   const [selectedTeamId, setSelectedTeamId] = useState<number | null>(null);
   const [addSearch, setAddSearch] = useState("");
+  const [shareRateDraft, setShareRateDraft] = useState<string | null>(null);
+  const [showLeft, setShowLeft] = useState(false);
 
   const { data: teams = [], isLoading } = useQuery<TeamWithMembers[]>({
     queryKey: ["/api/teams"],
@@ -66,6 +71,16 @@ export default function Teams() {
       toast({ title: "Takım oluşturuldu" });
     },
     onError: (e: any) => toast({ title: e.message ?? "Hata", variant: "destructive" }),
+  });
+
+  const saveShareRate = useMutation({
+    mutationFn: ({ id, shareRate }: { id: number; shareRate: string }) =>
+      fetch(`/api/teams/${id}`, {
+        method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shareRate }),
+      }).then(r => { if (!r.ok) throw new Error("fail"); return r.json(); }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/teams"] }); setShareRateDraft(null); toast({ title: "Paylaşım oranı kaydedildi" }); },
+    onError: () => toast({ title: "Kaydedilemedi", variant: "destructive" }),
   });
 
   const renameTeam = useMutation({
@@ -119,6 +134,8 @@ export default function Teams() {
   const memberIds = new Set(selectedTeam?.memberIds ?? []);
 
   const teamMembers = activeEmployees.filter(e => memberIds.has(e.id));
+  const membershipOf = (empId: number) => selectedTeam?.members.find(m => m.employeeId === empId);
+  const leftMembers = (selectedTeam?.members ?? []).filter(m => m.leftAt).map(m => ({ ...m, emp: allEmployees.find(e => e.id === m.employeeId) }));
   const nonMembersFiltered = activeEmployees.filter(e =>
     !memberIds.has(e.id) &&
     (addSearch === "" || e.name.toLowerCase().includes(addSearch.toLowerCase()) ||
@@ -241,6 +258,24 @@ export default function Teams() {
               </div>
             ) : (
               <>
+                {/* Paylaşım oranı (bilgi amaçlı, hesaba girmez) */}
+                <div className="rounded-xl border border-border bg-card shadow-sm px-4 py-3 flex items-center gap-3 flex-wrap">
+                  <span className="text-sm font-semibold">Takım Paylaşım Oranı</span>
+                  <Input
+                    value={shareRateDraft ?? selectedTeam.shareRate ?? ""}
+                    onChange={e => setShareRateDraft(e.target.value)}
+                    placeholder="örn. %10"
+                    className="h-8 w-32 text-sm"
+                    data-testid="team-share-rate"
+                  />
+                  <Button
+                    size="sm" className="h-8"
+                    disabled={shareRateDraft === null || shareRateDraft === (selectedTeam.shareRate ?? "") || saveShareRate.isPending}
+                    onClick={() => saveShareRate.mutate({ id: selectedTeam.id, shareRate: shareRateDraft ?? "" })}
+                  >Kaydet</Button>
+                  <span className="text-xs text-muted-foreground">Bilgi amaçlı; hesaplamalara girmez.</span>
+                </div>
+
                 {/* Current members */}
                 <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
                   <div className="px-4 py-3 border-b border-border bg-muted/20 flex items-center gap-2">
@@ -258,6 +293,9 @@ export default function Teams() {
                             <p className="text-sm font-medium truncate">{emp.name}</p>
                             {emp.kwuid && <p className="text-xs text-muted-foreground font-mono">{emp.kwuid}</p>}
                           </div>
+                          <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap" title="Takıma giriş tarihi">
+                            Giriş: {fmtYmd(membershipOf(emp.id)?.joinedAt ?? null)}
+                          </span>
                           {emp.category && (
                             <span className={`text-xs font-bold px-2 py-0.5 rounded-full ring-1 shrink-0 ${
                               emp.category === "K2" ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
@@ -277,6 +315,32 @@ export default function Teams() {
                     </div>
                   )}
                 </div>
+
+                {/* Ayrılan üyeler (tarihli geçmiş) */}
+                {leftMembers.length > 0 && (
+                  <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => setShowLeft(v => !v)}
+                      className="w-full px-4 py-3 border-b border-border bg-muted/20 flex items-center gap-2 text-left"
+                    >
+                      <UserMinus className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-sm font-semibold">Ayrılan Üyeler</span>
+                      <span className="ml-auto text-xs text-muted-foreground">{leftMembers.length} kayıt · {showLeft ? "gizle" : "göster"}</span>
+                    </button>
+                    {showLeft && (
+                      <div className="divide-y divide-border/50 max-h-64 overflow-y-auto">
+                        {leftMembers.map(m => (
+                          <div key={m.employeeId} className="flex items-center gap-3 px-4 py-2 text-sm">
+                            <span className="flex-1 min-w-0 truncate">{m.emp?.name ?? `#${m.employeeId}`}</span>
+                            <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">Giriş: {fmtYmd(m.joinedAt)}</span>
+                            <span className="text-xs text-rose-600 tabular-nums whitespace-nowrap">Çıkış: {fmtYmd(m.leftAt)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Add members */}
                 <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">

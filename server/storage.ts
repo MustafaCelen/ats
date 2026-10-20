@@ -44,7 +44,7 @@ export type TaskWithRelations = Task & { assignedTo?: PublicUser; createdBy?: Pu
 export interface FunnelStage { stage: string; count: number; }
 export interface StageTime { stage: string; avgDays: number; }
 export interface ManagerEfficiency {
-  userId: number; name: string; role: string;
+  userId: number; name: string; role: string; hmGroup: string | null;
   avgTimeToContractSign: number; avgTimeToEmploy: number; interviews: number; totalHires: number; employedCount: number;
 }
 export interface JobPerformance {
@@ -131,6 +131,11 @@ export interface ReportStats {
 
 // İstemciye giden kullanıcı: şifre ve Google anahtarları ASLA dışarı çıkmaz.
 // Anahtar gereken sunucu içi işler getUserByIdFull / getUserByEmailFull kullanır.
+// Bugünün tarihi (İstanbul), YYYY-MM-DD
+export function todayYmdIstanbul(): string {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Istanbul" });
+}
+
 function toPublicUser(u: User): PublicUser {
   const { passwordHash: _, googleAccessToken: _a, googleRefreshToken: _r, ...pub } = u;
   return { ...pub, hasGoogleCalendar: !!u.googleAccessToken };
@@ -142,7 +147,7 @@ export interface IStorage {
   getUserByEmailFull(email: string): Promise<User | undefined>;
   getUsers(): Promise<PublicUser[]>;
   createUser(data: { name: string; email: string; passwordHash: string; role: string }): Promise<PublicUser>;
-  updateUser(id: number, data: Partial<{ name: string; email: string; passwordHash: string; role: string; canViewFinancials: boolean }>): Promise<PublicUser | undefined>;
+  updateUser(id: number, data: Partial<{ name: string; email: string; passwordHash: string; role: string; canViewFinancials: boolean; hmGroup: string | null }>): Promise<PublicUser | undefined>;
   deleteUser(id: number): Promise<void>;
   seedAdminIfEmpty(): Promise<void>;
   getAssignedJobIds(userId: number): Promise<number[]>;
@@ -354,7 +359,7 @@ export class DatabaseStorage implements IStorage {
     }).returning();
     return toPublicUser(u);
   }
-  async updateUser(id: number, data: Partial<{ name: string; email: string; passwordHash: string; role: string; canViewFinancials: boolean }>): Promise<PublicUser | undefined> {
+  async updateUser(id: number, data: Partial<{ name: string; email: string; passwordHash: string; role: string; canViewFinancials: boolean; hmGroup: string | null }>): Promise<PublicUser | undefined> {
     const updateData: any = { ...data };
     if (data.email) updateData.email = data.email.toLowerCase();
     const [u] = await db.update(users).set(updateData).where(eq(users.id, id)).returning();
@@ -1499,7 +1504,7 @@ export class DatabaseStorage implements IStorage {
         const [u] = await db.select().from(users).where(eq(users.id, userId));
         const assignedJobs = await this.getAssignedJobIds(userId);
         if (assignedJobs.length === 0) {
-          return { userId, name: u?.name ?? "Manager", role: u?.role ?? "hiring_manager", avgTimeToContractSign: 0, avgTimeToEmploy: 0, interviews: 0, totalHires: 0, employedCount: 0 };
+          return { userId, name: u?.name ?? "Manager", role: u?.role ?? "hiring_manager", hmGroup: u?.hmGroup ?? null, avgTimeToContractSign: 0, avgTimeToEmploy: 0, interviews: 0, totalHires: 0, employedCount: 0 };
         }
 
         // Applications within date range for this manager's jobs
@@ -1634,6 +1639,7 @@ export class DatabaseStorage implements IStorage {
           userId,
           name: u?.name ?? "Manager",
           role: u?.role ?? "hiring_manager",
+          hmGroup: u?.hmGroup ?? null,
           avgTimeToContractSign: mgrAvgTimeToContractSign,
           avgTimeToEmploy: mgrAvgTimeToEmploy,
           interviews: mgrIvRow[0]?.count || 0,
@@ -5357,7 +5363,9 @@ export class DatabaseStorage implements IStorage {
   // kullanılıyor — ÜK koçluğu işe başlamayla birlikte başlıyor. Çıkış için mevcut
   // employees.uk_end_date (text, YYYY-MM-DD) kullanılıyor — biri şirkette kalırken de ÜK'dan
   // çıkabilir, o yüzden ayrı bir alan.
-  async getUkEntryExitReport(startDate: Date, endDate: Date, includePassive = false): Promise<{
+  // Koçluk giriş/çıkış raporu. ÜK: giriş = şirkete giriş (start_date), çıkış = uk_end_date.
+  // PK / DÜA: giriş = pk/dua_start_date, çıkış = pk/dua_end_date (bayrak değişince sunucu doldurur).
+  async getUkEntryExitReport(startDate: Date, endDate: Date, includePassive = false, type: "uk" | "pk" | "dua" = "uk"): Promise<{
     entries: { employeeId: number; name: string; kwuid: string | null; startDate: string | null; office: string | null; status: string }[];
     exits: { employeeId: number; name: string; kwuid: string | null; ukEndDate: string; office: string | null; status: string }[];
   }> {
@@ -5366,6 +5374,27 @@ export class DatabaseStorage implements IStorage {
     const startYmd = startDate.toISOString().slice(0, 10);
     const endYmd = endDate.toISOString().slice(0, 10);
     const passiveFilter = includePassive ? sql`true` : eq(employees.status, "active");
+
+    if (type !== "uk") {
+      const flagCol = type === "pk" ? employees.performansKariyerKoclugu : employees.dua;
+      const startCol = type === "pk" ? employees.pkStartDate : employees.duaStartDate;
+      const endCol = type === "pk" ? employees.pkEndDate : employees.duaEndDate;
+      const base = { id: employees.id, kwuid: employees.kwuid, name: candidates.name, office: candidates.office, status: employees.status };
+      const [entryRows, exitRows] = await Promise.all([
+        db.select({ ...base, startDate: startCol }).from(employees)
+          .leftJoin(candidates, eq(employees.candidateId, candidates.id))
+          .where(and(eq(flagCol, true), isNotNull(startCol), gte(startCol, startYmd), lte(startCol, endYmd), passiveFilter))
+          .orderBy(startCol),
+        db.select({ ...base, endDate: endCol }).from(employees)
+          .leftJoin(candidates, eq(employees.candidateId, candidates.id))
+          .where(and(isNotNull(endCol), gte(endCol, startYmd), lte(endCol, endYmd), passiveFilter))
+          .orderBy(endCol),
+      ]);
+      return {
+        entries: entryRows.map((r) => ({ employeeId: r.id, name: r.name ?? "—", kwuid: r.kwuid ?? null, startDate: r.startDate ?? null, office: r.office ?? null, status: r.status })),
+        exits: exitRows.map((r) => ({ employeeId: r.id, name: r.name ?? "—", kwuid: r.kwuid ?? null, ukEndDate: r.endDate!, office: r.office ?? null, status: r.status })),
+      };
+    }
 
     const [entryRows, exitRows] = await Promise.all([
       db.select({
@@ -7581,8 +7610,14 @@ export class DatabaseStorage implements IStorage {
     const members = await db.select().from(teamMembers);
     return allTeams.map(t => ({
       ...t,
-      memberIds: members.filter(m => m.teamId === t.id).map(m => m.employeeId),
+      memberIds: members.filter(m => m.teamId === t.id && !m.leftAt).map(m => m.employeeId),
+      members: members.filter(m => m.teamId === t.id).map(m => ({ employeeId: m.employeeId, joinedAt: m.joinedAt ?? null, leftAt: m.leftAt ?? null })),
     }));
+  }
+
+  async updateTeam(id: number, data: { name?: string; shareRate?: string | null }): Promise<Team> {
+    const [team] = await db.update(teams).set(data).where(eq(teams.id, id)).returning();
+    return team;
   }
 
   async createTeam(name: string): Promise<Team> {
@@ -7600,12 +7635,17 @@ export class DatabaseStorage implements IStorage {
     await db.delete(teams).where(eq(teams.id, id));
   }
 
-  async addTeamMember(teamId: number, employeeId: number): Promise<void> {
-    await db.insert(teamMembers).values({ teamId, employeeId }).onConflictDoNothing();
+  // Ekleme: daha önce ayrılmış üye yeniden katılırsa aynı satır yeniden açılır (giriş tarihi bugün).
+  async addTeamMember(teamId: number, employeeId: number, joinedAt?: string): Promise<void> {
+    const day = joinedAt || todayYmdIstanbul();
+    await db.insert(teamMembers).values({ teamId, employeeId, joinedAt: day, leftAt: null })
+      .onConflictDoUpdate({ target: [teamMembers.teamId, teamMembers.employeeId], set: { joinedAt: day, leftAt: null } });
   }
 
-  async removeTeamMember(teamId: number, employeeId: number): Promise<void> {
-    await db.delete(teamMembers).where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.employeeId, employeeId)));
+  // Çıkarma: satır silinmez, left_at yazılır (takım giriş/çıkış geçmişi korunur).
+  async removeTeamMember(teamId: number, employeeId: number, leftAt?: string): Promise<void> {
+    await db.update(teamMembers).set({ leftAt: leftAt || todayYmdIstanbul() })
+      .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.employeeId, employeeId)));
   }
 
   // ── Fonzip ────────────────────────────────────────────────────────────────
