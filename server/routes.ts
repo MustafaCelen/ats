@@ -3380,6 +3380,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // ── Danışman bazlı tahsilat (kalem kalem, kasa/banka) ──────────────────────
+  // USD/TRY kuru (exchange_rates; verilen tarihten geriye en son bilinen gün)
+  app.get("/api/exchange-rates/usd", requireAuth, async (req, res) => {
+    try {
+      const day = typeof req.query.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date) ? req.query.date : todayYmdIstanbul();
+      const r = await pool.query<{ date: string; usd_try: string }>(`SELECT date, usd_try FROM exchange_rates WHERE date <= $1 AND usd_try IS NOT NULL ORDER BY date DESC LIMIT 1`, [day]);
+      if (!r.rows[0]) return res.status(404).json({ message: "Kur bulunamadı" });
+      res.json({ requested: day, date: r.rows[0].date, usdTry: Number(r.rows[0].usd_try) });
+    } catch (err) {
+      console.error("[GET /api/exchange-rates/usd]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   app.get("/api/closing-agents/:id/collections", requireAuth, requireAdmin, async (req, res) => {
     try {
       const rows = await storage.getClosingAgentCollections(Number(req.params.id));
@@ -3392,17 +3405,32 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/closing-agents/:id/collections", requireAuth, requireAdmin, async (req, res) => {
     try {
-      const { method, amount, note, collectedAt } = req.body;
-      if (!method || !["banka", "nakit"].includes(method) || amount == null) {
-        return res.status(400).json({ message: "method (banka|nakit) and amount are required" });
+      const agentId = Number(req.params.id);
+      const { method, note, collectedAt } = req.body ?? {};
+      if (method !== "banka" && method !== "nakit") return res.status(400).json({ message: "method banka veya nakit olmalı" });
+      const currency = req.body?.currency === "USD" ? "USD" : "TRY";
+      let amount = Number(req.body?.amount);
+      let originalAmount: string | null = null, fxRate: string | null = null;
+      if (currency === "USD") {
+        // Dolar tahsilat: dolar tutarı × kur = TL karşılığı; kur verilmezse o günün kuru
+        const usd = Number(req.body?.originalAmount ?? req.body?.amount);
+        if (!Number.isFinite(usd) || usd <= 0) return res.status(400).json({ message: "Dolar tutarı geçersiz" });
+        let rate = Number(req.body?.fxRate);
+        if (!Number.isFinite(rate) || rate <= 0) {
+          const day = typeof collectedAt === "string" && collectedAt ? collectedAt.slice(0, 10) : todayYmdIstanbul();
+          const r = await pool.query<{ usd_try: string }>(`SELECT usd_try FROM exchange_rates WHERE date <= $1 AND usd_try IS NOT NULL ORDER BY date DESC LIMIT 1`, [day]);
+          rate = Number(r.rows[0]?.usd_try);
+          if (!Number.isFinite(rate) || rate <= 0) return res.status(400).json({ message: "Kur bulunamadı; kuru elle girin" });
+        }
+        originalAmount = usd.toFixed(2);
+        fxRate = rate.toFixed(4);
+        amount = Math.round(usd * rate * 100) / 100;
       }
+      if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ message: "Tutar geçersiz" });
       const row = await storage.addClosingAgentCollection({
-        closingAgentId: Number(req.params.id),
-        method,
-        amount: String(amount),
-        note: note ?? null,
-        collectedAt: collectedAt ? new Date(collectedAt) : undefined,
-        createdByUserId: req.user!.id,
+        closingAgentId: agentId, method, amount: amount.toFixed(2), note: note || null,
+        currency, originalAmount, fxRate,
+        collectedAt: collectedAt ? new Date(collectedAt) : undefined, createdByUserId: req.user!.id,
       });
       res.status(201).json(row);
     } catch (err) {

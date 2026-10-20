@@ -3528,8 +3528,28 @@ function AgentCollectionDialog({ agentId, row, onClose }: {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [method, setMethod] = useState<"banka" | "nakit">("banka");
+  const [currency, setCurrency] = useState<"TRY" | "USD">("TRY");
   const [amount, setAmount] = useState("");
+  const [fxRate, setFxRate] = useState("");   // USD: uygulanacak kur (günün kuru gelir, elle değiştirilebilir)
   const [note, setNote] = useState("");
+
+  // Günün USD/TRY kuru (exchange_rates'ten; hafta sonu/tatilde en son bilinen gün)
+  const { data: todayRate } = useQuery<{ date: string; usdTry: number }>({
+    queryKey: ["/api/exchange-rates/usd"],
+    queryFn: async () => {
+      const res = await fetch("/api/exchange-rates/usd", { credentials: "include" });
+      if (!res.ok) throw new Error("Kur yok");
+      return res.json();
+    },
+    enabled: agentId !== null && currency === "USD",
+    staleTime: 10 * 60 * 1000,
+  });
+  useEffect(() => {
+    if (currency === "USD" && todayRate && !fxRate) setFxRate(String(todayRate.usdTry));
+  }, [currency, todayRate, fxRate]);
+  const rateNum = parseFloat(fxRate.replace(",", ".")) || 0;
+  const usdNum = parseFloat(amount) || 0;
+  const tlPreview = currency === "USD" ? Math.round(usdNum * rateNum * 100) / 100 : 0;
 
   const { data: items = [] } = useQuery<any[]>({
     queryKey: ["/api/closing-agents", agentId, "collections"],
@@ -3561,7 +3581,9 @@ function AgentCollectionDialog({ agentId, row, onClose }: {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
-      body: JSON.stringify({ method, amount, note: note || undefined }),
+      body: JSON.stringify(currency === "USD"
+        ? { method, currency: "USD", originalAmount: amount, fxRate: rateNum > 0 ? rateNum : undefined, note: note || undefined }
+        : { method, amount, note: note || undefined }),
     });
     setAmount("");
     setNote("");
@@ -3583,7 +3605,8 @@ function AgentCollectionDialog({ agentId, row, onClose }: {
           <DialogTitle>Tahsilat — {row?.employeeName ?? ""}</DialogTitle>
           <p id="agent-collection-desc" className="text-sm text-muted-foreground">
             Tahsilat, Kasa'nın iki alt kalemi üzerinden ayrı ayrı izlenir: Banka ve Nakit.
-            Her iki kalem de kendi tutarına ulaşınca ödeme durumu otomatik "Tahsil Edildi" olur.
+            Her iki kalem de kendi tutarına ulaşınca ödeme durumu otomatik "Tahsil Edildi" olur; kapanıştaki
+            tüm danışmanlar tahsil edilince işlem otomatik kapanır. Dolar tahsilat günün kuruyla TL'ye çevrilip kasaya yazılır.
           </p>
         </DialogHeader>
         <div className="space-y-3 pt-2">
@@ -3632,6 +3655,11 @@ function AgentCollectionDialog({ agentId, row, onClose }: {
                     {it.method === "banka" ? "Banka" : "Nakit"}
                   </Badge>
                   <span className="font-medium">{fmtTRY(parseFloat(it.amount))}</span>
+                  {it.currency === "USD" && (
+                    <span className="text-[11px] text-sky-700 whitespace-nowrap" title="Dolar tahsilat: dolar tutarı × uygulanan kur">
+                      ${Number(it.originalAmount).toLocaleString("tr-TR", { maximumFractionDigits: 2 })} × {Number(it.fxRate).toLocaleString("tr-TR", { maximumFractionDigits: 4 })}
+                    </span>
+                  )}
                   {it.note && <span className="text-xs text-muted-foreground truncate">{it.note}</span>}
                   <span className="ml-auto text-[11px] text-muted-foreground shrink-0">
                     {it.collectedAt ? new Date(it.collectedAt).toLocaleDateString("tr-TR") : ""}
@@ -3655,16 +3683,38 @@ function AgentCollectionDialog({ agentId, row, onClose }: {
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-1.5 flex-1">
-              <label className="text-xs font-medium">Tutar</label>
-              <Input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} className="h-9" />
+            <div className="space-y-1.5 w-20">
+              <label className="text-xs font-medium">Para</label>
+              <Select value={currency} onValueChange={(v) => { setCurrency(v as "TRY" | "USD"); setFxRate(""); }}>
+                <SelectTrigger className="h-9" data-testid="collection-currency"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="TRY">₺ TL</SelectItem>
+                  <SelectItem value="USD">$ USD</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
+            <div className="space-y-1.5 flex-1">
+              <label className="text-xs font-medium">{currency === "USD" ? "Tutar ($)" : "Tutar (₺)"}</label>
+              <Input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} className="h-9" data-testid="collection-amount" />
+            </div>
+            {currency === "USD" && (
+              <div className="space-y-1.5 w-28">
+                <label className="text-xs font-medium" title={todayRate ? `Kur günü: ${todayRate.date}` : undefined}>Kur (₺/$)</label>
+                <Input type="number" step="0.0001" value={fxRate} onChange={(e) => setFxRate(e.target.value)} className="h-9" placeholder="Günün kuru" data-testid="collection-fx-rate" />
+              </div>
+            )}
             <div className="space-y-1.5 flex-1">
               <label className="text-xs font-medium">Not (opsiyonel)</label>
               <Input value={note} onChange={(e) => setNote(e.target.value)} className="h-9" />
             </div>
-            <Button size="sm" className="h-9 shrink-0" onClick={addItem} disabled={!amount}>Ekle</Button>
+            <Button size="sm" className="h-9 shrink-0" onClick={addItem} disabled={!amount || (currency === "USD" && rateNum <= 0)}>Ekle</Button>
           </div>
+          {currency === "USD" && (
+            <p className="text-xs text-muted-foreground -mt-1" data-testid="collection-tl-preview">
+              {todayRate ? `Günün kuru (${todayRate.date}): ${todayRate.usdTry.toLocaleString("tr-TR", { maximumFractionDigits: 4 })} ₺` : "Kur yükleniyor…"}
+              {usdNum > 0 && rateNum > 0 && <> · Kasaya gidecek TL karşılığı: <span className="font-semibold text-foreground">{fmtTRY(tlPreview)}</span></>}
+            </p>
+          )}
 
           <div className="flex justify-end pt-1">
             <Button variant="outline" onClick={onClose}>Kapat</Button>

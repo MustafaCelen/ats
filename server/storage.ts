@@ -246,6 +246,7 @@ export interface IStorage {
   }>): Promise<void>;
   updateClosingSide(id: number, data: Partial<{ kasa: string; nakit: string; banka: string }>): Promise<void>;
   getClosingIdForAgent(agentId: number): Promise<number | null>;
+  autoCloseWhenFullyCollected(closingAgentId: number): Promise<void>;
   syncClosingAgentUkIncome(agentId: number): Promise<void>;
   backfillAllUkIncomes(): Promise<{ synced: number; deleted: number }>;
   findCandidateDuplicates(): Promise<any[]>;
@@ -2715,12 +2716,16 @@ export class DatabaseStorage implements IStorage {
 
   async addClosingAgentCollection(data: {
     closingAgentId: number; method: string; amount: string; note?: string | null;
+    currency?: string; originalAmount?: string | null; fxRate?: string | null;
     collectedAt?: Date; createdByUserId?: number | null;
   }): Promise<ClosingAgentCollection> {
     const [row] = await db.insert(closingAgentCollections).values({
       closingAgentId: data.closingAgentId,
       method: data.method,
       amount: data.amount,
+      currency: data.currency ?? "TRY",
+      originalAmount: data.originalAmount ?? null,
+      fxRate: data.fxRate ?? null,
       note: data.note ?? null,
       collectedAt: data.collectedAt ?? new Date(),
       createdByUserId: data.createdByUserId ?? null,
@@ -2766,6 +2771,25 @@ export class DatabaseStorage implements IStorage {
     if (shouldBeCollected !== agent.paymentCollected) {
       await this.updateClosingAgent(closingAgentId, { paymentCollected: shouldBeCollected });
     }
+    if (shouldBeCollected) await this.autoCloseWhenFullyCollected(closingAgentId);
+  }
+
+  // Kapanıştaki TÜM danışmanların tahsilatı tamamlanınca işlem otomatik kapanır:
+  // bekleyen (expected) danışman satırları ve kapanış "completed" olur.
+  async autoCloseWhenFullyCollected(closingAgentId: number): Promise<void> {
+    const closingId = await this.getClosingIdForAgent(closingAgentId);
+    if (!closingId) return;
+    const rows = await db.execute(sql`
+      SELECT ca.id, ca.status, ca.payment_collected AS collected
+      FROM closing_agents ca JOIN closing_sides cs ON cs.id = ca.closing_side_id
+      WHERE cs.closing_id = ${closingId}
+    `);
+    const agents = rows.rows as any[];
+    if (agents.length === 0 || !agents.every((a) => a.collected === true)) return;
+    for (const a of agents) {
+      if (a.status === "expected") await this.updateClosingAgent(a.id, { status: "completed" });
+    }
+    await db.execute(sql`UPDATE closings SET status = 'completed' WHERE id = ${closingId} AND status <> 'completed'`);
   }
 
   async updateClosingAgent(id: number, data: Partial<{

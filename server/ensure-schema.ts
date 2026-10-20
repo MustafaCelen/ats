@@ -360,6 +360,10 @@ export async function ensureSchema(): Promise<void> {
       created_at TIMESTAMP DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS closing_agent_collections_agent_id_idx ON closing_agent_collections(closing_agent_id);
+    -- USD tahsilat: dolar tutarı + uygulanan kur; amount her zaman TL karşılığı
+    ALTER TABLE closing_agent_collections ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'TRY';
+    ALTER TABLE closing_agent_collections ADD COLUMN IF NOT EXISTS original_amount NUMERIC(15,2);
+    ALTER TABLE closing_agent_collections ADD COLUMN IF NOT EXISTS fx_rate NUMERIC(15,4);
 
     -- Adayı yönlendiren danışman (ÜK 45+45 "Katkı Payı Yönlendirme").
     ALTER TABLE candidates ADD COLUMN IF NOT EXISTS referred_by_employee_id INTEGER;

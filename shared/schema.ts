@@ -586,7 +586,10 @@ export const closingAgentCollections = pgTable("closing_agent_collections", {
   id: serial("id").primaryKey(),
   closingAgentId: integer("closing_agent_id").notNull(),
   method: text("method").notNull(), // "banka" | "nakit" — her biri kendi hedefine (closingAgents.banka / .nakit) sayılır
-  amount: numeric("amount", { precision: 15, scale: 2 }).notNull(),
+  amount: numeric("amount", { precision: 15, scale: 2 }).notNull(),   // her zaman TL (USD ise originalAmount × fxRate)
+  currency: text("currency").notNull().default("TRY"),                 // "TRY" | "USD"
+  originalAmount: numeric("original_amount", { precision: 15, scale: 2 }), // USD tahsilatta dolar tutarı
+  fxRate: numeric("fx_rate", { precision: 15, scale: 4 }),             // uygulanan kur (TCMB/Frankfurter günlük, elle değiştirilebilir)
   note: text("note"),
   collectedAt: timestamp("collected_at").defaultNow(),
   createdByUserId: integer("created_by_user_id"),

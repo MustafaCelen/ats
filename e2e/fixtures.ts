@@ -126,6 +126,10 @@ export async function advisorLogin(context: BrowserContext, employeeId: number) 
 
 export async function cleanupE2E() {
   const emp = `SELECT e.id FROM employees e JOIN candidates c ON c.id = e.candidate_id WHERE c.name LIKE 'E2E %'`;
+  await q(`DELETE FROM closing_agent_collections WHERE closing_agent_id IN (SELECT id FROM closing_agents WHERE employee_id IN (${emp}))`);
+  await q(`DELETE FROM closing_agents WHERE employee_id IN (${emp})`);
+  await q(`DELETE FROM closing_sides WHERE closing_id IN (SELECT id FROM closings WHERE property_address LIKE 'E2E %')`);
+  await q(`DELETE FROM closings WHERE property_address LIKE 'E2E %'`);
   await q(`DELETE FROM team_members WHERE employee_id IN (${emp}) OR team_id IN (SELECT id FROM teams WHERE name LIKE 'E2E %')`);
   await q(`DELETE FROM teams WHERE name LIKE 'E2E %'`);
   await q(`UPDATE users SET hm_group = NULL WHERE hm_group LIKE 'E2E %'`);
