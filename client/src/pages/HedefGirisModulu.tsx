@@ -12,7 +12,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Target, DollarSign, Receipt, TrendingUp, UserCheck, ExternalLink, Calendar } from "lucide-react";
+import { Target, DollarSign, Receipt, TrendingUp, UserCheck, ExternalLink, Calendar, Trophy } from "lucide-react";
 import { EXPENSE_CATEGORY_GROUPS, INCOME_CATEGORIES } from "@shared/schema";
 
 function fmtTRY(n: number) {
@@ -152,6 +152,56 @@ function FinansalHedefEditor({ year }: { year: number }) {
       </div>
       <div className="px-5 py-2.5 border-t border-border bg-muted/20 text-xs text-muted-foreground">
         Alandan çıktığınızda (blur) otomatik kaydedilir.
+      </div>
+    </div>
+  );
+}
+
+// ── Capper Hedefi — yıllık, ofis bazlı (Cap Analizi'nde gerçekleşen/hedef) ──
+function CapperHedefEditor({ year }: { year: number }) {
+  const qc = useQueryClient();
+  const { data } = useQuery<{ year: number; byOffice: Record<string, number>; total: number }>({
+    queryKey: ["/api/capper-targets", year],
+    queryFn: () => fetch(`/api/capper-targets?year=${year}`, { credentials: "include" }).then((r) => r.json()),
+  });
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const valueFor = (o: string) => draft[o] ?? String(data?.byOffice?.[o] ?? "");
+  const total = OFFICES.reduce((s, o) => s + (Number(valueFor(o)) || 0), 0);
+  const saveOffice = async (o: string) => {
+    if (draft[o] === undefined) return;
+    const target = draft[o] === "" ? 0 : Number(draft[o]);
+    if (!Number.isInteger(target) || target < 0) return;
+    const r = await fetch("/api/capper-targets", {
+      method: "PUT", credentials: "include", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ year, office: o, target }),
+    });
+    if (r.ok) { setDraft((d) => { const n = { ...d }; delete n[o]; return n; }); qc.invalidateQueries({ queryKey: ["/api/capper-targets", year] }); }
+  };
+  return (
+    <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden" data-testid="capper-hedef">
+      <div className="px-5 py-3 border-b border-border flex items-center gap-2 flex-wrap">
+        <Trophy className="h-4 w-4 text-amber-500" />
+        <h2 className="text-base font-semibold">Capper Hedefi</h2>
+        <span className="text-xs text-muted-foreground ml-1">{year} — yıl içinde cap'e ulaşması hedeflenen danışman sayısı, ofis bazlı</span>
+        <span className="ml-auto text-sm font-semibold tabular-nums">Toplam: {total}</span>
+      </div>
+      <div className="px-5 py-3 flex items-center gap-6 flex-wrap">
+        {OFFICES.map((o) => (
+          <label key={o} className="flex items-center gap-2 text-sm">
+            <span className="text-muted-foreground w-24">{o}</span>
+            <Input
+              type="number" min={0} inputMode="numeric"
+              value={valueFor(o)}
+              onChange={(e) => setDraft((d) => ({ ...d, [o]: e.target.value }))}
+              onBlur={() => saveOffice(o)}
+              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+              placeholder="0"
+              className="h-8 w-24 text-right text-sm tabular-nums"
+              data-testid={`capper-hedef-${o}`}
+            />
+          </label>
+        ))}
+        <span className="text-xs text-muted-foreground">Cap Analizi'nde gerçekleşen / hedef olarak izlenir.</span>
       </div>
     </div>
   );
@@ -701,6 +751,7 @@ export default function HedefGirisModulu() {
 
         {/* Makro: yıllık/aylık hedefler — hepsi doğrudan bu modülde girilir */}
         <FinansalHedefEditor year={year} />
+        <CapperHedefEditor year={year} />
         <MasrafHedefEditor year={year} />
 
         {/* Mikro: diğer giriş noktaları */}

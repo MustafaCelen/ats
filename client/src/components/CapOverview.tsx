@@ -33,7 +33,7 @@ function projection(s: any) {
   return { monthsElapsed, monthsRemaining, projected, projPct: s.capAmount > 0 ? Math.round((projected / s.capAmount) * 100) : 0 };
 }
 
-export function CapOverview() {
+export function CapOverview({ target }: { target?: number } = {}) {
   const { data: capStatuses = {} } = useCapStatuses();
 
   const capList = useMemo(() => {
@@ -116,7 +116,9 @@ export function CapOverview() {
           <div className="px-5 py-4 border-b border-border flex items-center gap-2">
             <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold">✓</span>
             <h2 className="text-base font-semibold">Cap Yapanlar</h2>
-            <span className="ml-auto text-xs bg-emerald-100 text-emerald-700 font-semibold px-2 py-0.5 rounded-full">{cappers.length} danışman</span>
+            <span className="ml-auto text-xs bg-emerald-100 text-emerald-700 font-semibold px-2 py-0.5 rounded-full" data-testid="cappers-vs-target">
+              {cappers.length} danışman{target ? ` / hedef ${target}` : ""}
+            </span>
           </div>
           {cappers.length === 0 ? <div className="p-8 text-center text-sm text-muted-foreground">Henüz cap yapan danışman yok</div> : (
             <div className="divide-y divide-border/50 max-h-[420px] overflow-y-auto">

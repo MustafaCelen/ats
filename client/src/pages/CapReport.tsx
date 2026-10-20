@@ -67,7 +67,7 @@ function Skeleton({ h = "h-64" }: { h?: string }) {
 }
 
 // ── Year section ──────────────────────────────────────────────────────────────
-function YearSection({ year, rows, isLoading }: { year: number; rows: CapRow[]; isLoading: boolean }) {
+function YearSection({ year, rows, isLoading, target }: { year: number; rows: CapRow[]; isLoading: boolean; target?: number }) {
   const capped = useMemo(() => rows.filter((r) => r.hasCapped && r.achievementDays !== null), [rows]);
   const notCapped = useMemo(() => rows.filter((r) => !r.hasCapped), [rows]);
 
@@ -115,8 +115,8 @@ function YearSection({ year, rows, isLoading }: { year: number; rows: CapRow[]; 
         <MetricCard
           icon={Trophy} color="bg-amber-50 text-amber-600"
           label="Cap'e Ulaşan"
-          value={capped.length}
-          sub={`${rows.length} danışmandan`}
+          value={target ? `${capped.length} / ${target}` : capped.length}
+          sub={target ? `hedef ${target} · ${rows.length} danışmandan` : `${rows.length} danışmandan`}
         />
         <MetricCard
           icon={TrendingUp} color="bg-blue-50 text-blue-600"
@@ -327,6 +327,13 @@ export default function CapReport() {
     staleTime: 5 * 60 * 1000,
   });
 
+  // Yıllık capper hedefi (Hedef Giriş Modülü → Capper Hedefi)
+  const thisYear = new Date().getFullYear();
+  const { data: capperTarget } = useQuery<{ year: number; byOffice: Record<string, number>; total: number }>({
+    queryKey: ["/api/capper-targets", thisYear],
+    queryFn: () => fetch(`/api/capper-targets?year=${thisYear}`, { credentials: "include" }).then((r) => r.json()),
+  });
+  const targetTotal = capperTarget?.total ?? 0;
   const rows2025 = useMemo(() => data.filter((r) => new Date(r.periodStart).getFullYear() === 2025), [data]);
   const rows2026 = useMemo(() => data.filter((r) => new Date(r.periodStart).getFullYear() === 2026), [data]);
 
@@ -341,7 +348,7 @@ export default function CapReport() {
           <p className="text-sm text-muted-foreground mt-0.5">Danışmanların cap periyoduna göre cap'e ulaşma süreleri</p>
         </div>
 
-        <YearSection year={2026} rows={rows2026} isLoading={isLoading} />
+        <YearSection year={2026} rows={rows2026} isLoading={isLoading} target={thisYear === 2026 ? targetTotal : undefined} />
 
         {rows2025.length > 0 && (
           <>
@@ -354,9 +361,17 @@ export default function CapReport() {
         <div className="border-t border-border pt-2" />
         <div>
           <h2 className="text-lg font-bold">Güncel Cap Durumu</h2>
-          <p className="text-sm text-muted-foreground mt-0.5">Cap yenileme takvimi, cap yapanlar, yaklaşanlar ve mevcut hızla yapabilecekler</p>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Cap yenileme takvimi, cap yapanlar, yaklaşanlar ve mevcut hızla yapabilecekler
+            {targetTotal > 0 && (
+              <span className="ml-2 inline-flex items-center gap-1 text-xs font-medium bg-amber-50 text-amber-800 border border-amber-200 rounded-full px-2 py-0.5" data-testid="capper-target-chip">
+                {thisYear} capper hedefi: {targetTotal}
+                {Object.entries(capperTarget?.byOffice ?? {}).filter(([, v]) => v > 0).map(([o, v]) => ` · ${o} ${v}`).join("")}
+              </span>
+            )}
+          </p>
         </div>
-        <CapOverview />
+        <CapOverview target={targetTotal || undefined} />
       </div>
     </Layout>
   );

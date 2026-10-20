@@ -47,6 +47,14 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction) {
   next();
 }
 
+// Super admin: Kullanıcılar, Danışman Birleştir, Duplike Kapanışlar, Fonzip, WhatsApp Toplu
+export function requireSuperAdmin(req: Request, res: Response, next: NextFunction) {
+  if (!req.user || req.user.role !== "admin" || !(req.user as any).isSuperAdmin) {
+    return res.status(403).json({ message: "Bu işlem yalnız super admin yetkisiyle yapılabilir" });
+  }
+  next();
+}
+
 export function requireHiringManagerOrAdmin(req: Request, res: Response, next: NextFunction) {
   if (!req.user || req.user.role === "assistant") {
     return res.status(403).json({ message: "Forbidden" });

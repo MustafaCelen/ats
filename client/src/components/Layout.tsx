@@ -184,7 +184,13 @@ export function Layout({ children }: LayoutProps) {
     user?.canViewFinancials ? reportsGroupAdmin : reportsGroupHM,
   ];
 
-  const navItems = isAdmin ? adminNavItems : isAssistant ? assistantNavItems : hmNavItems;
+  // Super admin'e özel modüller: diğer adminlerin menüsünden düşer
+  const isSuperAdmin = isAdmin && !!(user as any)?.isSuperAdmin;
+  const SUPER_ADMIN_ONLY = new Set(["/users", "/duplicate-merge", "/duplicate-closings", "/fonzip", "/whatsapp-bulk"]);
+  const visible = (leaf: NavLeaf) => isSuperAdmin || !SUPER_ADMIN_ONLY.has(leaf.href);
+  const navItems: NavEntry[] = (isAdmin ? adminNavItems : isAssistant ? assistantNavItems : hmNavItems)
+    .map((item) => (isGroup(item) ? { ...item, children: item.children.filter(visible) } : item))
+    .filter((item) => (isGroup(item) ? item.children.length > 0 : visible(item)));
 
   // Auto-open the reports group if we're on a report sub-route
   const defaultOpen = navItems.find(

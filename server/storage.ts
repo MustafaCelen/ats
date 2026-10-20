@@ -147,7 +147,7 @@ export interface IStorage {
   getUserByEmailFull(email: string): Promise<User | undefined>;
   getUsers(): Promise<PublicUser[]>;
   createUser(data: { name: string; email: string; passwordHash: string; role: string }): Promise<PublicUser>;
-  updateUser(id: number, data: Partial<{ name: string; email: string; passwordHash: string; role: string; canViewFinancials: boolean; hmGroup: string | null }>): Promise<PublicUser | undefined>;
+  updateUser(id: number, data: Partial<{ name: string; email: string; passwordHash: string; role: string; canViewFinancials: boolean; hmGroup: string | null; isSuperAdmin: boolean }>): Promise<PublicUser | undefined>;
   deleteUser(id: number): Promise<void>;
   seedAdminIfEmpty(): Promise<void>;
   getAssignedJobIds(userId: number): Promise<number[]>;
@@ -360,7 +360,7 @@ export class DatabaseStorage implements IStorage {
     }).returning();
     return toPublicUser(u);
   }
-  async updateUser(id: number, data: Partial<{ name: string; email: string; passwordHash: string; role: string; canViewFinancials: boolean; hmGroup: string | null }>): Promise<PublicUser | undefined> {
+  async updateUser(id: number, data: Partial<{ name: string; email: string; passwordHash: string; role: string; canViewFinancials: boolean; hmGroup: string | null; isSuperAdmin: boolean }>): Promise<PublicUser | undefined> {
     const updateData: any = { ...data };
     if (data.email) updateData.email = data.email.toLowerCase();
     const [u] = await db.update(users).set(updateData).where(eq(users.id, id)).returning();

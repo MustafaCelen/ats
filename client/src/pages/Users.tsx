@@ -53,10 +53,10 @@ export default function Users() {
   const [deleteTarget, setDeleteTarget] = useState<PublicUser | null>(null);
   const [selectedJobId, setSelectedJobId] = useState<number | null>(null);
 
-  if (currentUser?.role !== "admin") {
+  if (currentUser?.role !== "admin" || !(currentUser as any)?.isSuperAdmin) {
     return (
       <Layout>
-        <div className="text-center py-20 text-muted-foreground">Bu sayfaya erişim yetkiniz yok.</div>
+        <div className="text-center py-20 text-muted-foreground">Bu sayfa yalnız super admin yetkisiyle görüntülenir.</div>
       </Layout>
     );
   }
@@ -97,7 +97,7 @@ export default function Users() {
                     <p className="font-medium text-sm truncate" title={user.name}>{user.name}</p>
                   </div>
                   <p className="text-sm text-muted-foreground truncate" title={user.email}>{user.email}</p>
-                  <RoleBadge role={user.role} />
+                  <RoleBadge role={user.role} isSuperAdmin={(user as any).isSuperAdmin} />
                   {user.role === "hiring_manager" ? <HmGroupField user={user} /> : <span className="text-xs text-muted-foreground">—</span>}
                   <p className="text-xs text-muted-foreground whitespace-nowrap">
                     {user.createdAt ? formatDistanceToNow(new Date(user.createdAt), { addSuffix: true }) : "—"}
@@ -115,6 +115,9 @@ export default function Users() {
                     )}
                     {user.role !== "admin" && (
                       <ToggleFinancialsButton user={user} />
+                    )}
+                    {user.role === "admin" && user.id !== currentUser?.id && (
+                      <ToggleSuperAdminButton user={user} />
                     )}
                     {user.id !== currentUser?.id && (
                       <Button
@@ -482,7 +485,45 @@ function DeleteUserConfirm({ user, onDone }: { user: PublicUser | null; onDone: 
 
 // ─── Role Badge ───────────────────────────────────────────────────────────────
 
-function RoleBadge({ role }: { role: string }) {
+function ToggleSuperAdminButton({ user }: { user: PublicUser }) {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const [busy, setBusy] = useState(false);
+  const isSuper = (user as any).isSuperAdmin ?? false;
+  const toggle = async () => {
+    setBusy(true);
+    try {
+      const r = await fetch(`/api/users/${user.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include",
+        body: JSON.stringify({ isSuperAdmin: !isSuper }),
+      });
+      if (!r.ok) { toast({ title: (await r.json().catch(() => ({}))).message ?? "Kaydedilemedi", variant: "destructive" }); return; }
+      qc.invalidateQueries({ queryKey: ["/api/users"] });
+      toast({ title: !isSuper ? `${user.name} artık super admin` : `${user.name} super admin yetkisi kaldırıldı` });
+    } finally { setBusy(false); }
+  };
+  return (
+    <Button
+      size="sm" variant={isSuper ? "default" : "outline"}
+      className={`h-7 text-xs ${isSuper ? "bg-red-600 hover:bg-red-700 text-white border-red-600" : ""}`}
+      onClick={toggle} disabled={busy}
+      title={isSuper ? "Super admin yetkisini kaldır" : "Super admin yap (Kullanıcılar, Danışman Birleştir, Duplike Kapanışlar, Fonzip, WhatsApp Toplu)"}
+      data-testid={`btn-super-admin-${user.id}`}
+    >
+      <Shield className="h-3 w-3 mr-1" />
+      {isSuper ? "Super ✓" : "Super"}
+    </Button>
+  );
+}
+
+function RoleBadge({ role, isSuperAdmin }: { role: string; isSuperAdmin?: boolean }) {
+  if (role === "admin" && isSuperAdmin) {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-red-600 text-white font-medium ring-1 ring-red-700">
+        <Shield className="h-3 w-3" />Super Admin
+      </span>
+    );
+  }
   if (role === "admin") {
     return (
       <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium ring-1 ring-red-200">

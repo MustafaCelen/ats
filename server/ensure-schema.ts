@@ -299,6 +299,20 @@ export async function ensureSchema(): Promise<void> {
     ALTER TABLE employees ADD COLUMN IF NOT EXISTS dua_end_date TEXT;
     -- Hiring manager grubu (Üretim Bandı raporunda grup alt toplamı)
     ALTER TABLE users ADD COLUMN IF NOT EXISTS hm_group TEXT;
+    -- Super admin bayrağı; hiç super admin yoksa en eski admin super admin olur
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS is_super_admin BOOLEAN NOT NULL DEFAULT false;
+    UPDATE users SET is_super_admin = TRUE
+      WHERE id = (SELECT MIN(id) FROM users WHERE role = 'admin')
+        AND NOT EXISTS (SELECT 1 FROM users WHERE is_super_admin);
+    -- Yıllık capper hedefi (ofis bazlı; Hedef Giriş Modülü + Cap Analizi)
+    CREATE TABLE IF NOT EXISTS capper_targets (
+      id SERIAL PRIMARY KEY,
+      year INTEGER NOT NULL,
+      office TEXT NOT NULL DEFAULT '',
+      target INTEGER NOT NULL DEFAULT 0,
+      updated_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE (year, office)
+    );
     -- Takımlar: tarihli üyelik + paylaşım oranı
     CREATE TABLE IF NOT EXISTS teams (
       id SERIAL PRIMARY KEY,

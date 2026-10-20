@@ -133,6 +133,8 @@ export async function cleanupE2E() {
   await q(`DELETE FROM team_members WHERE employee_id IN (${emp}) OR team_id IN (SELECT id FROM teams WHERE name LIKE 'E2E %')`);
   await q(`DELETE FROM teams WHERE name LIKE 'E2E %'`);
   await q(`UPDATE users SET hm_group = NULL WHERE hm_group LIKE 'E2E %'`);
+  await q(`DELETE FROM users WHERE email LIKE 'e2e-%'`);
+  await q(`DELETE FROM capper_targets WHERE year = 2099`);
   await q(`DELETE FROM uk_program_checks WHERE employee_id IN (${emp})`);
   await q(`DELETE FROM uk_program_weeks WHERE employee_id IN (${emp})`);
   await q(`DELETE FROM uk_program_enrollments WHERE employee_id IN (${emp})`);

@@ -5,7 +5,7 @@ import { storage } from "./storage";
 import { todayYmdIstanbul } from "./storage";
 import { db, pool } from "./db";
 import { sql } from "drizzle-orm";
-import { requireAuth, requireAdmin, requireHiringManagerOrAdmin, requireFinancialsAccess } from "./auth";
+import { requireAuth, requireAdmin, requireSuperAdmin, requireHiringManagerOrAdmin, requireFinancialsAccess } from "./auth";
 import { api } from "@shared/routes";
 import { z } from "zod";
 import { insertInterviewSchema, insertOfferSchema, type InsertTask, TASK_STATUSES, OFFICES } from "@shared/schema";
@@ -997,7 +997,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // ── WhatsApp Toplu Mesaj ───────────────────────────────────────────────────────
 
-  app.get("/api/whatsapp/templates", requireAuth, requireAdmin, async (_req, res) => {
+  app.get("/api/whatsapp/templates", requireAuth, requireSuperAdmin, async (_req, res) => {
     try {
       const templates = await listWhatsAppTemplates();
       res.json(templates);
@@ -1007,7 +1007,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.post("/api/whatsapp/bulk-send-one", requireAuth, requireAdmin, async (req, res) => {
+  app.post("/api/whatsapp/bulk-send-one", requireAuth, requireSuperAdmin, async (req, res) => {
     try {
       const { employeeId, templateSid, templateName, variables } = req.body as {
         employeeId: number; templateSid: string; templateName: string; variables?: Record<string, string>;
@@ -1041,7 +1041,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.get("/api/whatsapp/bulk-sends", requireAuth, requireAdmin, async (_req, res) => {
+  app.get("/api/whatsapp/bulk-sends", requireAuth, requireSuperAdmin, async (_req, res) => {
     try {
       res.json(await storage.getWhatsappBulkSends());
     } catch (err) {
@@ -1052,7 +1052,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // Sunucu taraflı toplu gönderim: sayfa yenilense de gönderim durmaz, ilerleme
   // batchId ile sorgulanabilir (server/whatsapp-bulk-runner.ts).
-  app.post("/api/whatsapp/bulk-send", requireAuth, requireAdmin, async (req, res) => {
+  app.post("/api/whatsapp/bulk-send", requireAuth, requireSuperAdmin, async (req, res) => {
     try {
       const { employeeIds, templateSid, templateName, variablesByEmployeeId } = req.body as {
         employeeIds: number[]; templateSid: string; templateName: string;
@@ -1086,23 +1086,23 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.get("/api/whatsapp/bulk-send/active", requireAuth, requireAdmin, async (req, res) => {
+  app.get("/api/whatsapp/bulk-send/active", requireAuth, requireSuperAdmin, async (req, res) => {
     res.json(getActiveBatchForUser(req.user!.id));
   });
 
   // Sayfa yenilendikten sonra "Kaldığı Yerden Devam Et" butonunun geri gelebilmesi için:
   // aktif batch yoksa, bu kullanıcının yakın zamanda bitmiş/durmuş son batch'ini döner.
-  app.get("/api/whatsapp/bulk-send/last", requireAuth, requireAdmin, async (req, res) => {
+  app.get("/api/whatsapp/bulk-send/last", requireAuth, requireSuperAdmin, async (req, res) => {
     res.json(getLastBatchForUser(req.user!.id));
   });
 
-  app.get("/api/whatsapp/bulk-send/:batchId", requireAuth, requireAdmin, async (req, res) => {
+  app.get("/api/whatsapp/bulk-send/:batchId", requireAuth, requireSuperAdmin, async (req, res) => {
     const batch = getBatch(req.params.batchId);
     if (!batch) return res.status(404).json({ message: "Batch bulunamadı" });
     res.json(batch);
   });
 
-  app.post("/api/whatsapp/bulk-send/:batchId/stop", requireAuth, requireAdmin, async (req, res) => {
+  app.post("/api/whatsapp/bulk-send/:batchId/stop", requireAuth, requireSuperAdmin, async (req, res) => {
     const ok = requestStop(req.params.batchId);
     res.json({ ok });
   });
@@ -1262,7 +1262,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json(await storage.getUsers());
   });
 
-  app.post("/api/users", requireAuth, requireAdmin, async (req, res) => {
+  app.post("/api/users", requireAuth, requireSuperAdmin, async (req, res) => {
     try {
       const { name, email, password, role } = req.body;
       if (!name || !email || !password) return res.status(400).json({ message: "Name, email, and password are required" });
@@ -1275,15 +1275,24 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.patch("/api/users/:id", requireAuth, requireAdmin, async (req, res) => {
+  app.patch("/api/users/:id", requireAuth, requireSuperAdmin, async (req, res) => {
     try {
-      const { name, email, password, role, canViewFinancials, hmGroup } = req.body;
+      const { name, email, password, role, canViewFinancials, hmGroup, isSuperAdmin } = req.body;
       const update: any = {};
       if (name) update.name = name;
       if (email) update.email = email;
       if (role) update.role = role;
       if (canViewFinancials !== undefined) update.canViewFinancials = canViewFinancials;
       if (hmGroup !== undefined) update.hmGroup = typeof hmGroup === "string" && hmGroup.trim() ? hmGroup.trim() : null;
+      const targetId = Number(req.params.id);
+      if (isSuperAdmin !== undefined) {
+        if (targetId === req.user!.id && !isSuperAdmin) return res.status(400).json({ message: "Kendi super admin yetkinizi kaldıramazsınız" });
+        const target = await storage.getUserById(targetId);
+        if (!target) return res.status(404).json({ message: "User not found" });
+        if (isSuperAdmin && (role ?? target.role) !== "admin") return res.status(400).json({ message: "Yalnız admin rolündeki kullanıcı super admin olabilir" });
+        update.isSuperAdmin = !!isSuperAdmin;
+      }
+      if (role && role !== "admin") update.isSuperAdmin = false;   // admin'likten çıkan super admin kalamaz
       if (password) update.passwordHash = await bcrypt.hash(password, 10);
       const user = await storage.updateUser(Number(req.params.id), update);
       if (!user) return res.status(404).json({ message: "User not found" });
@@ -1294,7 +1303,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.delete("/api/users/:id", requireAuth, requireAdmin, async (req, res) => {
+  app.delete("/api/users/:id", requireAuth, requireSuperAdmin, async (req, res) => {
     try {
       const id = Number(req.params.id);
       if (req.user!.id === id) return res.status(400).json({ message: "Kendi hesabınızı silemezsiniz" });
@@ -1370,12 +1379,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ── Candidates ──────────────────────────────────────────────────────────────
 
   // Duplicate merge routes ÖNCE tanımlanmalı (yoksa /:id "duplicates"/"merge" yakalıyor)
-  app.get("/api/candidates/duplicates", requireAuth, requireAdmin, async (_req, res) => {
+  app.get("/api/candidates/duplicates", requireAuth, requireSuperAdmin, async (_req, res) => {
     try { res.json(await storage.findCandidateDuplicates()); }
     catch (err: any) { console.error("[duplicates]", err); res.status(500).json({ message: err.message }); }
   });
 
-  app.get("/api/candidates/merge/log", requireAuth, requireAdmin, async (_req, res) => {
+  app.get("/api/candidates/merge/log", requireAuth, requireSuperAdmin, async (_req, res) => {
     try {
       const rows = await db.execute(sql`
         SELECT id, source_id, target_id, performed_by_user_id, performed_at, undone_at, notes
@@ -1385,7 +1394,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     } catch (err: any) { res.status(500).json({ message: err.message }); }
   });
 
-  app.post("/api/candidates/merge/preview", requireAuth, requireAdmin, async (req, res) => {
+  app.post("/api/candidates/merge/preview", requireAuth, requireSuperAdmin, async (req, res) => {
     try {
       const { sourceId, targetId } = req.body ?? {};
       if (!sourceId || !targetId) return res.status(400).json({ message: "sourceId ve targetId gerekli" });
@@ -1393,14 +1402,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     } catch (err: any) { console.error("[merge preview]", err); res.status(500).json({ message: err.message }); }
   });
 
-  app.post("/api/candidates/merge/:logId/undo", requireAuth, requireAdmin, async (req, res) => {
+  app.post("/api/candidates/merge/:logId/undo", requireAuth, requireSuperAdmin, async (req, res) => {
     try {
       await storage.undoMerge(parseInt(req.params.logId));
       res.json({ ok: true });
     } catch (err: any) { console.error("[undo merge]", err); res.status(500).json({ message: err.message }); }
   });
 
-  app.post("/api/candidates/merge", requireAuth, requireAdmin, async (req, res) => {
+  app.post("/api/candidates/merge", requireAuth, requireSuperAdmin, async (req, res) => {
     try {
       const { sourceId, targetId } = req.body ?? {};
       if (!sourceId || !targetId) return res.status(400).json({ message: "sourceId ve targetId gerekli" });
@@ -3955,7 +3964,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // Tekrar tekrar import edilmiş (aynı adres+tarih+bedel) duplike kapanışları bul/temizle
-  app.get("/api/closings/duplicates", requireAuth, requireAdmin, async (_req, res) => {
+  app.get("/api/closings/duplicates", requireAuth, requireSuperAdmin, async (_req, res) => {
     try {
       res.json(await storage.getDuplicateClosingGroups());
     } catch (err: any) {
@@ -3963,7 +3972,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.status(500).json({ message: err.message });
     }
   });
-  app.post("/api/closings/duplicates/cleanup", requireAuth, requireAdmin, async (req, res) => {
+  app.post("/api/closings/duplicates/cleanup", requireAuth, requireSuperAdmin, async (req, res) => {
     try {
       const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter((n: number) => !isNaN(n)) : [];
       res.json(await storage.cleanupDuplicateClosings(ids));
@@ -4452,6 +4461,35 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // ── Financial Targets ─────────────────────────────────────────────────────────
 
+  // ── Yıllık capper hedefi (ofis bazlı) ──
+  app.get("/api/capper-targets", requireAuth, async (req, res) => {
+    try {
+      const year = Number(req.query.year) || new Date().getFullYear();
+      const r = await pool.query<{ office: string; target: number }>("SELECT office, target FROM capper_targets WHERE year = $1 ORDER BY office", [year]);
+      res.json({ year, byOffice: Object.fromEntries(r.rows.map((x) => [x.office, x.target])), total: r.rows.reduce((s, x) => s + x.target, 0) });
+    } catch (err) {
+      console.error("[GET /api/capper-targets]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+  app.put("/api/capper-targets", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const year = Number(req.body?.year), target = Number(req.body?.target ?? 0);
+      const office = typeof req.body?.office === "string" ? req.body.office : "";
+      if (!Number.isInteger(year) || year < 2000 || year > 2100) return res.status(400).json({ message: "Geçersiz yıl" });
+      if (!Number.isInteger(target) || target < 0 || target > 10000) return res.status(400).json({ message: "Hedef 0-10000 arasında olmalı" });
+      await pool.query(
+        `INSERT INTO capper_targets (year, office, target, updated_at) VALUES ($1, $2, $3, NOW())
+         ON CONFLICT (year, office) DO UPDATE SET target = EXCLUDED.target, updated_at = NOW()`,
+        [year, office, target],
+      );
+      res.json({ ok: true });
+    } catch (err) {
+      console.error("[PUT /api/capper-targets]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   app.get("/api/financial-targets", requireAuth, requireFinancialsAccess, async (req, res) => {
     try {
       const year = parseInt(req.query.year as string) || new Date().getFullYear();
@@ -4485,14 +4523,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // ── Fonzip Integration ────────────────────────────────────────────────────────
 
-  app.get("/api/fonzip/status", requireAuth, requireAdmin, (_req, res) => {
+  app.get("/api/fonzip/status", requireAuth, requireSuperAdmin, (_req, res) => {
     res.json({ configured: isFonzipConfigured() });
   });
 
   let syncRunning = false;
   let lastSyncResult: any = null;
 
-  app.post("/api/fonzip/sync", requireAuth, requireAdmin, async (req, res) => {
+  app.post("/api/fonzip/sync", requireAuth, requireSuperAdmin, async (req, res) => {
     if (!isFonzipConfigured()) return res.status(400).json({ error: "Fonzip yapılandırılmamış." });
     if (syncRunning) return res.json({ running: true, message: "Sync zaten devam ediyor." });
     const userId = (req as any).user?.id ?? 0;
@@ -4504,14 +4542,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       .finally(() => { syncRunning = false; });
   });
 
-  app.get("/api/fonzip/sync/status", requireAuth, requireAdmin, (_req, res) => {
+  app.get("/api/fonzip/sync/status", requireAuth, requireSuperAdmin, (_req, res) => {
     res.json({ running: syncRunning, lastResult: lastSyncResult });
   });
 
   let usersFinancialsSyncRunning = false;
   let lastUsersFinancialsResult: any = null;
 
-  app.post("/api/fonzip/sync-users", requireAuth, requireAdmin, (_req, res) => {
+  app.post("/api/fonzip/sync-users", requireAuth, requireSuperAdmin, (_req, res) => {
     if (!isFonzipConfigured()) return res.status(400).json({ error: "Fonzip yapılandırılmamış." });
     if (usersFinancialsSyncRunning) return res.json({ running: true, message: "Kullanıcı sync'i zaten devam ediyor." });
     usersFinancialsSyncRunning = true;
@@ -4522,7 +4560,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       .finally(() => { usersFinancialsSyncRunning = false; });
   });
 
-  app.get("/api/fonzip/sync-users/status", requireAuth, requireAdmin, (_req, res) => {
+  app.get("/api/fonzip/sync-users/status", requireAuth, requireSuperAdmin, (_req, res) => {
     res.json({ running: usersFinancialsSyncRunning, lastResult: lastUsersFinancialsResult });
   });
 
@@ -4545,7 +4583,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.get("/api/fonzip/user-financials", requireAuth, requireAdmin, async (_req, res) => {
+  app.get("/api/fonzip/user-financials", requireAuth, requireSuperAdmin, async (_req, res) => {
     try {
       const report = await getFonzipUserFinancialsReport();
       res.json(report);
@@ -4554,7 +4592,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.post("/api/fonzip/sync-recent", requireAuth, requireAdmin, (req, res) => {
+  app.post("/api/fonzip/sync-recent", requireAuth, requireSuperAdmin, (req, res) => {
     if (!isFonzipConfigured()) return res.status(400).json({ error: "Fonzip yapılandırılmamış." });
     const userId = (req as any).user?.id ?? 0;
     // mode=full: tüm /debts sayfaları (~400 sayfa, 8 dk) — eski borçların status
@@ -4568,7 +4606,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     });
   });
 
-  app.get("/api/fonzip/sync-recent/status", requireAuth, requireAdmin, async (_req, res) => {
+  app.get("/api/fonzip/sync-recent/status", requireAuth, requireSuperAdmin, async (_req, res) => {
     res.json(await getDebtSyncStatus());
   });
 
@@ -4590,7 +4628,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   let excelImportProgress = { current: 0, total: 0 };
   let excelImportStartedAt: number | null = null;
 
-  app.post("/api/fonzip/import-excel", requireAuth, requireAdmin, async (req, res) => {
+  app.post("/api/fonzip/import-excel", requireAuth, requireSuperAdmin, async (req, res) => {
     try {
       const rows = req.body?.rows;
       const mode = req.body?.mode === "debts" ? "debts" : "payments";
@@ -4623,12 +4661,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.get("/api/fonzip/import-excel/status", requireAuth, requireAdmin, (_req, res) => {
+  app.get("/api/fonzip/import-excel/status", requireAuth, requireSuperAdmin, (_req, res) => {
     res.setHeader("Cache-Control", "no-store");
     res.json({ running: excelImportRunning, lastResult: lastExcelImportResult, progress: excelImportProgress });
   });
 
-  app.post("/api/fonzip/import-excel/reset", requireAuth, requireAdmin, (_req, res) => {
+  app.post("/api/fonzip/import-excel/reset", requireAuth, requireSuperAdmin, (_req, res) => {
     excelImportRunning = false;
     excelImportStartedAt = null;
     excelImportProgress = { current: 0, total: 0 };
@@ -4636,7 +4674,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json({ ok: true });
   });
 
-  app.get("/api/fonzip/sync/stats", requireAuth, requireAdmin, async (_req, res) => {
+  app.get("/api/fonzip/sync/stats", requireAuth, requireSuperAdmin, async (_req, res) => {
     try {
       const stats = await storage.getFonzipSyncStats();
       res.json(stats);
@@ -4645,7 +4683,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.get("/api/fonzip/synced-debts", requireAuth, requireAdmin, async (req, res) => {
+  app.get("/api/fonzip/synced-debts", requireAuth, requireSuperAdmin, async (req, res) => {
     try {
       const status = req.query.status !== undefined ? parseInt(req.query.status as string) : undefined;
       const unmatched = req.query.unmatched === "true";
@@ -4656,7 +4694,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.patch("/api/fonzip/synced-debts/:fonzipId/match", requireAuth, requireAdmin, async (req, res) => {
+  app.patch("/api/fonzip/synced-debts/:fonzipId/match", requireAuth, requireSuperAdmin, async (req, res) => {
     try {
       const fonzipId = parseInt(req.params.fonzipId);
       const { employeeId } = req.body as { employeeId: number | null };
@@ -4667,7 +4705,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.get("/api/fonzip/dues-report", requireAuth, requireAdmin, async (_req, res) => {
+  app.get("/api/fonzip/dues-report", requireAuth, requireSuperAdmin, async (_req, res) => {
     try {
       const data = await storage.getFonzipDuesReport();
       res.json(data);
@@ -4676,7 +4714,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.get("/api/fonzip/preview", requireAuth, requireAdmin, async (_req, res) => {
+  app.get("/api/fonzip/preview", requireAuth, requireSuperAdmin, async (_req, res) => {
     if (!isFonzipConfigured()) {
       return res.status(400).json({ error: "Fonzip credentials tanımlı değil. FONZIP_CLIENT_ID ve FONZIP_CLIENT_SECRET env değişkenlerini ekleyin." });
     }
@@ -4688,7 +4726,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.get("/api/fonzip/users", requireAuth, requireAdmin, async (req, res) => {
+  app.get("/api/fonzip/users", requireAuth, requireSuperAdmin, async (req, res) => {
     if (!isFonzipConfigured()) return res.status(400).json({ error: "Fonzip yapılandırılmamış." });
     try {
       const page = parseInt(req.query.page as string || "1");
@@ -4700,7 +4738,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.get("/api/fonzip/debts", requireAuth, requireAdmin, async (req, res) => {
+  app.get("/api/fonzip/debts", requireAuth, requireSuperAdmin, async (req, res) => {
     if (!isFonzipConfigured()) return res.status(400).json({ error: "Fonzip yapılandırılmamış." });
     try {
       const page = parseInt(req.query.page as string || "1");
@@ -4712,7 +4750,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.get("/api/fonzip/donations", requireAuth, requireAdmin, async (req, res) => {
+  app.get("/api/fonzip/donations", requireAuth, requireSuperAdmin, async (req, res) => {
     if (!isFonzipConfigured()) return res.status(400).json({ error: "Fonzip yapılandırılmamış." });
     try {
       const page = parseInt(req.query.page as string || "1");

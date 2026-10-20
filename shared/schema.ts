@@ -15,6 +15,8 @@ export const users = pgTable("users", {
   role: text("role").notNull().default("hiring_manager"), // admin | hiring_manager
   canViewFinancials: boolean("can_view_financials").notNull().default(false),
   hmGroup: text("hm_group"),   // Hiring manager grubu (raporlarda grup alt toplamı) — serbest metin
+  // Super admin: admin + tehlikeli modüller (Kullanıcılar, Danışman Birleştir, Duplike Kapanışlar, Fonzip, WhatsApp Toplu)
+  isSuperAdmin: boolean("is_super_admin").notNull().default(false),
   googleId: text("google_id").unique(),
   googleAccessToken: text("google_access_token"),
   googleRefreshToken: text("google_refresh_token"),

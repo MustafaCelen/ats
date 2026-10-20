@@ -53,11 +53,13 @@ function ProtectedRoute({
   adminOnly = false,
   financialsOnly = false,
   noAssistant = false,
+  superAdminOnly = false,
 }: {
   children: React.ReactNode;
   adminOnly?: boolean;
   financialsOnly?: boolean;
   noAssistant?: boolean;
+  superAdminOnly?: boolean;
 }) {
   const { data: user, isLoading } = useAuth();
 
@@ -70,6 +72,7 @@ function ProtectedRoute({
   }
   if (!user) return <Redirect to="/login" />;
   if (adminOnly && user.role !== "admin") return <Redirect to="/dashboard" />;
+  if (superAdminOnly && (user.role !== "admin" || !(user as any).isSuperAdmin)) return <Redirect to="/dashboard" />;
   if (financialsOnly && user.role !== "admin" && !user.canViewFinancials) return <Redirect to="/dashboard" />;
   if (noAssistant && user.role === "assistant") return <Redirect to="/tasks" />;
   return <>{children}</>;
@@ -89,7 +92,7 @@ function Router() {
       <Route path="/candidates/:id" component={() => <ProtectedRoute><CandidateDetail /></ProtectedRoute>} />
       <Route path="/interviews" component={() => <ProtectedRoute><Interviews /></ProtectedRoute>} />
       <Route path="/reports" component={() => <ProtectedRoute noAssistant><Reports /></ProtectedRoute>} />
-      <Route path="/users" component={() => <ProtectedRoute adminOnly><Users /></ProtectedRoute>} />
+      <Route path="/users" component={() => <ProtectedRoute superAdminOnly><Users /></ProtectedRoute>} />
       <Route path="/tasks" component={() => <ProtectedRoute><Tasks /></ProtectedRoute>} />
       <Route path="/employees" component={() => <ProtectedRoute><Employees /></ProtectedRoute>} />
       <Route path="/onboarding" component={() => <ProtectedRoute><OnboardingBoard /></ProtectedRoute>} />
@@ -109,8 +112,8 @@ function Router() {
       <Route path="/coaching" component={() => <ProtectedRoute noAssistant><Coaching /></ProtectedRoute>} />
       <Route path="/expenses" component={() => <ProtectedRoute adminOnly><Expenses /></ProtectedRoute>} />
       <Route path="/expense-reports" component={() => <ProtectedRoute adminOnly><ExpenseReports /></ProtectedRoute>} />
-      <Route path="/duplicate-merge" component={() => <ProtectedRoute adminOnly><DuplicateMerge /></ProtectedRoute>} />
-      <Route path="/duplicate-closings" component={() => <ProtectedRoute adminOnly><DuplicateClosings /></ProtectedRoute>} />
+      <Route path="/duplicate-merge" component={() => <ProtectedRoute superAdminOnly><DuplicateMerge /></ProtectedRoute>} />
+      <Route path="/duplicate-closings" component={() => <ProtectedRoute superAdminOnly><DuplicateClosings /></ProtectedRoute>} />
       <Route path="/campaigns" component={() => <ProtectedRoute><Campaigns /></ProtectedRoute>} />
       <Route path="/campaigns/:id" component={() => <ProtectedRoute><CampaignDetail /></ProtectedRoute>} />
       <Route path="/pl-report" component={() => <ProtectedRoute adminOnly><PLReport /></ProtectedRoute>} />
@@ -118,8 +121,8 @@ function Router() {
       <Route path="/referans-eslestirme" component={() => <ProtectedRoute noAssistant><ReferansEslestirme /></ProtectedRoute>} />
       <Route path="/borclular-raporu" component={() => <ProtectedRoute adminOnly><BorclularRaporu /></ProtectedRoute>} />
       <Route path="/hedef-giris" component={() => <ProtectedRoute adminOnly><HedefGirisModulu /></ProtectedRoute>} />
-      <Route path="/fonzip" component={() => <ProtectedRoute adminOnly><FonzipPreview /></ProtectedRoute>} />
-      <Route path="/whatsapp-bulk" component={() => <ProtectedRoute adminOnly><WhatsappBulk /></ProtectedRoute>} />
+      <Route path="/fonzip" component={() => <ProtectedRoute superAdminOnly><FonzipPreview /></ProtectedRoute>} />
+      <Route path="/whatsapp-bulk" component={() => <ProtectedRoute superAdminOnly><WhatsappBulk /></ProtectedRoute>} />
       <Route component={NotFound} />
     </Switch>
   );
