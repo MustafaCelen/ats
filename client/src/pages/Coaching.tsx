@@ -8,7 +8,7 @@ import {
 } from "recharts";
 import {
   Users, DollarSign, Handshake, ChevronDown, ChevronRight,
-  Award, Target, BarChart2, ChevronLeft, UserMinus,
+  Award, Target, BarChart2, ChevronLeft, UserMinus, UserCheck,
 } from "lucide-react";
 import { format } from "date-fns";
 import { tr } from "date-fns/locale";
@@ -353,6 +353,8 @@ export default function Coaching() {
   }, [coaches, typeFilter]);
   const totalClosings = useMemo(() => allStudents.reduce((s, st) => s + st.totalClosings, 0), [allStudents]);
   const totalBHB = useMemo(() => allStudents.reduce((s, st) => s + st.totalBHB, 0), [allStudents]);
+  // Dönem içinde en az bir işlemi (kapanış payı veya BHB) olan farklı danışman sayısı
+  const producingCount = useMemo(() => allStudents.filter((st) => st.totalClosings > 0 || st.totalBHB > 0).length, [allStudents]);
   const totalVolume = useMemo(() => allStudents.reduce((s, st) => s + st.totalVolume, 0), [allStudents]);
   const avgCapPct = useMemo(() => allStudents.length > 0
     ? Math.round(allStudents.reduce((s, st) => s + st.capPct, 0) / allStudents.length) : 0, [allStudents]);
@@ -525,9 +527,14 @@ export default function Coaching() {
         {!isLoading && allStudents.length > 0 && (
           <>
             {/* Summary metrics */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
               <MetricCard icon={Users} label="Toplam Öğrenci" value={allStudents.length}
                 sub={`${coaches.length} koç`} color="bg-violet-100 text-violet-600" />
+              <div data-testid="coaching-producing-card">
+                <MetricCard icon={UserCheck} label="İşlem Yapan Danışman" value={producingCount}
+                  sub={allStudents.length > 0 ? `${allStudents.length} öğrencinin %${Math.round((producingCount / allStudents.length) * 100)}'i` : undefined}
+                  color="bg-teal-100 text-teal-600" />
+              </div>
               <MetricCard icon={Handshake} label="Toplam Kapanış" value={totalClosings}
                 color="bg-blue-100 text-blue-600" />
               <MetricCard icon={DollarSign} label="Toplam BHB" value={fmtShort(totalBHB) + " ₺"}
