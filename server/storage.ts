@@ -2780,16 +2780,26 @@ export class DatabaseStorage implements IStorage {
     const closingId = await this.getClosingIdForAgent(closingAgentId);
     if (!closingId) return;
     const rows = await db.execute(sql`
-      SELECT ca.id, ca.status, ca.payment_collected AS collected
+      SELECT ca.id, ca.status, ca.payment_collected AS collected, ca.closing_date,
+             (SELECT MAX(c.collected_at) FROM closing_agent_collections c WHERE c.closing_agent_id = ca.id) AS last_collected_at
       FROM closing_agents ca JOIN closing_sides cs ON cs.id = ca.closing_side_id
       WHERE cs.closing_id = ${closingId}
     `);
     const agents = rows.rows as any[];
     if (agents.length === 0 || !agents.every((a) => a.collected === true)) return;
+    // İşlem tarihi: elle girilmişse korunur; boşsa son tahsilat kaleminin tarihi (o da yoksa bugün).
+    const dates: Date[] = [];
     for (const a of agents) {
-      if (a.status === "expected") await this.updateClosingAgent(a.id, { status: "completed" });
+      const patch: { status?: string; closingDate?: Date } = {};
+      if (a.status === "expected") patch.status = "completed";
+      let date: Date | null = a.closing_date ? new Date(a.closing_date) : null;
+      if (!date) { date = a.last_collected_at ? new Date(a.last_collected_at) : new Date(); patch.closingDate = date; }
+      dates.push(date);
+      if (Object.keys(patch).length) await this.updateClosingAgent(a.id, patch);
     }
-    await db.execute(sql`UPDATE closings SET status = 'completed' WHERE id = ${closingId} AND status <> 'completed'`);
+    // Kapanış tarihi = danışman tarihlerinin en büyüğü (elle onaydaki kuralla aynı)
+    const maxDate = dates.reduce((best, d) => (d > best ? d : best), dates[0]);
+    await db.execute(sql`UPDATE closings SET status = 'completed', closing_date = ${maxDate} WHERE id = ${closingId}`);
   }
 
   async updateClosingAgent(id: number, data: Partial<{

@@ -64,6 +64,12 @@ test("tüm danışmanların tahsilatı tamamlanınca işlem otomatik kapanır", 
   expect(c.status).toBe("completed");
   const rows = await q(`SELECT status, payment_collected FROM closing_agents WHERE closing_side_id = $1`, [side.id]);
   expect(rows.every((x: any) => x.status === "completed" && x.payment_collected === true)).toBe(true);
+  // Tarihler: danışman satırlarına son tahsilat tarihi (bugün), kapanışa en büyük danışman tarihi yazılır
+  const dated = await q(`SELECT closing_date::date::text AS d FROM closing_agents WHERE closing_side_id = $1`, [side.id]);
+  const today = new Date().toISOString().slice(0, 10);
+  expect(dated.every((x: any) => x.d === today)).toBe(true);
+  const [cd] = await q(`SELECT closing_date::date::text AS d FROM closings WHERE id = $1`, [closingId]);
+  expect(cd.d).toBe(today);
 });
 
 test("tahsilat dialogu: USD seçilince kur alanı günün kuruyla dolar, TL karşılığı gösterilir", async ({ page }) => {
