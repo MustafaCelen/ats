@@ -30,61 +30,7 @@ function jobFilter(req: Request): number[] | undefined {
   return assignedJobIds.length ? assignedJobIds : undefined;
 }
 
-// Send each agent of a closing a WhatsApp breakdown of their side. Returns delivery counts.
-async function sendClosingNotifications(_closingId: number, _agentIdFilter?: number): Promise<{ sent: number; skipped: number }> {
-  return { sent: 0, skipped: 0 };
-  // WhatsApp closing notifications disabled
-  let sent = 0, skipped = 0;
-  const details = await storage.getClosing(_closingId) as any;
-  if (!details) return { sent, skipped };
-
-  const sideLabel: Record<string, string> = { buyer: "Alıcı", seller: "Satıcı", referral: "Referans" };
-  const fmt = (n: string | null | undefined) =>
-    n ? Number(n).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—";
-
-  for (const side of details.sides) {
-    for (const agent of side.agents) {
-      if (agentIdFilter !== undefined && agent.id !== agentIdFilter) continue;
-      // Use agent's own date if set; otherwise fallback to closing-level date
-      const agentDate = (agent as any).closingDate ?? details.closingDate;
-      const dateStr = agentDate ? new Date(agentDate).toLocaleDateString("tr-TR") : "—";
-      const emp = await storage.getEmployee(agent.employeeId);
-      if (!emp?.candidate?.phone) { skipped++; continue; }
-      const name = emp.candidate.name ?? "Danışman";
-
-      const paymentLines: string[] = [];
-      if (Number(agent.banka) > 0) paymentLines.push(`🏦 Banka: ₺${fmt(agent.banka)}`);
-      if (Number(agent.nakit) > 0) paymentLines.push(`💵 Nakit: ₺${fmt(agent.nakit)}`);
-      if (Number(agent.kasa)  > 0) paymentLines.push(`🗄️ Kasa: ₺${fmt(agent.kasa)}`);
-
-      const message = [
-        `Merhaba ${name} 👋`,
-        "",
-        `Bir kapanış kaydınız mevcut:`,
-        "",
-        `📍 ${details.propertyAddress || "—"}`,
-        `📅 Tarih: ${dateStr}`,
-        `💰 Satış Değeri: ₺${fmt(details.saleValue)}`,
-        `🤝 Taraf: ${sideLabel[side.sideType] ?? side.sideType}`,
-        "",
-        `BHB Payınız: ₺${fmt(agent.bhbShare)}`,
-        `Ana Merkez Payı: ₺${fmt(agent.mainBranchShare)}`,
-        `KWTR KDV: ₺${fmt(agent.kwtrKdv)}`,
-        `Şirket Parası (Hesaplanan): ₺${fmt(agent.marketCenterDue)}`,
-        `Şirket Parası (Uygulanan): ₺${fmt(agent.marketCenterActual)}`,
-        `BM KDV: ₺${fmt(agent.bmKdv)}`,
-        ...(Number(agent.ukShare) > 0 ? [`ÜK Payı: ₺${fmt(agent.ukShare)}`] : []),
-        ...(Number(agent.ukKdv) > 0 ? [`ÜK KDV: ₺${fmt(agent.ukKdv)}`] : []),
-        `Net Geliriniz: ₺${fmt(agent.employeeNet)}`,
-        ...(paymentLines.length > 0 ? ["", "Ödeme Detayı:", ...paymentLines] : []),
-      ].join("\n");
-
-      const id = await sendWhatsApp(emp.candidate.phone, message);
-      if (id) sent++; else skipped++;
-    }
-  }
-  return { sent, skipped };
-}
+// Kapanış WhatsApp bildirimleri kaldırıldı (toplantı kararı, 2026-10-21): onay/tahsilat akışı mesaj göndermez.
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
   registerUkProgramRoutes(app);
@@ -3254,83 +3200,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       });
       res.status(201).json(closing);
 
-      // Fire WhatsApp per agent whose effective status is "completed".
-      // (Agent-level status overrides closing-level when explicitly set.)
-      (async () => {
-        try {
-          const details = await storage.getClosing(closing.id) as any;
-          if (!details) return;
-          for (const side of details.sides ?? []) {
-            for (const agent of side.agents ?? []) {
-              const effStatus = (agent.status ?? details.status) === "completed";
-              if (effStatus) await sendClosingNotifications(closing.id, agent.id);
-            }
-          }
-        } catch (err) {
-          console.warn("[WhatsApp notify (per-agent on create)]", err);
-        }
-      })();
     } catch (err) {
       console.error("[POST /api/closings]", err);
-      res.status(500).json({ message: "Internal server error" });
-    }
-  });
-
-  // Manually (re)send the WhatsApp breakdown to a closing's agents
-  app.post("/api/closings/:id/notify", requireAuth, requireAdmin, async (req, res) => {
-    try {
-      const result = await sendClosingNotifications(Number(req.params.id));
-      res.json(result);
-    } catch (err) {
-      console.error("[POST /api/closings/:id/notify]", err);
-      res.status(500).json({ message: "Internal server error" });
-    }
-  });
-
-  // Send WhatsApp breakdown to a single agent within a closing
-  app.post("/api/closing-agents/:id/notify", requireAuth, requireAdmin, async (req, res) => {
-    try {
-      const agentId = Number(req.params.id);
-      const closingId = await storage.getClosingIdForAgent(agentId);
-      if (!closingId) return res.status(404).json({ message: "Agent not found" });
-      const result = await sendClosingNotifications(closingId, agentId);
-      res.json(result);
-    } catch (err) {
-      console.error("[POST /api/closing-agents/:id/notify]", err);
-      res.status(500).json({ message: "Internal server error" });
-    }
-  });
-
-  app.delete("/api/closings/:id", requireAuth, requireAdmin, async (req, res) => {
-    try {
-      await storage.deleteClosing(Number(req.params.id));
-      res.status(204).send();
-    } catch {
-      res.status(500).json({ message: "Internal server error" });
-    }
-  });
-
-  app.patch("/api/closings/:id", requireAuth, requireAdmin, async (req, res) => {
-    try {
-      const { sides, ...rest } = req.body;
-      const data = { ...rest };
-      if (data.closingDate) data.closingDate = new Date(data.closingDate);
-      if (data.contractStartDate) data.contractStartDate = new Date(data.contractStartDate);
-      if (data.contractEndDate) data.contractEndDate = new Date(data.contractEndDate);
-      await storage.updateClosing(Number(req.params.id), data);
-      if (sides && Array.isArray(sides)) {
-        const normalizedSides = sides.map((s: any) => ({
-          ...s,
-          agents: (s.agents ?? []).map((a: any) => ({
-            ...a,
-            closingDate: a.closingDate ? new Date(a.closingDate) : null,
-            status: a.status ?? null,
-          })),
-        }));
-        await storage.replaceClosingSides(Number(req.params.id), String(rest.saleValue ?? "0"), String(rest.commissionRate ?? "2"), normalizedSides);
-      }
-      res.status(204).send();
-    } catch {
       res.status(500).json({ message: "Internal server error" });
     }
   });
@@ -3350,7 +3221,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       await storage.updateClosingAgent(agentId, body);
       res.status(204).send();
 
-      // Fire-and-forget: auto-close + WhatsApp notification
+      // Fire-and-forget: tüm danışmanlar onaylıysa kapanışı kapat
       if (becameCompleted) {
         (async () => {
           try {
@@ -3377,9 +3248,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
               );
             }
 
-            await sendClosingNotifications(closingId, agentId);
           } catch (err) {
-            console.warn("[auto-close / WhatsApp notify (agent)]", err);
+            console.warn("[auto-close (agent)]", err);
           }
         })();
       }

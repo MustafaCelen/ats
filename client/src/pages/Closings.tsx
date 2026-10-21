@@ -27,7 +27,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Handshake, Plus, Trash2, TrendingUp, DollarSign, Users,
   AlertCircle, CheckCircle2, Settings, Pencil,
-  Download, Upload, MessageCircle, ChevronUp, ChevronDown, Landmark, Receipt,
+  Download, Upload, ChevronUp, ChevronDown, Landmark, Receipt,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { DEAL_TYPES, DEAL_CATEGORIES, type DealCategory, type CapStatus, type ClosingWithDetails } from "@shared/schema";
@@ -2663,25 +2663,6 @@ export default function Closings() {
     }
   };
 
-  const handleNotifyAgent = async (agentId: number, employeeName: string) => {
-    if (!window.confirm(`${employeeName} danışmanına WhatsApp bildirimi gönderilsin mi?`)) return;
-    try {
-      const res = await fetch(`/api/closing-agents/${agentId}/notify`, { method: "POST", credentials: "include" });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toast({ title: "Gönderilemedi", description: data.message || `Sunucu hatası (${res.status})`, variant: "destructive" });
-        return;
-      }
-      if (data.sent > 0) {
-        toast({ title: "Gönderildi", description: `${employeeName} kişisine WhatsApp gönderildi.` });
-      } else {
-        toast({ title: "Gönderilemedi", description: "Telefonu kayıtlı değil veya WhatsApp yapılandırılmamış.", variant: "destructive" });
-      }
-    } catch {
-      toast({ title: "Hata", description: "Bildirim gönderilemedi (ağ hatası).", variant: "destructive" });
-    }
-  };
-
   const advisorNames = useMemo(() => {
     const names = new Set<string>();
     for (const r of flatRows) if (r.employeeName) names.add(r.employeeName);
@@ -3313,7 +3294,7 @@ export default function Closings() {
                     return (
                       <tr key={row.agentId} className={`border-b border-border/50 hover:bg-muted/30 ${row.isFirstOfClosing ? "border-t-2 border-t-border" : ""}`}>
                         <td className="px-2 py-1 whitespace-nowrap">
-                          {/* Sabit genişlikli yuvalar: onay kutusu | durum | tahsilat | WhatsApp | düzenle | tahsilat gir */}
+                          {/* Sabit genişlikli yuvalar: onay kutusu | durum | tahsilat | düzenle | tahsilat gir */}
                           <div className="flex items-center gap-1">
                             <span className="w-4 shrink-0 flex items-center justify-center">
                               {row.status === "expected" && (
@@ -3354,13 +3335,6 @@ export default function Closings() {
                               title={row.paymentCollected ? "Tahsil edildi (kaldırmak için tıkla)" : "Tahsilat bekleniyor (ödendi olarak işaretle)"}
                             >
                               {row.paymentCollected ? "💰" : "💸"}
-                            </button>
-                            <button
-                              onClick={() => handleNotifyAgent(row.agentId, row.employeeName)}
-                              className="w-6 shrink-0 flex items-center justify-center text-muted-foreground hover:text-emerald-600 transition-colors p-1 rounded"
-                              title="Bu danışmana WhatsApp gönder"
-                            >
-                              <MessageCircle className="h-3.5 w-3.5" />
                             </button>
                             <span className="w-6 shrink-0 flex items-center justify-center">
                               {row.isFirstOfClosing && (
