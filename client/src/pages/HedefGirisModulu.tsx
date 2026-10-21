@@ -111,7 +111,7 @@ function FinansalHedefEditor({ year }: { year: number }) {
       <div className="px-5 py-3 border-b border-border flex items-center gap-2 flex-wrap">
         <DollarSign className="h-4 w-4 text-primary" />
         <h2 className="text-base font-semibold">Finansal Hedefler</h2>
-        <span className="text-xs text-muted-foreground ml-1">BHB / BM / Satılık / Kiralık — aylık, ofis bazlı</span>
+        <span className="text-xs text-muted-foreground ml-1">BHB / Şirket Parası / Satılık / Kiralık — aylık, ofis bazlı</span>
         <Select value={office} onValueChange={setOffice}>
           <SelectTrigger className="w-32 ml-auto h-8"><SelectValue /></SelectTrigger>
           <SelectContent>
