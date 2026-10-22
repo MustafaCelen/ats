@@ -4,6 +4,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { UkEnrollDialog } from "@/components/UkEnrollDialog";
+import { UkBulkEnrollDialog } from "@/components/UkBulkEnrollDialog";
+import { useToast } from "@/hooks/use-toast";
 import { UkWelcomeEmailDialog } from "@/components/UkWelcomeEmailDialog";
 import { Layout } from "@/components/Layout";
 import { Route as RouteIcon, Search, CheckCircle2, ChevronRight, UserPlus, Mail, Send } from "lucide-react";
@@ -55,6 +57,35 @@ export default function UkBasariRotasi() {
     setCoach(v);
     try { localStorage.setItem("ukRotaCoachFilter", v); } catch {}
   };
+  const { toast } = useToast();
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkMailing, setBulkMailing] = useState(false);
+  // Programda olup hoş geldin maili gitmemiş, e-postası olan danışmanlar (toplu mail hedefi)
+  const mailPending = useMemo(() => data.filter((r) => r.status === "active" && r.hasEmail && !r.welcomeSentAt), [data]);
+  const sendBulkWelcome = async () => {
+    if (mailPending.length === 0) return;
+    if (!window.confirm(`${mailPending.length} danışmana hoş geldin maili gönderilsin mi?`)) return;
+    setBulkMailing(true);
+    try {
+      const r = await fetch("/api/uk-program/bulk-welcome", {
+        method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ employeeIds: mailPending.map((x) => x.employeeId) }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? "Gönderilemedi");
+      const failed = (d.results as any[]).filter((x) => !x.mailed);
+      toast({
+        title: `${d.mailed} hoş geldin maili gönderildi`,
+        description: failed.length ? `Gönderilemeyen: ${failed.map((x) => `${x.name} (${x.error})`).join(", ")}` : undefined,
+        variant: d.mailed === 0 ? "destructive" : undefined,
+      });
+      qc.invalidateQueries({ queryKey: ["/api/uk-program"] });
+    } catch (e: any) {
+      toast({ title: "Hata", description: e.message, variant: "destructive" });
+    } finally {
+      setBulkMailing(false);
+    }
+  };
   const { data: coaches = [] } = useQuery<{ id: number; name: string }[]>({
     queryKey: ["/api/hiring-managers"],
     queryFn: () => fetch("/api/hiring-managers", { credentials: "include" }).then((r) => r.json()),
@@ -101,10 +132,21 @@ export default function UkBasariRotasi() {
               Üretkenlik Koçluğu programındaki danışmanların 6 haftalık rota ilerlemesi ve aktivite puanı
             </p>
           </div>
-          <Button className="gap-1.5" onClick={() => setEnrollOpen(true)}>
-            <UserPlus className="h-4 w-4" /> Danışman Ekle
-          </Button>
+          <div className="flex items-center gap-2 flex-wrap">
+            {mailPending.length > 0 && (
+              <Button variant="outline" className="gap-1.5" onClick={sendBulkWelcome} disabled={bulkMailing} data-testid="uk-bulk-mail" title="Programda olup hoş geldin maili gitmemiş danışmanlara toplu gönder">
+                <Send className="h-4 w-4" /> {bulkMailing ? "Gönderiliyor…" : `Toplu Mail (${mailPending.length})`}
+              </Button>
+            )}
+            <Button variant="outline" className="gap-1.5" onClick={() => setBulkOpen(true)} data-testid="uk-bulk-open">
+              <UserPlus className="h-4 w-4" /> Toplu Ekle
+            </Button>
+            <Button className="gap-1.5" onClick={() => setEnrollOpen(true)}>
+              <UserPlus className="h-4 w-4" /> Danışman Ekle
+            </Button>
+          </div>
         </div>
+        <UkBulkEnrollDialog open={bulkOpen} onOpenChange={setBulkOpen} onDone={() => qc.invalidateQueries({ queryKey: ["/api/uk-program"] })} />
         <UkEnrollDialog
           open={enrollOpen}
           onOpenChange={setEnrollOpen}

@@ -393,6 +393,95 @@ export function registerUkProgramRoutes(app: Express) {
 
   registerAdvisorUkRoutes(app);
 
+  // ── Toplu ekleme / toplu hoş geldin maili ──
+  // Adaylar: aktif, profilinde ÜK koçu olan ve programda olmayan danışmanlar.
+  app.get("/api/uk-program/bulk-candidates", requireAuth, async (_req: Request, res: Response) => {
+    try {
+      const r = await pool.query(
+        `SELECT e.id, c.name, e.kwuid, u.name AS coach_name,
+                (coalesce(e.kw_mail, '') <> '' OR coalesce(c.email, '') <> '') AS has_email,
+                (en.employee_id IS NOT NULL) AS was_removed
+           FROM employees e
+           JOIN candidates c ON c.id = e.candidate_id
+           JOIN users u ON u.id = e.uretkenlik_koclugu_manager_id
+           LEFT JOIN uk_program_enrollments en ON en.employee_id = e.id
+          WHERE e.status = 'active' AND (en.employee_id IS NULL OR en.removed_at IS NOT NULL)
+          ORDER BY u.name, c.name`,
+      );
+      res.json(r.rows.map((x) => ({
+        employeeId: x.id, name: x.name, kwuid: x.kwuid, coachName: x.coach_name,
+        hasEmail: !!x.has_email, wasRemoved: !!x.was_removed,
+      })));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Seçilen danışmanları aynı pazartesiden programa alır; istenirse e-postası olanlara hoş geldin
+  // maili gönderir. Danışman başına sonuç döner (eklendi / zaten programda / koç yok / mail durumu).
+  app.post("/api/uk-program/bulk-enroll", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const ids = Array.isArray(req.body?.employeeIds) ? req.body.employeeIds.map(Number).filter(Number.isInteger) : [];
+      const startDate = String(req.body?.startDate ?? "");
+      const sendWelcome = !!req.body?.sendWelcome;
+      if (ids.length === 0) return res.status(400).json({ error: "Danışman seçin." });
+      if (ids.length > 200) return res.status(400).json({ error: "Tek seferde en fazla 200 danışman." });
+      if (!ukIsMonday(startDate)) return res.status(400).json({ error: "Program başlangıcı pazartesi olmalı." });
+      const results: { employeeId: number; name: string; enrolled: boolean; mailed: boolean | null; error: string | null }[] = [];
+      for (const employeeId of ids) {
+        const p = await loadParticipant(employeeId);
+        if (!p) { results.push({ employeeId, name: `#${employeeId}`, enrolled: false, mailed: null, error: "Danışman bulunamadı" }); continue; }
+        if (p.status !== "active") { results.push({ employeeId, name: p.name, enrolled: false, mailed: null, error: "Pasif danışman" }); continue; }
+        if (!p.profileCoach) { results.push({ employeeId, name: p.name, enrolled: false, mailed: null, error: "Profilde ÜK koçu yok" }); continue; }
+        if (p.inProgram) { results.push({ employeeId, name: p.name, enrolled: false, mailed: null, error: "Zaten programda" }); continue; }
+        await pool.query(
+          `INSERT INTO uk_program_enrollments (employee_id, coach_user_id, start_date, added_by_user_id, added_at, removed_at, source)
+           VALUES ($1, NULL, $2, $3, NOW(), NULL, 'manual')
+           ON CONFLICT (employee_id) DO UPDATE SET coach_user_id = NULL, start_date = EXCLUDED.start_date,
+             added_by_user_id = EXCLUDED.added_by_user_id, added_at = NOW(), removed_at = NULL, source = 'manual'`,
+          [employeeId, startDate, (req as any).user.id],
+        );
+        let mailed: boolean | null = null, error: string | null = null;
+        if (sendWelcome) {
+          const fresh = await loadParticipant(employeeId);
+          const m = fresh ? await welcomeEmailFor(req, fresh) : null;
+          if (!m || m.to.length === 0) { mailed = false; error = "E-posta yok, mail gönderilmedi"; }
+          else {
+            mailed = await sendEmail(m.to.join(", "), m.subject, m.html);
+            if (mailed) await pool.query("UPDATE uk_program_enrollments SET welcome_sent_at = NOW(), welcome_sent_by_user_id = $2 WHERE employee_id = $1 AND removed_at IS NULL", [employeeId, (req as any).user.id]);
+            else error = "Mail gönderilemedi (mail ayarları)";
+          }
+        }
+        results.push({ employeeId, name: p.name, enrolled: true, mailed, error });
+      }
+      res.json({ results, enrolled: results.filter((r) => r.enrolled).length, mailed: results.filter((r) => r.mailed).length });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Programdaki danışmanlara toplu hoş geldin maili (verilen id'ler; e-postası olmayan atlanır).
+  app.post("/api/uk-program/bulk-welcome", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const ids = Array.isArray(req.body?.employeeIds) ? req.body.employeeIds.map(Number).filter(Number.isInteger) : [];
+      if (ids.length === 0) return res.status(400).json({ error: "Danışman seçin." });
+      if (ids.length > 200) return res.status(400).json({ error: "Tek seferde en fazla 200 danışman." });
+      const results: { employeeId: number; name: string; mailed: boolean; error: string | null }[] = [];
+      for (const employeeId of ids) {
+        const p = await loadParticipant(employeeId);
+        if (!p?.inProgram) { results.push({ employeeId, name: p?.name ?? `#${employeeId}`, mailed: false, error: "Programda değil" }); continue; }
+        const m = await welcomeEmailFor(req, p);
+        if (m.to.length === 0) { results.push({ employeeId, name: p.name, mailed: false, error: "E-posta yok" }); continue; }
+        const ok = await sendEmail(m.to.join(", "), m.subject, m.html);
+        if (ok) await pool.query("UPDATE uk_program_enrollments SET welcome_sent_at = NOW(), welcome_sent_by_user_id = $2 WHERE employee_id = $1 AND removed_at IS NULL", [employeeId, (req as any).user.id]);
+        results.push({ employeeId, name: p.name, mailed: ok, error: ok ? null : "Mail gönderilemedi (mail ayarları)" });
+      }
+      res.json({ results, mailed: results.filter((r) => r.mailed).length });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Manuel ekleme (tüm personel). Koç her zaman danışman profilindeki ÜK koçudur; profilde
   // koç yoksa eklenemez. ÜK işaretine/ÜK payına dokunmaz; yeniden eklemede önceki
   // işaretler ve haftalık kayıtlar korunur.
