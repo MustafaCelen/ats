@@ -425,7 +425,6 @@ export function registerUkProgramRoutes(app: Express) {
       const startDate = String(req.body?.startDate ?? "");
       const sendWelcome = !!req.body?.sendWelcome;
       if (ids.length === 0) return res.status(400).json({ error: "Danışman seçin." });
-      if (ids.length > 200) return res.status(400).json({ error: "Tek seferde en fazla 200 danışman." });
       if (!ukIsMonday(startDate)) return res.status(400).json({ error: "Program başlangıcı pazartesi olmalı." });
       const results: { employeeId: number; name: string; enrolled: boolean; mailed: boolean | null; error: string | null }[] = [];
       for (const employeeId of ids) {
@@ -465,7 +464,6 @@ export function registerUkProgramRoutes(app: Express) {
     try {
       const ids = Array.isArray(req.body?.employeeIds) ? req.body.employeeIds.map(Number).filter(Number.isInteger) : [];
       if (ids.length === 0) return res.status(400).json({ error: "Danışman seçin." });
-      if (ids.length > 200) return res.status(400).json({ error: "Tek seferde en fazla 200 danışman." });
       const results: { employeeId: number; name: string; mailed: boolean; error: string | null }[] = [];
       for (const employeeId of ids) {
         const p = await loadParticipant(employeeId);
