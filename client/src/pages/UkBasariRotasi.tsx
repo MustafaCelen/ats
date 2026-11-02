@@ -76,7 +76,9 @@ export default function UkBasariRotasi() {
       const failed = (d.results as any[]).filter((x) => !x.mailed);
       toast({
         title: `${d.mailed} hoş geldin maili gönderildi`,
-        description: failed.length ? `Gönderilemeyen: ${failed.map((x) => `${x.name} (${x.error})`).join(", ")}` : undefined,
+        description: d.stopped
+          ? `${d.stopped} Gönderilemeyen ${failed.length} danışman "Toplu Mail" sayısında kalır.`
+          : failed.length ? `Gönderilemeyen: ${failed.map((x) => `${x.name} (${x.error})`).join(", ")}` : undefined,
         variant: d.mailed === 0 ? "destructive" : undefined,
       });
       qc.invalidateQueries({ queryKey: ["/api/uk-program"] });

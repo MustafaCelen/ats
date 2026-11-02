@@ -8,7 +8,7 @@ import type { Express, Request, Response } from "express";
 import { pool } from "./db";
 import { requireAuth } from "./auth";
 import { storage } from "./storage";
-import { sendEmail } from "./email";
+import { sendEmail, sendEmailDetailed } from "./email";
 import { buildUkWelcomeEmail } from "./uk-welcome-email";
 import { publicBaseUrl } from "./whatsapp";
 import {
@@ -468,9 +468,10 @@ export function registerUkProgramRoutes(app: Express) {
           const m = fresh ? await welcomeEmailFor(req, fresh) : null;
           if (!m || m.to.length === 0) { mailed = false; error = "E-posta yok, mail gönderilmedi"; }
           else {
-            mailed = await sendEmail(m.to.join(", "), m.subject, m.html);
-            if (mailed) await pool.query("UPDATE uk_program_enrollments SET welcome_sent_at = NOW(), welcome_sent_by_user_id = $2 WHERE employee_id = $1 AND removed_at IS NULL", [employeeId, (req as any).user.id]);
-            else error = "Mail gönderilemedi (mail ayarları)";
+            const r = await sendEmailDetailed(m.to.join(", "), m.subject, m.html);
+            mailed = r.ok;
+            if (r.ok) { await pool.query("UPDATE uk_program_enrollments SET welcome_sent_at = NOW(), welcome_sent_by_user_id = $2 WHERE employee_id = $1 AND removed_at IS NULL", [employeeId, (req as any).user.id]); await new Promise((rs) => setTimeout(rs, 250)); }
+            else error = `Mail gönderilemedi: ${r.error}`;
           }
         }
         results.push({ employeeId, name: p.name, enrolled: true, mailed, error });
@@ -487,16 +488,25 @@ export function registerUkProgramRoutes(app: Express) {
       const ids = Array.isArray(req.body?.employeeIds) ? req.body.employeeIds.map(Number).filter(Number.isInteger) : [];
       if (ids.length === 0) return res.status(400).json({ error: "Danışman seçin." });
       const results: { employeeId: number; name: string; mailed: boolean; error: string | null }[] = [];
+      let stopReason: string | null = null;
       for (const employeeId of ids) {
         const p = await loadParticipant(employeeId);
         if (!p?.inProgram) { results.push({ employeeId, name: p?.name ?? `#${employeeId}`, mailed: false, error: "Programda değil" }); continue; }
         const m = await welcomeEmailFor(req, p);
         if (m.to.length === 0) { results.push({ employeeId, name: p.name, mailed: false, error: "E-posta yok" }); continue; }
-        const ok = await sendEmail(m.to.join(", "), m.subject, m.html);
-        if (ok) await pool.query("UPDATE uk_program_enrollments SET welcome_sent_at = NOW(), welcome_sent_by_user_id = $2 WHERE employee_id = $1 AND removed_at IS NULL", [employeeId, (req as any).user.id]);
-        results.push({ employeeId, name: p.name, mailed: ok, error: ok ? null : "Mail gönderilemedi (mail ayarları)" });
+        if (stopReason) { results.push({ employeeId, name: p.name, mailed: false, error: stopReason }); continue; }
+        const r = await sendEmailDetailed(m.to.join(", "), m.subject, m.html);
+        if (r.ok) {
+          await pool.query("UPDATE uk_program_enrollments SET welcome_sent_at = NOW(), welcome_sent_by_user_id = $2 WHERE employee_id = $1 AND removed_at IS NULL", [employeeId, (req as any).user.id]);
+          results.push({ employeeId, name: p.name, mailed: true, error: null });
+          await new Promise((rs) => setTimeout(rs, 250));   // Gmail dakika başı sınırına takılmamak için
+        } else {
+          results.push({ employeeId, name: p.name, mailed: false, error: `Mail gönderilemedi: ${r.error}` });
+          // Kota aşıldıysa kalanları denemek anlamsız: hepsi "gönderilmedi" kalır, yarın Toplu Mail (N) ile devam edilir.
+          if (r.quota) stopReason = "Gmail gönderim sınırı aşıldı; kalanlar gönderilmedi, daha sonra Toplu Mail ile tekrar deneyin.";
+        }
       }
-      res.json({ results, mailed: results.filter((r) => r.mailed).length });
+      res.json({ results, mailed: results.filter((r) => r.mailed).length, stopped: stopReason });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
