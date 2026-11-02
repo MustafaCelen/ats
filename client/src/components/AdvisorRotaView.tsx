@@ -240,7 +240,12 @@ export function AdvisorRotaView({ token, onWideChange }: { token: string; onWide
 
       {notice && <div className="rounded-xl bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">{notice}</div>}
 
-      {inProgram && <WeekView token={token} data={data} week={data.currentWeek} onToggle={toggle} onSaved={() => load()} readOnly={!!data.preview} view={view} />}
+      {inProgram && !currentRow && (
+        <Card className="p-5 text-center text-sm text-muted-foreground">
+          Bu haftanın verisi alınamadı. Sayfayı yenileyin; sorun sürerse ofisinize bildirin.
+        </Card>
+      )}
+      {inProgram && currentRow && <WeekView token={token} data={data} week={data.currentWeek} onToggle={toggle} onSaved={() => load()} readOnly={!!data.preview} view={view} />}
     </>
   );
 }
@@ -248,7 +253,8 @@ export function AdvisorRotaView({ token, onWideChange }: { token: string; onWide
 function WeekView({ token, data, week, onToggle, onSaved, readOnly = false, view = "liste" }: {
   token: string; data: Data; week: number; onToggle: (id: string, done: boolean) => void; onSaved: () => void; readOnly?: boolean; view?: ViewMode;
 }) {
-  const row = data.weeks.find((w) => w.week === week)!;
+  const row = data.weeks.find((w) => w.week === week);
+  if (!row) return null;   // sunucu bu haftayı göndermediyse (eski sürüm / uyumsuz yanıt) çökme
   const confirmed = !!row.confirmedAt;
   const monday = data.week1Monday ? ukAddDays(data.week1Monday, (week - 1) * 7) : null;
   // Yalnızca içinde bulunulan hafta düzenlenebilir (sunucu da aynı kuralı uygular).
