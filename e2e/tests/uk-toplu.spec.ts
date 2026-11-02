@@ -8,7 +8,7 @@ test("toplu ekle: adaylar koçlu/aktif/programda olmayanlar; seçilenler aynı p
   const kocsuz = await createAdvisor("Toplu Kocsuz");
   const pasif = await createAdvisor("Toplu Pasif", { status: "inactive" });
   const zaten = await createAdvisor("Toplu Zaten");
-  for (const x of [a, b, pasif, zaten]) await q(`UPDATE employees SET uretkenlik_koclugu_manager_id = $2 WHERE id = $1`, [x.employeeId, USERS.zeynep.id]);
+  for (const x of [a, b, pasif, zaten]) await q(`UPDATE employees SET uretkenlik_koclugu = TRUE, uretkenlik_koclugu_manager_id = $2 WHERE id = $1`, [x.employeeId, USERS.zeynep.id]);
   await enroll(zaten.employeeId, USERS.zeynep.id, startForWeek(1));
 
   await loginAs(page, "admin");

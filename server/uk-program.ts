@@ -44,6 +44,7 @@ type Participant = {
   source: "manual" | "auto" | "backfill" | null;
   manual: boolean;          // elle eklendi
   profileCoach: boolean;    // koç danışman profilinden geliyor (programda değiştirilemez)
+  ukActive: boolean;        // ÜK işareti açık + koç var + çıkış tarihi yok/ileride
   inProgram: boolean;
   welcomeSentAt: string | null;
 };
@@ -59,10 +60,15 @@ const PARTICIPANT_FROM = `
        JOIN candidates c ON c.id = e.candidate_id
        LEFT JOIN uk_program_enrollments en ON en.employee_id = e.id AND en.removed_at IS NULL
        LEFT JOIN users u ON u.id = e.uretkenlik_koclugu_manager_id`;
+// "ÜK alıyor" şartı (2026-11-02): ÜK işareti açık, profilde koç var, çıkış tarihi boş ya da ileride.
+// Daha önce yalnız koç alanına bakılıyordu; ÜK'dan çıkmış (çıkış tarihi dolu) danışmanlar da
+// programa alınabiliyordu.
+const UK_ACTIVE_SQL = `(e.uretkenlik_koclugu = TRUE AND e.uretkenlik_koclugu_manager_id IS NOT NULL
+       AND (e.uk_end_date IS NULL OR e.uk_end_date = '' OR e.uk_end_date > to_char((now() AT TIME ZONE 'Europe/Istanbul')::date, 'YYYY-MM-DD')))`;
 // Koç yalnızca danışman profilindeki ÜK koçudur (programda koç seçimi/değişimi yok).
 // Profilde koç yoksa danışman programda sayılmaz: listede görünmez, portalda Rotam açılmaz.
 const PARTICIPANT_COLS = `e.id, c.name, e.kwuid, e.status, u.id AS coach_id, u.name AS coach_name,
-       (en.employee_id IS NOT NULL AND e.uretkenlik_koclugu_manager_id IS NOT NULL) AS enrolled, en.source,
+       (en.employee_id IS NOT NULL AND ${UK_ACTIVE_SQL}) AS enrolled, en.source, ${UK_ACTIVE_SQL} AS uk_active,
        en.start_date AS en_start, to_char(e.start_date, 'YYYY-MM-DD') AS start_date, en.welcome_sent_at,
        e.uretkenlik_koclugu_manager_id AS profile_coach_id`;
 
@@ -70,7 +76,7 @@ export async function isInUkProgram(employeeId: number): Promise<boolean> {
   // Koçu olmayan veya pasife alınmış danışman programa giremez (profildeki ÜK koçu ve aktif durum şart).
   const r = await pool.query(
     `SELECT 1 FROM uk_program_enrollments en JOIN employees e ON e.id = en.employee_id
-      WHERE en.employee_id = $1 AND en.removed_at IS NULL AND e.uretkenlik_koclugu_manager_id IS NOT NULL AND e.status = 'active'`,
+      WHERE en.employee_id = $1 AND en.removed_at IS NULL AND ${UK_ACTIVE_SQL} AND e.status = 'active'`,
     [employeeId],
   );
   return r.rows.length > 0;
@@ -88,6 +94,7 @@ async function loadParticipant(employeeId: number): Promise<Participant | null> 
     source: row.enrolled ? row.source : null,
     manual: !!row.enrolled && row.source === "manual",
     profileCoach: row.profile_coach_id != null,
+    ukActive: !!row.uk_active,
     inProgram: !!row.enrolled,
     welcomeSentAt: row.welcome_sent_at ?? null,
   };
@@ -105,12 +112,12 @@ export async function autoEnrollOnCoachAssigned(
 ): Promise<boolean> {
   if (!newCoachId || newCoachId === prevCoachId) return false;
   const r = await pool.query(
-    `SELECT e.status, en.removed_at, (en.employee_id IS NOT NULL) AS has_row
+    `SELECT e.status, en.removed_at, (en.employee_id IS NOT NULL) AS has_row, ${UK_ACTIVE_SQL} AS uk_active
        FROM employees e LEFT JOIN uk_program_enrollments en ON en.employee_id = e.id WHERE e.id = $1`,
     [employeeId],
   );
   const row = r.rows[0];
-  if (!row || row.status !== "active") return false;
+  if (!row || row.status !== "active" || !row.uk_active) return false;
   if (row.has_row && !row.removed_at) return false; // zaten programda
   await pool.query(
     `INSERT INTO uk_program_enrollments (employee_id, coach_user_id, start_date, source, added_at, removed_at)
@@ -427,7 +434,7 @@ export function registerUkProgramRoutes(app: Express) {
            JOIN candidates c ON c.id = e.candidate_id
            JOIN users u ON u.id = e.uretkenlik_koclugu_manager_id
            LEFT JOIN uk_program_enrollments en ON en.employee_id = e.id
-          WHERE e.status = 'active' AND (en.employee_id IS NULL OR en.removed_at IS NOT NULL)
+          WHERE e.status = 'active' AND ${UK_ACTIVE_SQL} AND (en.employee_id IS NULL OR en.removed_at IS NOT NULL)
           ORDER BY u.name, c.name`,
       );
       res.json(r.rows.map((x) => ({
@@ -454,6 +461,7 @@ export function registerUkProgramRoutes(app: Express) {
         if (!p) { results.push({ employeeId, name: `#${employeeId}`, enrolled: false, mailed: null, error: "Danışman bulunamadı" }); continue; }
         if (p.status !== "active") { results.push({ employeeId, name: p.name, enrolled: false, mailed: null, error: "Pasif danışman" }); continue; }
         if (!p.profileCoach) { results.push({ employeeId, name: p.name, enrolled: false, mailed: null, error: "Profilde ÜK koçu yok" }); continue; }
+        if (!p.ukActive) { results.push({ employeeId, name: p.name, enrolled: false, mailed: null, error: "ÜK'da değil (işaret kapalı veya çıkış tarihi dolu)" }); continue; }
         if (p.inProgram) { results.push({ employeeId, name: p.name, enrolled: false, mailed: null, error: "Zaten programda" }); continue; }
         await pool.query(
           `INSERT INTO uk_program_enrollments (employee_id, coach_user_id, start_date, added_by_user_id, added_at, removed_at, source)
@@ -524,6 +532,7 @@ export function registerUkProgramRoutes(app: Express) {
       const p = await loadParticipant(employeeId);
       if (!p) return res.status(404).json({ error: "Danışman bulunamadı." });
       if (!p.profileCoach) return res.status(400).json({ error: "Danışmanın profilinde ÜK koçu yok. Önce danışman profilinden koç atayın." });
+      if (!p.ukActive) return res.status(400).json({ error: "Danışman ÜK'da değil (işaret kapalı veya ÜK çıkış tarihi dolu)." });
       if (p.inProgram) return res.status(409).json({ error: `${p.name} zaten programda.` });
       await pool.query(
         `INSERT INTO uk_program_enrollments (employee_id, coach_user_id, start_date, added_by_user_id, added_at, removed_at, source)
@@ -598,7 +607,7 @@ export function registerUkProgramRoutes(app: Express) {
                 (SELECT COUNT(*)::int FROM candidates rc WHERE rc.referred_by_employee_id = e.id) AS referrals,
                 (coalesce(e.kw_mail, '') <> '' OR coalesce(c.email, '') <> '') AS has_email
            ${PARTICIPANT_FROM}
-          WHERE en.employee_id IS NOT NULL AND e.uretkenlik_koclugu_manager_id IS NOT NULL ${includePassive ? "" : "AND e.status = 'active'"}
+          WHERE en.employee_id IS NOT NULL AND ${includePassive ? "e.uretkenlik_koclugu_manager_id IS NOT NULL" : `${UK_ACTIVE_SQL} AND e.status = 'active'`}
           ORDER BY en.start_date DESC NULLS LAST, c.name`,
       );
       const today = todayYmd();
