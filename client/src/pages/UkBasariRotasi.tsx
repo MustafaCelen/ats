@@ -77,7 +77,7 @@ export default function UkBasariRotasi() {
       toast({
         title: `${d.mailed} hoş geldin maili gönderildi`,
         description: d.stopped
-          ? `${d.stopped} Gönderilemeyen ${failed.length} danışman "Toplu Mail" sayısında kalır.`
+          ? `${d.stopped} Gönderilemeyen ${failed.length} danışman "Toplu Mail" sayısında kalır. Gmail yanıtı: ${failed.find((x) => x.error?.startsWith("Mail gönderilemedi"))?.error ?? "—"}`
           : failed.length ? `Gönderilemeyen: ${failed.map((x) => `${x.name} (${x.error})`).join(", ")}` : undefined,
         variant: d.mailed === 0 ? "destructive" : undefined,
       });
