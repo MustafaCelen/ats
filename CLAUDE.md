@@ -93,8 +93,8 @@ or the advisor `/l/:token` links will be wrong.
   `parseInt(str.replace(/[^0-9]/g, "")) || 5` before dividing by 100 (used in both storage.ts and Closings.tsx).
 - **Closings list editing** is read-only inline (`InlineCell`/`InlineSelect` render plain text); edits go
   through the Pencil dialog. Approve flow accepts TR (`GG.AA.YYYY`) and ISO date formats.
-- **Git:** end commit messages with `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`. Remote is
-  `MustafaCelen/ats`, default branch `main`.
+- **Git:** remote is `MustafaCelen/ats`, default branch `main`. Commit attribution is added automatically —
+  don't hardcode a model name here.
 
 ## graphify
 

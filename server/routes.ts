@@ -3287,6 +3287,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const agentId = Number(req.params.id);
       const { method, note, collectedAt } = req.body ?? {};
       if (method !== "banka" && method !== "nakit") return res.status(400).json({ message: "method banka veya nakit olmalı" });
+      if (collectedAt !== undefined && collectedAt !== null && collectedAt !== "") {
+        const d = new Date(collectedAt);
+        if (Number.isNaN(d.getTime())) return res.status(400).json({ message: "Tahsilat tarihi geçersiz" });
+        if (d.getTime() > Date.now() + 24 * 3600_000) return res.status(400).json({ message: "Tahsilat tarihi gelecekte olamaz" });
+      }
       const currency = req.body?.currency === "USD" ? "USD" : "TRY";
       let amount = Number(req.body?.amount);
       let originalAmount: string | null = null, fxRate: string | null = null;

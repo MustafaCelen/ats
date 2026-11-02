@@ -3505,6 +3505,8 @@ function AgentCollectionDialog({ agentId, row, onClose }: {
   const [currency, setCurrency] = useState<"TRY" | "USD">("TRY");
   const [amount, setAmount] = useState("");
   const [fxRate, setFxRate] = useState("");   // USD: uygulanacak kur (günün kuru gelir, elle değiştirilebilir)
+  const todayYmd = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; })();
+  const [collectedOn, setCollectedOn] = useState(todayYmd);   // tahsilat tarihi (varsayılan bugün; otomatik kapanışta işlem tarihi bundan gelir)
   const [note, setNote] = useState("");
 
   // Günün USD/TRY kuru (exchange_rates'ten; hafta sonu/tatilde en son bilinen gün)
@@ -3556,11 +3558,12 @@ function AgentCollectionDialog({ agentId, row, onClose }: {
       headers: { "Content-Type": "application/json" },
       credentials: "include",
       body: JSON.stringify(currency === "USD"
-        ? { method, currency: "USD", originalAmount: amount, fxRate: rateNum > 0 ? rateNum : undefined, note: note || undefined }
-        : { method, amount, note: note || undefined }),
+        ? { method, currency: "USD", originalAmount: amount, fxRate: rateNum > 0 ? rateNum : undefined, note: note || undefined, collectedAt: collectedOn !== todayYmd ? collectedOn : undefined }
+        : { method, amount, note: note || undefined, collectedAt: collectedOn !== todayYmd ? collectedOn : undefined }),
     });
     setAmount("");
     setNote("");
+    setCollectedOn(todayYmd);
     queryClient.invalidateQueries({ queryKey: ["/api/closing-agents", agentId, "collections"] });
     queryClient.invalidateQueries({ queryKey: ["/api/closings"] });
     toast({ title: "Tahsilat kaydedildi" });
@@ -3677,6 +3680,10 @@ function AgentCollectionDialog({ agentId, row, onClose }: {
                 <Input type="number" step="0.0001" value={fxRate} onChange={(e) => setFxRate(e.target.value)} className="h-9" placeholder="Günün kuru" data-testid="collection-fx-rate" />
               </div>
             )}
+            <div className="space-y-1.5 w-36">
+              <label className="text-xs font-medium">Tahsilat tarihi</label>
+              <Input type="date" value={collectedOn} max={todayYmd} onChange={(e) => setCollectedOn(e.target.value || todayYmd)} className="h-9" data-testid="collection-date" />
+            </div>
             <div className="space-y-1.5 flex-1">
               <label className="text-xs font-medium">Not (opsiyonel)</label>
               <Input value={note} onChange={(e) => setNote(e.target.value)} className="h-9" />
