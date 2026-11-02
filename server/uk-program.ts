@@ -12,11 +12,23 @@ import { sendEmail } from "./email";
 import { buildUkWelcomeEmail } from "./uk-welcome-email";
 import { publicBaseUrl } from "./whatsapp";
 import {
-  UK_ACTIVITIES, UK_ACTIVITY_IDS, UK_PROGRAM_WEEKS, computeUkActivityScore, computeUkTargetScore,
+  UK_ACTIVITIES, UK_ACTIVITY_IDS, UK_PROGRAM_WEEKS, UK_PERIODS, UK_PERIOD_WEEKS, ukPeriodOfWeek,
+  computeUkActivityScore, computeUkTargetScore, combineUkActivityScores, combineUkTargetScores,
   ukProgramWeek1Monday, ukAddDays, ukCurrentWeek, ukIsMonday, type UkScoreKey,
 } from "@shared/uk-program";
 
 const scoreOfActivity = new Map(UK_ACTIVITIES.map((a) => [a.id, a.score] as const));
+const periodOfActivity = new Map(UK_ACTIVITIES.map((a) => [a.id, ukPeriodOfWeek(a.week)] as const));
+
+// Etkinlik kimliklerinden dönem bazlı skor kalemi sayıları (dönem başına ayrı puanlanır).
+function doneByPeriod(ids: string[]): Partial<Record<UkScoreKey, number>>[] {
+  const out: Partial<Record<UkScoreKey, number>>[] = Array.from({ length: UK_PERIODS }, () => ({}));
+  for (const id of ids) {
+    const s = scoreOfActivity.get(id); const p = periodOfActivity.get(id);
+    if (s && p != null) out[p][s] = (out[p][s] ?? 0) + 1;
+  }
+  return out;
+}
 
 function todayYmd(): string {
   // İstanbul günü (UTC+3) — hafta sınırları yerel güne göre.
@@ -163,13 +175,14 @@ async function buildProgram(p: Participant) {
   ]);
   const auto = week1Monday ? await loadAutoWeekly(p.employeeId, week1Monday) : null;
 
-  const done: Partial<Record<UkScoreKey, number>> = {};
-  for (const r of checks.rows) {
-    const s = scoreOfActivity.get(r.activity_id);
-    if (s) done[s] = (done[s] ?? 0) + 1;
+  const doneP = doneByPeriod(checks.rows.map((r: any) => r.activity_id));
+  for (let pi = 0; pi < UK_PERIODS; pi++) {
+    doneP[pi].katki = auto
+      ? Array.from({ length: UK_PERIOD_WEEKS }, (_, i) => auto[pi * UK_PERIOD_WEEKS + i + 1]?.katkiPayi ?? 0).reduce((s, v) => s + v, 0)
+      : 0;
   }
-  if (auto) done.katki = Object.values(auto).reduce((s, w) => s + w.katkiPayi, 0);
-  const score = computeUkActivityScore(done);
+  const activityParts = doneP.map((d) => computeUkActivityScore(d));
+  const score = combineUkActivityScores(activityParts);
 
   const weekRows = Array.from({ length: UK_PROGRAM_WEEKS }, (_, i) => {
     const w = i + 1;
@@ -188,7 +201,14 @@ async function buildProgram(p: Participant) {
     };
   });
 
-  const targetScore = computeUkTargetScore(weekRows);
+  const targetParts = Array.from({ length: UK_PERIODS }, (_, pi) =>
+    computeUkTargetScore(weekRows.slice(pi * UK_PERIOD_WEEKS, (pi + 1) * UK_PERIOD_WEEKS)));
+  const targetScore = combineUkTargetScores(targetParts);
+  // Dönem kırılımı: 1. ve 2. dönem (45 gün + 45 gün) ayrı ayrı.
+  const periods = activityParts.map((a, pi) => ({
+    period: pi + 1, score: a, targetScore: targetParts[pi],
+    startWeek: pi * UK_PERIOD_WEEKS + 1, endWeek: (pi + 1) * UK_PERIOD_WEEKS,
+  }));
 
   return {
     participant: p,
@@ -198,6 +218,7 @@ async function buildProgram(p: Participant) {
     weeks: weekRows,
     score,
     targetScore,
+    periods,
     totals: {
       activities: UK_ACTIVITIES.length,
       done: checks.rows.length,
@@ -268,9 +289,10 @@ function registerAdvisorUkRoutes(app: Express) {
         ? ukAddDays(prog.week1Monday, (cw - 1) * 7 + 6) : null;
       const realIds: number[] = (req.session as any)?.advisorEmployeeIds ?? [];
       // Puan/skor danışmana gösterilmez (onaylı karar) — yanıttan da çıkarılır.
-      const { score: _score, targetScore, totals: _totals, ...rest } = prog;
-      // Hedefler danışmana puansız gösterilir: 6 hafta sonu hedeflerinde ilerleme.
-      const programTargets = targetScore.rows
+      const { score: _score, targetScore: _ts, periods, totals: _totals, ...rest } = prog;
+      // Hedefler danışmana puansız gösterilir: içinde bulunduğu dönemin (6 hafta) hedeflerinde ilerleme.
+      const periodTarget = periods[Math.min(UK_PERIODS - 1, Math.max(0, ukPeriodOfWeek(Math.max(1, cw))))].targetScore;
+      const programTargets = periodTarget.rows
         .filter((r) => r.mode === "total" && r.target != null)
         .map((r) => ({ key: r.key, label: r.label, target: r.target as number, done: r.done, hint: r.hint }));
       res.json({ ...rest, checks, weeks, weekEnd, programTargets, today: todayYmd(), preview: !realIds.includes(p.employeeId) });
@@ -584,25 +606,26 @@ export function registerUkProgramRoutes(app: Express) {
         const programStart = row.en_start || row.start_date || null;
         const week1Monday = programStart ? ukProgramWeek1Monday(programStart) : null;
         const auto = autoBy.get(row.id);
-        const targetScore = computeUkTargetScore(Array.from({ length: UK_PROGRAM_WEEKS }, (_, i) => {
+        const weekActuals = Array.from({ length: UK_PROGRAM_WEEKS }, (_, i) => {
           const m = manualWeeks.find((x: any) => x.employee_id === row.id && x.week === i + 1);
           const a = auto?.[i + 1];
           return { arama: m?.arama, randevu: m?.randevu, tekYetki: m?.tek_yetki, kapanis: a?.kapanis ?? 0, bhb: a?.bhb ?? 0, katkiPayi: a?.katkiPayi ?? 0 };
-        })).total;
-        const done: Partial<Record<UkScoreKey, number>> = {};
-        for (const id of (row.ids ?? []) as string[]) {
-          const s = scoreOfActivity.get(id);
-          if (s) done[s] = (done[s] ?? 0) + 1;
-        }
+        });
+        const targetScore = combineUkTargetScores(Array.from({ length: UK_PERIODS }, (_, pi) =>
+          computeUkTargetScore(weekActuals.slice(pi * UK_PERIOD_WEEKS, (pi + 1) * UK_PERIOD_WEEKS)))).total;
+        const doneP = doneByPeriod((row.ids ?? []) as string[]);
         // Katkı payı program penceresindeki referanslardan (detayla aynı).
-        done.katki = auto ? Object.values(auto).reduce((s, w) => s + w.katkiPayi, 0) : 0;
+        for (let pi = 0; pi < UK_PERIODS; pi++) {
+          doneP[pi].katki = weekActuals.slice(pi * UK_PERIOD_WEEKS, (pi + 1) * UK_PERIOD_WEEKS).reduce((s, w) => s + w.katkiPayi, 0);
+        }
+        const done = doneP;
         return {
           employeeId: row.id, name: row.name, kwuid: row.kwuid, status: row.status,
           coachId: row.coach_id, coachName: row.coach_name,
           programStart, week1Monday,
           currentWeek: week1Monday ? ukCurrentWeek(week1Monday, today) : 0,
           done: row.done, total: UK_ACTIVITIES.length,
-          score: computeUkActivityScore(done).total,
+          score: combineUkActivityScores(done.map((d) => computeUkActivityScore(d))).total,
           targetScore,
           lastConfirmedWeek: row.last_confirmed ?? null,
           welcomeSentAt: row.welcome_sent_at ?? null,

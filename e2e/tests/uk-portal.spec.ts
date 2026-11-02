@@ -85,7 +85,7 @@ test("haftalık gerçekleşen kaydı, hedef ipuçları ve 6 hafta sonu hedefleri
   const [w] = await q(`SELECT arama, randevu FROM uk_program_weeks WHERE employee_id = $1 AND week = 2`, [a.employeeId]);
   expect(w).toMatchObject({ arama: 30, randevu: 1 });
 
-  const targets = page.locator("div").filter({ has: page.getByRole("heading", { name: "6 hafta sonu hedeflerin" }) }).last();
+  const targets = page.locator("div").filter({ has: page.getByRole("heading", { name: "Bu dönemin (6 hafta) sonu hedeflerin" }) }).last();
   await expect(targets.locator("div").filter({ hasText: /^Tek Yetki \(Satılık\)/ }).first()).toContainText("1 / 1");
   await expect(targets.locator("div").filter({ hasText: /^Kapanış/ }).first()).toContainText("0 / 1");
   await expect(targets.locator("div").filter({ hasText: /^Katkı Payı/ }).first()).toContainText("1 / 2");
@@ -107,9 +107,9 @@ test("başlamamış ve tamamlanmış program kartları", async ({ page, context 
   await expect(page.getByText(`Programınız ${fmtTr(nextMonday())} Pazartesi başlıyor.`)).toBeVisible();
   await expect(page.locator('[data-testid^="uk-act-"]')).toHaveCount(0);
 
-  await enroll(a.employeeId, USERS.zeynep.id, startForWeek(8));
+  await enroll(a.employeeId, USERS.zeynep.id, startForWeek(14));
   await page.reload();
-  await expect(page.getByText(/Tebrikler, 6 haftalık programı tamamladınız/)).toBeVisible();
+  await expect(page.getByText(/Tebrikler, 12 haftalık programı tamamladınız/)).toBeVisible();
 });
 
 test("programda olmayan danışmanda Rotam sekmesi yok; başkasının rotası açılmaz", async ({ page, context }) => {

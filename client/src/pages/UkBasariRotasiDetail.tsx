@@ -29,6 +29,7 @@ type ProgramData = {
     rows: { key: string; label: string; points: number; source: "manual" | "auto"; mode: "weekly" | "total"; target: number | null; hint: string; done: number; targetTotal: number | null; weeksMet: number | null; earned: number }[];
     total: number; max: number;
   };
+  periods?: { period: number; score: { total: number; max: number }; targetScore: { total: number; max: number } }[];
   totals: { activities: number; done: number };
   canEdit: boolean;
   isAdmin?: boolean;
@@ -110,7 +111,7 @@ function WeekSummary({ employeeId, row, canEdit }: { employeeId: number; row: We
         {auto("BHB", fmtTRY(row.bhb), "Bu haftaki tamamlanan kapanışların BHB toplamı")}
         {auto("Katkı Payı", String(row.katkiPayi), "Bu hafta referans olduğu yeni adaylar")}
       </div>
-      <p className="text-[11px] text-muted-foreground">Haftalık hedef: günde 10 arama (haftada 50) ve 1 randevu. Tek yetki, kapanış ve katkı payı 6 hafta toplamında değerlendirilir.</p>
+      <p className="text-[11px] text-muted-foreground">Haftalık hedef: günde 10 arama (haftada 50) ve 1 randevu. Tek yetki, kapanış ve katkı payı her dönemin (6 hafta) toplamında değerlendirilir; 2. dönem hedefleri 1. dönemle aynıdır.</p>
       <textarea
         value={note} disabled={!canEdit} onChange={(e) => setNote(e.target.value)} rows={2}
         placeholder={canEdit ? "Koç notu: haftanın değerlendirmesi, sonraki hafta için odak…" : "Koç notu yok"}
@@ -184,7 +185,7 @@ function ScoreTable({ data }: { data: ProgramData }) {
       <div className="rounded-xl border border-border bg-card overflow-hidden">
         <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-2">
           <h3 className="text-sm font-semibold">Hedef</h3>
-          <span className="text-xs text-muted-foreground text-right">Haftalık kalemler her hafta ayrı, diğerleri 6 hafta toplamı</span>
+          <span className="text-xs text-muted-foreground text-right">Haftalık kalemler her hafta ayrı, diğerleri dönem (6 hafta) toplamı; iki dönemin toplamı</span>
         </div>
         <table className="w-full text-sm">
           <thead className="bg-muted/40 text-xs text-muted-foreground">
@@ -440,10 +441,12 @@ export default function UkBasariRotasiDetail() {
               <div className="rounded-lg bg-red-600 px-4 py-2.5">
                 <p className="text-[11px] text-white/80">Aktivite puanı</p>
                 <p className="text-xl font-extrabold">{data.score.total.toLocaleString("tr-TR")} <span className="text-sm font-semibold text-white/70">/ {data.score.max}</span></p>
+                {data.periods && <p className="text-[10px] text-white/75" data-testid="uk-period-activity">{data.periods.map((p) => `${p.period}. dönem ${p.score.total.toLocaleString("tr-TR")}`).join(" · ")}</p>}
               </div>
               <div className="rounded-lg bg-red-600 px-4 py-2.5">
                 <p className="text-[11px] text-white/80">Hedef puanı</p>
                 <p className="text-xl font-extrabold">{data.targetScore.total.toLocaleString("tr-TR")} <span className="text-sm font-semibold text-white/70">/ {data.targetScore.max}</span></p>
+                {data.periods && <p className="text-[10px] text-white/75" data-testid="uk-period-target">{data.periods.map((p) => `${p.period}. dönem ${p.targetScore.total.toLocaleString("tr-TR")}`).join(" · ")}</p>}
               </div>
             </div>
           </div>

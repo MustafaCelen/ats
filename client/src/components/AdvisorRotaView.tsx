@@ -209,7 +209,7 @@ export function AdvisorRotaView({ token, onWideChange }: { token: string; onWide
               </>
             ) : (
               <>
-                <p className="font-semibold">Tebrikler, 6 haftalık programı tamamladınız! 🎉</p>
+                <p className="font-semibold">Tebrikler, 12 haftalık programı tamamladınız! 🎉</p>
                 <p className="text-sm text-muted-foreground mt-1">Değerlendirmeniz için koçunuzla görüşebilirsiniz.</p>
               </>
             )}
@@ -345,11 +345,11 @@ function WeekView({ token, data, week, onToggle, onSaved, readOnly = false, view
   );
 }
 
-// 6 hafta sonu hedefleri: ilerleme (puan gösterilmez).
+// Dönem (6 hafta) sonu hedefleri: ilerleme (puan gösterilmez).
 function ProgramTargets({ items }: { items: { key: string; label: string; target: number; done: number; hint: string }[] }) {
   return (
     <Card>
-      <h3 className="font-semibold text-sm">6 hafta sonu hedeflerin</h3>
+      <h3 className="font-semibold text-sm">Bu dönemin (6 hafta) sonu hedeflerin</h3>
       <div className="mt-3 space-y-2.5">
         {items.map((t) => {
           const ok = t.done >= t.target;

@@ -50,7 +50,7 @@ export function buildUkWelcomeEmail(opts: {
       <p style="margin:0 0 14px 0;">Merhaba <b style="color:#0f172a;">${esc(firstName)}</b>,</p>
       <p style="margin:0 0 14px 0;">
         Üretkenlik Koçluğu kapsamında <b>45+45 Başarı Rotası</b>'na dahil edildiniz. Önümüzdeki
-        <b>6 hafta</b> boyunca günlük aktivitelerinizi ve haftalık hedeflerinizi koçunuzla birlikte
+        <b>12 hafta</b> (2 dönem × 6 hafta) boyunca günlük aktivitelerinizi ve haftalık hedeflerinizi koçunuzla birlikte
         bu rota üzerinden takip edeceksiniz.
       </p>
     </td></tr>

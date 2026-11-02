@@ -35,7 +35,7 @@ test("başlangıç yalnız pazartesi; 'Şu an' haftası değişince başlangıç
 test("koç kutucuk işaretler/kaldırır; kalıcıdır", async ({ page }) => {
   await loginAs(page, "zeynep");
   await page.goto(`/uk-basari-rotasi/${a.employeeId}`);
-  await expect(page.getByRole("button", { name: /2\. Hafta/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^2\. Hafta/ })).toBeVisible();
   const box = page.getByTestId("uk-grid-w2-d0-r0");
   await expect(box).toHaveAttribute("data-done", "0");
   await box.click();
@@ -46,11 +46,11 @@ test("koç kutucuk işaretler/kaldırır; kalıcıdır", async ({ page }) => {
   expect(ck).toMatchObject({ by_advisor: false, checked_by_user_id: USERS.zeynep.id });
 
   // Koç geçmiş haftayı da düzenleyebilir
-  await page.getByRole("button", { name: /1\. Hafta/ }).click();
+  await page.getByRole("button", { name: /^1\. Hafta/ }).click();
   await page.getByTestId("uk-grid-w1-d1-r0").click();
   await expect(page.getByTestId("uk-grid-w1-d1-r0")).toHaveAttribute("data-done", "1");
 
-  await page.getByRole("button", { name: /2\. Hafta/ }).click();
+  await page.getByRole("button", { name: /^2\. Hafta/ }).click();
   await page.getByTestId("uk-grid-w2-d0-r0").click();
   await expect(page.getByTestId("uk-grid-w2-d0-r0")).toHaveAttribute("data-done", "0");
 });
@@ -72,13 +72,13 @@ test("haftalık gerçekleşen kaydet, haftayı onayla, onayı kaldır", async ({
 
   const [w] = await q(`SELECT arama, randevu, tek_yetki, coach_note, confirmed_at IS NOT NULL AS ok FROM uk_program_weeks WHERE employee_id = $1 AND week = 2`, [a.employeeId]);
   expect(w).toMatchObject({ arama: 50, randevu: 1, tek_yetki: 1, coach_note: "E2E koç notu", ok: true });
-  await expect(page.getByRole("button", { name: /2\. Hafta/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^2\. Hafta/ })).toBeVisible();
 
   await summary.getByRole("button", { name: "Onayı Kaldır" }).click();
   await expect(summary).toContainText("Koç onayı bekliyor");
 });
 
-test("skor tablosu: hedef dağılımı 20/8/8/8/6 ve hesap", async ({ page }) => {
+test("skor tablosu: hedef dağılımı (2 dönem toplamı) 40/16/16/16/12 ve hesap", async ({ page }) => {
   await q(`INSERT INTO uk_program_weeks (employee_id, week, arama, randevu, tek_yetki) VALUES ($1, 1, 50, 2, 1), ($1, 2, 25, 0, 0)`, [a.employeeId]);
   await loginAs(page, "admin");
   await page.goto(`/uk-basari-rotasi/${a.employeeId}`);
@@ -86,29 +86,29 @@ test("skor tablosu: hedef dağılımı 20/8/8/8/6 ve hesap", async ({ page }) =>
 
   const hedef = page.locator("div.rounded-xl").filter({ has: page.getByRole("heading", { name: "Hedef" }) }).first();
   const rowOf = (label: string) => hedef.locator("tbody tr").filter({ hasText: label });
-  const expected: [string, string][] = [["Arama", "20"], ["Randevu", "8"], ["Tek Yetki (Satılık)", "8"], ["Kapanış", "8"], ["Katkı Payı", "6"]];
+  const expected: [string, string][] = [["Arama", "40"], ["Randevu", "16"], ["Tek Yetki (Satılık)", "16"], ["Kapanış", "16"], ["Katkı Payı", "12"]];
   for (const [label, pts] of expected) await expect(rowOf(label).locator("td").nth(2)).toHaveText(pts);
 
   // Arama: hafta1 50/50 + hafta2 25/50 → 10 × 1,5/6 = 2,5
-  await expect(rowOf("Arama")).toContainText("75 / 300");
-  await expect(rowOf("Arama")).toContainText("1/6 hafta tuttu");
+  await expect(rowOf("Arama")).toContainText("75 / 600");
+  await expect(rowOf("Arama")).toContainText("1/12 hafta tuttu");
   await expect(rowOf("Arama").locator("td").nth(3)).toHaveText("5");   // 20 × 1,5/6
   // Randevu: haftada 1, fazlası taşınmaz → 8 × 1/6 = 1,3
   await expect(rowOf("Randevu").locator("td").nth(3)).toHaveText("1,3");
   await expect(rowOf("Tek Yetki (Satılık)").locator("td").nth(3)).toHaveText("8");
-  await expect(hedef.locator("tfoot")).toContainText("50");
+  await expect(hedef.locator("tfoot")).toContainText("100");
   await expect(hedef.locator("tfoot td").last()).toHaveText("14,3");
   await expect(hedef.locator("tbody tr").filter({ hasText: "BHB" })).toHaveCount(0);
   await expect(page.getByText("Hedef puanı")).toBeVisible();
 
   const akt = page.locator("div.rounded-xl").filter({ has: page.getByRole("heading", { name: "Aktivite" }) }).first();
-  await expect(akt.locator("tbody tr").filter({ hasText: "Katkı Payı Yönlendirme" })).toContainText("0 / 2");
+  await expect(akt.locator("tbody tr").filter({ hasText: "Katkı Payı Yönlendirme" })).toContainText("0 / 4");
 });
 
 test("başka koç da tam yetkili: işaretler, onaylar, mail/çıkar butonları görünür", async ({ page }) => {
   await loginAs(page, "mehmet");
   await page.goto(`/uk-basari-rotasi/${a.employeeId}`);
-  await expect(page.getByRole("button", { name: /2\. Hafta/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^2\. Hafta/ })).toBeVisible();
   await expect(page.getByText(/Görüntüleme modu/)).toHaveCount(0);
   await page.getByTestId("uk-grid-w2-d0-r0").click();
   await expect(page.getByTestId("uk-grid-w2-d0-r0")).toHaveAttribute("data-done", "1");

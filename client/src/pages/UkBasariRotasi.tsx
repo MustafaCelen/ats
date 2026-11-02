@@ -129,7 +129,7 @@ export default function UkBasariRotasi() {
               <RouteIcon className="h-6 w-6 text-primary" /> 45+45 Başarı Rotası
             </h1>
             <p className="text-sm text-muted-foreground mt-0.5">
-              Üretkenlik Koçluğu programındaki danışmanların 6 haftalık rota ilerlemesi ve aktivite puanı
+              Üretkenlik Koçluğu programındaki danışmanların 12 haftalık (2 dönem × 6 hafta) rota ilerlemesi ve aktivite puanı
             </p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
@@ -241,8 +241,8 @@ export default function UkBasariRotasi() {
                         <span className="text-xs text-muted-foreground w-16 text-right">{r.done}/{r.total}</span>
                       </div>
                     </td>
-                    <td className="px-2 py-2.5 text-right font-semibold tabular-nums">{r.score.toLocaleString("tr-TR")} <span className="text-muted-foreground font-normal">/ 50</span></td>
-                    <td className="px-2 py-2.5 text-right font-semibold tabular-nums">{(r.targetScore ?? 0).toLocaleString("tr-TR")} <span className="text-muted-foreground font-normal">/ 50</span></td>
+                    <td className="px-2 py-2.5 text-right font-semibold tabular-nums">{r.score.toLocaleString("tr-TR")} <span className="text-muted-foreground font-normal">/ 100</span></td>
+                    <td className="px-2 py-2.5 text-right font-semibold tabular-nums">{(r.targetScore ?? 0).toLocaleString("tr-TR")} <span className="text-muted-foreground font-normal">/ 100</span></td>
                     <td className="px-2 py-2.5">
                       {r.lastConfirmedWeek
                         ? <span className="inline-flex items-center gap-1 text-xs text-emerald-700"><CheckCircle2 className="h-3.5 w-3.5" /> {r.lastConfirmedWeek}. hafta</span>

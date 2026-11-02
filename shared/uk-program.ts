@@ -7,7 +7,12 @@
 // danışmanın referans olduğu adaylardan sayılır. Hedef puanları (Arama, Randevu…)
 // sonraya bırakıldı; şimdilik yalnızca gerçekleşenler tutulur.
 
-export const UK_PROGRAM_WEEKS = 6;
+// Program iki dönemden oluşur (45 + 45 gün): aynı 6 haftalık şablon 2 kez uygulanır; hedefler ve
+// puanlar her dönemde aynıdır. Toplam skor iki dönemin toplamıdır (aktivite 100 + hedef 100).
+export const UK_PERIOD_WEEKS = 6;
+export const UK_PERIODS = 2;
+export const UK_PROGRAM_WEEKS = UK_PERIOD_WEEKS * UK_PERIODS;
+export const ukPeriodOfWeek = (week: number) => Math.floor((week - 1) / UK_PERIOD_WEEKS);   // 0 | 1
 
 export const UK_TIME_ROWS = [
   "08:45–09:30",
@@ -73,7 +78,7 @@ export const UK_TARGET_ITEMS: readonly UkTargetItem[] = [
 
 export type UkActivity = {
   id: string;            // kalıcı kimlik: w{hafta}-d{gün}-r{başlangıç satırı}
-  week: number;          // 1..6
+  week: number;          // 1..12 (7-12 = 2. dönem, şablon 1-6'nın tekrarı)
   day: number;           // 0 = Pazartesi … 4 = Cuma
   from: number;          // UK_TIME_ROWS indeksi (dahil)
   to: number;            // UK_TIME_ROWS indeksi (dahil)
@@ -177,10 +182,10 @@ const WEEK_ROWS: Record<number, Row[]> = {
   ],
 };
 
-export const UK_ACTIVITIES: UkActivity[] = Object.entries(WEEK_ROWS).flatMap(([w, rows]) =>
-  rows.map(([day, from, to, label, score]) => ({
-    id: `w${w}-d${day}-r${from}`,
-    week: Number(w), day, from, to, label, score,
+export const UK_ACTIVITIES: UkActivity[] = Array.from({ length: UK_PROGRAM_WEEKS }, (_, i) => i + 1).flatMap((week) =>
+  WEEK_ROWS[((week - 1) % UK_PERIOD_WEEKS) + 1].map(([day, from, to, label, score]) => ({
+    id: `w${week}-d${day}-r${from}`,
+    week, day, from, to, label, score,
   })),
 );
 
@@ -190,7 +195,7 @@ export const UK_ACTIVITY_IDS = new Set(UK_ACTIVITIES.map((a) => a.id));
 export const UK_PLANNED: Record<UkScoreKey, number> = UK_SCORE_ITEMS.reduce((acc, it) => {
   acc[it.key] = it.key === "katki"
     ? UK_KATKI_PLANNED
-    : UK_ACTIVITIES.filter((a) => a.score === it.key).length;
+    : UK_ACTIVITIES.filter((a) => a.week <= UK_PERIOD_WEEKS && a.score === it.key).length;
   return acc;
 }, {} as Record<UkScoreKey, number>);
 
@@ -221,7 +226,7 @@ export function ukAddDays(ymd: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-// Bugün programın kaçıncı haftası (0 = başlamadı, 7 = tamamlandı).
+// Bugün programın kaçıncı haftası (0 = başlamadı, 13 = tamamlandı).
 export function ukCurrentWeek(week1Monday: string, todayYmd: string): number {
   const diff = Math.floor((Date.parse(todayYmd) - Date.parse(week1Monday)) / 86400000);
   if (diff < 0) return 0;
@@ -251,17 +256,17 @@ export type UkWeekActuals = Partial<Record<UkTargetKey, number | null>>;
 // Hedef puanı. weeks: 1..6. haftaların gerçekleşenleri (eksik hafta = 0).
 export function computeUkTargetScore(weeks: UkWeekActuals[]) {
   const rows = UK_TARGET_ITEMS.map((it) => {
-    const vals = weeks.slice(0, UK_PROGRAM_WEEKS).map((w) => Math.max(0, Number(w[it.key]) || 0));
+    const vals = weeks.slice(0, UK_PERIOD_WEEKS).map((w) => Math.max(0, Number(w[it.key]) || 0));
     const done = vals.reduce((s, v) => s + v, 0);
     const t = it.target;
     const ratio = t == null
       ? (done > 0 ? 1 : 0)
       : it.mode === "weekly"
-        ? vals.reduce((s, v) => s + Math.min(1, v / t), 0) / UK_PROGRAM_WEEKS
+        ? vals.reduce((s, v) => s + Math.min(1, v / t), 0) / UK_PERIOD_WEEKS
         : Math.min(1, done / t);
     return {
       ...it, done: Math.round(done * 100) / 100,
-      targetTotal: t == null ? null : it.mode === "weekly" ? t * UK_PROGRAM_WEEKS : t,
+      targetTotal: t == null ? null : it.mode === "weekly" ? t * UK_PERIOD_WEEKS : t,
       weeksMet: it.mode === "weekly" && t != null ? vals.filter((v) => v >= t).length : null,
       earned: Math.round(it.points * ratio * 10) / 10,
     };
@@ -269,4 +274,28 @@ export function computeUkTargetScore(weeks: UkWeekActuals[]) {
   const total = Math.round(rows.reduce((s, r) => s + r.earned, 0) * 10) / 10;
   const max = UK_TARGET_ITEMS.reduce((s, r) => s + r.points, 0);
   return { rows, total, max };
+}
+
+// İki dönemin skorlarını tek tabloda toplar (kalem bazında; max = dönem sayısı × dönem max'ı).
+export function combineUkActivityScores(parts: ReturnType<typeof computeUkActivityScore>[]) {
+  const rows = parts[0].rows.map((r, i) => ({
+    ...r,
+    points: parts.reduce((s, p) => s + p.rows[i].points, 0),
+    planned: parts.reduce((s, p) => s + p.rows[i].planned, 0),
+    done: parts.reduce((s, p) => s + p.rows[i].done, 0),
+    earned: Math.round(parts.reduce((s, p) => s + p.rows[i].earned, 0) * 10) / 10,
+  }));
+  return { rows, total: Math.round(parts.reduce((s, p) => s + p.total, 0) * 10) / 10, max: parts.reduce((s, p) => s + p.max, 0) };
+}
+
+export function combineUkTargetScores(parts: ReturnType<typeof computeUkTargetScore>[]) {
+  const rows = parts[0].rows.map((r, i) => ({
+    ...r,
+    points: parts.reduce((s, p) => s + p.rows[i].points, 0),
+    done: Math.round(parts.reduce((s, p) => s + p.rows[i].done, 0) * 100) / 100,
+    targetTotal: r.targetTotal == null ? null : parts.reduce((s, p) => s + (p.rows[i].targetTotal ?? 0), 0),
+    weeksMet: r.weeksMet == null ? null : parts.reduce((s, p) => s + (p.rows[i].weeksMet ?? 0), 0),
+    earned: Math.round(parts.reduce((s, p) => s + p.rows[i].earned, 0) * 10) / 10,
+  }));
+  return { rows, total: Math.round(parts.reduce((s, p) => s + p.total, 0) * 10) / 10, max: parts.reduce((s, p) => s + p.max, 0) };
 }
