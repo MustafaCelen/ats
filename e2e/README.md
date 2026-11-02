@@ -13,7 +13,7 @@ Arayüzdeki butonları gerçek uygulama üzerinde tıklayarak test eder.
 
 ## Çalıştırma
 
-Önce uygulama yerelde ayakta olmalı (`docker compose up -d`, http://localhost:5000).
+Önce uygulama yerelde ayakta olmalı (`docker compose up -d`, http://localhost:5000). Cron uçlarını test eden spec'ler için konteyneri `CRON_SECRET=lokal-test-123 docker compose up -d` ile başlatın (uk-whatsapp, uk-hatirlatma-mail).
 
 ```bash
 cd e2e

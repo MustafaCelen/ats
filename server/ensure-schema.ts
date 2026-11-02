@@ -415,6 +415,27 @@ export async function ensureSchema(): Promise<void> {
     -- Hoş geldin maili (manuel tetiklenir): son gönderim.
     ALTER TABLE uk_program_enrollments ADD COLUMN IF NOT EXISTS welcome_sent_at TIMESTAMP;
     ALTER TABLE uk_program_enrollments ADD COLUMN IF NOT EXISTS welcome_sent_by_user_id INTEGER;
+    -- Haftalık hatırlatma maili (bu hafta aktivite girmeyenlere; admin elle ya da cron). sent_by_user_id 0 = cron.
+    CREATE TABLE IF NOT EXISTS uk_program_reminder_mails (
+      id SERIAL PRIMARY KEY,
+      employee_id INTEGER NOT NULL,
+      week INTEGER NOT NULL,
+      to_emails TEXT NOT NULL,
+      sent_by_user_id INTEGER,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS uk_program_reminder_mails_emp_idx ON uk_program_reminder_mails(employee_id, created_at);
+    -- Her hatırlatma maili çalıştırması (admin / cron / harici cron) özet satırı; hata da yazılır ki
+    -- otomatik gönderimin çalışıp çalışmadığı arayüzden görülsün.
+    CREATE TABLE IF NOT EXISTS uk_program_reminder_runs (
+      id SERIAL PRIMARY KEY,
+      trigger TEXT NOT NULL,
+      candidates INTEGER NOT NULL DEFAULT 0,
+      mailed INTEGER NOT NULL DEFAULT 0,
+      failed INTEGER NOT NULL DEFAULT 0,
+      error TEXT,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
 
     -- Haftalık gerçekleşenler (manuel kısım) + koç onayı.
     CREATE TABLE IF NOT EXISTS uk_program_weeks (

@@ -10,6 +10,7 @@ import { requireAuth } from "./auth";
 import { storage } from "./storage";
 import { sendEmail, sendEmailDetailed } from "./email";
 import { buildUkWelcomeEmail } from "./uk-welcome-email";
+import { buildUkReminderEmail } from "./uk-reminder-email";
 import { publicBaseUrl, listWhatsAppTemplates } from "./whatsapp";
 import { startBulkSendBatch, getBatch, getActiveBatchForUser, type BulkSendItem } from "./whatsapp-bulk-runner";
 import {
@@ -398,8 +399,11 @@ export type UkWaKind = keyof typeof UK_WA_KINDS;
 export type UkWaRecipient = {
   employeeId: number; name: string; phone: string | null; hasPhone: boolean; coachName: string | null;
   currentWeek: number; doneThisWeek: number; totalThisWeek: number; actualsEntered: boolean;
-  sentBefore: boolean;        // welcome: daha önce WA hoş geldin gitti; reminder: bu hafta hatırlatma gitti
+  sentBefore: boolean;        // welcome: daha önce WA hoş geldin gitti; reminder: bu hafta WA hatırlatma gitti
   sentAt: string | null;
+  emails: string[]; hasEmail: boolean;   // KW + kişisel e-posta (giriş yapabildiği adresler)
+  mailSentBefore: boolean;    // reminder: bu hafta hatırlatma MAİLİ gitti (welcome: hoş geldin maili gitti)
+  mailSentAt: string | null;
   link: string;
 };
 
@@ -414,8 +418,11 @@ export async function ukWaRecipients(req: Request, kind: UkWaKind): Promise<UkWa
   const thisMonday = ukProgramWeek1Monday(today);
   const label = UK_WA_KINDS[kind].label;
   const r = await pool.query(
-    `SELECT ${PARTICIPANT_COLS}, c.phone,
+    `SELECT ${PARTICIPANT_COLS}, c.phone, e.kw_mail, c.email,
             (SELECT array_agg(k.activity_id) FROM uk_program_checks k WHERE k.employee_id = e.id) AS ids,
+            ${kind === "reminder"
+              ? "(SELECT MAX(m.created_at) FROM uk_program_reminder_mails m WHERE m.employee_id = e.id AND m.created_at >= ($2::date - interval '3 hours'))"
+              : "en.welcome_sent_at"} AS mail_sent_at,
             (SELECT array_agg(w.week) FROM uk_program_weeks w WHERE w.employee_id = e.id
               AND (w.arama IS NOT NULL OR w.randevu IS NOT NULL OR w.tek_yetki IS NOT NULL)) AS actual_weeks,
             (SELECT MAX(s.created_at) FROM whatsapp_bulk_sends s
@@ -441,10 +448,13 @@ export async function ukWaRecipients(req: Request, kind: UkWaKind): Promise<UkWa
     if (kind === "welcome" && cw > UK_PROGRAM_WEEKS) continue;
     const token = await storage.ensureAdvisorToken(row.id);
     const phone = (row.phone ?? "").trim() || null;
+    const emails = Array.from(new Set([row.kw_mail, row.email].map((m) => String(m ?? "").trim().toLowerCase()).filter(Boolean)));
     out.push({
       employeeId: row.id, name: row.name, phone, hasPhone: !!phone, coachName: row.coach_name ?? null,
       currentWeek: cw, doneThisWeek, totalThisWeek, actualsEntered,
       sentBefore: !!row.sent_at, sentAt: row.sent_at ?? null,
+      emails, hasEmail: emails.length > 0,
+      mailSentBefore: !!row.mail_sent_at, mailSentAt: row.mail_sent_at ?? null,
       link: `${base}/a/${token}?tab=rota`,
     });
   }
@@ -479,6 +489,125 @@ export async function ukWaStartBatch(req: Request, kind: UkWaKind, templateSid: 
   if (items.length === 0) throw new Error("Seçilen danışmanlar listede yok.");
   const batchId = startBulkSendBatch({ createdByUserId: userId, templateSid, templateName: UK_WA_KINDS[kind].label, items });
   return { batchId, count: items.length };
+}
+
+// ── Haftalık hatırlatma MAİLİ ─────────────────────────────────────────────────
+// WhatsApp'tan farkı: Twilio şablonu/onayı gerekmez, metin bizde (uk-reminder-email.ts).
+// Alıcılar ukWaRecipients(req,"reminder") ile aynı: bu hafta hiç aktivite işaretlememiş olanlar.
+function ukReminderMailFor(r: UkWaRecipient) {
+  const sundayYmd = ukAddDays(ukProgramWeek1Monday(todayYmd()), 6);
+  const { subject, html } = buildUkReminderEmail({
+    name: r.name, coachName: r.coachName, week: r.currentWeek, totalWeeks: UK_PROGRAM_WEEKS, sundayYmd, link: r.link,
+  });
+  return { to: r.emails, subject, html };
+}
+
+export type UkReminderMailResult = { employeeId: number; name: string; mailed: boolean; error: string | null };
+export type UkReminderMailRun = { results: UkReminderMailResult[]; mailed: number; stopped: string | null };
+
+// Otomatik hatırlatma maili zamanı (index.ts in-process cron). Yalnız production; UK_REMINDER_MAIL_CRON
+// cron ifadesi ya da "off". Arayüz de bunu gösterir ("her cuma 17:00" sözü koda değil ayara bağlı).
+export function ukReminderMailCronExpr(): string | null {
+  const expr = process.env.UK_REMINDER_MAIL_CRON ?? "0 17 * * 5";
+  if (process.env.NODE_ENV !== "production" || expr === "off") return null;
+  return expr;
+}
+
+// Çalıştırma özeti (admin, cron, harici cron, hata dahil) — dialog başlığında "son otomatik gönderim".
+async function logUkReminderRun(trigger: string, run: UkReminderMailRun | null, error: string | null) {
+  try {
+    await pool.query(
+      "INSERT INTO uk_program_reminder_runs (trigger, candidates, mailed, failed, error) VALUES ($1, $2, $3, $4, $5)",
+      [trigger, run?.results.length ?? 0, run?.mailed ?? 0, run ? run.results.length - run.mailed : 0, error ?? run?.stopped ?? null],
+    );
+  } catch (e) { console.warn("[uk reminder run log]", e); }
+}
+
+// Seçilen danışmanlara hatırlatma maili; Gmail kotası aşılınca ya da mail ayarı yoksa kalanlar
+// denenmez. Aynı anda iki çalıştırma (admin + cron, iki instance) olmasın diye DB advisory lock;
+// alınamazsa hata. Bu hafta mail gidenler kilit içinde taze listeyle yeniden kontrol edilir
+// (eski ekranla/arka arkaya tetikle çift mail gitmesin); admin allowResend ile bilerek yineleyebilir.
+export async function sendUkReminderMails(req: Request, employeeIds: number[], userId: number, opts: { allowResend?: boolean; trigger?: string } = {}): Promise<UkReminderMailRun> {
+  // Hafta sınırına (Pzt 00:00 İstanbul) çok yakın başlatma: created_at yeni haftaya düşer ve o
+  // danışmanlar gelecek haftanın hatırlatmasını almaz (WhatsApp batch'indeki korumanın aynısı).
+  const ist = new Date(Date.now() + 3 * 3600 * 1000);
+  const dow = ist.getUTCDay(), min = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+  if ((dow === 0 && min >= 23 * 60 + 30) || (dow === 1 && min < 10)) {
+    throw new Error("Hafta sınırına çok yakın (Pazartesi 00:00). Birkaç dakika sonra tekrar deneyin.");
+  }
+  const trigger = opts.trigger ?? (userId === 0 ? "cron" : `admin:${userId}`);
+  const client = await pool.connect();
+  try {
+    const lock = await client.query("SELECT pg_try_advisory_lock(845450) AS ok");
+    if (!lock.rows[0]?.ok) throw new Error("Hatırlatma maili gönderimi zaten çalışıyor; bitince tekrar deneyin.");
+    try {
+      const all = await ukWaRecipients(req, "reminder");
+      const byId = new Map(all.map((x) => [x.employeeId, x]));
+      const results: UkReminderMailResult[] = [];
+      let stopReason: string | null = null;
+      for (const id of employeeIds) {
+        const r = byId.get(id);
+        if (!r) { results.push({ employeeId: id, name: `#${id}`, mailed: false, error: "Listede değil (bu hafta aktivite girmiş ya da programda değil)" }); continue; }
+        if (!r.hasEmail) { results.push({ employeeId: id, name: r.name, mailed: false, error: "E-posta yok" }); continue; }
+        if (r.mailSentBefore && !opts.allowResend) { results.push({ employeeId: id, name: r.name, mailed: false, error: "Bu hafta zaten mail gitti" }); continue; }
+        if (stopReason) { results.push({ employeeId: id, name: r.name, mailed: false, error: stopReason }); continue; }
+        const m = ukReminderMailFor(r);
+        const res = await sendEmailDetailed(m.to.join(", "), m.subject, m.html);
+        if (res.ok) {
+          // Mail gitti; log yazılamazsa bile gönderim sayılır (yoksa bir sonraki tetik yeniden yollar).
+          try {
+            await pool.query(
+              "INSERT INTO uk_program_reminder_mails (employee_id, week, to_emails, sent_by_user_id) VALUES ($1, $2, $3, $4)",
+              [id, r.currentWeek, m.to.join(", "), userId],
+            );
+          } catch (e) { console.error("[uk reminder mail] log yazılamadı", id, e); }
+          results.push({ employeeId: id, name: r.name, mailed: true, error: null });
+          await new Promise((rs) => setTimeout(rs, 250));   // Gmail dakika başı sınırı
+        } else {
+          results.push({ employeeId: id, name: r.name, mailed: false, error: `Mail gönderilemedi: ${res.error}` });
+          if (res.quota) stopReason = "Gmail gönderim sınırı aşıldı; kalanlar gönderilmedi, daha sonra tekrar deneyin.";
+          else if (res.error.startsWith("Mail ayarları")) stopReason = res.error;   // ayar yoksa hepsini denemek anlamsız
+        }
+      }
+      const run = { results, mailed: results.filter((x) => x.mailed).length, stopped: stopReason };
+      await logUkReminderRun(trigger, run, null);
+      return run;
+    } finally {
+      await client.query("SELECT pg_advisory_unlock(845450)");
+    }
+  } finally {
+    client.release();
+  }
+}
+
+// Otomatik hatırlatma maili (in-process cron ya da harici cron ucu). Bu hafta aktivite girmemiş,
+// e-postası olan ve bu hafta henüz hatırlatma maili almamış herkese. Hata da run loguna yazılır.
+export async function runUkReminderMailCron(trigger: string, req?: Request): Promise<UkReminderMailRun | null> {
+  try {
+    const r = req ?? ({ protocol: "https", get: () => "" } as unknown as Request);
+    if (!req && !publicBaseUrl()) throw new Error("PUBLIC_BASE_URL tanımlı değil; otomatik gönderim atlandı.");
+    const recips = (await ukWaRecipients(r, "reminder")).filter((x) => x.hasEmail && !x.mailSentBefore);
+    if (recips.length === 0) {
+      console.log(`[uk reminder mail cron:${trigger}] alıcı yok`);
+      const run = { results: [], mailed: 0, stopped: null };
+      await logUkReminderRun(trigger, run, null);
+      return run;
+    }
+    const out = await sendUkReminderMails(r, recips.map((x) => x.employeeId), 0, { trigger });
+    console.log(`[uk reminder mail cron:${trigger}] ${out.mailed}/${recips.length} gitti${out.stopped ? " · " + out.stopped : ""}`);
+    return out;
+  } catch (e: any) {
+    console.error(`[uk reminder mail cron:${trigger}]`, e);
+    await logUkReminderRun(trigger, null, String(e?.message ?? e));
+    throw e;
+  }
+}
+
+// Son çalıştırma özeti (dialog başlığı için).
+async function lastUkReminderRun() {
+  const r = await pool.query("SELECT trigger, candidates, mailed, failed, error, created_at FROM uk_program_reminder_runs ORDER BY id DESC LIMIT 1");
+  const x = r.rows[0];
+  return x ? { trigger: x.trigger, candidates: x.candidates, mailed: x.mailed, failed: x.failed, error: x.error, at: x.created_at } : null;
 }
 
 export function registerUkProgramRoutes(app: Express) {
@@ -737,6 +866,39 @@ export function registerUkProgramRoutes(app: Express) {
     }
   });
 
+  // Hatırlatma maili: alıcılar aynı liste (ukWaRecipients reminder). Önizleme ilk alıcı için.
+  app.get("/api/uk-program/reminder-mail/recipients", requireAuth, async (req: Request, res: Response) => {
+    try {
+      if (!isAdmin(req)) return res.status(403).json({ error: "Yalnız admin." });
+      const [recipients, lastRun] = await Promise.all([ukWaRecipients(req, "reminder"), lastUkReminderRun()]);
+      res.json({ recipients, lastRun, autoCron: ukReminderMailCronExpr() });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app.get("/api/uk-program/reminder-mail/preview/:employeeId", requireAuth, async (req: Request, res: Response) => {
+    try {
+      if (!isAdmin(req)) return res.status(403).json({ error: "Yalnız admin." });
+      const r = (await ukWaRecipients(req, "reminder")).find((x) => x.employeeId === Number(req.params.employeeId));
+      if (!r) return res.status(404).json({ error: "Bu danışman hatırlatma listesinde değil." });
+      const m = ukReminderMailFor(r);
+      res.json({ to: m.to, subject: m.subject, html: m.html });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app.post("/api/uk-program/reminder-mail/send", requireAuth, async (req: Request, res: Response) => {
+    try {
+      if (!isAdmin(req)) return res.status(403).json({ error: "Yalnız admin." });
+      const ids = Array.isArray(req.body?.employeeIds) ? req.body.employeeIds.map(Number).filter(Number.isInteger) : [];
+      if (ids.length === 0) return res.status(400).json({ error: "Danışman seçin." });
+      res.json(await sendUkReminderMails(req, ids, (req as any).user.id, { allowResend: !!req.body?.allowResend }));
+    } catch (err: any) {
+      console.error("[POST uk reminder mail]", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/uk-program/whatsapp/batch/:batchId", requireAuth, async (req: Request, res: Response) => {
     if (!isAdmin(req)) return res.status(403).json({ error: "Yalnız admin." });
     const b = getBatch(String(req.params.batchId));
@@ -746,25 +908,35 @@ export function registerUkProgramRoutes(app: Express) {
 
   // Harici zamanlayıcı (Replit Scheduled Deployment / cron-job.org): CRON_SECRET ile korunur.
   // Bu hafta aktivite girmemiş ve bu hafta henüz hatırlatma almamış herkese gönderir.
-  // Şablon: TWILIO_WA_UK_REMINDER_SID. Örn. her cuma 17:00: POST /api/uk-program/whatsapp/reminder/cron
+  // ?channel=whatsapp (varsayılan; şablon TWILIO_WA_UK_REMINDER_SID) | mail | both.
+  // Örn. her cuma 17:00: POST /api/uk-program/whatsapp/reminder/cron?channel=mail
   app.all("/api/uk-program/whatsapp/reminder/cron", async (req: Request, res: Response) => {
     try {
       const secret = process.env.CRON_SECRET;
       const given = req.get("x-cron-secret") ?? String(req.query.secret ?? "");
       if (!secret || given !== secret) return res.status(401).json({ error: "Yetkisiz." });
+      const channel = String(req.query.channel ?? req.body?.channel ?? "whatsapp");
+      // Mail: istek, gönderim bitene kadar açık kalır (alıcı başına ~1,5 sn; 200 alıcı ≈ 5 dk).
+      // Zamanlayıcıda zaman aşımını ≥ 10 dk yapın; erken kopsa da sunucu gönderimi bitirir.
+      let mailSummary: { count: number; mailed: number; stopped: string | null } | undefined;
+      if (channel === "mail" || channel === "both") {
+        const run = await runUkReminderMailCron("harici-cron", req);
+        mailSummary = { count: run?.results.length ?? 0, mailed: run?.mailed ?? 0, stopped: run?.stopped ?? null };
+        if (channel === "mail") return res.json({ channel, mail: mailSummary });
+      }
       const templateSid = process.env.TWILIO_WA_UK_REMINDER_SID;
-      if (!templateSid) return res.status(400).json({ error: "TWILIO_WA_UK_REMINDER_SID tanımlı değil." });
+      if (!templateSid) return res.status(mailSummary ? 200 : 400).json({ channel, mail: mailSummary, whatsappError: "TWILIO_WA_UK_REMINDER_SID tanımlı değil.", ...(mailSummary ? {} : { error: "TWILIO_WA_UK_REMINDER_SID tanımlı değil." }) });
       // Tekrar tetiklenmeye karşı: cron batch'i (userId 0) hâlâ çalışıyorsa yenisini açma.
       const running = getActiveBatchForUser(0);
-      if (running) return res.json({ batchId: running.batchId, count: running.total, alreadyRunning: true });
+      if (running) return res.json({ channel, mail: mailSummary, batchId: running.batchId, count: running.total, alreadyRunning: true });
       const recips = (await ukWaRecipients(req, "reminder")).filter((r) => r.hasPhone && !r.sentBefore);
-      if (recips.length === 0) return res.json({ batchId: null, count: 0 });
+      if (recips.length === 0) return res.json({ channel, mail: mailSummary, batchId: null, count: 0 });
       const { batchId, count } = await ukWaStartBatch(req, "reminder", templateSid, recips.map((r) => r.employeeId), 0);
       // Autoscale: yanıt dönünce instance uyuyabilir; gönderim bitene kadar isteği açık tut (en çok 10 dk).
       const deadline = Date.now() + 10 * 60_000;
       let b = getBatch(batchId);
       while (b && b.status === "running" && Date.now() < deadline) { await new Promise((r) => setTimeout(r, 1000)); b = getBatch(batchId); }
-      res.json({ batchId, count, status: b?.status ?? "unknown", sent: b?.sent ?? 0, failed: b?.failed ?? 0 });
+      res.json({ channel, mail: mailSummary, batchId, count, status: b?.status ?? "unknown", sent: b?.sent ?? 0, failed: b?.failed ?? 0 });
     } catch (err: any) {
       console.error("[uk whatsapp reminder cron]", err);
       res.status(500).json({ error: err.message });

@@ -11,6 +11,7 @@ import { isFonzipConfigured, startDebtSync, maybeCatchUpSync } from "./fonzip";
 import { ensureSchema } from "./ensure-schema";
 import { ensureClosingSheetHeader } from "./google-sheets";
 import { isGoogleFormsConfigured, syncGoogleFormLeads } from "./google-forms";
+import { runUkReminderMailCron, ukReminderMailCronExpr } from "./uk-program";
 
 const PgStore = connectPgSimple(session);
 
@@ -390,6 +391,18 @@ app.use((req, res, next) => {
     }, { timezone: "Europe/Istanbul" });
     log("[cron] Fonzip günlük sync planlandı: her gün 03:00 (+ boot/istek catch-up)");
     setTimeout(() => { void maybeCatchUpSync("boot"); }, 20_000);
+  }
+
+  // ── 45+45 haftalık hatırlatma maili ─────────────────────────────────────────
+  // Bu hafta hiç aktivite işaretlememiş danışmanlara, varsayılan her cuma 17:00 (İstanbul).
+  // UK_REMINDER_MAIL_CRON: cron ifadesi ya da "off". Yalnız production (Replit dev workspace'i
+  // aynı DB'ye bakıyorsa çift gönderim olmasın). Autoscale uyuyorsa çalışmaz; yedek olarak
+  // Scheduled Deployment ile POST /api/uk-program/whatsapp/reminder/cron?channel=mail çağrılabilir —
+  // ikisi de bu hafta mail gidenleri atlar, advisory lock ile çakışmaz.
+  const ukMailCron = ukReminderMailCronExpr();
+  if (ukMailCron && cron.validate(ukMailCron)) {
+    cron.schedule(ukMailCron, () => { void runUkReminderMailCron("cron").catch((e) => log(`[cron] ÜK hatırlatma maili hata: ${e?.message ?? e}`)); }, { timezone: "Europe/Istanbul" });
+    log(`[cron] ÜK haftalık hatırlatma maili planlandı: ${ukMailCron} (İstanbul)`);
   }
 
   // ── Google Form lead sync scheduler (her 15 dakikada bir) ──────────────────

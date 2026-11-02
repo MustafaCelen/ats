@@ -136,6 +136,8 @@ export async function cleanupE2E() {
   await q(`DELETE FROM users WHERE email LIKE 'e2e-%'`);
   await q(`DELETE FROM capper_targets WHERE year = 2099`);
   await q(`DELETE FROM whatsapp_bulk_sends WHERE employee_id IN (${emp}) OR employee_name LIKE 'E2E %'`);
+  await q(`DELETE FROM uk_program_reminder_mails WHERE employee_id IN (${emp})`);
+  await q(`DELETE FROM uk_program_reminder_runs WHERE trigger LIKE 'admin:%' OR trigger = 'harici-cron'`);   // e2e'nin ürettikleri
   await q(`DELETE FROM uk_program_checks WHERE employee_id IN (${emp})`);
   await q(`DELETE FROM uk_program_weeks WHERE employee_id IN (${emp})`);
   await q(`DELETE FROM uk_program_enrollments WHERE employee_id IN (${emp})`);

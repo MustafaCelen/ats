@@ -5,7 +5,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { UkEnrollDialog } from "@/components/UkEnrollDialog";
 import { UkBulkEnrollDialog } from "@/components/UkBulkEnrollDialog";
-import { UkWhatsappDialog, type UkWaKind } from "@/components/UkWhatsappDialog";
+import { UkWhatsappDialog, type UkWaKind, type UkWaChannel } from "@/components/UkWhatsappDialog";
 import { useToast } from "@/hooks/use-toast";
 import { UkWelcomeEmailDialog } from "@/components/UkWelcomeEmailDialog";
 import { Layout } from "@/components/Layout";
@@ -60,7 +60,8 @@ export default function UkBasariRotasi() {
   };
   const { toast } = useToast();
   const [bulkOpen, setBulkOpen] = useState(false);
-  const [waKind, setWaKind] = useState<UkWaKind | null>(null);   // WhatsApp dialogu (admin)
+  const [waKind, setWaKind] = useState<UkWaKind | null>(null);   // WhatsApp / mail dialogu (admin)
+  const [waChannel, setWaChannel] = useState<UkWaChannel>("whatsapp");
   const [bulkMailing, setBulkMailing] = useState(false);
   // Programda olup hoş geldin maili gitmemiş, e-postası olan danışmanlar (toplu mail hedefi)
   const mailPending = useMemo(() => data.filter((r) => r.status === "active" && r.hasEmail && !r.welcomeSentAt), [data]);
@@ -147,8 +148,11 @@ export default function UkBasariRotasi() {
                 <Button variant="outline" className="gap-1.5" onClick={() => setWaKind("welcome")} data-testid="uk-wa-welcome" title="Programdaki danışmanlara Twilio şablonuyla WhatsApp hoş geldin mesajı">
                   <MessageCircle className="h-4 w-4" /> WhatsApp Hoş Geldin
                 </Button>
-                <Button variant="outline" className="gap-1.5" onClick={() => setWaKind("reminder")} data-testid="uk-wa-reminder" title="Bu hafta aktivite girmemiş danışmanlara WhatsApp hatırlatma">
+                <Button variant="outline" className="gap-1.5" onClick={() => { setWaChannel("whatsapp"); setWaKind("reminder"); }} data-testid="uk-wa-reminder" title="Bu hafta aktivite girmemiş danışmanlara WhatsApp hatırlatma">
                   <BellRing className="h-4 w-4" /> Haftalık Hatırlatma
+                </Button>
+                <Button variant="outline" className="gap-1.5" onClick={() => { setWaChannel("mail"); setWaKind("reminder"); }} data-testid="uk-mail-reminder" title="Bu hafta aktivite girmemiş danışmanlara e-posta hatırlatma (ayara göre otomatik de gider)">
+                  <Mail className="h-4 w-4" /> Hatırlatma Maili
                 </Button>
               </>
             )}
@@ -160,7 +164,7 @@ export default function UkBasariRotasi() {
             </Button>
           </div>
         </div>
-        {waKind && <UkWhatsappDialog kind={waKind} open onOpenChange={(v) => { if (!v) setWaKind(null); }} />}
+        {waKind && <UkWhatsappDialog kind={waKind} channel={waKind === "reminder" ? waChannel : "whatsapp"} open onOpenChange={(v) => { if (!v) setWaKind(null); }} />}
         <UkBulkEnrollDialog open={bulkOpen} onOpenChange={setBulkOpen} onDone={() => qc.invalidateQueries({ queryKey: ["/api/uk-program"] })} />
         <UkEnrollDialog
           open={enrollOpen}
