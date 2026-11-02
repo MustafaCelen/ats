@@ -10,7 +10,8 @@ import { requireAuth } from "./auth";
 import { storage } from "./storage";
 import { sendEmail, sendEmailDetailed } from "./email";
 import { buildUkWelcomeEmail } from "./uk-welcome-email";
-import { publicBaseUrl } from "./whatsapp";
+import { publicBaseUrl, listWhatsAppTemplates } from "./whatsapp";
+import { startBulkSendBatch, getBatch, getActiveBatchForUser, type BulkSendItem } from "./whatsapp-bulk-runner";
 import {
   UK_ACTIVITIES, UK_ACTIVITY_IDS, UK_PROGRAM_WEEKS, UK_PERIODS, UK_PERIOD_WEEKS, ukPeriodOfWeek,
   computeUkActivityScore, computeUkTargetScore, combineUkActivityScores, combineUkTargetScores,
@@ -381,6 +382,105 @@ async function welcomeEmailFor(req: Request, p: Participant) {
   return { to: loginEmails, subject, html, link };
 }
 
+// ── WhatsApp alıcıları ────────────────────────────────────────────────────────
+export const UK_WA_KINDS = {
+  welcome: {
+    label: "ÜK Hoş Geldin (WhatsApp)", envSid: "TWILIO_WA_UK_WELCOME_SID",
+    variablesHint: "{{1}} ad, {{2}} rota linki",
+  },
+  reminder: {
+    label: "ÜK Haftalık Hatırlatma (WhatsApp)", envSid: "TWILIO_WA_UK_REMINDER_SID",
+    variablesHint: "{{1}} ad, {{2}} hafta no, {{3}} rota linki",
+  },
+} as const;
+export type UkWaKind = keyof typeof UK_WA_KINDS;
+
+export type UkWaRecipient = {
+  employeeId: number; name: string; phone: string | null; hasPhone: boolean; coachName: string | null;
+  currentWeek: number; doneThisWeek: number; totalThisWeek: number; actualsEntered: boolean;
+  sentBefore: boolean;        // welcome: daha önce WA hoş geldin gitti; reminder: bu hafta hatırlatma gitti
+  sentAt: string | null;
+  link: string;
+};
+
+function ukBaseUrl(req: Request): string {
+  return (publicBaseUrl() || `${req.protocol}://${req.get("host")}`).replace(/\/$/, "");
+}
+
+// kind=welcome: programdaki herkes (başlamamışlar dahil, 12 haftayı bitirmişler hariç). kind=reminder: içinde bulunduğu
+// haftada hiç aktivite işaretlememiş olanlar (haftalık gerçekleşen girmiş olsa da).
+export async function ukWaRecipients(req: Request, kind: UkWaKind): Promise<UkWaRecipient[]> {
+  const today = todayYmd();
+  const thisMonday = ukProgramWeek1Monday(today);
+  const label = UK_WA_KINDS[kind].label;
+  const r = await pool.query(
+    `SELECT ${PARTICIPANT_COLS}, c.phone,
+            (SELECT array_agg(k.activity_id) FROM uk_program_checks k WHERE k.employee_id = e.id) AS ids,
+            (SELECT array_agg(w.week) FROM uk_program_weeks w WHERE w.employee_id = e.id
+              AND (w.arama IS NOT NULL OR w.randevu IS NOT NULL OR w.tek_yetki IS NOT NULL)) AS actual_weeks,
+            (SELECT MAX(s.created_at) FROM whatsapp_bulk_sends s
+              WHERE s.employee_id = e.id AND s.status = 'sent' AND s.template_name = $1
+                ${kind === "reminder" ? "AND s.created_at >= ($2::date - interval '3 hours')" : ""}) AS sent_at
+       ${PARTICIPANT_FROM}
+      WHERE en.employee_id IS NOT NULL AND ${UK_ACTIVE_SQL} AND e.status = 'active'
+      ORDER BY u.name, c.name`,
+    kind === "reminder" ? [label, thisMonday] : [label],
+  );
+  const base = ukBaseUrl(req);
+  const out: UkWaRecipient[] = [];
+  for (const row of r.rows) {
+    const programStart = row.en_start || row.start_date || null;
+    const week1Monday = programStart ? ukProgramWeek1Monday(programStart) : null;
+    const cw = week1Monday ? ukCurrentWeek(week1Monday, today) : 0;
+    const inWeek = cw >= 1 && cw <= UK_PROGRAM_WEEKS;
+    const ids: string[] = row.ids ?? [];
+    const doneThisWeek = inWeek ? ids.filter((id) => id.startsWith(`w${cw}-`)).length : 0;
+    const totalThisWeek = inWeek ? UK_ACTIVITIES.filter((a) => a.week === cw).length : 0;
+    const actualsEntered = inWeek && ((row.actual_weeks ?? []) as number[]).includes(cw);
+    if (kind === "reminder" && !(inWeek && doneThisWeek === 0)) continue;
+    if (kind === "welcome" && cw > UK_PROGRAM_WEEKS) continue;
+    const token = await storage.ensureAdvisorToken(row.id);
+    const phone = (row.phone ?? "").trim() || null;
+    out.push({
+      employeeId: row.id, name: row.name, phone, hasPhone: !!phone, coachName: row.coach_name ?? null,
+      currentWeek: cw, doneThisWeek, totalThisWeek, actualsEntered,
+      sentBefore: !!row.sent_at, sentAt: row.sent_at ?? null,
+      link: `${base}/a/${token}?tab=rota`,
+    });
+  }
+  return out;
+}
+
+export async function ukWaStartBatch(req: Request, kind: UkWaKind, templateSid: string, employeeIds: number[], userId: number) {
+  if (kind === "reminder") {
+    // Hafta sınırına (Pzt 00:00 İstanbul) çok yakın başlatma: batch alıcı başına 1,5 sn sürer, sınırı
+    // aşan kayıtlar yeni haftaya yazılır ve o danışmanlar gelecek haftanın hatırlatmasını almaz.
+    const ist = new Date(Date.now() + 3 * 3600 * 1000);
+    const dow = ist.getUTCDay(), min = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+    if ((dow === 0 && min >= 23 * 60 + 30) || (dow === 1 && min < 10)) {
+      throw new Error("Hafta sınırına çok yakın (Pazartesi 00:00). Birkaç dakika sonra tekrar deneyin.");
+    }
+  }
+  const all = await ukWaRecipients(req, kind);
+  const byId = new Map(all.map((x) => [x.employeeId, x]));
+  // Şablonun tanımladığı değişkenler dışındakiler gönderilmez (Twilio fazla değişkeni reddeder).
+  const tpl = (await listWhatsAppTemplates().catch(() => [])).find((t) => t.sid === templateSid) ?? null;
+  const items: BulkSendItem[] = [];
+  for (const id of employeeIds) {
+    const x = byId.get(id);
+    if (!x) continue;
+    const first = (x.name.trim().split(/\s+/)[0] || x.name.trim()) || "Danışman";   // WhatsApp boş değişkeni reddeder
+    const vars: Record<string, string> = kind === "reminder"
+      ? { "1": first, "2": String(x.currentWeek), "3": x.link }
+      : { "1": first, "2": x.link };
+    const filtered = tpl && tpl.variables.length > 0 ? Object.fromEntries(Object.entries(vars).filter(([k]) => tpl.variables.includes(k))) : vars;
+    items.push({ employeeId: x.employeeId, name: x.name, phone: x.phone, variables: filtered });
+  }
+  if (items.length === 0) throw new Error("Seçilen danışmanlar listede yok.");
+  const batchId = startBulkSendBatch({ createdByUserId: userId, templateSid, templateName: UK_WA_KINDS[kind].label, items });
+  return { batchId, count: items.length };
+}
+
 export function registerUkProgramRoutes(app: Express) {
   // Önizleme (koç/admin): alıcılar, konu, HTML, son gönderim.
   app.get("/api/uk-program/:employeeId/welcome-email", requireAuth, async (req: Request, res: Response) => {
@@ -591,6 +691,82 @@ export function registerUkProgramRoutes(app: Express) {
       const base = publicBaseUrl() || `${req.protocol}://${req.get("host")}`;
       res.json({ url: `${base.replace(/\/$/, "")}/a/${token}?tab=rota`, loginEmails: emails });
     } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── WhatsApp: hoş geldin + haftalık hatırlatma (Twilio onaylı şablonlarla) ───────────
+  // Şablon metni Twilio Console'da onaylatılır; burada yalnız alıcı listesi, kişisel link ve
+  // değişkenler hazırlanır, gönderim whatsapp-bulk-runner ile (1,5 sn aralık, art arda 3 hata → dur).
+  // Değişkenler: {{1}} ad, {{2}} hafta no (hatırlatmada) / link (hoş geldinde), {{3}} link.
+  // Yalnız şablonun tanımladığı değişkenler gönderilir.
+  const isAdmin = (req: Request) => (req as any).user?.role === "admin";
+  const isUkWaKind = (k: string): k is UkWaKind => Object.prototype.hasOwnProperty.call(UK_WA_KINDS, k);
+  app.get("/api/uk-program/whatsapp/:kind/recipients", requireAuth, async (req: Request, res: Response) => {
+    try {
+      if (!isAdmin(req)) return res.status(403).json({ error: "Yalnız admin." });
+      const kind = String(req.params.kind);
+      if (!isUkWaKind(kind)) return res.status(404).json({ error: "Bilinmeyen tür." });
+      const [recipients, templates] = await Promise.all([ukWaRecipients(req, kind), listWhatsAppTemplates().catch(() => [])]);
+      res.json({
+        kind, label: UK_WA_KINDS[kind].label,
+        defaultTemplateSid: process.env[UK_WA_KINDS[kind].envSid] ?? null,
+        variablesHint: UK_WA_KINDS[kind].variablesHint,
+        templates, recipients,
+      });
+    } catch (err: any) {
+      console.error("[GET uk whatsapp recipients]", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/uk-program/whatsapp/:kind/send", requireAuth, async (req: Request, res: Response) => {
+    try {
+      if (!isAdmin(req)) return res.status(403).json({ error: "Yalnız admin." });
+      const kind = String(req.params.kind);
+      if (!isUkWaKind(kind)) return res.status(404).json({ error: "Bilinmeyen tür." });
+      const ids = Array.isArray(req.body?.employeeIds) ? req.body.employeeIds.map(Number).filter(Number.isInteger) : [];
+      const templateSid = String(req.body?.templateSid ?? process.env[UK_WA_KINDS[kind].envSid] ?? "");
+      if (ids.length === 0) return res.status(400).json({ error: "Danışman seçin." });
+      if (!templateSid) return res.status(400).json({ error: "Twilio şablonu seçin." });
+      const { batchId, count } = await ukWaStartBatch(req, kind, templateSid, ids, (req as any).user.id);
+      res.json({ batchId, count });
+    } catch (err: any) {
+      console.error("[POST uk whatsapp send]", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/uk-program/whatsapp/batch/:batchId", requireAuth, async (req: Request, res: Response) => {
+    if (!isAdmin(req)) return res.status(403).json({ error: "Yalnız admin." });
+    const b = getBatch(String(req.params.batchId));
+    if (!b) return res.status(404).json({ error: "Gönderim bulunamadı." });
+    res.json(b);
+  });
+
+  // Harici zamanlayıcı (Replit Scheduled Deployment / cron-job.org): CRON_SECRET ile korunur.
+  // Bu hafta aktivite girmemiş ve bu hafta henüz hatırlatma almamış herkese gönderir.
+  // Şablon: TWILIO_WA_UK_REMINDER_SID. Örn. her cuma 17:00: POST /api/uk-program/whatsapp/reminder/cron
+  app.all("/api/uk-program/whatsapp/reminder/cron", async (req: Request, res: Response) => {
+    try {
+      const secret = process.env.CRON_SECRET;
+      const given = req.get("x-cron-secret") ?? String(req.query.secret ?? "");
+      if (!secret || given !== secret) return res.status(401).json({ error: "Yetkisiz." });
+      const templateSid = process.env.TWILIO_WA_UK_REMINDER_SID;
+      if (!templateSid) return res.status(400).json({ error: "TWILIO_WA_UK_REMINDER_SID tanımlı değil." });
+      // Tekrar tetiklenmeye karşı: cron batch'i (userId 0) hâlâ çalışıyorsa yenisini açma.
+      const running = getActiveBatchForUser(0);
+      if (running) return res.json({ batchId: running.batchId, count: running.total, alreadyRunning: true });
+      const recips = (await ukWaRecipients(req, "reminder")).filter((r) => r.hasPhone && !r.sentBefore);
+      if (recips.length === 0) return res.json({ batchId: null, count: 0 });
+      const { batchId, count } = await ukWaStartBatch(req, "reminder", templateSid, recips.map((r) => r.employeeId), 0);
+      // Autoscale: yanıt dönünce instance uyuyabilir; gönderim bitene kadar isteği açık tut (en çok 10 dk).
+      const deadline = Date.now() + 10 * 60_000;
+      let b = getBatch(batchId);
+      while (b && b.status === "running" && Date.now() < deadline) { await new Promise((r) => setTimeout(r, 1000)); b = getBatch(batchId); }
+      res.json({ batchId, count, status: b?.status ?? "unknown", sent: b?.sent ?? 0, failed: b?.failed ?? 0 });
+    } catch (err: any) {
+      console.error("[uk whatsapp reminder cron]", err);
       res.status(500).json({ error: err.message });
     }
   });

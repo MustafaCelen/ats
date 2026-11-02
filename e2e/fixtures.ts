@@ -61,10 +61,10 @@ export type Advisor = { employeeId: number; candidateId: number; name: string; k
 let seq = 0;
 const uniq = () => `${Date.now().toString(36)}${(seq++).toString(36)}`;
 
-export async function createAdvisor(name: string, opts: { status?: "active" | "inactive"; email?: string | null } = {}): Promise<Advisor> {
+export async function createAdvisor(name: string, opts: { status?: "active" | "inactive"; email?: string | null; phone?: string | null } = {}): Promise<Advisor> {
   const full = name.startsWith("E2E ") ? name : `E2E ${name}`;
   const email = opts.email === undefined ? `e2e-${uniq()}@example.invalid` : opts.email;
-  const [c] = await q(`INSERT INTO candidates (name, email, category, office) VALUES ($1, $2, 'K0', 'Akatlar') RETURNING id`, [full, email]);
+  const [c] = await q(`INSERT INTO candidates (name, email, phone, category, office) VALUES ($1, $2, $3, 'K0', 'Akatlar') RETURNING id`, [full, email, opts.phone ?? null]);
   const kwuid = String(900000000 + Math.floor(Math.random() * 99_999_999));
   const token = crypto.randomBytes(20).toString("hex");
   const [e] = await q(
@@ -135,6 +135,7 @@ export async function cleanupE2E() {
   await q(`UPDATE users SET hm_group = NULL WHERE hm_group LIKE 'E2E %'`);
   await q(`DELETE FROM users WHERE email LIKE 'e2e-%'`);
   await q(`DELETE FROM capper_targets WHERE year = 2099`);
+  await q(`DELETE FROM whatsapp_bulk_sends WHERE employee_id IN (${emp}) OR employee_name LIKE 'E2E %'`);
   await q(`DELETE FROM uk_program_checks WHERE employee_id IN (${emp})`);
   await q(`DELETE FROM uk_program_weeks WHERE employee_id IN (${emp})`);
   await q(`DELETE FROM uk_program_enrollments WHERE employee_id IN (${emp})`);
