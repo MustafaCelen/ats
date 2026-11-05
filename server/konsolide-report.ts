@@ -39,23 +39,31 @@ function fillCats(target: CatCounts[], rows: any[], valueKey = "c") {
   }
 }
 
-export async function getKonsolideReport(year: number, today = new Date(), opts: { includePnl?: boolean } = {}): Promise<KonsolideReport> {
+export async function getKonsolideReport(
+  year: number, today = new Date(), opts: { includePnl?: boolean; office?: string | null } = {},
+): Promise<KonsolideReport> {
   const includePnl = opts.includePnl ?? true;
-  const offices = [...OFFICES];
+  const office = opts.office && (OFFICES as readonly string[]).includes(opts.office) ? opts.office : null;
+  const offices = office ? [office] : [...OFFICES];
+  const officeList = sql.join(offices.map((o) => sql`${o}`), sql`, `);
+  // Danışman/aday ofisi (randevu, brüt/net): Finansal Raporlar ile aynı — adayın ŞU ANKİ ofisi
+  const candOffice = office ? sql` AND c.office = ${office}` : sql``;
+  // Gider kayıtları: ofis görünümünde yalnız o ofis; Konsolide'de tümü ("" eski satırlar dahil)
+  const expOffice = office ? sql` AND office = ${office}` : sql``;
 
   // ── Randevu ────────────────────────────────────────────────────────────────
   const randevuActual = catsByMonth();
   fillCats(randevuActual, (await db.execute(sql`
     SELECT EXTRACT(MONTH FROM i.start_time)::int AS m, COALESCE(c.category, 'K0') AS category, COUNT(*)::int AS c
     FROM interviews i LEFT JOIN candidates c ON c.id = i.candidate_id
-    WHERE EXTRACT(YEAR FROM i.start_time) = ${year}
+    WHERE EXTRACT(YEAR FROM i.start_time) = ${year}${candOffice}
     GROUP BY 1, 2`)).rows as any[]);
 
   const randevuHedef = catsByMonth();
   fillCats(randevuHedef, (await db.execute(sql`
     SELECT month AS m, category, SUM(target)::int AS c
     FROM interview_targets
-    WHERE year = ${year} AND office IN (${sql.join(offices.map((o) => sql`${o}`), sql`, `)})
+    WHERE year = ${year} AND office IN (${officeList})
     GROUP BY 1, 2`)).rows as any[]);
 
   // ── Brüt / Net (danışman giriş–çıkış) ──────────────────────────────────────
@@ -63,14 +71,14 @@ export async function getKonsolideReport(year: number, today = new Date(), opts:
   fillCats(brutActual, (await db.execute(sql`
     SELECT EXTRACT(MONTH FROM e.start_date)::int AS m, COALESCE(c.category, 'K0') AS category, COUNT(*)::int AS c
     FROM employees e JOIN candidates c ON c.id = e.candidate_id
-    WHERE e.start_date IS NOT NULL AND EXTRACT(YEAR FROM e.start_date) = ${year}
+    WHERE e.start_date IS NOT NULL AND EXTRACT(YEAR FROM e.start_date) = ${year}${candOffice}
     GROUP BY 1, 2`)).rows as any[]);
 
   const leftActual = catsByMonth();
   fillCats(leftActual, (await db.execute(sql`
     SELECT EXTRACT(MONTH FROM e.passive_at)::int AS m, COALESCE(c.category, 'K0') AS category, COUNT(*)::int AS c
     FROM employees e JOIN candidates c ON c.id = e.candidate_id
-    WHERE e.passive_at IS NOT NULL AND EXTRACT(YEAR FROM e.passive_at) = ${year}
+    WHERE e.passive_at IS NOT NULL AND EXTRACT(YEAR FROM e.passive_at) = ${year}${candOffice}
     GROUP BY 1, 2`)).rows as any[]);
 
   const growthRows = (await db.execute(sql`
@@ -78,7 +86,7 @@ export async function getKonsolideReport(year: number, today = new Date(), opts:
       SUM(brut_target_k0) AS bk0, SUM(brut_target_k1) AS bk1, SUM(brut_target_k2) AS bk2,
       SUM(net_target) AS net, SUM(net_target_k0) AS nk0, SUM(net_target_k1) AS nk1, SUM(net_target_k2) AS nk2
     FROM growth_targets
-    WHERE year = ${year} AND month BETWEEN 1 AND 12
+    WHERE year = ${year} AND month BETWEEN 1 AND 12${expOffice}
     GROUP BY month`)).rows as any[];
   const brutHedef = catsByMonth();
   const netHedef = catsByMonth();
@@ -92,7 +100,7 @@ export async function getKonsolideReport(year: number, today = new Date(), opts:
   }
 
   // ── Kapanışlar: BHB / BM / Satılık / Kiralık adet ───────────────────────────
-  const closing = await storage.getClosingStats(new Date(year, 0, 1), new Date(year, 11, 31));
+  const closing = await storage.getClosingStats(new Date(year, 0, 1), new Date(year, 11, 31), office ?? undefined);
   const trend = new Map<number, { bhb: number; bm: number; satilikCount: number; kiralikCount: number }>();
   for (const t of closing.monthlyTrend as any[]) {
     const m = parseInt(String(t.month).slice(5, 7), 10);
@@ -107,7 +115,7 @@ export async function getKonsolideReport(year: number, today = new Date(), opts:
       SUM(satilik_adet_target) AS satilik, SUM(satilik_adet_high_target) AS satilik_high,
       SUM(kiralik_adet_target) AS kiralik, SUM(kiralik_adet_high_target) AS kiralik_high
     FROM financial_targets
-    WHERE year = ${year} AND office IN (${sql.join(offices.map((o) => sql`${o}`), sql`, `)})
+    WHERE year = ${year} AND office IN (${officeList})
     GROUP BY month`)).rows as any[];
   const fin = new Map<number, any>();
   for (const r of finRows) fin.set(Number(r.m), r);
@@ -116,8 +124,12 @@ export async function getKonsolideReport(year: number, today = new Date(), opts:
   const expRows = (await db.execute(sql`
     SELECT CAST(SUBSTRING(date FROM 6 FOR 2) AS int) AS m, type, SUM(amount) AS total
     FROM office_expenses
-    WHERE date >= ${`${year}-01-01`} AND date <= ${`${year}-12-31`}
+    WHERE date >= ${`${year}-01-01`} AND date <= ${`${year}-12-31`}${expOffice}
     GROUP BY 1, 2`)).rows as any[];
+  // Ofisi boş bırakılmış kayıtlar: ofis görünümünde hiçbir ofiste sayılmaz — kullanıcıya uyarı
+  const [unassigned] = (await db.execute(sql`
+    SELECT COUNT(*)::int AS c FROM office_expenses
+    WHERE date >= ${`${year}-01-01`} AND date <= ${`${year}-12-31`} AND office = ''`)).rows as any[];
   const masrafActual = Array(12).fill(0) as number[];
   const gelirActual = Array(12).fill(0) as number[];
   for (const r of expRows) {
@@ -130,7 +142,7 @@ export async function getKonsolideReport(year: number, today = new Date(), opts:
   const expTargetRows = (await db.execute(sql`
     SELECT month AS m, type, SUM(amount) AS total
     FROM expense_targets
-    WHERE year = ${year}
+    WHERE year = ${year}${expOffice}
     GROUP BY 1, 2`)).rows as any[];
   const masrafHedef = Array(12).fill(0) as number[];
   const gelirHedef = Array(12).fill(0) as number[];
@@ -182,5 +194,9 @@ export async function getKonsolideReport(year: number, today = new Date(), opts:
     const z = { hedef: 0, hedefHigh: 0, actual: 0 };
     for (const m of months) { m.masraf = { ...z }; m.digerGelir = { ...z }; m.kar = { ...z }; }
   }
-  return { year, includesPnl: includePnl, ytdThroughMonth: ytdThroughMonthFor(year, today), months };
+  return {
+    year, office, includesPnl: includePnl,
+    unassignedExpenseRows: Number(unassigned?.c ?? 0),
+    ytdThroughMonth: ytdThroughMonthFor(year, today), months,
+  };
 }

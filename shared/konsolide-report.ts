@@ -30,6 +30,10 @@ export type KonsolideMonth = {
 
 export type KonsolideReport = {
   year: number;
+  /** null = Konsolide (tüm ofisler); "Akatlar" | "Zekeriyaköy" */
+  office: string | null;
+  /** Ofis görünümünde: o yıl ofisi boş bırakılmış gider/gelir kayıt sayısı (hiçbir ofiste görünmez). */
+  unassignedExpenseRows: number;
   /** false ise masraf / diğer gelir / kar sıfırlanmıştır (Kâr-Zarar verisi yalnız admin görür). */
   includesPnl: boolean;
   /** YTD'ye dahil son ay (1-12); 0 = hiçbiri (gelecek yıl). Tamamlanmış aylar: içinde bulunulan ay hariç. */

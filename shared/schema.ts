@@ -718,17 +718,19 @@ export const insertOfficeExpenseSchema = createInsertSchema(officeExpenses).omit
 export type InsertOfficeExpense = z.infer<typeof insertOfficeExpenseSchema>;
 export type OfficeExpense = typeof officeExpenses.$inferSelect;
 
-// Kategori bazlı aylık hedefler (masraf ve ek gelir)
+// Kategori bazlı aylık hedefler (masraf ve ek gelir) — ofis bazlı.
+// office "" = ofis bazlı yapıdan önce girilmiş şirket geneli hedef (Konsolide'ye dahil, ofis görünümünde yok).
 export const expenseTargets = pgTable("expense_targets", {
   id: serial("id").primaryKey(),
   year: integer("year").notNull(),
   month: integer("month").notNull(), // 1-12
   type: text("type").notNull(),      // "income" | "expense"
   category: text("category").notNull(),
+  office: text("office").notNull().default(""), // "" | "Akatlar" | "Zekeriyaköy"
   amount: numeric("amount", { precision: 15, scale: 2 }).notNull(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (t) => ({
-  uq: uniqueIndex("expense_targets_uq").on(t.year, t.month, t.type, t.category),
+  uq: uniqueIndex("expense_targets_uq2").on(t.year, t.month, t.type, t.category, t.office),
   ymIdx: index("expense_targets_ym_idx").on(t.year, t.month),
 }));
 export type ExpenseTarget = typeof expenseTargets.$inferSelect;

@@ -4075,9 +4075,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const year = parseInt(String(req.query.year ?? ""));
       const month = req.query.month ? parseInt(String(req.query.month)) : null;
       if (!year) return res.status(400).json({ message: "year gerekli" });
+      // office verilmezse tüm ofisler (+ "" şirket geneli eski satırlar) döner
+      const officeCond = req.query.office != null ? sql` AND office = ${String(req.query.office)}` : sql``;
       const result = month
-        ? await db.execute(sql`SELECT * FROM expense_targets WHERE year = ${year} AND month = ${month} ORDER BY type, category`)
-        : await db.execute(sql`SELECT * FROM expense_targets WHERE year = ${year} ORDER BY month, type, category`);
+        ? await db.execute(sql`SELECT * FROM expense_targets WHERE year = ${year} AND month = ${month}${officeCond} ORDER BY type, category`)
+        : await db.execute(sql`SELECT * FROM expense_targets WHERE year = ${year}${officeCond} ORDER BY month, type, category`);
       res.json(result.rows);
     } catch (err) {
       console.error("[GET /api/expense-targets]", err);
@@ -4087,15 +4089,17 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/expense-targets", requireAuth, requireAdmin, async (req, res) => {
     try {
-      const { year, month, type, category, amount } = req.body ?? {};
+      const { year, month, type, category, amount, office } = req.body ?? {};
       if (!year || !month || !type || !category || amount == null) {
         return res.status(400).json({ message: "year, month, type, category, amount gerekli" });
       }
+      const off = office == null ? "" : String(office);
+      if (off !== "" && !(OFFICES as readonly string[]).includes(off)) return res.status(400).json({ message: "Geçersiz ofis" });
       const numAmount = String(parseFloat(String(amount)) || 0);
       const upsert = await db.execute(sql`
-        INSERT INTO expense_targets (year, month, type, category, amount, updated_at)
-        VALUES (${year}, ${month}, ${type}, ${category}, ${numAmount}::numeric, NOW())
-        ON CONFLICT (year, month, type, category)
+        INSERT INTO expense_targets (year, month, type, category, office, amount, updated_at)
+        VALUES (${year}, ${month}, ${type}, ${category}, ${off}, ${numAmount}::numeric, NOW())
+        ON CONFLICT (year, month, type, category, office)
         DO UPDATE SET amount = ${numAmount}::numeric, updated_at = NOW()
         RETURNING *
       `);
@@ -4194,9 +4198,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const year = parseInt(String(req.query.year ?? ""), 10);
       if (!year || year < 2000 || year > 2100) return res.status(400).json({ message: "year gerekli" });
+      // office: Akatlar | Zekeriyaköy | boş (Konsolide)
+      const office = req.query.office ? String(req.query.office) : null;
+      if (office && !(OFFICES as readonly string[]).includes(office)) return res.status(400).json({ message: "Geçersiz ofis" });
       // YTD sınırı İstanbul takvimine göre
       const todayIst = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Istanbul" }));
-      res.json(await getKonsolideReport(year, todayIst, { includePnl: req.user!.role === "admin" }));
+      res.json(await getKonsolideReport(year, todayIst, { includePnl: req.user!.role === "admin", office }));
     } catch (err) {
       console.error("[GET /api/reports/konsolide]", err);
       res.status(500).json({ message: "Internal server error" });

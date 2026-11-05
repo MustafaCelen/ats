@@ -573,29 +573,34 @@ function useExpenseTargetsYear(year: number) {
 
 function MasrafHedefEditor({ year }: { year: number }) {
   const qc = useQueryClient();
-  const { data: allTargets = [] } = useExpenseTargetsYear(year);
+  const { data: allRows = [] } = useExpenseTargetsYear(year);   // tüm ofisler + "" (eski şirket geneli)
+  const [office, setOffice] = useState<string>("Akatlar");
   const [activeTab, setActiveTab] = useState(MASRAF_TABS[0].key);
-  const [draft, setDraft] = useState<Record<string, string>>({}); // key: `${type}|${category}|${month}`
+  const [draft, setDraft] = useState<Record<string, string>>({}); // key: `${office}|${type}|${category}|${month}`
   const [saving, setSaving] = useState<string | null>(null);
+  const allTargets = useMemo(() => allRows.filter((t: any) => (t.office ?? "") === office), [allRows, office]);
+  const legacyRows = useMemo(() => allRows.filter((t: any) => !t.office), [allRows]);
 
-  const yearTotals = useMemo(() => {
+  const sumBy = (rows: any[]) => {
     let income = 0, expense = 0;
-    for (const t of allTargets) {
+    for (const t of rows) {
       const amt = parseFloat(t.amount ?? "0");
       if (t.type === "income") income += amt; else expense += amt;
     }
     return { income, expense };
-  }, [allTargets]);
+  };
+  const yearTotals = useMemo(() => sumBy(allTargets), [allTargets]);
+  const legacyTotals = useMemo(() => sumBy(legacyRows), [legacyRows]);
 
   const valueFor = (type: string, category: string, month: number) => {
-    const k = `${type}|${category}|${month}`;
+    const k = `${office}|${type}|${category}|${month}`;
     if (draft[k] !== undefined) return draft[k];
     const t = allTargets.find((x: any) => x.type === type && x.category === category && x.month === month);
     return t ? String(parseFloat(t.amount)) : "";
   };
 
   const save = async (type: string, category: string, month: number) => {
-    const k = `${type}|${category}|${month}`;
+    const k = `${office}|${type}|${category}|${month}`;
     const raw = draft[k];
     if (raw === undefined) return;
     const n = parseFloat(raw.replace(",", "."));
@@ -605,7 +610,7 @@ function MasrafHedefEditor({ year }: { year: number }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ year, month, category, type, amount: isNaN(n) ? 0 : n }),
+        body: JSON.stringify({ year, month, category, type, office, amount: isNaN(n) ? 0 : n }),
       });
       qc.invalidateQueries({ queryKey: ["/api/expense-targets", year] });
     } finally {
@@ -628,7 +633,7 @@ function MasrafHedefEditor({ year }: { year: number }) {
     }
     return map;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, allTargets, draft]);
+  }, [tab, allTargets, draft, office]);
   const grandTotal = useMemo(() => {
     const perMonth = Array(12).fill(0);
     for (const perGroup of Array.from(groupTotals.values())) {
@@ -642,16 +647,28 @@ function MasrafHedefEditor({ year }: { year: number }) {
       <div className="px-5 py-3 border-b border-border flex items-center gap-2 flex-wrap">
         <Receipt className="h-4 w-4 text-primary" />
         <h2 className="text-base font-semibold">Masraf Hedefleri</h2>
-        <span className="text-xs text-muted-foreground ml-1">{year} — kategori bazlı, aylık</span>
+        <span className="text-xs text-muted-foreground ml-1">{year} — kategori bazlı, aylık, ofis bazlı</span>
+        <Select value={office} onValueChange={setOffice}>
+          <SelectTrigger className="w-32 h-8" data-testid="masraf-hedef-office"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {OFFICES.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+          </SelectContent>
+        </Select>
         <div className="ml-auto flex items-center gap-3 text-xs">
-          <span className="text-emerald-600 font-semibold">Gelir: {fmtTRY(yearTotals.income)}</span>
-          <span className="text-red-600 font-semibold">Gider: {fmtTRY(yearTotals.expense)}</span>
+          <span className="text-emerald-600 font-semibold">{office} gelir: {fmtTRY(yearTotals.income)}</span>
+          <span className="text-red-600 font-semibold">{office} gider: {fmtTRY(yearTotals.expense)}</span>
           <Button size="sm" variant="ghost" className="h-7 text-xs gap-1" asChild>
             <Link href="/expense-reports"><ExternalLink className="h-3.5 w-3.5" /> Rapor Detayına Git</Link>
           </Button>
         </div>
       </div>
 
+      {legacyRows.length > 0 && (
+        <p className="px-5 py-2 text-xs text-amber-800 bg-amber-50 border-b border-amber-200" data-testid="masraf-hedef-legacy">
+          Ofis bazlı yapıdan önce girilmiş şirket geneli hedefler var (gelir {fmtTRY(legacyTotals.income)}, gider {fmtTRY(legacyTotals.expense)}).
+          Bunlar Konsolide Rapor'da sayılır ama ofis görünümlerinde görünmez; ofis bazlı hedefleri buradan yeniden girin.
+        </p>
+      )}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <div className="px-5 pt-3">
           <TabsList className="h-9 bg-muted/50">
@@ -694,7 +711,7 @@ function MasrafHedefEditor({ year }: { year: number }) {
                           <td className="py-1.5 px-4 text-xs sticky left-0 bg-card whitespace-nowrap">{cat}</td>
                           {MONTHS.map((_, i) => {
                             const month = i + 1;
-                            const k = `${t.type}|${cat}|${month}`;
+                            const k = `${office}|${t.type}|${cat}|${month}`;
                             return (
                               <td key={month} className="py-1 px-1 text-right">
                                 <Input

@@ -27,9 +27,12 @@ test("API: aylık satırlar, kategori kırılımı, net = giriş − çıkış, 
   expect(r.ok()).toBe(true);
   expect((await page.request.put(`/api/financial-targets/${Y}/3`, { data: { office: "Akatlar", bhbTarget: 1000000, bhbHighTarget: 1200000, bmTarget: 100000, bmHighTarget: 120000, satilikAdetTarget: 10, kiralikAdetTarget: 20 } })).ok()).toBe(true);
   expect((await page.request.put(`/api/financial-targets/${Y}/3`, { data: { office: "Zekeriyaköy", bhbTarget: 500000, bmTarget: 50000, satilikAdetTarget: 5, kiralikAdetTarget: 5 } })).ok()).toBe(true);
-  for (const [type, category, amount] of [["expense", "Kira", 3000], ["expense", "Zoom", 2000], ["income", "Oda Kira", 1000]] as const) {
-    expect((await page.request.post("/api/expense-targets", { data: { year: Y, month: 3, type, category, amount } })).ok()).toBe(true);
+  for (const [type, category, amount, office] of [["expense", "Kira", 3000, "Akatlar"], ["expense", "Zoom", 2000, "Zekeriyaköy"], ["income", "Oda Kira", 1000, "Akatlar"], ["expense", "Mutfak", 500, ""]] as const) {
+    expect((await page.request.post("/api/expense-targets", { data: { year: Y, month: 3, type, category, amount, office } })).ok()).toBe(true);
   }
+  expect((await page.request.post("/api/expense-targets", { data: { year: Y, month: 3, type: "expense", category: "Kira", amount: 1, office: "Bilinmeyen" } })).status()).toBe(400);
+  // Ofisi boş bırakılmış gider kaydı (uyarı için)
+  await q(`INSERT INTO office_expenses (type, category, amount, date, office) VALUES ('expense', 'Kira', 250, '2099-03-02', '')`);
 
   r = await page.request.get(`/api/reports/konsolide?year=${Y}`);
   expect(r.ok()).toBe(true);
@@ -50,9 +53,28 @@ test("API: aylık satırlar, kategori kırılımı, net = giriş − çıkış, 
   expect(mar.bm).toMatchObject({ hedef: 150000, hedefHigh: 120000 });
   expect(mar.satilik).toMatchObject({ hedef: 15 });
   expect(mar.kiralik).toMatchObject({ hedef: 25 });
-  expect(mar.masraf).toEqual({ hedef: 5000, actual: 4000 });
+  // Konsolide: iki ofis + "" (eski şirket geneli) toplanır; ofisi boş gider kaydı da sayılır
+  expect(mar.masraf).toEqual({ hedef: 5500, actual: 4250 });
   expect(mar.digerGelir).toEqual({ hedef: 1000, actual: 1500 });
-  expect(mar.kar).toMatchObject({ hedef: 150000 + 1000 - 5000, hedefHigh: 120000 + 1000 - 5000, actual: mar.bm.actual + 1500 - 4000 });
+  expect(mar.kar).toMatchObject({ hedef: 150000 + 1000 - 5500, hedefHigh: 120000 + 1000 - 5500, actual: mar.bm.actual + 1500 - 4250 });
+  expect(d.office).toBeNull();
+
+  // Ofis görünümü: Akatlar
+  const ak = await (await page.request.get(`/api/reports/konsolide?year=${Y}&office=Akatlar`)).json();
+  expect(ak.office).toBe("Akatlar");
+  expect(ak.unassignedExpenseRows).toBe(1);
+  const akMar = ak.months[2];
+  expect(akMar.randevu.hedef).toEqual({ K0: 5, K1: 3, K2: 0, toplam: 8 });   // Zekeriyaköy K0 hedefi hariç
+  expect(akMar.randevu.actual.toplam).toBe(2);                              // adaylar Akatlar
+  expect(akMar.brut.hedef.toplam).toBe(7);
+  expect(akMar.bhb).toMatchObject({ hedef: 1000000, hedefHigh: 1200000 });
+  expect(akMar.masraf).toEqual({ hedef: 3000, actual: 4000 });              // Zekeriyaköy ve "" hariç
+  expect(akMar.digerGelir).toEqual({ hedef: 1000, actual: 1500 });
+  const zk = await (await page.request.get(`/api/reports/konsolide?year=${Y}&office=Zekeriyak%C3%B6y`)).json();
+  expect(zk.months[2].masraf).toEqual({ hedef: 2000, actual: 0 });
+  expect(zk.months[2].randevu.actual.toplam).toBe(0);
+  expect(zk.months[2].brut.actual.toplam).toBe(0);
+  expect((await page.request.get(`/api/reports/konsolide?year=${Y}&office=Bilinmeyen`)).status()).toBe(400);
   expect((await page.request.get("/api/reports/konsolide?year=abc")).status()).toBe(400);
 
   // Eski istemci (yalnız netTarget) kırılımı silmez; toplamı yazar
@@ -121,6 +143,22 @@ test("ekran: 12 ay + YTD + TOPLAM, başlıklar, Forecast/Re-Forecast anahtarı, 
   await page.getByTestId("konsolide-export").click();
   expect((await dl).suggestedFilename()).toBe(`konsolide-${Y}.xlsx`);
 
+  // Ofis seçici: Akatlar → başlık ve veri değişir, boş ofisli kayıt uyarısı
+  await q(`INSERT INTO office_expenses (type, category, amount, date, office) VALUES ('expense', 'Kira', 10, '2099-05-02', '')`);
+  await page.getByTestId("konsolide-office-Akatlar").click();
+  await expect(table).toContainText(`AKATLAR ${Y}`);
+  await expect(page.getByTestId("konsolide-unassigned")).toContainText(/ofisi boş bırakılmış \d+ gider\/gelir kaydı/);
+  await expect(mayFin.locator("td").nth(1)).toHaveText("2.500.000");   // Re-Forecast hâlâ seçili, Akatlar hedefi
+  await page.getByTestId("konsolide-office-konsolide").click();
+  await expect(table).toContainText(`KONSOLİDE ${Y}`);
+  await expect(page.getByTestId("konsolide-unassigned")).toHaveCount(0);
+
   // Menü bağlantısı
   await expect(page.getByRole("link", { name: "Konsolide Rapor" })).toBeVisible();
+
+  // Hedef Giriş: masraf hedefleri ofis seçimli, eski şirket geneli uyarısı
+  await page.request.post("/api/expense-targets", { data: { year: Y, month: 1, type: "expense", category: "Kira", amount: 700, office: "" } });
+  await page.request.post("/api/expense-targets", { data: { year: Y, month: 1, type: "expense", category: "Kira", amount: 300, office: "Zekeriyaköy" } });
+  const rows = await (await page.request.get(`/api/expense-targets?year=${Y}&month=1&office=Zekeriyak%C3%B6y`)).json();
+  expect(rows.map((r: any) => [r.category, Number(r.amount)])).toEqual([["Kira", 300]]);
 });

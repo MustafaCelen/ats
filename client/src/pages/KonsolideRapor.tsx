@@ -10,7 +10,8 @@ import * as XLSX from "xlsx";
 import { Layout } from "@/components/Layout";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Download, Table2, Target } from "lucide-react";
+import { Building2, Download, Table2, Target } from "lucide-react";
+import { OFFICES } from "@shared/schema";
 import {
   addCatCounts, cumulativeHgPct, emptyCatCounts, monthlyHgPct,
   type CatCounts, type KonsolideMonth, type KonsolideReport,
@@ -22,6 +23,11 @@ const CURRENT_YEAR = new Date().getFullYear();
 const YEARS = Array.from({ length: 5 }, (_, i) => CURRENT_YEAR - 2 + i);
 
 type Forecast = "forecast" | "reforecast";
+type OfficeSel = (typeof OFFICES)[number] | "";   // "" = Konsolide
+const OFFICE_OPTIONS: { value: OfficeSel; label: string }[] = [
+  ...OFFICES.map((o) => ({ value: o as OfficeSel, label: o })),
+  { value: "", label: "Konsolide" },
+];
 
 // ── Biçimlendirme ─────────────────────────────────────────────────────────────
 const fmtInt = (n: number) => new Intl.NumberFormat("tr-TR", { maximumFractionDigits: 0 }).format(Math.round(n));
@@ -132,7 +138,7 @@ const GROUP_STYLES = {
 };
 
 // ── Excel aktarımı ────────────────────────────────────────────────────────────
-function exportXlsx(year: number, rows: Row[], forecast: Forecast, showPnl: boolean) {
+function exportXlsx(year: number, rows: Row[], forecast: Forecast, showPnl: boolean, scopeLabel: string) {
   const wb = XLSX.utils.book_new();
   const pct = (h: number, a: number, kind: Row["kind"]) => {
     const p = kind === "month" ? monthlyHgPct(h, a) : cumulativeHgPct(h, a);
@@ -147,7 +153,7 @@ function exportXlsx(year: number, rows: Row[], forecast: Forecast, showPnl: bool
   // Sayfa 1 — KONSOLİDE
   const sub = ["Hedef", "Actual", "H/G %", "Hedef", "Actual", "Hedef", "Actual", "Hedef", "Actual"];
   const aoa1: (string | number)[][] = [
-    [`KONSOLİDE ${year}`, "RANDEVU", "", "", "", "", "", "", "", "", "BRÜT", "", "", "", "", "", "", "", "", "NET", "", "", "", "", "", "", "", ""],
+    [`${scopeLabel.toLocaleUpperCase("tr-TR")} ${year}`, "RANDEVU", "", "", "", "", "", "", "", "", "BRÜT", "", "", "", "", "", "", "", "", "NET", "", "", "", "", "", "", "", ""],
     ["", "Toplam Randevu", "", "", "Yeni", "", "K1", "", "K2", "", "Toplam Brüt", "", "", "Yeni", "", "K1", "", "K2", "", "Toplam Net", "", "", "Yeni", "", "K1", "", "K2", ""],
     ["", ...sub, ...sub, ...sub],
     ...rows.map((r) => [r.label, ...catCols(r.randevu, r.kind), ...catCols(r.brut, r.kind), ...catCols(r.net, r.kind)]),
@@ -198,7 +204,7 @@ function exportXlsx(year: number, rows: Row[], forecast: Forecast, showPnl: bool
       }
     }
   }
-  XLSX.writeFile(wb, `konsolide-${year}.xlsx`);
+  XLSX.writeFile(wb, `${scopeLabel.toLocaleLowerCase("tr-TR").replace(/[^a-z0-9]/g, "")}-${year}.xlsx`);
 }
 
 // ── Sayfa ─────────────────────────────────────────────────────────────────────
@@ -209,12 +215,17 @@ export default function KonsolideRapor() {
     return q >= 2000 && q <= 2100 ? q : CURRENT_YEAR;
   });
   const yearOptions = YEARS.includes(year) ? YEARS : [...YEARS, year].sort();
+  const [office, setOffice] = useState<OfficeSel>(() => {
+    const q = new URLSearchParams(window.location.search).get("office") ?? "";
+    return (OFFICES as readonly string[]).includes(q) ? (q as OfficeSel) : "";
+  });
+  const scopeLabel = office || "Konsolide";
   const [forecast, setForecast] = useState<Forecast>("forecast");
 
   const { data, isLoading, isError } = useQuery<KonsolideReport>({
-    queryKey: ["/api/reports/konsolide", year],
+    queryKey: ["/api/reports/konsolide", year, office],
     queryFn: async () => {
-      const res = await fetch(`/api/reports/konsolide?year=${year}`, { credentials: "include" });
+      const res = await fetch(`/api/reports/konsolide?year=${year}${office ? `&office=${encodeURIComponent(office)}` : ""}`, { credentials: "include" });
       if (!res.ok) throw new Error("Konsolide rapor yüklenemedi");
       return res.json();
     },
@@ -273,10 +284,19 @@ export default function KonsolideRapor() {
               <Table2 className="h-6 w-6 text-primary" /> Konsolide Rapor
             </h1>
             <p className="text-sm text-muted-foreground mt-0.5">
-              Akatlar + Zekeriyaköy · aylık hedef / gerçekleşen · YTD tamamlanmış ayları, TOPLAM 12 ayı kapsar
+              {office ? `${office} ofisi` : "Akatlar + Zekeriyaköy"} · aylık hedef / gerçekleşen · YTD tamamlanmış ayları, TOPLAM 12 ayı kapsar
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-1" data-testid="konsolide-office-toggle">
+              <Building2 className="h-3.5 w-3.5 text-muted-foreground ml-1" />
+              {OFFICE_OPTIONS.map((o) => (
+                <Button key={o.label} size="sm" variant={office === o.value ? "default" : "ghost"} className="h-7 text-xs px-3"
+                  onClick={() => setOffice(o.value)} data-testid={`konsolide-office-${o.value || "konsolide"}`}>
+                  {o.label}
+                </Button>
+              ))}
+            </div>
             <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-1" data-testid="konsolide-forecast-toggle">
               <Button size="sm" variant={forecast === "forecast" ? "default" : "ghost"}
                 className={`h-7 text-xs px-3 gap-1 ${forecast === "forecast" ? "bg-amber-500 hover:bg-amber-600 text-white" : ""}`}
@@ -295,13 +315,19 @@ export default function KonsolideRapor() {
                 {yearOptions.map((y) => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}
               </SelectContent>
             </Select>
-            <Button variant="outline" size="sm" className="h-9 gap-1.5" disabled={!rows.length} onClick={() => exportXlsx(year, rows, forecast, showPnl)} data-testid="konsolide-export">
+            <Button variant="outline" size="sm" className="h-9 gap-1.5" disabled={!rows.length} onClick={() => exportXlsx(year, rows, forecast, showPnl, scopeLabel)} data-testid="konsolide-export">
               <Download className="h-4 w-4" /> Excel'e Aktar
             </Button>
           </div>
         </div>
 
         {isError && <p className="text-sm text-red-600">Rapor yüklenemedi.</p>}
+        {data && office && data.unassignedExpenseRows > 0 && (
+          <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2" data-testid="konsolide-unassigned">
+            {year} yılında ofisi boş bırakılmış {fmtInt(data.unassignedExpenseRows)} gider/gelir kaydı var; bunlar {office} görünümünde sayılmaz, yalnız Konsolide'de görünür.
+            Gelir/Gider modülünden kayıtlara ofis atayın.
+          </p>
+        )}
         {isLoading && <p className="text-sm text-muted-foreground">Yükleniyor…</p>}
 
         {rows.length > 0 && (
@@ -313,7 +339,7 @@ export default function KonsolideRapor() {
                   <thead>
                     <tr>
                       <th rowSpan={3} className="sticky left-0 z-10 bg-red-700 text-white px-3 py-2 text-left font-bold align-middle min-w-[110px]">
-                        KONSOLİDE {year}
+                        {scopeLabel.toLocaleUpperCase("tr-TR")} {year}
                       </th>
                       <th colSpan={9} className={`px-1.5 py-1.5 text-center font-bold tracking-wide ${GROUP_STYLES.randevu}`}>RANDEVU</th>
                       <th colSpan={9} className={`px-1.5 py-1.5 text-center font-bold tracking-wide ${GROUP_STYLES.brut}`}>BRÜT</th>
@@ -347,6 +373,7 @@ export default function KonsolideRapor() {
               </div>
               <p className="px-4 py-2 text-[11px] text-muted-foreground border-t border-border">
                 Yeni = K0. Aylık H/G% = (Actual − Hedef) / Hedef; YTD ve TOPLAM satırlarında Actual / Hedef. Net = brüt giriş − çıkış.
+                {office && " Randevu ve brüt/net, danışmanın şu anki ofisine göre sayılır (transfer öncesi kayıtlar yeni ofiste görünür)."}
               </p>
             </div>
 
@@ -356,7 +383,7 @@ export default function KonsolideRapor() {
                 <table className="text-[11px] min-w-full" data-testid="konsolide-fin-table">
                   <thead>
                     <tr>
-                      <th rowSpan={2} className="sticky left-0 z-10 bg-slate-800 text-white px-3 py-2 text-left font-bold align-middle min-w-[110px]">Finansal {year}</th>
+                      <th rowSpan={2} className="sticky left-0 z-10 bg-slate-800 text-white px-3 py-2 text-left font-bold align-middle min-w-[110px]">{scopeLabel} {year}</th>
                       <th colSpan={3} className={`px-1.5 py-1.5 text-center font-bold ${GROUP_STYLES.fin}`}>{year} BHB {forecast === "reforecast" ? "Re-Forecast" : "Forecast"}</th>
                       <th colSpan={3} className={`px-1.5 py-1.5 text-center font-bold ${GROUP_STYLES.fin} border-l border-white/30`}>BM'ye Kalan Hizmet Bedeli</th>
                       {showPnl && (

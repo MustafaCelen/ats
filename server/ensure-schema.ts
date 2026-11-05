@@ -30,7 +30,9 @@ export async function ensureSchema(): Promise<void> {
       type TEXT NOT NULL, category TEXT NOT NULL,
       amount NUMERIC(15,2) NOT NULL, updated_at TIMESTAMP DEFAULT NOW()
     );
-    CREATE UNIQUE INDEX IF NOT EXISTS expense_targets_uq ON expense_targets(year, month, type, category);
+    ALTER TABLE expense_targets ADD COLUMN IF NOT EXISTS office TEXT NOT NULL DEFAULT '';
+    DROP INDEX IF EXISTS expense_targets_uq;
+    CREATE UNIQUE INDEX IF NOT EXISTS expense_targets_uq2 ON expense_targets(year, month, type, category, office);
     CREATE INDEX IF NOT EXISTS expense_targets_ym_idx ON expense_targets(year, month);
 
     CREATE TABLE IF NOT EXISTS growth_targets (
