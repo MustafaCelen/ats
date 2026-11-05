@@ -23,6 +23,7 @@ import UkBasariRotasi from "@/pages/UkBasariRotasi";
 import UkBasariRotasiDetail from "@/pages/UkBasariRotasiDetail";
 import Closings from "@/pages/Closings";
 import FinancialReports from "@/pages/FinancialReports";
+import KonsolideRapor from "@/pages/KonsolideRapor";
 import CapReport from "@/pages/CapReport";
 import Coaching from "@/pages/Coaching";
 import Expenses from "@/pages/Expenses";
@@ -106,6 +107,7 @@ function Router() {
       <Route path="/closing-analytics" component={() => <ProtectedRoute noAssistant><ClosingAnalytics /></ProtectedRoute>} />
       <Route path="/agent-health" component={() => <ProtectedRoute noAssistant><AgentHealth /></ProtectedRoute>} />
       <Route path="/financial-reports" component={() => <ProtectedRoute financialsOnly><FinancialReports /></ProtectedRoute>} />
+      <Route path="/konsolide-rapor" component={() => <ProtectedRoute financialsOnly><KonsolideRapor /></ProtectedRoute>} />
       <Route path="/advisor-scorecard" component={() => <ProtectedRoute financialsOnly><AdvisorScorecard /></ProtectedRoute>} />
       <Route path="/advisor-personal-scorecard" component={() => <ProtectedRoute noAssistant><AdvisorPersonalScorecard /></ProtectedRoute>} />
       <Route path="/cap-report" component={() => <ProtectedRoute adminOnly><CapReport /></ProtectedRoute>} />

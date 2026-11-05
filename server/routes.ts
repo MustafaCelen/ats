@@ -17,6 +17,7 @@ import { isFonzipConfigured, fetchFonzipPreview, fetchFonzipUsers, fetchFonzipDe
 import { isMetaConfigured, isMetaWebhookConfigured, metaConfig, syncMetaCampaigns, fetchMetaLead, mapLeadToCandidate, verifyWebhookSignature, listLeadForms, backfillLeadsFromMeta } from "./meta";
 import { isGoogleFormsConfigured, syncGoogleFormLeads, getGoogleFormsSpreadsheetId } from "./google-forms";
 import { registerUkProgramRoutes, isInUkProgram, autoEnrollOnCoachAssigned } from "./uk-program";
+import { getKonsolideReport } from "./konsolide-report";
 import { registerReferralRoutes, recordReferralDecision, matchReferral } from "./referral";
 
 // Scoping helper:
@@ -3896,7 +3897,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const targetRows = (await db.execute(sql`
         SELECT gt.user_id, u.name AS user_name,
           SUM(gt.brut_target_k0) AS brut_target_k0, SUM(gt.brut_target_k1) AS brut_target_k1,
-          SUM(gt.brut_target_k2) AS brut_target_k2, SUM(gt.net_target) AS net_target
+          SUM(gt.brut_target_k2) AS brut_target_k2, SUM(gt.net_target) AS net_target,
+          SUM(gt.net_target_k0) AS net_target_k0, SUM(gt.net_target_k1) AS net_target_k1,
+          SUM(gt.net_target_k2) AS net_target_k2
         FROM growth_targets gt
         LEFT JOIN users u ON u.id = gt.user_id
         WHERE gt.year = ${year} AND gt.month = ${month ?? 0}${targetOfficeFilter}
@@ -3912,6 +3915,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         K1: targetRows.reduce((s, r) => s + Number(r.brut_target_k1 ?? 0), 0),
         K2: targetRows.reduce((s, r) => s + Number(r.brut_target_k2 ?? 0), 0),
       };
+      const netTargetByCategory = {
+        K0: targetRows.reduce((s, r) => s + Number(r.net_target_k0 ?? 0), 0),
+        K1: targetRows.reduce((s, r) => s + Number(r.net_target_k1 ?? 0), 0),
+        K2: targetRows.reduce((s, r) => s + Number(r.net_target_k2 ?? 0), 0),
+      };
       const targetsByUser = targetRows.map((r) => ({
         userId: r.user_id,
         userName: r.user_name ?? "(eski genel hedef)",
@@ -3920,13 +3928,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         brutTargetK2: Number(r.brut_target_k2 ?? 0),
         brutTarget: rowBrutTotal(r),
         netTarget: Number(r.net_target ?? 0),
+        netTargetK0: Number(r.net_target_k0 ?? 0),
+        netTargetK1: Number(r.net_target_k1 ?? 0),
+        netTargetK2: Number(r.net_target_k2 ?? 0),
       }));
 
       res.json({
         brut: brutRow?.c ?? 0,
         left: leftRow?.c ?? 0,
         net: (brutRow?.c ?? 0) - (leftRow?.c ?? 0),
-        brutByCategory, brutTargetByCategory,
+        brutByCategory, brutTargetByCategory, netTargetByCategory,
         brutTarget, netTarget, targetsByUser,
       });
     } catch (err) {
@@ -3948,12 +3959,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const isAdmin = req.user!.role === "admin";
       const requestedUserId = req.query.userId ? parseInt(String(req.query.userId), 10) : null;
       const targetUserId = isAdmin ? requestedUserId : req.user!.id;
-      if (!targetUserId) return res.json({ brutTargetK0: 0, brutTargetK1: 0, brutTargetK2: 0, netTarget: 0 });
+      if (!targetUserId) return res.json({ brutTargetK0: 0, brutTargetK1: 0, brutTargetK2: 0, netTarget: 0, netTargetK0: 0, netTargetK1: 0, netTargetK2: 0 });
 
       const officeCond = office ? sql`AND office = ${office}` : sql``;
       const [row] = (await db.execute(sql`
         SELECT SUM(brut_target_k0) AS brut_target_k0, SUM(brut_target_k1) AS brut_target_k1,
-               SUM(brut_target_k2) AS brut_target_k2, SUM(net_target) AS net_target
+               SUM(brut_target_k2) AS brut_target_k2, SUM(net_target) AS net_target,
+               SUM(net_target_k0) AS net_target_k0, SUM(net_target_k1) AS net_target_k1, SUM(net_target_k2) AS net_target_k2
         FROM growth_targets
         WHERE year = ${year} AND month = ${month} AND user_id = ${targetUserId} ${officeCond}
       `)).rows as any[];
@@ -3962,6 +3974,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         brutTargetK1: Number(row?.brut_target_k1 ?? 0),
         brutTargetK2: Number(row?.brut_target_k2 ?? 0),
         netTarget: Number(row?.net_target ?? 0),
+        netTargetK0: Number(row?.net_target_k0 ?? 0),
+        netTargetK1: Number(row?.net_target_k1 ?? 0),
+        netTargetK2: Number(row?.net_target_k2 ?? 0),
       });
     } catch (err) {
       console.error("[GET /api/growth/my-target]", err);
@@ -3971,7 +3986,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/growth/my-target", requireAuth, requireHiringManagerOrAdmin, async (req, res) => {
     try {
-      const { year, month, office, brutTargetK0, brutTargetK1, brutTargetK2, netTarget, userId } = req.body ?? {};
+      const { year, month, office, brutTargetK0, brutTargetK1, brutTargetK2, netTarget, netTargetK0, netTargetK1, netTargetK2, userId } = req.body ?? {};
       if (!year || month == null) return res.status(400).json({ message: "year, month gerekli" });
       if (!office) return res.status(400).json({ message: "office gerekli" });
       const isAdmin = req.user!.role === "admin";
@@ -3991,14 +4006,29 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const k0 = parseInt(String(brutTargetK0 ?? 0)) || 0;
       const k1 = parseInt(String(brutTargetK1 ?? 0)) || 0;
       const k2 = parseInt(String(brutTargetK2 ?? 0)) || 0;
-      const n = parseInt(String(netTarget ?? 0)) || 0;
-      const upsert = await db.execute(sql`
-        INSERT INTO growth_targets (year, month, user_id, office, brut_target_k0, brut_target_k1, brut_target_k2, net_target, updated_at)
-        VALUES (${year}, ${month}, ${targetUserId}, ${office}, ${k0}, ${k1}, ${k2}, ${n}, NOW())
-        ON CONFLICT (year, month, user_id, office)
-        DO UPDATE SET brut_target_k0 = ${k0}, brut_target_k1 = ${k1}, brut_target_k2 = ${k2}, net_target = ${n}, updated_at = NOW()
-        RETURNING *
-      `);
+      // Net hedef: K0/K1/K2 kırılımı gönderildiyse toplam (net_target) bunların toplamıdır;
+      // gönderilmediyse (eski istemci) yalnızca toplam yazılır, kırılım kolonlarına dokunulmaz.
+      const hasNetCats = netTargetK0 != null || netTargetK1 != null || netTargetK2 != null;
+      const nk0 = parseInt(String(netTargetK0 ?? 0)) || 0;
+      const nk1 = parseInt(String(netTargetK1 ?? 0)) || 0;
+      const nk2 = parseInt(String(netTargetK2 ?? 0)) || 0;
+      const n = hasNetCats ? nk0 + nk1 + nk2 : (parseInt(String(netTarget ?? 0)) || 0);
+      const upsert = hasNetCats
+        ? await db.execute(sql`
+            INSERT INTO growth_targets (year, month, user_id, office, brut_target_k0, brut_target_k1, brut_target_k2, net_target, net_target_k0, net_target_k1, net_target_k2, updated_at)
+            VALUES (${year}, ${month}, ${targetUserId}, ${office}, ${k0}, ${k1}, ${k2}, ${n}, ${nk0}, ${nk1}, ${nk2}, NOW())
+            ON CONFLICT (year, month, user_id, office)
+            DO UPDATE SET brut_target_k0 = ${k0}, brut_target_k1 = ${k1}, brut_target_k2 = ${k2}, net_target = ${n},
+              net_target_k0 = ${nk0}, net_target_k1 = ${nk1}, net_target_k2 = ${nk2}, updated_at = NOW()
+            RETURNING *
+          `)
+        : await db.execute(sql`
+            INSERT INTO growth_targets (year, month, user_id, office, brut_target_k0, brut_target_k1, brut_target_k2, net_target, updated_at)
+            VALUES (${year}, ${month}, ${targetUserId}, ${office}, ${k0}, ${k1}, ${k2}, ${n}, NOW())
+            ON CONFLICT (year, month, user_id, office)
+            DO UPDATE SET brut_target_k0 = ${k0}, brut_target_k1 = ${k1}, brut_target_k2 = ${k2}, net_target = ${n}, updated_at = NOW()
+            RETURNING *
+          `);
       res.json(upsert.rows[0]);
     } catch (err) {
       console.error("[POST /api/growth/my-target]", err);
@@ -4017,7 +4047,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const rows = (await db.execute(sql`
         SELECT user_id,
           SUM(brut_target_k0) AS brut_target_k0, SUM(brut_target_k1) AS brut_target_k1,
-          SUM(brut_target_k2) AS brut_target_k2, SUM(net_target) AS net_target
+          SUM(brut_target_k2) AS brut_target_k2, SUM(net_target) AS net_target,
+          SUM(net_target_k0) AS net_target_k0, SUM(net_target_k1) AS net_target_k1, SUM(net_target_k2) AS net_target_k2
         FROM growth_targets
         WHERE year = ${year} AND month = ${month} ${officeCond} AND user_id IS NOT NULL
         GROUP BY user_id
@@ -4028,6 +4059,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         brutTargetK1: Number(r.brut_target_k1 ?? 0),
         brutTargetK2: Number(r.brut_target_k2 ?? 0),
         netTarget: Number(r.net_target ?? 0),
+        netTargetK0: Number(r.net_target_k0 ?? 0),
+        netTargetK1: Number(r.net_target_k1 ?? 0),
+        netTargetK2: Number(r.net_target_k2 ?? 0),
       })));
     } catch (err) {
       console.error("[GET /api/growth/targets-by-office]", err);
@@ -4150,6 +4184,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.json(result.rows);
     } catch (err) {
       console.error("[GET /api/office-expenses/reports/top]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Konsolide Rapor (KONSOLİDE 20xx Excel'i): 12 ay × hedef/gerçekleşen, tek çağrı ──
+  // Erişim Finansal Raporlar ile aynı (admin + canViewFinancials).
+  app.get("/api/reports/konsolide", requireAuth, requireFinancialsAccess, async (req, res) => {
+    try {
+      const year = parseInt(String(req.query.year ?? ""), 10);
+      if (!year || year < 2000 || year > 2100) return res.status(400).json({ message: "year gerekli" });
+      // YTD sınırı İstanbul takvimine göre
+      const todayIst = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Istanbul" }));
+      res.json(await getKonsolideReport(year, todayIst, { includePnl: req.user!.role === "admin" }));
+    } catch (err) {
+      console.error("[GET /api/reports/konsolide]", err);
       res.status(500).json({ message: "Internal server error" });
     }
   });

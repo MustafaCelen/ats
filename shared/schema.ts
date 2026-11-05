@@ -736,7 +736,8 @@ export type ExpenseTarget = typeof expenseTargets.$inferSelect;
 // Brüt/Net büyüme hedefleri (aylık) — hiring manager × ofis bazlı; her HM, randevu
 // hedefleriyle aynı ofis seçiciyle, seçtiği ofis için kendi hedefini girer.
 // Brüt hedef K0/K1/K2 kategorisine bölünür (adaylar zaten bu kategoride takip
-// ediliyor); Net hedef tek bir toplam sayı.
+// ediliyor); Net hedef de K0/K1/K2 kırılımlı girilir, net_target toplamı tutar
+// (eski kayıtlarda yalnızca net_target dolu olabilir).
 // userId NULL = HM bazlı yapıya geçmeden önce girilmiş eski genel (şirket geneli) hedef.
 export const growthTargets = pgTable("growth_targets", {
   id: serial("id").primaryKey(),
@@ -748,7 +749,10 @@ export const growthTargets = pgTable("growth_targets", {
   brutTargetK0: integer("brut_target_k0").notNull().default(0),
   brutTargetK1: integer("brut_target_k1").notNull().default(0),
   brutTargetK2: integer("brut_target_k2").notNull().default(0),
-  netTarget: integer("net_target").notNull().default(0),
+  netTarget: integer("net_target").notNull().default(0), // toplam net hedef (K0+K1+K2 girildiyse onların toplamı)
+  netTargetK0: integer("net_target_k0").notNull().default(0),
+  netTargetK1: integer("net_target_k1").notNull().default(0),
+  netTargetK2: integer("net_target_k2").notNull().default(0),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (t) => ({
   uq: uniqueIndex("growth_targets_uq").on(t.year, t.month, t.userId, t.office),

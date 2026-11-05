@@ -45,6 +45,9 @@ export async function ensureSchema(): Promise<void> {
     ALTER TABLE growth_targets ADD COLUMN IF NOT EXISTS brut_target_k0 INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE growth_targets ADD COLUMN IF NOT EXISTS brut_target_k1 INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE growth_targets ADD COLUMN IF NOT EXISTS brut_target_k2 INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE growth_targets ADD COLUMN IF NOT EXISTS net_target_k0 INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE growth_targets ADD COLUMN IF NOT EXISTS net_target_k1 INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE growth_targets ADD COLUMN IF NOT EXISTS net_target_k2 INTEGER NOT NULL DEFAULT 0;
     DROP INDEX IF EXISTS growth_targets_uq;
     CREATE UNIQUE INDEX IF NOT EXISTS growth_targets_uq ON growth_targets(year, month, user_id, office);
     CREATE INDEX IF NOT EXISTS growth_targets_ym_idx ON growth_targets(year, month);

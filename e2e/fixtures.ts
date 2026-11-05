@@ -135,6 +135,13 @@ export async function cleanupE2E() {
   await q(`UPDATE users SET hm_group = NULL WHERE hm_group LIKE 'E2E %'`);
   await q(`DELETE FROM users WHERE email LIKE 'e2e-%'`);
   await q(`DELETE FROM capper_targets WHERE year = 2099`);
+  // Konsolide rapor testleri 2099 yılını kullanır (gerçek verilerle çakışmaz)
+  await q(`DELETE FROM growth_targets WHERE year = 2099`);
+  await q(`DELETE FROM interview_targets WHERE year = 2099`);
+  await q(`DELETE FROM financial_targets WHERE year = 2099`);
+  await q(`DELETE FROM expense_targets WHERE year = 2099`);
+  await q(`DELETE FROM office_expenses WHERE date LIKE '2099-%'`);
+  await q(`DELETE FROM interviews WHERE candidate_id IN (SELECT id FROM candidates WHERE name LIKE 'E2E %')`);
   await q(`DELETE FROM whatsapp_bulk_sends WHERE employee_id IN (${emp}) OR employee_name LIKE 'E2E %'`);
   await q(`DELETE FROM uk_program_reminder_mails WHERE employee_id IN (${emp})`);
   await q(`DELETE FROM uk_program_reminder_runs WHERE trigger LIKE 'admin:%' OR trigger = 'harici-cron'`);   // e2e'nin ürettikleri

@@ -304,9 +304,17 @@ function RandevuHedefEditor({ year, month }: { year: number; month: number }) {
 }
 
 // ── Bölüm 3: Büyüme Hedefleri — HM × ofis bazlı, aylık (brüt K0/K1/K2 + net) ──
-interface GrowthTargetValue { brutTargetK0: number; brutTargetK1: number; brutTargetK2: number; netTarget: number; }
-const emptyGrowthTarget: GrowthTargetValue = { brutTargetK0: 0, brutTargetK1: 0, brutTargetK2: 0, netTarget: 0 };
+interface GrowthTargetValue {
+  brutTargetK0: number; brutTargetK1: number; brutTargetK2: number;
+  netTarget: number; // toplam net (eski kayıtlarda yalnızca bu dolu olabilir)
+  netTargetK0: number; netTargetK1: number; netTargetK2: number;
+}
+const emptyGrowthTarget: GrowthTargetValue = { brutTargetK0: 0, brutTargetK1: 0, brutTargetK2: 0, netTarget: 0, netTargetK0: 0, netTargetK1: 0, netTargetK2: 0 };
 const growthCatKey = { K0: "brutTargetK0", K1: "brutTargetK1", K2: "brutTargetK2" } as const;
+const netCatKey = { K0: "netTargetK0", K1: "netTargetK1", K2: "netTargetK2" } as const;
+// Toplam net: sunucudaki net_target (kırılım gönderildiğinde sunucu K0+K1+K2 yazar; eski kayıtta tek sayı).
+const netTotal = (t: GrowthTargetValue) => t.netTarget;
+const netCatSum = (t: GrowthTargetValue) => t.netTargetK0 + t.netTargetK1 + t.netTargetK2;
 
 function useGrowthTargetsByOffice(year: number, month: number, office: string) {
   return useQuery<(GrowthTargetValue & { userId: number })[]>({
@@ -322,7 +330,7 @@ function useGrowthTargetsByOffice(year: number, month: number, office: string) {
 function useSaveGrowthTarget() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (data: GrowthTargetValue & { year: number; month: number; office: string; userId: number }) => {
+    mutationFn: async (data: Partial<GrowthTargetValue> & { year: number; month: number; office: string; userId: number }) => {
       const res = await fetch("/api/growth/my-target", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -387,10 +395,26 @@ function BuyumeHedefEditor({ year, month }: { year: number; month: number }) {
   const saveTarget = useSaveGrowthTarget();
   const byUser = useMemo(() => {
     const map = new Map<number, GrowthTargetValue>();
-    for (const t of rows) map.set(t.userId, { brutTargetK0: t.brutTargetK0, brutTargetK1: t.brutTargetK1, brutTargetK2: t.brutTargetK2, netTarget: t.netTarget });
+    for (const t of rows) map.set(t.userId, {
+      brutTargetK0: t.brutTargetK0, brutTargetK1: t.brutTargetK1, brutTargetK2: t.brutTargetK2,
+      netTarget: t.netTarget, netTargetK0: t.netTargetK0 ?? 0, netTargetK1: t.netTargetK1 ?? 0, netTargetK2: t.netTargetK2 ?? 0,
+    });
     return map;
   }, [rows]);
   const brutTotal = (t: GrowthTargetValue) => t.brutTargetK0 + t.brutTargetK1 + t.brutTargetK2;
+  // Brüt hücresi: net kırılımına dokunmadan yalnızca toplam gönderilir (sunucu kırılım kolonlarını korur).
+  const saveBrut = (hm: number, t: GrowthTargetValue, cat: keyof typeof growthCatKey, v: number) =>
+    saveTarget.mutate({
+      brutTargetK0: t.brutTargetK0, brutTargetK1: t.brutTargetK1, brutTargetK2: t.brutTargetK2,
+      [growthCatKey[cat]]: v, netTarget: t.netTarget, year, month, office, userId: hm,
+    });
+  // Net hücresi: kırılım gönderilir, toplam sunucuda K0+K1+K2 olarak yazılır.
+  const saveNet = (hm: number, t: GrowthTargetValue, cat: keyof typeof netCatKey, v: number) =>
+    saveTarget.mutate({
+      brutTargetK0: t.brutTargetK0, brutTargetK1: t.brutTargetK1, brutTargetK2: t.brutTargetK2,
+      netTargetK0: t.netTargetK0, netTargetK1: t.netTargetK1, netTargetK2: t.netTargetK2,
+      [netCatKey[cat]]: v, year, month, office, userId: hm,
+    });
 
   return (
     <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
@@ -411,13 +435,21 @@ function BuyumeHedefEditor({ year, month }: { year: number; month: number }) {
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
+              <tr className="border-b border-border bg-muted/30 text-[11px] uppercase tracking-wide text-muted-foreground">
+                <th className="py-1.5 px-4" />
+                <th colSpan={4} className="py-1.5 px-4 text-center font-semibold border-l border-border">Brüt Hedef</th>
+                <th colSpan={4} className="py-1.5 px-4 text-center font-semibold border-l border-border">Net Hedef</th>
+              </tr>
               <tr className="border-b border-border bg-muted/30">
                 <th className="text-left font-medium text-muted-foreground py-2.5 px-4">Hiring Manager</th>
-                {K0K1K2.map((cat) => (
-                  <th key={cat} className="text-center font-semibold py-2.5 px-4">{cat}</th>
+                {K0K1K2.map((cat, i) => (
+                  <th key={`b-${cat}`} className={`text-center font-semibold py-2.5 px-4 ${i === 0 ? "border-l border-border" : ""}`}>{cat}</th>
                 ))}
-                <th className="text-center font-medium text-muted-foreground py-2.5 px-4">Toplam Brüt</th>
-                <th className="text-center font-medium text-muted-foreground py-2.5 px-4">Net Hedef</th>
+                <th className="text-center font-medium text-muted-foreground py-2.5 px-4">Toplam</th>
+                {K0K1K2.map((cat, i) => (
+                  <th key={`n-${cat}`} className={`text-center font-semibold py-2.5 px-4 ${i === 0 ? "border-l border-border" : ""}`}>{cat}</th>
+                ))}
+                <th className="text-center font-medium text-muted-foreground py-2.5 px-4">Toplam</th>
               </tr>
             </thead>
             <tbody>
@@ -426,20 +458,19 @@ function BuyumeHedefEditor({ year, month }: { year: number; month: number }) {
                 return (
                   <tr key={hm.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
                     <td className="py-3 px-4 font-medium text-sm text-foreground whitespace-nowrap">{hm.name}</td>
-                    {K0K1K2.map((cat) => (
-                      <td key={cat} className="py-3 px-4 text-center">
-                        <GrowthTargetCell
-                          value={t[growthCatKey[cat]]}
-                          onSave={(v) => saveTarget.mutate({ ...t, [growthCatKey[cat]]: v, year, month, office, userId: hm.id })}
-                        />
+                    {K0K1K2.map((cat, i) => (
+                      <td key={`b-${cat}`} className={`py-3 px-4 text-center ${i === 0 ? "border-l border-border" : ""}`}>
+                        <GrowthTargetCell value={t[growthCatKey[cat]]} onSave={(v) => saveBrut(hm.id, t, cat, v)} />
                       </td>
                     ))}
                     <td className="py-3 px-4 text-center font-medium">{brutTotal(t)}</td>
-                    <td className="py-3 px-4 text-center">
-                      <GrowthTargetCell
-                        value={t.netTarget}
-                        onSave={(v) => saveTarget.mutate({ ...t, netTarget: v, year, month, office, userId: hm.id })}
-                      />
+                    {K0K1K2.map((cat, i) => (
+                      <td key={`n-${cat}`} className={`py-3 px-4 text-center ${i === 0 ? "border-l border-border" : ""}`}>
+                        <GrowthTargetCell value={t[netCatKey[cat]]} onSave={(v) => saveNet(hm.id, t, cat, v)} />
+                      </td>
+                    ))}
+                    <td className="py-3 px-4 text-center font-medium" title={netTotal(t) !== netCatSum(t) ? "Toplam, kırılım toplamıyla uyuşmuyor (eski kayıt) — bir kırılım hücresi girilince yeniden hesaplanır" : undefined}>
+                      {netTotal(t)}{netTotal(t) !== netCatSum(t) && <span className="text-amber-600 ml-0.5">*</span>}
                     </td>
                   </tr>
                 );
